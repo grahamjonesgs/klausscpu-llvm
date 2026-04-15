@@ -37,6 +37,37 @@
 
 using namespace llvm;
 
+bool KlaussCPUFrameLowering::hasReservedCallFrame(
+    const MachineFunction &MF) const {
+  // Reserve space for outgoing call frames in the prologue so that
+  // CALLSEQ_START/END pseudos are eliminated as no-ops.  This is safe as long
+  // as there are no dynamically-sized objects (VLAs / alloca with runtime size).
+  return !MF.getFrameInfo().hasVarSizedObjects();
+}
+
+MachineBasicBlock::iterator
+KlaussCPUFrameLowering::eliminateCallFramePseudoInstr(
+    MachineFunction &MF, MachineBasicBlock &MBB,
+    MachineBasicBlock::iterator I) const {
+  // When hasReservedCallFrame() is true the call frame is already baked into
+  // the prologue allocation, so these pseudos are just deleted.
+  // When it returns false (VLA present) we emit ADDSP adjustments.
+  if (!hasReservedCallFrame(MF)) {
+    const KlaussCPUInstrInfo &TII =
+        *MF.getSubtarget<KlaussCPUSubtarget>().getInstrInfo();
+    MachineInstr &MI = *I;
+    int64_t Amount = MI.getOperand(0).getImm();
+    if (Amount != 0) {
+      DebugLoc DL = MI.getDebugLoc();
+      if (MI.getOpcode() == TII.getCallFrameSetupOpcode())
+        BuildMI(MBB, I, DL, TII.get(KlaussCPU::ADDSP_I)).addImm(-Amount);
+      else
+        BuildMI(MBB, I, DL, TII.get(KlaussCPU::ADDSP_I)).addImm(Amount);
+    }
+  }
+  return MBB.erase(I);
+}
+
 void KlaussCPUFrameLowering::emitPrologue(MachineFunction &MF,
                                            MachineBasicBlock &MBB) const {
   const KlaussCPUInstrInfo &TII =

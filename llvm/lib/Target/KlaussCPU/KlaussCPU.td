@@ -1,6 +1,7 @@
 // KlaussCPU target description
 include "llvm/Target/Target.td"
 include "KlaussCPURegisterInfo.td"
+include "KlaussCPUCallingConv.td"
 include "KlaussCPUInstrInfo.td"
 
 def KlaussCPUInstrInfo : InstrInfo;

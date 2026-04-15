@@ -32,6 +32,16 @@ public:
   void emitEpilogue(MachineFunction &MF,
                     MachineBasicBlock &MBB) const override;
 
+  // Reserve a call frame at the bottom of each function's stack frame so that
+  // CALLSEQ_START/END pseudos need not emit SP adjustments.  This requires the
+  // prologue to include MFI.getMaxCallFrameSize() in its ADDSP allocation.
+  bool hasReservedCallFrame(const MachineFunction &MF) const override;
+
+  // Expand or delete CALLSEQ_START/END pseudo-instructions.
+  MachineBasicBlock::iterator eliminateCallFramePseudoInstr(
+      MachineFunction &MF, MachineBasicBlock &MBB,
+      MachineBasicBlock::iterator I) const override;
+
   // KlaussCPU always frames (R15 = P is always the frame pointer).
   bool hasFPImpl(const MachineFunction &MF) const override { return true; }
 };

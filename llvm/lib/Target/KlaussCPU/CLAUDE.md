@@ -165,6 +165,14 @@ SelectionDAGTargetInfo    TSI;
 - Omit `PrintMethod` from branch/call target operands in `.td` until `printBrTarget` etc. are implemented in the InstPrinter
 - Do not define `PRINT_ALIAS_INSTR` unless `printAliasInstr` / `printCustomAliasOperand` are declared in the InstPrinter header
 
+### Calling convention / call frame (step 8)
+- `getCallFrameSetupOpcode()` / `getCallFrameDestroyOpcode()` are **NOT virtual** in LLVM 23 — do not declare them as `override`. Pass opcodes as the 3rd/4th constructor parameters to `KlaussCPUGenInstrInfo(STI, RI, ADJCALLSTACKDOWN, ADJCALLSTACKUP)`.
+- `copyPhysReg` signature uses `Register` (not `MCRegister`) for DestReg / SrcReg in LLVM 23.
+- `InstrEmitter::countOperands` strips chain and glue from the **tail** of the operand list. Machine node operand order must be `[explicit_ops..., chain, glue]` — **chain goes last, not first**. Getting this wrong with `[chain, imm1, imm2]` causes the `#operands for dag node doesn't match .td file!` assertion.
+- `KlaussCPUGenCallingConv.inc` must be included inside `namespace llvm {}` — the generated code uses unqualified names (MVT, CCValAssign, etc.).
+- Do NOT re-include `KlaussCPUGenInstrInfo.inc` with `GET_INSTRINFO_ENUM` in `KlaussCPUISelDAGToDAG.cpp` — the enum is already visible transitively through `KlaussCPUTargetMachine.h → KlaussCPUSubtarget.h → KlaussCPUInstrInfo.h`.
+- Callee operand on the `KlaussCPUISD::CALL` node must be typed as `MVT::i64` (not `MVT::i32`) — KlaussCPU has no i32 register class, so any i32 target address would fail type promotion.
+
 ---
 
 ## Completed steps
@@ -182,19 +190,35 @@ SelectionDAGTargetInfo    TSI;
    - `LowerFormalArguments` (hardcoded R0–R3), `LowerReturn` (R12), `LowerCall` (fatal_error stub)
    - `emitPrologue` / `emitEpilogue` fully implemented
    - `eliminateFrameIndex` replaces FI pseudo with R15+offset
+8. ✅ Calling convention in TableGen — `LowerCall` implemented, `call @bar` produces correct assembly
+   - `KlaussCPUCallingConv.td`: `CC_KlaussCPU` (R0–R3, stack≥32), `RetCC_KlaussCPU` (R12), `CSR_KlaussCPU` (R4–R7)
+   - `LowerFormalArguments` / `LowerReturn` / `LowerCall` all CCState-driven
+   - `ADJCALLSTACKDOWN` / `ADJCALLSTACKUP` pseudos selected manually in `Select()` (no tablegen patterns — i32 type-set failure)
+   - `copyPhysReg` implemented using `COPY_R`
+   - Smoke test: `foo` calling `bar(i64)` → correct prologue + `call bar` + epilogue
+
+   Expected output (step 8):
+   ```
+   bar:
+       push    r15
+       getsp   r15
+       copy    r12, r0
+       setsp   r15
+       pop     r15
+       ret
+   foo:
+       push    r15
+       getsp   r15
+       addsp   -32
+       call    bar
+       setsp   r15
+       pop     r15
+       ret
+   ```
 
 ---
 
 ## Next steps
-
-### Step 8 — Calling convention in TableGen
-- Write `KlaussCPUCallingConv.td`:
-  - `CC_KlaussCPU`: args → R0–R3, overflow on stack at `CallerSP+32+n×8`
-  - `RetCC_KlaussCPU`: return value → R12
-  - Callee-saved: R4–R7
-- Add `-gen-callingconv` to `CMakeLists.txt` → `KlaussCPUGenCallingConv.inc`
-- Replace hardcoded logic in `LowerFormalArguments` / `LowerReturn` with `CCState::AnalyzeFormalArguments` / `CCState::AnalyzeReturn`
-- Implement `LowerCall` (currently `report_fatal_error`) — required for any function with outgoing calls
 
 ### Step 9 — Load/store isel patterns + frame index
 - Add patterns for `LDIDX64` / `STIDX64` in `KlaussCPUInstrInfo.td`

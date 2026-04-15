@@ -22,6 +22,14 @@
 def KlaussCPURetGlue : SDNode<"KlaussCPUISD::RET_GLUE", SDTNone,
                               [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 
+// Direct/indirect call — emitted by LowerCall.
+// Callee is i64 (address zero-extended into a GPR; encoder uses bits [31:0]).
+def SDT_KlaussCPUCall : SDTypeProfile<0, -1, [SDTCisVT<0, i64>]>;
+def KlaussCPUCallNode : SDNode<"KlaussCPUISD::CALL", SDT_KlaussCPUCall,
+                               [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
+                                SDNPVariadic]>;
+
+
 //===----------------------------------------------------------------------===//
 // Operand types
 //===----------------------------------------------------------------------===//
@@ -430,6 +438,32 @@ def BSWAP_R : R_inplace<0x0000097, "bswap\t$rd",
                 [(set GPR:$rd, (bswap GPR:$rs1))]>;
 
 //===----------------------------------------------------------------------===//
+// Pseudo-instructions (not emitted to the binary; eliminated by PEI)
+//===----------------------------------------------------------------------===//
+
+class Pseudo<dag outs, dag ins, list<dag> pattern = []>
+    : Instruction {
+  let Namespace        = "KlaussCPU";
+  dag OutOperandList   = outs;
+  dag InOperandList    = ins;
+  let AsmString        = "";
+  let Pattern          = pattern;
+  let isPseudo         = 1;
+  let isCodeGenOnly    = 1;
+  let Size             = 0;
+  field bits<32> Inst  = 0;
+  field bits<32> SoftFail = 0;
+  let DecoderNamespace = "KlaussCPU";
+}
+
+// Call-frame setup/destroy — consumed by eliminateCallFramePseudoInstr.
+// No tablegen patterns: ISD::CALLSEQ_START/END are matched in
+// KlaussCPUDAGToDAGISel::Select() to avoid i32-type-set inference issues
+// (KlaussCPU has no i32 register class).
+def ADJCALLSTACKDOWN : Pseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2)>;
+def ADJCALLSTACKUP   : Pseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2)>;
+
+//===----------------------------------------------------------------------===//
 // Stack management (used by frame lowering; no isel patterns)
 //===----------------------------------------------------------------------===//
 
@@ -521,3 +555,14 @@ let isReturn = 1, isTerminator = 1, isBarrier = 1 in
 def RET_I   : I0<0x00001012, (outs), (ins), "ret", [(KlaussCPURetGlue)]>;
 def NOP_I   : I0<0x0000F010, (outs), (ins), "nop">;
 def HALT_I  : I0<0x0000F011, (outs), (ins), "halt">;
+
+//===----------------------------------------------------------------------===//
+// Call patterns — matched from KlaussCPUISD::CALL nodes emitted by LowerCall.
+//===----------------------------------------------------------------------===//
+
+// Direct call to a global address or external symbol.
+// Callee is i64 (global address zero-extended into a GPR; encoder takes [31:0]).
+def : Pat<(KlaussCPUCallNode (i64 tglobaladdr:$func)),
+          (CALL_I tglobaladdr:$func)>;
+def : Pat<(KlaussCPUCallNode (i64 texternalsym:$func)),
+          (CALL_I texternalsym:$func)>;

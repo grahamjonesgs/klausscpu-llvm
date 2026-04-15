@@ -25,6 +25,16 @@ class KlaussCPUInstrInfo : public KlaussCPUGenInstrInfo {
 public:
   explicit KlaussCPUInstrInfo(const KlaussCPUSubtarget &STI,
                                const KlaussCPURegisterInfo &RI);
+
+  // getCallFrameSetupOpcode / getCallFrameDestroyOpcode are NOT virtual in
+  // LLVM 23.  The opcodes are stored in TargetInstrInfo::CallFrameSetupOpcode /
+  // CallFrameDestroyOpcode and set via the KlaussCPUGenInstrInfo constructor
+  // parameters — see KlaussCPUInstrInfo.cpp.
+
+  void copyPhysReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+                   const DebugLoc &DL, Register DestReg, Register SrcReg,
+                   bool KillSrc, bool RenamableDest = false,
+                   bool RenamableSrc = false) const override;
 };
 
 } // namespace llvm

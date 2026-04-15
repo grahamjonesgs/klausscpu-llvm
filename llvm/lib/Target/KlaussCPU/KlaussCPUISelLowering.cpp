@@ -25,6 +25,12 @@
 
 using namespace llvm;
 
+// Generated calling convention functions.  Must be included inside namespace
+// llvm because the generated code uses unqualified names (MVT, CCState, etc.).
+namespace llvm {
+#include "KlaussCPUGenCallingConv.inc"
+} // namespace llvm
+
 KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
                                                    const KlaussCPUSubtarget &STI)
     : TargetLowering(TM, STI) {
@@ -123,60 +129,72 @@ KlaussCPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
 }
 
 //===----------------------------------------------------------------------===//
-// Calling convention — hardcoded until KlaussCPUCallingConv.td (step 8)
+// Formal arguments — callee side
 //
-//   Args 0–3  : R0–R3  (i64, caller-saved)
-//   Args 4+   : stack  (8 bytes each, offset 32 + n*8 from caller SP)
-//   Return    : R12    (M, caller-saved)
+// Stack layout (from callee's incoming SP):
+//   [SP+0..SP+7]   return address (written by CALL, SP unchanged)
+//   [SP+8..SP+31]  reserved
+//   [SP+32..]      stack arguments (8 bytes each)
+//
+// We pre-reserve 32 bytes in CCState so stack args land at offset ≥ 32.
 //===----------------------------------------------------------------------===//
 
 SDValue KlaussCPUTargetLowering::LowerFormalArguments(
-    SDValue Chain, CallingConv::ID /*CallConv*/, bool /*IsVarArg*/,
+    SDValue Chain, CallingConv::ID CallConv, bool IsVarArg,
     const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &DL,
     SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
   MachineFunction &MF = DAG.getMachineFunction();
   MachineRegisterInfo &RegInfo = MF.getRegInfo();
 
-  static const MCPhysReg ArgRegs[] = {
-      KlaussCPU::R0, KlaussCPU::R1, KlaussCPU::R2, KlaussCPU::R3};
+  SmallVector<CCValAssign, 16> ArgLocs;
+  CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
+  // Reserve [SP+0..SP+31]: return address + ABI reserved area.
+  CCInfo.AllocateStack(32, Align(8));
+  CCInfo.AnalyzeFormalArguments(Ins, CC_KlaussCPU);
 
-  unsigned RegIdx = 0;
-  int64_t StackOffset = 32; // first stack arg is at [CallerSP + 32]
-
-  for (unsigned i = 0, e = Ins.size(); i != e; ++i) {
-    if (RegIdx < 4) {
+  for (const CCValAssign &VA : ArgLocs) {
+    if (VA.isRegLoc()) {
       Register VReg = RegInfo.createVirtualRegister(&KlaussCPU::GPRRegClass);
-      RegInfo.addLiveIn(ArgRegs[RegIdx++], VReg);
+      RegInfo.addLiveIn(VA.getLocReg(), VReg);
       InVals.push_back(DAG.getCopyFromReg(Chain, DL, VReg, MVT::i64));
     } else {
-      // Stack argument — create a fixed stack object and load from it.
-      MachineFrameInfo &MFI = MF.getFrameInfo();
-      int FI = MFI.CreateFixedObject(8, StackOffset, /*isImmutable=*/true);
+      assert(VA.isMemLoc() && "Unexpected CCValAssign loc type");
+      // Offset is relative to the incoming SP (already ≥ 32 due to pre-reserve).
+      int FI = MF.getFrameInfo().CreateFixedObject(8, VA.getLocMemOffset(),
+                                                    /*isImmutable=*/true);
       SDValue FIN = DAG.getFrameIndex(FI, getPointerTy(DAG.getDataLayout()));
       InVals.push_back(DAG.getLoad(MVT::i64, DL, Chain, FIN,
                                     MachinePointerInfo::getFixedStack(MF, FI)));
-      StackOffset += 8;
-      ++RegIdx;
     }
   }
 
   return Chain;
 }
 
+//===----------------------------------------------------------------------===//
+// Return — copy result to R12 and emit RET_GLUE
+//===----------------------------------------------------------------------===//
+
 SDValue KlaussCPUTargetLowering::LowerReturn(
-    SDValue Chain, CallingConv::ID /*CallConv*/, bool /*IsVarArg*/,
+    SDValue Chain, CallingConv::ID CallConv, bool IsVarArg,
     const SmallVectorImpl<ISD::OutputArg> &Outs,
     const SmallVectorImpl<SDValue> &OutVals, const SDLoc &DL,
     SelectionDAG &DAG) const {
+  MachineFunction &MF = DAG.getMachineFunction();
+
+  SmallVector<CCValAssign, 4> RVLocs;
+  CCState CCInfo(CallConv, IsVarArg, MF, RVLocs, *DAG.getContext());
+  CCInfo.AnalyzeReturn(Outs, RetCC_KlaussCPU);
+
   SmallVector<SDValue, 4> RetOps(1, Chain);
   SDValue Glue;
 
-  // KlaussCPU ABI: single i64 return value goes in R12 (M register).
-  if (!Outs.empty()) {
-    assert(Outs.size() == 1 && "KlaussCPU: only one i64 return value supported");
-    Chain = DAG.getCopyToReg(Chain, DL, KlaussCPU::R12, OutVals[0], Glue);
+  for (const CCValAssign &VA : RVLocs) {
+    assert(VA.isRegLoc() && "KlaussCPU: only register returns supported");
+    Chain = DAG.getCopyToReg(Chain, DL, VA.getLocReg(), OutVals[VA.getValNo()],
+                              Glue);
     Glue = Chain.getValue(1);
-    RetOps.push_back(DAG.getRegister(KlaussCPU::R12, MVT::i64));
+    RetOps.push_back(DAG.getRegister(VA.getLocReg(), VA.getLocVT()));
   }
 
   RetOps[0] = Chain;
@@ -186,8 +204,114 @@ SDValue KlaussCPUTargetLowering::LowerReturn(
   return DAG.getNode(KlaussCPUISD::RET_GLUE, DL, MVT::Other, RetOps);
 }
 
-SDValue KlaussCPUTargetLowering::LowerCall(
-    TargetLowering::CallLoweringInfo & /*CLI*/,
-    SmallVectorImpl<SDValue> & /*InVals*/) const {
-  report_fatal_error("KlaussCPU: LowerCall not yet implemented (step 8)");
+//===----------------------------------------------------------------------===//
+// Call — outgoing side
+//
+// CALL instruction stores return address at [SP+0] without changing SP.
+// Callee sees:  [SP+0..7]=ret_addr, [SP+8..31]=reserved, [SP+32..]=stack args.
+// Since SP is unchanged across the call boundary, the caller writes stack args
+// to the same offsets.  We pre-reserve 32 bytes in CCState (matching the callee
+// side) so the first stack arg is assigned offset 32.
+//===----------------------------------------------------------------------===//
+
+SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
+                                            SmallVectorImpl<SDValue> &InVals) const {
+  SelectionDAG &DAG          = CLI.DAG;
+  SDLoc        &DL           = CLI.DL;
+  SDValue       Chain        = CLI.Chain;
+  SDValue       Callee       = CLI.Callee;
+  CallingConv::ID CallConv   = CLI.CallConv;
+  bool          IsVarArg     = CLI.IsVarArg;
+  MachineFunction &MF        = DAG.getMachineFunction();
+  // Pointers are 32-bit (DataLayout p:32:32), but all GPRs are 64-bit.
+  // Use MVT::i32 for SP/memory-address arithmetic, MVT::i64 for the callee
+  // operand on the call node (which must match the i64 GPR class).
+  MVT PtrVT  = getPointerTy(DAG.getDataLayout()); // MVT::i32 — for SP math
+  MVT CallVT = MVT::i64;                          // GPR-width callee operand
+
+  // ---- Analyze outgoing arguments ----------------------------------------
+  SmallVector<CCValAssign, 16> ArgLocs;
+  CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
+  // Pre-reserve [SP+0..SP+31] for return address + ABI reserved area.
+  CCInfo.AllocateStack(32, Align(8));
+  CCInfo.AnalyzeCallOperands(CLI.Outs, CC_KlaussCPU);
+
+  unsigned StackSize = CCInfo.getStackSize(); // ≥ 32
+
+  Chain = DAG.getCALLSEQ_START(Chain, StackSize, 0, DL);
+
+  // ---- Collect register and memory args ----------------------------------
+  SmallVector<std::pair<Register, SDValue>, 8> RegsToPass;
+  SmallVector<SDValue, 4> MemOpChains;
+
+  // SP value for computing store addresses.
+  SDValue SP = DAG.getCopyFromReg(Chain, DL, KlaussCPU::SP, PtrVT);
+
+  for (unsigned I = 0, E = ArgLocs.size(); I != E; ++I) {
+    const CCValAssign &VA = ArgLocs[I];
+    SDValue Arg = CLI.OutVals[I];
+
+    if (VA.isRegLoc()) {
+      RegsToPass.push_back({VA.getLocReg(), Arg});
+    } else {
+      assert(VA.isMemLoc());
+      // Offset already includes the 32-byte pre-reservation.
+      SDValue Addr = DAG.getNode(ISD::ADD, DL, PtrVT, SP,
+                                  DAG.getConstant(VA.getLocMemOffset(), DL, PtrVT));
+      MemOpChains.push_back(
+          DAG.getStore(Chain, DL, Arg, Addr, MachinePointerInfo()));
+    }
+  }
+
+  if (!MemOpChains.empty())
+    Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other, MemOpChains);
+
+  // ---- Copy register args and attach glue --------------------------------
+  SDValue Glue;
+  for (auto &[Reg, Val] : RegsToPass) {
+    Chain = DAG.getCopyToReg(Chain, DL, Reg, Val, Glue);
+    Glue  = Chain.getValue(1);
+  }
+
+  // ---- Resolve callee address --------------------------------------------
+  // Use CallVT (i64) so the callee node is typed as a GPR-width value.
+  // The CALL_I instruction encoder uses only bits [31:0] of the address.
+  if (auto *GA = dyn_cast<GlobalAddressSDNode>(Callee))
+    Callee = DAG.getTargetGlobalAddress(GA->getGlobal(), DL, CallVT, 0);
+  else if (auto *ES = dyn_cast<ExternalSymbolSDNode>(Callee))
+    Callee = DAG.getTargetExternalSymbol(ES->getSymbol(), CallVT);
+
+  // ---- Build the call node -----------------------------------------------
+  SmallVector<SDValue, 16> Ops;
+  Ops.push_back(Chain);
+  Ops.push_back(Callee);
+  for (auto &[Reg, Val] : RegsToPass)
+    Ops.push_back(DAG.getRegister(Reg, Val.getValueType()));
+  // Keep SP live-in to the call node so the scheduler doesn't move stores.
+  Ops.push_back(DAG.getRegister(KlaussCPU::SP, MVT::i32));
+  if (Glue.getNode())
+    Ops.push_back(Glue);
+
+  SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
+  Chain = DAG.getNode(KlaussCPUISD::CALL, DL, NodeTys, Ops);
+  Glue  = Chain.getValue(1);
+
+  Chain = DAG.getCALLSEQ_END(Chain, StackSize, 0, Glue, DL);
+  Glue  = Chain.getValue(1);
+
+  // ---- Copy return values from R12 ---------------------------------------
+  SmallVector<CCValAssign, 4> RVLocs;
+  CCState RetCCInfo(CallConv, IsVarArg, MF, RVLocs, *DAG.getContext());
+  RetCCInfo.AnalyzeCallResult(CLI.Ins, RetCC_KlaussCPU);
+
+  for (const CCValAssign &VA : RVLocs) {
+    assert(VA.isRegLoc() && "KlaussCPU: only register returns supported");
+    SDValue RV = DAG.getCopyFromReg(Chain, DL, VA.getLocReg(), VA.getValVT(),
+                                     Glue);
+    InVals.push_back(RV.getValue(0));
+    Chain = RV.getValue(1);
+    Glue  = RV.getValue(2);
+  }
+
+  return Chain;
 }
