@@ -19,6 +19,7 @@
 
 #include "KlaussCPUTargetMachine.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
+#include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/Support/Debug.h"
 
 // KlaussCPU:: opcode enum (ADJCALLSTACKDOWN, ADJCALLSTACKUP, etc.) is visible
@@ -75,6 +76,66 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
   if (N->isMachineOpcode()) {
     LLVM_DEBUG(dbgs() << "== "; N->dump(CurDAG); dbgs() << "\n");
     return;
+  }
+
+  // ---- ISD::FrameIndex → TargetFrameIndex --------------------------------
+  // KlaussCPU has no i32 register class, so pointers are promoted from i32 to
+  // i64 during type legalization.  We produce a TargetFrameIndex typed as i64
+  // so it can serve as a GPR-class operand in LDIDX64 / STIDX64.
+  // eliminateFrameIndex (KlaussCPURegisterInfo) later rewrites the operand to
+  // R15 + frame_slot_offset.
+  if (N->getOpcode() == ISD::FrameIndex) {
+    int FI = cast<FrameIndexSDNode>(N)->getIndex();
+    SDValue TFI = CurDAG->getTargetFrameIndex(FI, MVT::i64);
+    ReplaceNode(N, TFI.getNode());
+    return;
+  }
+
+  // TargetFrameIndex is a legal operand placeholder; no instruction needed.
+  if (N->getOpcode() == ISD::TargetFrameIndex)
+    return;
+
+  // ---- Frame-slot LOAD: (load (TargetFrameIndex)) → LDIDX64 --------------
+  // The 0 offset is a placeholder; eliminateFrameIndex will fill in the real
+  // frame offset.  Machine node order: [base, offset, chain].
+  if (N->getOpcode() == ISD::LOAD) {
+    auto *LN = cast<LoadSDNode>(N);
+    // Handle non-extending 64-bit loads only (sign/zero-ext handled later).
+    if (LN->getExtensionType() == ISD::NON_EXTLOAD &&
+        LN->getMemoryVT() == MVT::i64) {
+      SDValue Ptr = LN->getBasePtr();
+      if (Ptr.getOpcode() == ISD::TargetFrameIndex) {
+        SDLoc DL(N);
+        SDValue Off = CurDAG->getTargetConstant(0, DL, MVT::i64);
+        SDValue Ops[] = {Ptr, Off, LN->getChain()};
+        SDNode *Res = CurDAG->getMachineNode(KlaussCPU::LDIDX64, DL,
+                                              CurDAG->getVTList(MVT::i64,
+                                                                MVT::Other),
+                                              Ops);
+        ReplaceUses(N, Res);
+        CurDAG->RemoveDeadNode(N);
+        return;
+      }
+    }
+  }
+
+  // ---- Frame-slot STORE: (store val, (TargetFrameIndex)) → STIDX64 -------
+  // Machine node order: [data, base, offset, chain].
+  if (N->getOpcode() == ISD::STORE) {
+    auto *SN = cast<StoreSDNode>(N);
+    if (!SN->isTruncatingStore() && SN->getMemoryVT() == MVT::i64) {
+      SDValue Ptr = SN->getBasePtr();
+      if (Ptr.getOpcode() == ISD::TargetFrameIndex) {
+        SDLoc DL(N);
+        SDValue Off = CurDAG->getTargetConstant(0, DL, MVT::i64);
+        SDValue Ops[] = {SN->getValue(), Ptr, Off, SN->getChain()};
+        SDNode *Res = CurDAG->getMachineNode(KlaussCPU::STIDX64, DL,
+                                              CurDAG->getVTList(MVT::Other),
+                                              Ops);
+        ReplaceNode(N, Res);
+        return;
+      }
+    }
   }
 
   // Lower ISD::CALLSEQ_START/END to the ADJCALLSTACK pseudos manually.

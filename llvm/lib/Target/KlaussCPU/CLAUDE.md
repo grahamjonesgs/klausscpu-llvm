@@ -12,9 +12,9 @@ LLVM trunk (v23).  Use the **RISC-V backend** as the style reference, not X86 or
 |---|---|
 | GPRs | R0–R15, 64-bit; R15 = frame pointer (P) |
 | PC / SP | 32-bit (128 MiB RAM addressable) |
-| Memory bus | big-endian |
+| Memory bus | little-endian |
 | Register file | little-endian |
-| DataLayout | `e-m:e-p:32:32-i64:64-n32:64` |
+| DataLayout | `e-m:e-p:64:64-i64:64-n64` |
 | Hardware FP | none — soft-float only |
 | CMOV | none — SELECT must be expanded |
 | Atomics | none — `setMaxAtomicSizeInBitsSupported(0)` |
@@ -216,14 +216,30 @@ SelectionDAGTargetInfo    TSI;
        ret
    ```
 
+9. ✅ Load/store isel patterns + frame index
+   - DataLayout changed to `p:64:64` — FrameIndex is i64 from the start (no type-promotion crash)
+   - `ISD::FrameIndex` → `TargetFrameIndex` (i64) in `Select()` → `eliminateFrameIndex` rewrites to R15+offset
+   - `ISD::LOAD` / `ISD::STORE` with TargetFrameIndex base → `LDIDX64` / `STIDX64` in C++ `Select()`
+   - Tablegen patterns added for GPR-base loads/stores with `simm32_imm` offset
+   - `SETR` pattern added for 32-bit constant materialization (`simm32_imm`)
+   - Smoke tests:
+     ```
+     sum(i64 %a, i64 %b) with alloca:
+         push r15; getsp r15; addsp -8
+         stidx64 r0, r15, -8
+         addr r12, r0, r1
+         setsp r15; pop r15; ret
+
+     foo() calling bar(42):
+         push r15; getsp r15; addsp -32
+         setr r0, 42
+         call bar
+         setsp r15; pop r15; ret
+     ```
+
 ---
 
 ## Next steps
-
-### Step 9 — Load/store isel patterns + frame index
-- Add patterns for `LDIDX64` / `STIDX64` in `KlaussCPUInstrInfo.td`
-- Handle `ISD::FrameIndex` in `KlaussCPUISelDAGToDAG::Select()` — convert to `TargetFrameIndex` so `eliminateFrameIndex` can rewrite it to `R15+offset`
-- Without this, any function with local variables will crash during selection
 
 ### Step 10 — Callee-saved register spilling
 - Implement `storeRegToStackSlot` / `loadRegFromStackSlot` in `KlaussCPUInstrInfo`

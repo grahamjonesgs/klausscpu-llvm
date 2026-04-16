@@ -523,6 +523,41 @@ def LDIDX32 : RRV_ld<0x00000C, "ldidx\t$rd, $base, $offset">;
 def STIDX32 : RRV_st<0x00000D, "stidx\t$rs_data, $base, $offset">;
 
 //===----------------------------------------------------------------------===//
+// Load / store isel patterns
+//
+// FrameIndex-based loads/stores are handled in KlaussCPUDAGToDAGISel::Select()
+// (C++ code), because the TargetFrameIndex operand type (i64 after promotion)
+// cannot be matched directly against a GPR in a tablegen pattern without a
+// ComplexPattern.  These tablegen patterns cover the general register+offset
+// case where the address is already in a GPR.
+//
+// simm32_imm: matches a 64-bit immediate that fits in a signed 32-bit field,
+// used as the offset in LDIDX64 / STIDX64.
+//===----------------------------------------------------------------------===//
+
+def simm32_imm : ImmLeaf<i64, [{return isInt<32>(Imm);}]>;
+
+// Materialize a signed 32-bit constant into a GPR using SETR.
+// Covers values in [-2^31, 2^31-1]; large 64-bit constants need a sequence.
+def : Pat<(i64 simm32_imm:$imm), (SETR simm32_imm:$imm)>;
+
+// 64-bit load from a GPR base with no offset.
+def : Pat<(i64 (load (i64 GPR:$base))),
+          (LDIDX64 GPR:$base, 0)>;
+
+// 64-bit load from GPR base + signed-32 immediate offset.
+def : Pat<(i64 (load (add (i64 GPR:$base), simm32_imm:$off))),
+          (LDIDX64 GPR:$base, simm32_imm:$off)>;
+
+// 64-bit store to a GPR base with no offset.
+def : Pat<(store (i64 GPR:$val), (i64 GPR:$base)),
+          (STIDX64 GPR:$val, GPR:$base, 0)>;
+
+// 64-bit store to GPR base + signed-32 immediate offset.
+def : Pat<(store (i64 GPR:$val), (add (i64 GPR:$base), simm32_imm:$off)),
+          (STIDX64 GPR:$val, GPR:$base, simm32_imm:$off)>;
+
+//===----------------------------------------------------------------------===//
 // Control flow: branches and calls
 //===----------------------------------------------------------------------===//
 

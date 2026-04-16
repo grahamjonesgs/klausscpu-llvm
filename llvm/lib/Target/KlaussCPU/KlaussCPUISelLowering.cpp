@@ -73,7 +73,7 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setMaxAtomicSizeInBitsSupported(0);
 
   // ---- Stack operations ----
-  setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i32, Expand);
+  setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i64, Expand);
   setOperationAction(ISD::STACKSAVE,          MVT::Other, Expand);
   setOperationAction(ISD::STACKRESTORE,       MVT::Other, Expand);
 
@@ -223,10 +223,10 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
   CallingConv::ID CallConv   = CLI.CallConv;
   bool          IsVarArg     = CLI.IsVarArg;
   MachineFunction &MF        = DAG.getMachineFunction();
-  // Pointers are 32-bit (DataLayout p:32:32), but all GPRs are 64-bit.
-  // Use MVT::i32 for SP/memory-address arithmetic, MVT::i64 for the callee
-  // operand on the call node (which must match the i64 GPR class).
-  MVT PtrVT  = getPointerTy(DAG.getDataLayout()); // MVT::i32 — for SP math
+  // Pointers are now 64-bit (DataLayout p:64:64) so GPRs can hold them natively.
+  // SP is still a 32-bit hardware register; copy it as i32 and zero-extend
+  // to i64 for address arithmetic.
+  MVT PtrVT  = getPointerTy(DAG.getDataLayout()); // MVT::i64
   MVT CallVT = MVT::i64;                          // GPR-width callee operand
 
   // ---- Analyze outgoing arguments ----------------------------------------
@@ -244,8 +244,10 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
   SmallVector<std::pair<Register, SDValue>, 8> RegsToPass;
   SmallVector<SDValue, 4> MemOpChains;
 
-  // SP value for computing store addresses.
-  SDValue SP = DAG.getCopyFromReg(Chain, DL, KlaussCPU::SP, PtrVT);
+  // SP is a 32-bit hardware register.  Copy it as i32, then zero-extend to
+  // i64 so address arithmetic uses the same type as pointer operands (i64).
+  SDValue SP32 = DAG.getCopyFromReg(Chain, DL, KlaussCPU::SP, MVT::i32);
+  SDValue SP   = DAG.getNode(ISD::ZERO_EXTEND, DL, PtrVT, SP32);
 
   for (unsigned I = 0, E = ArgLocs.size(); I != E; ++I) {
     const CCValAssign &VA = ArgLocs[I];
