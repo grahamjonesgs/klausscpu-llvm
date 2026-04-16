@@ -35,6 +35,24 @@ public:
                    const DebugLoc &DL, Register DestReg, Register SrcReg,
                    bool KillSrc, bool RenamableDest = false,
                    bool RenamableSrc = false) const override;
+
+  // LLVM 23 signatures: no TRI parameter; VReg follows RC; load has SubReg+Flags.
+  void storeRegToStackSlot(MachineBasicBlock &MBB,
+                            MachineBasicBlock::iterator I,
+                            Register SrcReg, bool IsKill, int FI,
+                            const TargetRegisterClass *RC,
+                            Register VReg,
+                            MachineInstr::MIFlag Flags =
+                                MachineInstr::NoFlags) const override;
+
+  void loadRegFromStackSlot(MachineBasicBlock &MBB,
+                             MachineBasicBlock::iterator I,
+                             Register DstReg, int FI,
+                             const TargetRegisterClass *RC,
+                             Register VReg,
+                             unsigned SubReg = 0,
+                             MachineInstr::MIFlag Flags =
+                                 MachineInstr::NoFlags) const override;
 };
 
 } // namespace llvm

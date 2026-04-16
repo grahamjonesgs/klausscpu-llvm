@@ -239,14 +239,40 @@ SelectionDAGTargetInfo    TSI;
 
 ---
 
+10. ✅ Callee-saved register spilling
+    - `storeRegToStackSlot` / `loadRegFromStackSlot` implemented in `KlaussCPUInstrInfo`
+      using `STIDX64` / `LDIDX64` with `MachineMemOperand` and `MIFlag`
+    - LLVM 23 signature: no `TRI` param; has `VReg`, `SubReg=0`, `Flags=NoFlags`
+    - Smoke test (`outer` calling `inner` with `%a` live across the call):
+      ```
+      addsp   -40
+      stidx64 r0, r15, -8     # 8-byte Folded Spill
+      call    inner
+      ldidx64 r0, r15, -8     # 8-byte Folded Reload
+      addr    r12, r12, r0
+      setsp   r15; pop r15; ret
+      ```
+    - Also fixed: LDIDX64/STIDX64 opcodes corrected (were swapped with LDIDX32/STIDX32)
+    - Also fixed: SETR comment corrected (sign-extends, not zero-extends)
+
+---
+
 ## Next steps
 
-### Step 10 — Callee-saved register spilling
-- Implement `storeRegToStackSlot` / `loadRegFromStackSlot` in `KlaussCPUInstrInfo`
-  using `STIDX64` / `LDIDX64`
-- Required when a function clobbers R4–R7
+### Step 11 — Sub-word loads/stores + sign-extension (required for C `char`/`short`/`int`)
+- Add isel patterns for LDIDX8/16/32, STIDX8/16/32
+- Add patterns for SEXTB/SEXTH/SEXTW after signed sub-word loads
+- Required for any C code that touches non-64-bit types
 
-### Step 11 — End-to-end clang test
+### Step 12 — Conditional branches (required for C `if`/loops)
+- Add `BR_CC` patterns: CMPRR + appropriate JMP variant per condition code
+- Without this, any `if` statement or loop will fail at instruction selection
+
+### Step 13 — SETR64 for large constants
+- Implement 64-bit constant materialization using the V64 3-word format
+- Required for global addresses and 64-bit literals > INT_MAX
+
+### Step 14 — End-to-end clang test
 ```bash
 clang -O0 -target klausscpu-unknown-elf -nostdlib -S foo.c -o foo.s
 ```

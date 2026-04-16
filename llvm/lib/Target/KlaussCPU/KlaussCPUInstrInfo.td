@@ -492,7 +492,7 @@ def JMPR_R  : R_in<0x0000102, (ins GPR:$reg), "jmpr\t$reg"> {
 // RV: register ← immediate  (SETR and in-place RV ops)
 //===----------------------------------------------------------------------===//
 
-// Load 32-bit immediate (zero-extended to 64 bits)
+// Load 32-bit immediate (sign-extended to 64 bits)
 def SETR    : RV_ld<0x0000080, "setr\t$rd, $imm">;
 
 // In-place immediate operations (rd op= imm32)
@@ -515,12 +515,14 @@ def CMPRV_I : RV_cmp<0x0000083, "cmprv\t$rs, $imm">;
 // Memory: indexed 64-bit load / store  (primary frame-slot instructions)
 //===----------------------------------------------------------------------===//
 
-def LDIDX64 : RRV_ld<0x0000FC, "ldidx64\t$rd, $base, $offset">;
-def STIDX64 : RRV_st<0x0000FD, "stidx64\t$rs_data, $base, $offset">;
+// Opcodes from architecture doc §8.3: LDIDX64=0x0000_0C, STIDX64=0x0000_0D
+//                                     LDIDX32=0x0000_C0, STIDX32=0x0000_C1
+def LDIDX64 : RRV_ld<0x00000C, "ldidx64\t$rd, $base, $offset">;
+def STIDX64 : RRV_st<0x00000D, "stidx64\t$rs_data, $base, $offset">;
 
 // 32-bit indexed variants
-def LDIDX32 : RRV_ld<0x00000C, "ldidx\t$rd, $base, $offset">;
-def STIDX32 : RRV_st<0x00000D, "stidx\t$rs_data, $base, $offset">;
+def LDIDX32 : RRV_ld<0x0000C0, "ldidx\t$rd, $base, $offset">;
+def STIDX32 : RRV_st<0x0000C1, "stidx\t$rs_data, $base, $offset">;
 
 //===----------------------------------------------------------------------===//
 // Load / store isel patterns
