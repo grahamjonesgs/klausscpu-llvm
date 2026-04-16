@@ -62,12 +62,25 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::SELECT_CC, VT, Expand);
   }
 
-  // ---- No sign-extending loads ----
-  // The hardware only does zero-extending loads; SEXT loads must be expanded.
+  // ---- Sub-word loads / stores ----
+  // Hardware has MEMGET8/16/32 (zero-extending, register-addressed) and
+  // LDIDX32/STIDX32 (base+offset, 32-bit).  No hardware sign-extending loads.
+  //
+  // SEXTLOAD expands → ZEXTLOAD + SIGN_EXTEND_INREG.
+  // SIGN_EXTEND_INREG i8/i16 → Legal (SEXTB/SEXTH hardware instructions).
+  // SIGN_EXTEND_INREG i32 → Expand (shift pair: SHLV 32 + SHRAV 32).
   for (MVT VT : {MVT::i8, MVT::i16, MVT::i32}) {
+    setLoadExtAction(ISD::ZEXTLOAD, MVT::i64, VT, Legal);
+    setLoadExtAction(ISD::EXTLOAD,  MVT::i64, VT, Legal);
     setLoadExtAction(ISD::SEXTLOAD, MVT::i64, VT, Expand);
     setLoadExtAction(ISD::SEXTLOAD, MVT::i32, VT, Expand);
   }
+  setTruncStoreAction(MVT::i64, MVT::i8,  Legal);
+  setTruncStoreAction(MVT::i64, MVT::i16, Legal);
+  setTruncStoreAction(MVT::i64, MVT::i32, Legal);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i8,  Legal);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i16, Legal);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i32, Expand);
 
   // ---- No atomics ----
   setMaxAtomicSizeInBitsSupported(0);

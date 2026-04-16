@@ -257,16 +257,39 @@ SelectionDAGTargetInfo    TSI;
 
 ---
 
-## Next steps
+11. ✅ Sub-word loads/stores + sign-extension
+    - Hardware instruction notes (from opcode_select_opcodes.json):
+      - No LDIDX8/16 — use MEMGET8/MEMGET16 (RR register-addressed, zero-extending)
+      - MEMGET32 (0x000079) for 32-bit register-addressed loads
+      - LDIDX32 (0x00000C) / STIDX32 (0x00000D) for base+offset 32-bit access (RRV format)
+      - MEMSET8/16/32 (0x000074/76/78) for truncating stores
+    - `KlaussCPUISelLowering`: ZEXTLOAD/EXTLOAD i8/i16/i32 → Legal; SEXTLOAD → Expand
+      (expands to ZEXTLOAD + SIGN_EXTEND_INREG); TruncStore i8/i16/i32 → Legal;
+      SIGN_EXTEND_INREG i8/i16 → Legal (SEXTB/SEXTH); i32 → Expand (shift pair)
+    - C++ `Select()`: extended to handle i32 TargetFrameIndex loads/stores via LDIDX32/STIDX32
+    - i8/i16 frame-slot access: not yet implemented (requires register scavenging
+      in `eliminateFrameIndex`); -O1+ eliminates these via mem2reg
+    - Smoke tests:
+      ```
+      load_byte_zext:   memget8 r12, r0
+      load_byte_sext:   memget8 r12, r0 ; sextb r12
+      load_short_zext:  memget16 r12, r0
+      load_short_sext:  memget16 r12, r0 ; sexth r12
+      load_int_zext:    memget32 r12, r0
+      load_int_sext:    memget32 r12, r0 ; setr r14,32 ; shlr r12,r12,r14 ; sarr r12,r12,r14
+      store_byte:       memset8 r1, r0
+      store_short:      memset16 r1, r0
+      store_int:        memset32 r1, r0
+      ```
 
-### Step 11 — Sub-word loads/stores + sign-extension (required for C `char`/`short`/`int`)
-- Add isel patterns for LDIDX8/16/32, STIDX8/16/32
-- Add patterns for SEXTB/SEXTH/SEXTW after signed sub-word loads
-- Required for any C code that touches non-64-bit types
+---
+
+## Next steps
 
 ### Step 12 — Conditional branches (required for C `if`/loops)
 - Add `BR_CC` patterns: CMPRR + appropriate JMP variant per condition code
 - Without this, any `if` statement or loop will fail at instruction selection
+- Hardware: `CMPRR_I` sets equal/less/ult/sign flags; `JMPE/JMPNE/JMPLT/JMPLE/JMPGT/JMPGE/JMPULT/…`
 
 ### Step 13 — SETR64 for large constants
 - Implement 64-bit constant materialization using the V64 3-word format
@@ -276,3 +299,7 @@ SelectionDAGTargetInfo    TSI;
 ```bash
 clang -O0 -target klausscpu-unknown-elf -nostdlib -S foo.c -o foo.s
 ```
+
+### Step 15 — i8/i16 frame-slot access (eliminateFrameIndex scavenging)
+- Implement register scavenging in `eliminateFrameIndex` for MEMGET8/16/MEMSET8/16
+- Required for -O0 functions with local `char`/`short` variables on the stack

@@ -95,20 +95,40 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
   if (N->getOpcode() == ISD::TargetFrameIndex)
     return;
 
-  // ---- Frame-slot LOAD: (load (TargetFrameIndex)) → LDIDX64 --------------
+  // ---- Frame-slot LOAD: (load (TargetFrameIndex)) → LDIDX64 / LDIDX32 ---
   // The 0 offset is a placeholder; eliminateFrameIndex will fill in the real
-  // frame offset.  Machine node order: [base, offset, chain].
+  // frame offset (R15 + slot_offset).  Machine node order: [base, offset, chain].
+  //
+  // i8/i16 frame-slot loads require address materialisation via a scratch
+  // register (register scavenging) which is not yet implemented.  Those cases
+  // fall through to SelectCode and will produce a "Cannot select" error.
+  // Use -O1 or higher to eliminate frame-local i8/i16 allocas via mem2reg.
   if (N->getOpcode() == ISD::LOAD) {
     auto *LN = cast<LoadSDNode>(N);
-    // Handle non-extending 64-bit loads only (sign/zero-ext handled later).
-    if (LN->getExtensionType() == ISD::NON_EXTLOAD &&
-        LN->getMemoryVT() == MVT::i64) {
-      SDValue Ptr = LN->getBasePtr();
-      if (Ptr.getOpcode() == ISD::TargetFrameIndex) {
-        SDLoc DL(N);
-        SDValue Off = CurDAG->getTargetConstant(0, DL, MVT::i64);
+    SDValue Ptr = LN->getBasePtr();
+    if (Ptr.getOpcode() == ISD::TargetFrameIndex) {
+      SDLoc DL(N);
+      SDValue Off = CurDAG->getTargetConstant(0, DL, MVT::i64);
+
+      // 64-bit non-extending frame-slot load → LDIDX64.
+      if (LN->getExtensionType() == ISD::NON_EXTLOAD &&
+          LN->getMemoryVT() == MVT::i64) {
         SDValue Ops[] = {Ptr, Off, LN->getChain()};
         SDNode *Res = CurDAG->getMachineNode(KlaussCPU::LDIDX64, DL,
+                                              CurDAG->getVTList(MVT::i64,
+                                                                MVT::Other),
+                                              Ops);
+        ReplaceUses(N, Res);
+        CurDAG->RemoveDeadNode(N);
+        return;
+      }
+
+      // 32-bit zero/any-extending frame-slot load → LDIDX32 (zero-extends to i64).
+      if (LN->getMemoryVT() == MVT::i32 &&
+          (LN->getExtensionType() == ISD::ZEXTLOAD ||
+           LN->getExtensionType() == ISD::EXTLOAD)) {
+        SDValue Ops[] = {Ptr, Off, LN->getChain()};
+        SDNode *Res = CurDAG->getMachineNode(KlaussCPU::LDIDX32, DL,
                                               CurDAG->getVTList(MVT::i64,
                                                                 MVT::Other),
                                               Ops);
@@ -119,17 +139,29 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
     }
   }
 
-  // ---- Frame-slot STORE: (store val, (TargetFrameIndex)) → STIDX64 -------
+  // ---- Frame-slot STORE: (store val, (TargetFrameIndex)) → STIDX64 / STIDX32 ---
   // Machine node order: [data, base, offset, chain].
   if (N->getOpcode() == ISD::STORE) {
     auto *SN = cast<StoreSDNode>(N);
-    if (!SN->isTruncatingStore() && SN->getMemoryVT() == MVT::i64) {
-      SDValue Ptr = SN->getBasePtr();
-      if (Ptr.getOpcode() == ISD::TargetFrameIndex) {
-        SDLoc DL(N);
-        SDValue Off = CurDAG->getTargetConstant(0, DL, MVT::i64);
+    SDValue Ptr = SN->getBasePtr();
+    if (Ptr.getOpcode() == ISD::TargetFrameIndex) {
+      SDLoc DL(N);
+      SDValue Off = CurDAG->getTargetConstant(0, DL, MVT::i64);
+
+      // 64-bit non-truncating frame-slot store → STIDX64.
+      if (!SN->isTruncatingStore() && SN->getMemoryVT() == MVT::i64) {
         SDValue Ops[] = {SN->getValue(), Ptr, Off, SN->getChain()};
         SDNode *Res = CurDAG->getMachineNode(KlaussCPU::STIDX64, DL,
+                                              CurDAG->getVTList(MVT::Other),
+                                              Ops);
+        ReplaceNode(N, Res);
+        return;
+      }
+
+      // 32-bit truncating frame-slot store → STIDX32.
+      if (SN->isTruncatingStore() && SN->getMemoryVT() == MVT::i32) {
+        SDValue Ops[] = {SN->getValue(), Ptr, Off, SN->getChain()};
+        SDNode *Res = CurDAG->getMachineNode(KlaussCPU::STIDX32, DL,
                                               CurDAG->getVTList(MVT::Other),
                                               Ops);
         ReplaceNode(N, Res);

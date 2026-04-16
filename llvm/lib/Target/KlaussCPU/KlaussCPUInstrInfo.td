@@ -413,6 +413,21 @@ def MEMGET64 : RR1<0x00007B, (outs GPR:$rd), (ins GPR:$rs),
 }
 def MEMSET64 : RRst<0x00007A, "memset64\t$rs_data, $rs_addr">;
 
+// Sub-word register-addressed loads (zero-extend to 64 bits).
+// Hardware has no indexed (base+offset) variants for 8/16-bit; use LDIDX32
+// for 32-bit indexed access.  Opcodes from opcode_select_opcodes.json.
+def MEMGET8  : RR1<0x000075, (outs GPR:$rd), (ins GPR:$rs),
+                  "memget8\t$rd, $rs"> { let mayLoad = 1; }
+def MEMGET16 : RR1<0x000077, (outs GPR:$rd), (ins GPR:$rs),
+                  "memget16\t$rd, $rs"> { let mayLoad = 1; }
+def MEMGET32 : RR1<0x000079, (outs GPR:$rd), (ins GPR:$rs),
+                  "memget32\t$rd, $rs"> { let mayLoad = 1; }
+
+// Sub-word register-addressed stores (stores low N bits of rs_data to mem[rs_addr]).
+def MEMSET8  : RRst<0x000074, "memset8\t$rs_data, $rs_addr">;
+def MEMSET16 : RRst<0x000076, "memset16\t$rs_data, $rs_addr">;
+def MEMSET32 : RRst<0x000078, "memset32\t$rs_data, $rs_addr">;
+
 //===----------------------------------------------------------------------===//
 // ALU — single-register in-place (2-address: $rd = $rs1)
 //===----------------------------------------------------------------------===//
@@ -436,6 +451,16 @@ def BITREV  : R_inplace<0x00000AB, "bitrev\t$rd",
                 [(set GPR:$rd, (bitreverse GPR:$rs1))]>;
 def BSWAP_R : R_inplace<0x0000097, "bswap\t$rd",
                 [(set GPR:$rd, (bswap GPR:$rs1))]>;
+
+// Sign-extend to 64 bits (arch doc §7.2; hardware extends to 64)
+def SEXTB   : R_inplace<0x000008C, "sextb\t$rd",
+                [(set GPR:$rd, (sext_inreg GPR:$rs1, i8))]>;
+def SEXTH   : R_inplace<0x0000094, "sexth\t$rd",
+                [(set GPR:$rd, (sext_inreg GPR:$rs1, i16))]>;
+
+// Zero-extend to 64 bits
+def ZEXTB   : R_inplace<0x0000095, "zextb\t$rd">;
+def ZEXTH   : R_inplace<0x0000096, "zexth\t$rd">;
 
 //===----------------------------------------------------------------------===//
 // Pseudo-instructions (not emitted to the binary; eliminated by PEI)
@@ -515,14 +540,17 @@ def CMPRV_I : RV_cmp<0x0000083, "cmprv\t$rs, $imm">;
 // Memory: indexed 64-bit load / store  (primary frame-slot instructions)
 //===----------------------------------------------------------------------===//
 
-// Opcodes from architecture doc §8.3: LDIDX64=0x0000_0C, STIDX64=0x0000_0D
-//                                     LDIDX32=0x0000_C0, STIDX32=0x0000_C1
-def LDIDX64 : RRV_ld<0x00000C, "ldidx64\t$rd, $base, $offset">;
-def STIDX64 : RRV_st<0x00000D, "stidx64\t$rs_data, $base, $offset">;
+// Opcodes from hardware opcode table (opcode_select_opcodes.json):
+//   LDIDX64 = 0x0000FC?? (64-bit indexed load), STIDX64 = 0x0000FD??
+//   LDIDX   = 0x00000C?? (32-bit indexed load), STIDX   = 0x00000D??
+//   Sub-word indexed loads (8/16-bit) do not exist in hardware;
+//   use MEMGET8/MEMGET16 (register-addressed) instead.
+def LDIDX64 : RRV_ld<0x0000FC, "ldidx64\t$rd, $base, $offset">;
+def STIDX64 : RRV_st<0x0000FD, "stidx64\t$rs_data, $base, $offset">;
 
-// 32-bit indexed variants
-def LDIDX32 : RRV_ld<0x0000C0, "ldidx\t$rd, $base, $offset">;
-def STIDX32 : RRV_st<0x0000C1, "stidx\t$rs_data, $base, $offset">;
+// 32-bit indexed load/store (zero-extends to 64)
+def LDIDX32 : RRV_ld<0x00000C, "ldidx\t$rd, $base, $offset">;
+def STIDX32 : RRV_st<0x00000D, "stidx\t$rs_data, $base, $offset">;
 
 //===----------------------------------------------------------------------===//
 // Load / store isel patterns
@@ -558,6 +586,35 @@ def : Pat<(store (i64 GPR:$val), (i64 GPR:$base)),
 // 64-bit store to GPR base + signed-32 immediate offset.
 def : Pat<(store (i64 GPR:$val), (add (i64 GPR:$base), simm32_imm:$off)),
           (STIDX64 GPR:$val, GPR:$base, simm32_imm:$off)>;
+
+// Sub-word zero-extending loads from a GPR address.
+// FrameIndex-based sub-word loads (i32) are handled in KlaussCPUDAGToDAGISel::Select();
+// i8/i16 frame-index loads require register scavenging (not yet implemented —
+// use -O1 or higher to eliminate frame-local i8/i16 allocas via mem2reg).
+def : Pat<(i64 (zextloadi8  (i64 GPR:$addr))), (MEMGET8  GPR:$addr)>;
+def : Pat<(i64 (zextloadi16 (i64 GPR:$addr))), (MEMGET16 GPR:$addr)>;
+def : Pat<(i64 (zextloadi32 (i64 GPR:$addr))), (MEMGET32 GPR:$addr)>;
+def : Pat<(i64 (extloadi8   (i64 GPR:$addr))), (MEMGET8  GPR:$addr)>;
+def : Pat<(i64 (extloadi16  (i64 GPR:$addr))), (MEMGET16 GPR:$addr)>;
+def : Pat<(i64 (extloadi32  (i64 GPR:$addr))), (MEMGET32 GPR:$addr)>;
+
+// 32-bit indexed load from GPR base + signed-32 offset (covers struct/array fields).
+def : Pat<(i64 (zextloadi32 (add (i64 GPR:$base), simm32_imm:$off))),
+          (LDIDX32 GPR:$base, simm32_imm:$off)>;
+def : Pat<(i64 (extloadi32  (add (i64 GPR:$base), simm32_imm:$off))),
+          (LDIDX32 GPR:$base, simm32_imm:$off)>;
+
+// Truncating stores to a GPR address.
+def : Pat<(truncstorei8  (i64 GPR:$val), (i64 GPR:$addr)),
+          (MEMSET8  GPR:$val, GPR:$addr)>;
+def : Pat<(truncstorei16 (i64 GPR:$val), (i64 GPR:$addr)),
+          (MEMSET16 GPR:$val, GPR:$addr)>;
+def : Pat<(truncstorei32 (i64 GPR:$val), (i64 GPR:$addr)),
+          (MEMSET32 GPR:$val, GPR:$addr)>;
+
+// 32-bit indexed truncating store to GPR base + signed-32 offset.
+def : Pat<(truncstorei32 (i64 GPR:$val), (add (i64 GPR:$base), simm32_imm:$off)),
+          (STIDX32 GPR:$val, GPR:$base, simm32_imm:$off)>;
 
 //===----------------------------------------------------------------------===//
 // Control flow: branches and calls
