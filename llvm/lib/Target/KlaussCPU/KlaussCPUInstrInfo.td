@@ -403,8 +403,10 @@ def MAXUR  : RRR<0x00430, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
 def COPY_R   : RR1<0x000001, (outs GPR:$rd), (ins GPR:$rs),
                   "copy\t$rd, $rs">;
 
-// Compare (flags only): rs1 - rs2, no writeback
-def CMPRR_I  : RR0<0x000005, "cmprr\t$rs1, $rs2">;
+// Compare (flags only): rs1 - rs2, no writeback.
+// hasSideEffects = 1 prevents the optimizer from removing or reordering these
+// instructions away from the conditional branch that consumes the flags.
+def CMPRR_I  : RR0<0x000005, "cmprr\t$rs1, $rs2"> { let hasSideEffects = 1; }
 
 // 64-bit load / store via absolute register address
 def MEMGET64 : RR1<0x00007B, (outs GPR:$rd), (ins GPR:$rs),
@@ -533,8 +535,8 @@ def MULV    : RV_2addr<0x00000B8, "mulv\t$rd, $imm">;
 def DIVV    : RV_2addr<0x00000B9, "divv\t$rd, $imm">;
 def MODV    : RV_2addr<0x00000BA, "modv\t$rd, $imm">;
 
-// Compare register to immediate — flags only
-def CMPRV_I : RV_cmp<0x0000083, "cmprv\t$rs, $imm">;
+// Compare register to immediate — flags only (same side-effect caveat as CMPRR_I)
+def CMPRV_I : RV_cmp<0x0000083, "cmprv\t$rs, $imm"> { let hasSideEffects = 1; }
 
 //===----------------------------------------------------------------------===//
 // Memory: indexed 64-bit load / store  (primary frame-slot instructions)

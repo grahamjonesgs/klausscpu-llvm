@@ -284,12 +284,22 @@ SelectionDAGTargetInfo    TSI;
 
 ---
 
-## Next steps
+12. ✅ Conditional branches — `if` / loops
+    - `hasSideEffects = 1` added to CMPRR_I and CMPRV_I (prevents reordering away from branch)
+    - `ISD::BR_CC` → Legal in ISelLowering; `ISD::BR` + `ISD::BR_CC` handled in C++ Select()
+    - `ISD::BR` → JMP; `ISD::BR_CC` → CMPRR_I (or CMPRV_I for simm32 constants) + JMPxx
+    - Chain output from compare consumed by branch → correct scheduling dependency at -O0
+    - All 10 CondCodes mapped: SETEQ→JMPE, SETNE→JMPNE, SETLT→JMPLT, SETLE→JMPLE,
+      SETGT→JMPGT, SETGE→JMPGE, SETULT→JMPULT, SETULE→JMPULE, SETUGT→JMPUGT, SETUGE→JMPUGE
+    - Smoke tests:
+      ```
+      signed_lt:    cmprr r0,r1 ; jmpge .false ; jmp .true
+      cmp_const:    cmprv r0,42 ; jmpne .no    ; jmp .yes
+      unsigned_lt:  cmprr r0,r1 ; jmpuge .false ; jmp .true
+      countdown:    cmprv r14,0 ; jmpne .loop  (back-edge)
+      ```
 
-### Step 12 — Conditional branches (required for C `if`/loops)
-- Add `BR_CC` patterns: CMPRR + appropriate JMP variant per condition code
-- Without this, any `if` statement or loop will fail at instruction selection
-- Hardware: `CMPRR_I` sets equal/less/ult/sign flags; `JMPE/JMPNE/JMPLT/JMPLE/JMPGT/JMPGE/JMPULT/…`
+## Next steps
 
 ### Step 13 — SETR64 for large constants
 - Implement 64-bit constant materialization using the V64 3-word format

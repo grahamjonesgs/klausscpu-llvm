@@ -92,7 +92,10 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
 
   // ---- Branch/control ----
   setOperationAction(ISD::BR_JT,  MVT::Other, Expand);
-  setOperationAction(ISD::BRCOND, MVT::Other, Expand); // use BR_CC
+  setOperationAction(ISD::BRCOND, MVT::Other, Expand); // expands to BR_CC
+  // BR_CC with i64 operands is Legal — handled by KlaussCPUDAGToDAGISel::Select()
+  // which emits CMPRR_I/CMPRV_I + the appropriate conditional JMP instruction.
+  setOperationAction(ISD::BR_CC,  MVT::i64,   Legal);
 
   // ---- Integer ops that the hardware supports natively ----
   // These are Legal by default once the register class is registered,

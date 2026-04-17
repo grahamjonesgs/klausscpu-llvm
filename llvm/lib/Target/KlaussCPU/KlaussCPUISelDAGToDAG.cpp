@@ -21,6 +21,7 @@
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/MathExtras.h"
 
 // KlaussCPU:: opcode enum (ADJCALLSTACKDOWN, ADJCALLSTACKUP, etc.) is visible
 // transitively: KlaussCPUTargetMachine.h → KlaussCPUSubtarget.h →
@@ -200,6 +201,75 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
       SDValue Ops[] = {Imm1, Imm2, N->getOperand(0)};
       CurDAG->SelectNodeTo(N, Opc, MVT::Other, MVT::Glue, Ops);
     }
+    return;
+  }
+
+  // ---- ISD::BR → JMP (unconditional branch) --------------------------------
+  // ISD::BR: (chain, dest_bb)
+  if (N->getOpcode() == ISD::BR) {
+    SDValue Chain = N->getOperand(0);
+    SDValue Dest  = N->getOperand(1);
+    SDLoc DL(N);
+    SDValue Ops[] = {Dest, Chain};
+    SDNode *Res = CurDAG->getMachineNode(KlaussCPU::JMP, DL, MVT::Other, Ops);
+    ReplaceNode(N, Res);
+    return;
+  }
+
+  // ---- ISD::BR_CC → CMPRR_I/CMPRV_I + conditional JMP -------------------
+  // ISD::BR_CC: (chain, condcode, lhs, rhs, dest_bb)
+  //
+  // The compare instruction has no output register (it only sets processor
+  // flags).  We model the dependency via a chain output from the compare,
+  // which is consumed as the chain input to the branch.
+  //
+  // CMPRV_I accepts a signed-32-bit immediate RHS directly.
+  // CMPRR_I requires both operands to be in registers.
+  // Large constants (> INT32_MAX) must be in a register at this point; they
+  // are materialized by SETR. 64-bit constants > INT_MAX need SETR64 (step 13).
+  if (N->getOpcode() == ISD::BR_CC) {
+    ISD::CondCode CC = cast<CondCodeSDNode>(N->getOperand(1))->get();
+    SDValue Chain    = N->getOperand(0);
+    SDValue LHS      = N->getOperand(2);
+    SDValue RHS      = N->getOperand(3);
+    SDValue Dest     = N->getOperand(4);
+    SDLoc DL(N);
+
+    // Emit the compare.
+    SDNode *CmpNode;
+    if (auto *C = dyn_cast<ConstantSDNode>(RHS);
+        C && isInt<32>(C->getSExtValue())) {
+      // Constant RHS that fits in a signed 32-bit field → CMPRV_I.
+      SDValue Imm  = CurDAG->getTargetConstant(C->getSExtValue(), DL, MVT::i64);
+      SDValue Ops[] = {LHS, Imm, Chain};
+      CmpNode = CurDAG->getMachineNode(KlaussCPU::CMPRV_I, DL, MVT::Other, Ops);
+    } else {
+      // Register-register compare.
+      SDValue Ops[] = {LHS, RHS, Chain};
+      CmpNode = CurDAG->getMachineNode(KlaussCPU::CMPRR_I, DL, MVT::Other, Ops);
+    }
+
+    // Map ISD::CondCode to the KlaussCPU conditional jump opcode.
+    // CMPRR/CMPRV set: equal / less (signed) / ult (unsigned) / sign.
+    unsigned JmpOpc;
+    switch (CC) {
+    case ISD::SETEQ:   JmpOpc = KlaussCPU::JMPE;    break;
+    case ISD::SETNE:   JmpOpc = KlaussCPU::JMPNE;   break;
+    case ISD::SETLT:   JmpOpc = KlaussCPU::JMPLT;   break;
+    case ISD::SETLE:   JmpOpc = KlaussCPU::JMPLE;   break;
+    case ISD::SETGT:   JmpOpc = KlaussCPU::JMPGT;   break;
+    case ISD::SETGE:   JmpOpc = KlaussCPU::JMPGE;   break;
+    case ISD::SETULT:  JmpOpc = KlaussCPU::JMPULT;  break;
+    case ISD::SETULE:  JmpOpc = KlaussCPU::JMPULE;  break;
+    case ISD::SETUGT:  JmpOpc = KlaussCPU::JMPUGT;  break;
+    case ISD::SETUGE:  JmpOpc = KlaussCPU::JMPUGE;  break;
+    default:
+      llvm_unreachable("KlaussCPU BR_CC: unhandled CondCode");
+    }
+
+    SDValue JmpOps[] = {Dest, SDValue(CmpNode, 0) /* chain from compare */};
+    SDNode *JmpNode = CurDAG->getMachineNode(JmpOpc, DL, MVT::Other, JmpOps);
+    ReplaceNode(N, JmpNode);
     return;
   }
 
