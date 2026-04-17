@@ -90,6 +90,13 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::STACKSAVE,          MVT::Other, Expand);
   setOperationAction(ISD::STACKRESTORE,       MVT::Other, Expand);
 
+  // ---- Global addresses / symbols ----
+  // All symbols are 32-bit addresses (128 MiB RAM); lowered to TargetGlobalAddress
+  // which the isel pattern maps to SETR (sign-extends; bit 31 is always 0 for
+  // valid addresses, so sign-ext == zero-ext).
+  setOperationAction(ISD::GlobalAddress,  MVT::i64, Custom);
+  setOperationAction(ISD::ExternalSymbol, MVT::i64, Custom);
+
   // ---- Branch/control ----
   setOperationAction(ISD::BR_JT,  MVT::Other, Expand);
   setOperationAction(ISD::BRCOND, MVT::Other, Expand); // expands to BR_CC
@@ -132,7 +139,30 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
 
 SDValue KlaussCPUTargetLowering::LowerOperation(SDValue Op,
                                                  SelectionDAG &DAG) const {
-  llvm_unreachable("KlaussCPU: unimplemented LowerOperation opcode");
+  switch (Op.getOpcode()) {
+  case ISD::GlobalAddress:  return LowerGlobalAddress(Op, DAG);
+  case ISD::ExternalSymbol: return LowerExternalSymbol(Op, DAG);
+  default:
+    llvm_unreachable("KlaussCPU: unimplemented LowerOperation opcode");
+  }
+}
+
+SDValue KlaussCPUTargetLowering::LowerGlobalAddress(SDValue Op,
+                                                      SelectionDAG &DAG) const {
+  auto *N = cast<GlobalAddressSDNode>(Op);
+  // Wrap the TargetGlobalAddress in a KlaussCPUISD::ADDR node so that
+  // KlaussCPUDAGToDAGISel::Select() can safely emit SETR without hitting
+  // the CSE-induced self-reference issue (see KlaussCPUISelLowering.h).
+  SDValue TGA = DAG.getTargetGlobalAddress(N->getGlobal(), SDLoc(N), MVT::i64,
+                                            N->getOffset());
+  return DAG.getNode(KlaussCPUISD::ADDR, SDLoc(N), MVT::i64, TGA);
+}
+
+SDValue KlaussCPUTargetLowering::LowerExternalSymbol(SDValue Op,
+                                                       SelectionDAG &DAG) const {
+  auto *N = cast<ExternalSymbolSDNode>(Op);
+  SDValue TES = DAG.getTargetExternalSymbol(N->getSymbol(), MVT::i64);
+  return DAG.getNode(KlaussCPUISD::ADDR, SDLoc(N), MVT::i64, TES);
 }
 
 const char *
@@ -140,6 +170,7 @@ KlaussCPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   switch (Opcode) {
   case KlaussCPUISD::RET_GLUE: return "KlaussCPUISD::RET_GLUE";
   case KlaussCPUISD::CALL:     return "KlaussCPUISD::CALL";
+  case KlaussCPUISD::ADDR:     return "KlaussCPUISD::ADDR";
   default: return nullptr;
   }
 }

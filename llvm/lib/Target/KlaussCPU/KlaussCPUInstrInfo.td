@@ -570,8 +570,14 @@ def STIDX32 : RRV_st<0x00000D, "stidx\t$rs_data, $base, $offset">;
 def simm32_imm : ImmLeaf<i64, [{return isInt<32>(Imm);}]>;
 
 // Materialize a signed 32-bit constant into a GPR using SETR.
-// Covers values in [-2^31, 2^31-1]; large 64-bit constants need a sequence.
+// Covers values in [-2^31, 2^31-1].
+// Large 64-bit constants use the SETR+SHLV+ORV sequence in Select().
+// NOTE: SETR64 hardware instruction is BUGGY (hi32 fetch inverts r_PC[2]) — do not use.
 def : Pat<(i64 simm32_imm:$imm), (SETR simm32_imm:$imm)>;
+
+// Global addresses and external symbols are materialized in C++ Select()
+// via SETR (non-call uses) to avoid the "leaf node not emitted" crash.
+// Call-site uses are handled directly by the CALL_I patterns below.
 
 // 64-bit load from a GPR base with no offset.
 def : Pat<(i64 (load (i64 GPR:$base))),

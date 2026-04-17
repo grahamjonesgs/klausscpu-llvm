@@ -19,6 +19,13 @@ enum NodeType : unsigned {
   FIRST_NUMBER = ISD::BUILTIN_OP_END,
   RET_GLUE, // function return with optional return-value glue
   CALL,     // direct call (step 8)
+  ADDR,     // materialise a global/external-symbol address into a GPR
+            //   (i64) = ADDR (TargetGlobalAddress/TargetExternalSymbol)
+            // Lowered to SETR by Select().  Wrapping is necessary because
+            // TargetGlobalAddress CSEs, so we cannot pass it as an operand
+            // to getMachineNode() and then call ReplaceNode() on it — that
+            // would cause ReplaceAllUsesWith to create a self-referential
+            // SETR instruction ("%0 = SETR %0").
 };
 } // namespace KlaussCPUISD
 
@@ -44,6 +51,10 @@ public:
 
   SDValue LowerCall(TargetLowering::CallLoweringInfo &CLI,
                      SmallVectorImpl<SDValue> &InVals) const override;
+
+private:
+  SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerExternalSymbol(SDValue Op, SelectionDAG &DAG) const;
 };
 
 } // namespace llvm

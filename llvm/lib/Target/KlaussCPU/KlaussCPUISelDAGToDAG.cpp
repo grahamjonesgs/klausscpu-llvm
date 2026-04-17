@@ -96,6 +96,35 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
   if (N->getOpcode() == ISD::TargetFrameIndex)
     return;
 
+  // ---- KlaussCPUISD::ADDR → SETR -------------------------------------------
+  // LowerGlobalAddress / LowerExternalSymbol wrap the TargetGlobalAddress in
+  // a KlaussCPUISD::ADDR node (see KlaussCPUISelLowering.h for the reason).
+  //
+  // Here we peel off the wrapper and emit SETR with the enclosed symbol.
+  //
+  // Why not handle bare TargetGlobalAddress here instead?  Two reasons:
+  //   1. SelectionDAG CSE-deduplicates TargetGlobalAddress nodes, so
+  //      creating a "fresh" copy returns the original node.  Passing it as
+  //      getMachineNode's operand and then calling ReplaceNode on it causes
+  //      ReplaceAllUsesWith to rewrite SETR's own operand reference → self-
+  //      referential machine instruction ("%0 = SETR %0").
+  //   2. Call-site callee addresses bypass LowerOperation (LowerCall calls
+  //      DAG.getTargetGlobalAddress directly) and are handled by the
+  //      CALL_I tablegen pattern — they must NOT be converted to SETR.
+  if (N->getOpcode() == KlaussCPUISD::ADDR) {
+    // N = KlaussCPUISD::ADDR(TGA_or_TES)
+    // Operand 0 is the TargetGlobalAddress or TargetExternalSymbol leaf.
+    SDValue Sym = N->getOperand(0);
+    SDLoc DL(N);
+    // getMachineNode with Sym (TGA/TES) as operand → MO_GlobalAddress in the
+    // resulting MachineInstr.  ReplaceNode replaces ADDR (N), not Sym, so
+    // SETR's reference to Sym is not rewritten → no self-reference.
+    SDNode *Res =
+        CurDAG->getMachineNode(KlaussCPU::SETR, DL, MVT::i64, Sym);
+    ReplaceNode(N, Res);
+    return;
+  }
+
   // ---- Frame-slot LOAD: (load (TargetFrameIndex)) → LDIDX64 / LDIDX32 ---
   // The 0 offset is a placeholder; eliminateFrameIndex will fill in the real
   // frame offset (R15 + slot_offset).  Machine node order: [base, offset, chain].
@@ -202,6 +231,42 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
       CurDAG->SelectNodeTo(N, Opc, MVT::Other, MVT::Glue, Ops);
     }
     return;
+  }
+
+  // ---- ISD::Constant: 64-bit values that don't fit in simm32 --------------
+  // SETR covers [-2^31, 2^31-1].  For larger values, emit the 3-instruction
+  // sequence:  SETR rd, hi32  →  SHLV rd, 32  →  ORV rd, lo32
+  // giving  rd = {hi32, lo32}  (full 64-bit value).
+  //
+  // NOTE: SETR64 (hardware instruction) has a known hi32 fetch bug
+  // (r_PC[2] condition inverted) and must NOT be used.
+  if (N->getOpcode() == ISD::Constant) {
+    auto *C = cast<ConstantSDNode>(N);
+    int64_t Val = C->getSExtValue();
+    if (!isInt<32>(Val)) {
+      SDLoc DL(N);
+      uint32_t Lo = static_cast<uint32_t>(static_cast<uint64_t>(Val));
+      int32_t  Hi = static_cast<int32_t>(static_cast<uint64_t>(Val) >> 32);
+
+      // SETR rd, Hi   (sign-extends Hi to 64 bits)
+      SDValue HiImm = CurDAG->getTargetConstant(Hi, DL, MVT::i64);
+      SDNode *SetR  = CurDAG->getMachineNode(KlaussCPU::SETR, DL, MVT::i64, HiImm);
+
+      // SHLV rd, 32   (rd = rd << 32 → {Hi, 0})
+      SDValue ShAmt = CurDAG->getTargetConstant(32, DL, MVT::i64);
+      SDNode *Shlv  = CurDAG->getMachineNode(KlaussCPU::SHLV, DL, MVT::i64,
+                                              {SDValue(SetR, 0), ShAmt});
+
+      // ORV rd, Lo    (rd = rd | zero_ext(Lo) → {Hi, Lo})
+      SDValue LoImm = CurDAG->getTargetConstant(static_cast<int32_t>(Lo),
+                                                 DL, MVT::i64);
+      SDNode *Orv   = CurDAG->getMachineNode(KlaussCPU::ORV, DL, MVT::i64,
+                                              {SDValue(Shlv, 0), LoImm});
+
+      ReplaceNode(N, Orv);
+      return;
+    }
+    // simm32 constants: fall through to SelectCode (matched by SETR pattern).
   }
 
   // ---- ISD::BR → JMP (unconditional branch) --------------------------------

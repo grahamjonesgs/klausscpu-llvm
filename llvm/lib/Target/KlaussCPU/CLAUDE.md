@@ -173,6 +173,13 @@ SelectionDAGTargetInfo    TSI;
 - Do NOT re-include `KlaussCPUGenInstrInfo.inc` with `GET_INSTRINFO_ENUM` in `KlaussCPUISelDAGToDAG.cpp` — the enum is already visible transitively through `KlaussCPUTargetMachine.h → KlaussCPUSubtarget.h → KlaussCPUInstrInfo.h`.
 - Callee operand on the `KlaussCPUISD::CALL` node must be typed as `MVT::i64` (not `MVT::i32`) — KlaussCPU has no i32 register class, so any i32 target address would fail type promotion.
 
+### Global address / large-constant materialization (step 13)
+- `DAG.getTargetGlobalAddress(same_params)` is **CSE-deduplicated** — calling it twice returns the *same* `SDNode*`. If you then call `getMachineNode(SETR, DL, MVT::i64, SDValue(tga_node, 0))` and `ReplaceNode(tga_node, setr_node)`, `ReplaceAllUsesWith` rewrites SETR's own operand from `tga_node` to `setr_node` → self-referential machine instruction `%0 = SETR %0` → RegAllocFast crash `"no reload in start block. Missing vreg def?"`.
+- **Fix — ADDR wrapper node:** `LowerGlobalAddress` / `LowerExternalSymbol` wrap the TargetGlobalAddress in a `KlaussCPUISD::ADDR` node. `Select()` then replaces `ADDR` (not TGA) with `SETR(TGA)`. `ReplaceAllUsesWith(ADDR, SETR)` never touches TGA → no circular reference.
+- Call-site callee addresses **bypass `LowerOperation`** — `LowerCall` calls `DAG.getTargetGlobalAddress()` directly, and the bare TGA is consumed by the `CALL_I` tablegen pattern. Never wrap call-target TGAs in ADDR.
+- Hardware `SETR64` is **buggy** (inverts PC[2] of the address). Use the 3-instruction sequence `SETR hi32 ; SHLV 32 ; ORV lo32` for any 64-bit constant (including global addresses).
+- `SDUse` iterators: `for (auto UI = N->use_begin(); UI != N->use_end(); ++UI)` — `*UI` is an `SDUse&`. Access the user node via `UI->getUser()` (arrow, not dot).
+
 ---
 
 ## Completed steps
@@ -299,11 +306,27 @@ SelectionDAGTargetInfo    TSI;
       countdown:    cmprv r14,0 ; jmpne .loop  (back-edge)
       ```
 
-## Next steps
+---
 
-### Step 13 — SETR64 for large constants
-- Implement 64-bit constant materialization using the V64 3-word format
-- Required for global addresses and 64-bit literals > INT_MAX
+13. ✅ Large constant materialization + global address lowering
+    - Hardware `SETR64` is buggy — use 3-instruction sequence: `SETR hi32 ; SHLV 32 ; ORV lo32`
+    - `ISD::Constant` i64 values > INT32_MAX handled in C++ `Select()` (ISD::Constant handler)
+    - `ISD::GlobalAddress` / `ISD::ExternalSymbol` → Custom in ISelLowering
+    - `LowerGlobalAddress` / `LowerExternalSymbol` wrap TGA/TES in `KlaussCPUISD::ADDR` node
+      (avoids CSE-induced self-referential SETR — see LLVM 23 gotcha above)
+    - `Select()` ADDR handler: `getMachineNode(SETR, DL, MVT::i64, Sym)` + `ReplaceNode(ADDR, SETR)`
+    - Direct calls (`call @foo`) still use `CALL_I` tablegen pattern — callee TGA bypasses LowerOperation
+    - Smoke tests:
+      ```
+      large constant 5000000000:    setr r12, 1; shlv r12, 32; orv r12, 705032704
+      large constant -5000000000:   setr r12, -2; shlv r12, 32; orv r12, -705032704
+      global variable read:         setr r12, g; ldidx64 r12, r12, 0
+      global variable write:        setr r12, g; stidx64 r0, r12, 0
+      return global address:        setr r12, g
+      direct call:                  setr r0, 42; call callee   (CALL_I, not CALLR)
+      ```
+
+## Next steps
 
 ### Step 14 — End-to-end clang test
 ```bash
