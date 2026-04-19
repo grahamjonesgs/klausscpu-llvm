@@ -14,7 +14,7 @@ LLVM trunk (v23).  Use the **RISC-V backend** as the style reference, not X86 or
 | PC / SP | 32-bit (128 MiB RAM addressable) |
 | Memory bus | little-endian |
 | Register file | little-endian |
-| DataLayout | `e-m:e-p:64:64-i64:64-n64` |
+| DataLayout | `e-m:e-p:64:64-i64:64-i128:128-n64` |
 | Hardware FP | none — soft-float only |
 | CMOV | none — SELECT must be expanded |
 | Atomics | none — `setMaxAtomicSizeInBitsSupported(0)` |
@@ -326,13 +326,42 @@ SelectionDAGTargetInfo    TSI;
       direct call:                  setr r0, 42; call callee   (CALL_I, not CALLR)
       ```
 
-## Next steps
+---
 
-### Step 14 — End-to-end clang test
-```bash
-clang -O0 -target klausscpu-unknown-elf -nostdlib -S foo.c -o foo.s
-```
+14. ✅ End-to-end clang test — `clang -O0 -target klausscpu-unknown-elf -nostdlib -S foo.c`
+    - Registered `klausscpu` in `llvm/include/llvm/TargetParser/Triple.h` (ArchType enum)
+    - Updated `llvm/lib/TargetParser/Triple.cpp` — arch name/prefix, parse, canonicalize,
+      ELF format, 64-bit pointer width, no 32-bit variant, already-64-bit, LE-only,
+      no BE variant, DwarfCFI exception handling
+    - `KlaussCPUTargetInfo.cpp`: typed `RegisterTarget<Triple::klausscpu>`
+    - New `clang/lib/Basic/Targets/KlaussCPU.h/.cpp` — minimal `KlaussCPUTargetInfo`
+      with datalayout `e-m:e-p:64:64-i64:64-i128:128-n64`, 64-bit types, GCC reg names,
+      `__klausscpu__` / `__KlaussCPU__` macros
+    - `clang/lib/Basic/Targets.cpp` + `CMakeLists.txt` wired in
+    - DataLayout updated to include `i128:128` (Clang's default `__int128` align is 16 bytes;
+      LLVM defaults i128 to 8-byte aligned when unspecified → assertion in checkDataLayoutConsistency)
+    - LLVM 23 gotcha: MCAsmInfo ExceptionHandlingType must match `Triple::getDefaultExceptionHandling()`
+      — KlaussCPU needed to be added to the DwarfCFI case in Triple.cpp or the assertion fires
+    - LLVM 23 gotcha: at -O0 FastISel is active; when it falls back to SelectionDAG, the STORE/LOAD
+      nodes can be visited before their FrameIndex operand has been converted to TargetFrameIndex.
+      The C++ Select() handlers for STORE/LOAD must normalise FrameIndex → TargetFrameIndex inline
+      rather than assuming it has already been done, otherwise MEMSET32/MEMGET32 tablegen patterns
+      match the bare FrameIndex (typed i64) as a GPR address and produce a MachineInstr with a
+      FrameIndex as a register operand → `eliminateFrameIndex` crash on out-of-bounds operand access.
+    - Smoke tests (both `int` and `long`):
+      ```
+      int add(int a,int b):   stidx r0,r15,-4; stidx r1,r15,-8; ldidx/ldidx; addr r12,r12,r14
+      read_global():          setr r12, global_var; memget32 r12, r12
+      main():                 setr r0,1; setr r1,2; call add; call read_global; addr r12,r12,r14
+      global_var:             .long 42
+      ```
+
+## Next steps
 
 ### Step 15 — i8/i16 frame-slot access (eliminateFrameIndex scavenging)
 - Implement register scavenging in `eliminateFrameIndex` for MEMGET8/16/MEMSET8/16
 - Required for -O0 functions with local `char`/`short` variables on the stack
+
+### Step 16 — LDIDX32 hardware bug workaround
+- Hardware `LDIDX32` inverts `addr[2]` — replace with `LDIDX64` + `ANDV 0xFFFFFFFF` to zero-extend
+- Required for correct 32-bit frame-slot loads in all code paths

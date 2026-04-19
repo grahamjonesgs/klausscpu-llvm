@@ -43,6 +43,7 @@ StringRef Triple::getArchTypeName(ArchType Kind) {
   case hsail64:        return "hsail64";
   case hsail:          return "hsail";
   case kalimba:        return "kalimba";
+  case klausscpu:      return "klausscpu";
   case lanai:          return "lanai";
   case loongarch32:    return "loongarch32";
   case loongarch64:    return "loongarch64";
@@ -239,6 +240,7 @@ StringRef Triple::getArchTypePrefix(ArchType Kind) {
   case spirv64:     return "spv";
 
   case kalimba:     return "kalimba";
+  case klausscpu:   return "klausscpu";
   case lanai:       return "lanai";
   case shave:       return "shave";
   case wasm32:
@@ -512,6 +514,7 @@ Triple::ArchType Triple::getArchTypeForLLVMName(StringRef Name) {
       .Case("spirv32", spirv32)
       .Case("spirv64", spirv64)
       .Case("kalimba", kalimba)
+      .Case("klausscpu", klausscpu)
       .Case("lanai", lanai)
       .Case("shave", shave)
       .Case("wasm32", wasm32)
@@ -661,6 +664,7 @@ Triple::ArchType Triple::parseArch(StringRef ArchName) {
                   "spirv64v1.3", "spirv64v1.4", "spirv64v1.5", "spirv64v1.6"},
                  Triple::spirv64)
           .StartsWith("kalimba", Triple::kalimba)
+          .Case("klausscpu", Triple::klausscpu)
           .Case("lanai", Triple::lanai)
           .Case("renderscript32", Triple::renderscript32)
           .Case("renderscript64", Triple::renderscript64)
@@ -1006,6 +1010,7 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
   case Triple::hsail64:
   case Triple::hsail:
   case Triple::kalimba:
+  case Triple::klausscpu:
   case Triple::lanai:
   case Triple::loongarch32:
   case Triple::loongarch64:
@@ -1784,6 +1789,7 @@ unsigned Triple::getArchPointerBitWidth(llvm::Triple::ArchType Arch) {
   case llvm::Triple::bpfeb:
   case llvm::Triple::bpfel:
   case llvm::Triple::hsail64:
+  case llvm::Triple::klausscpu:
   case llvm::Triple::loongarch64:
   case llvm::Triple::mips64:
   case llvm::Triple::mips64el:
@@ -1844,6 +1850,7 @@ Triple Triple::get32BitArchVariant() const {
   case Triple::avr:
   case Triple::bpfeb:
   case Triple::bpfel:
+  case Triple::klausscpu:
   case Triple::msp430:
   case Triple::systemz:
   case Triple::ve:
@@ -1949,6 +1956,7 @@ Triple Triple::get64BitArchVariant() const {
   case Triple::bpfeb:
   case Triple::bpfel:
   case Triple::hsail64:
+  case Triple::klausscpu:
   case Triple::loongarch64:
   case Triple::mips64:
   case Triple::mips64el:
@@ -2018,6 +2026,7 @@ Triple Triple::getBigEndianArchVariant() const {
   case Triple::hsail64:
   case Triple::hsail:
   case Triple::kalimba:
+  case Triple::klausscpu:
   case Triple::loongarch32:
   case Triple::loongarch64:
   case Triple::msp430:
@@ -2131,6 +2140,7 @@ bool Triple::isLittleEndian() const {
   case Triple::hsail64:
   case Triple::hsail:
   case Triple::kalimba:
+  case Triple::klausscpu:
   case Triple::loongarch32:
   case Triple::loongarch64:
   case Triple::mips64el:
@@ -2388,6 +2398,7 @@ ExceptionHandling Triple::getDefaultExceptionHandling() const {
   case Triple::arc:
   case Triple::csky:
   case Triple::hexagon:
+  case Triple::klausscpu:
   case Triple::lanai:
   case Triple::m68k:
   case Triple::msp430:

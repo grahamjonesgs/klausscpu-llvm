@@ -125,9 +125,13 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
     return;
   }
 
-  // ---- Frame-slot LOAD: (load (TargetFrameIndex)) → LDIDX64 / LDIDX32 ---
+  // ---- Frame-slot LOAD: (load (FrameIndex|TargetFrameIndex)) → LDIDX64/32 ---
   // The 0 offset is a placeholder; eliminateFrameIndex will fill in the real
   // frame offset (R15 + slot_offset).  Machine node order: [base, offset, chain].
+  //
+  // We check for both ISD::FrameIndex and ISD::TargetFrameIndex because the
+  // node ordering during selection is not strictly guaranteed: the LOAD may be
+  // visited before the FrameIndex handler has converted the pointer.
   //
   // i8/i16 frame-slot loads require address materialisation via a scratch
   // register (register scavenging) which is not yet implemented.  Those cases
@@ -136,6 +140,11 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
   if (N->getOpcode() == ISD::LOAD) {
     auto *LN = cast<LoadSDNode>(N);
     SDValue Ptr = LN->getBasePtr();
+    // Normalise FrameIndex → TargetFrameIndex if not already done.
+    if (Ptr.getOpcode() == ISD::FrameIndex) {
+      int FI = cast<FrameIndexSDNode>(Ptr.getNode())->getIndex();
+      Ptr = CurDAG->getTargetFrameIndex(FI, MVT::i64);
+    }
     if (Ptr.getOpcode() == ISD::TargetFrameIndex) {
       SDLoc DL(N);
       SDValue Off = CurDAG->getTargetConstant(0, DL, MVT::i64);
@@ -169,11 +178,17 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
     }
   }
 
-  // ---- Frame-slot STORE: (store val, (TargetFrameIndex)) → STIDX64 / STIDX32 ---
+  // ---- Frame-slot STORE: (store val, (FrameIndex|TargetFrameIndex)) → STIDX64/32 ---
   // Machine node order: [data, base, offset, chain].
+  // We check for both FrameIndex and TargetFrameIndex for the same reason as LOAD.
   if (N->getOpcode() == ISD::STORE) {
     auto *SN = cast<StoreSDNode>(N);
     SDValue Ptr = SN->getBasePtr();
+    // Normalise FrameIndex → TargetFrameIndex if not already done.
+    if (Ptr.getOpcode() == ISD::FrameIndex) {
+      int FI = cast<FrameIndexSDNode>(Ptr.getNode())->getIndex();
+      Ptr = CurDAG->getTargetFrameIndex(FI, MVT::i64);
+    }
     if (Ptr.getOpcode() == ISD::TargetFrameIndex) {
       SDLoc DL(N);
       SDValue Off = CurDAG->getTargetConstant(0, DL, MVT::i64);

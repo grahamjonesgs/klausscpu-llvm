@@ -22,6 +22,7 @@
 #include "Targets/CSKY.h"
 #include "Targets/DirectX.h"
 #include "Targets/Hexagon.h"
+#include "Targets/KlaussCPU.h"
 #include "Targets/Lanai.h"
 #include "Targets/LoongArch.h"
 #include "Targets/M68k.h"
@@ -129,6 +130,9 @@ std::unique_ptr<TargetInfo> AllocateTarget(const llvm::Triple &Triple,
     if (Triple.isOSQurt())
       return std::make_unique<QURTTargetInfo<HexagonTargetInfo>>(Triple, Opts);
     return std::make_unique<HexagonTargetInfo>(Triple, Opts);
+
+  case llvm::Triple::klausscpu:
+    return std::make_unique<KlaussCPUTargetInfo>(Triple, Opts);
 
   case llvm::Triple::lanai:
     return std::make_unique<LanaiTargetInfo>(Triple, Opts);

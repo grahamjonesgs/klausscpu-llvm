@@ -1,4 +1,6 @@
+#include "KlaussCPUTargetInfo.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/TargetParser/Triple.h"
 using namespace llvm;
 
 namespace llvm {
@@ -9,6 +11,6 @@ Target &getTheKlaussCPUTarget() {
 } // namespace llvm
 
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeKlaussCPUTargetInfo() {
-  RegisterTarget<> X(getTheKlaussCPUTarget(), "klausscpu",
-                     "KlaussCPU 64-bit FPGA CPU", "KlaussCPU");
+  RegisterTarget<Triple::klausscpu> X(getTheKlaussCPUTarget(), "klausscpu",
+                                      "KlaussCPU 64-bit FPGA CPU", "KlaussCPU");
 }

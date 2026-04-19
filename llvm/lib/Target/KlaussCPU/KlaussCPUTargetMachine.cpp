@@ -2,7 +2,7 @@
 //
 // KlaussCPU LLVM backend — target machine implementation.
 //
-// DataLayout: e-m:e-p:64:64-i64:64-n64
+// DataLayout: e-m:e-p:64:64-i64:64-i128:128-n64
 //   e       = little-endian (memory bus and register file)
 //   m:e     = ELF name mangling
 //   p:64:64 = pointers are 64-bit (GPR-width); the hardware only uses bits
@@ -34,7 +34,7 @@ using namespace llvm;
 
 // KlaussCPU DataLayout string — fixed for this architecture.
 static const char KlaussCPUDataLayout[] =
-    "e-m:e-p:64:64-i64:64-n64";
+    "e-m:e-p:64:64-i64:64-i128:128-n64";
 
 extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void
 LLVMInitializeKlaussCPUTarget() {
