@@ -68,7 +68,7 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   //
   // SEXTLOAD expands → ZEXTLOAD + SIGN_EXTEND_INREG.
   // SIGN_EXTEND_INREG i8/i16 → Legal (SEXTB/SEXTH hardware instructions).
-  // SIGN_EXTEND_INREG i32 → Expand (shift pair: SHLV 32 + SHRAV 32).
+  // SIGN_EXTEND_INREG i32 → Legal (SEXTW hardware instruction, fixed April 2026).
   for (MVT VT : {MVT::i8, MVT::i16, MVT::i32}) {
     setLoadExtAction(ISD::ZEXTLOAD, MVT::i64, VT, Legal);
     setLoadExtAction(ISD::EXTLOAD,  MVT::i64, VT, Legal);
@@ -80,7 +80,7 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setTruncStoreAction(MVT::i64, MVT::i32, Legal);
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i8,  Legal);
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i16, Legal);
-  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i32, Expand);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i32, Legal);
 
   // ---- No atomics ----
   setMaxAtomicSizeInBitsSupported(0);

@@ -369,16 +369,41 @@ SelectionDAGTargetInfo    TSI;
       scavenges a scratch reg, emits `SETR scratch, <offset>` + `ADDR scratch, R15, scratch`,
       replaces the FrameIndex operand with scratch.
     - `KlaussCPUISelDAGToDAG.cpp`: explicit i8/i16 FrameIndex LOAD/STORE handlers emit
-      `MEMGET8/16` and `MEMSET8/16` with `TargetFrameIndex` as the address operand (consistent
-      with how i32/i64 are handled, rather than leaving it to `SelectCode`).
-    - Smoke tests:
+      `MEMGET8/16` and `MEMSET8/16` with `TargetFrameIndex` as the address operand.
+    - **Superseded by Step 16**: LDIDX8/16/STIDX8/16 hardware instructions now exist;
+      scavenging code removed, frame-slot access goes through the standard base+offset path.
+    - Smoke tests (Step 15 approach, now emitted differently in Step 16):
       ```
-      volatile byte store+load:   setr rN,-1; addr rN,r15,rN; memset8 r0,rN; setr r14,-1; addr r14,r15,r14; memget8 r12,r14
-      volatile short store+load:  setr rN,-2; addr rN,r15,rN; memset16 r0,rN; setr r14,-2; addr r14,r15,r14; memget16 r12,r14
+      volatile byte store+load:   stidx8 r0,r15,-1; ldidx8 r12,r15,-1
+      volatile short store+load:  stidx16 r0,r15,-2; ldidx16 r12,r15,-2
       ```
+
+---
+
+16. ✅ Hardware opcode fixes + sub-word indexed instructions + SEXTW/ZEXTW
+    - **LDIDX32 opcode corrected**: was `0x00000C` (= non-aligned LDIDX64!), now `0x0000C0`.
+      Mnemonic updated to `ldidx32`. Every `int` frame slot was doing a 64-bit access before.
+    - **STIDX32 opcode corrected**: was `0x00000D` (= non-aligned STIDX64!), now `0x0000C1`.
+      Mnemonic updated to `stidx32`.
+    - **LDIDX8/STIDX8/LDIDX16/STIDX16 added** (opcodes 0x0000C4/C5/C2/C3, RRV base+offset format):
+      - Replaces the Step 15 scavenging workaround for i8/i16 frame-slot access
+      - `eliminateFrameIndex` scavenging block removed — all frame instructions now use the
+        standard base+offset path
+      - `KlaussCPUISelDAGToDAG.cpp` updated: i8/i16 frame LOAD → LDIDX8/16, STORE → STIDX8/16
+        (with Off operand), so eliminateFrameIndex handles them normally
+      - `requiresRegisterScavenging()=true` kept as a safety net (harmless)
+    - **SEXTW** (opcode 0x00000F0) added — sign-extend 32→64; pattern `(sext_inreg GPR:$rs, i32)`
+    - **ZEXTW** (opcode 0x00000F1) added — zero-extend 32→64 (no tablegen pattern yet)
+    - **SIGN_EXTEND_INREG i32 → Legal** in ISelLowering (was Expand → shift pair)
+    - **Tablegen patterns** added for LDIDX8/16 and STIDX8/16 with GPR base + simm32 offset
+      (struct/array fields); MEMGET8/16 patterns kept for pure GPR-address (no offset) access
+    - SETR64 hardware bug confirmed fixed (April 2026) — not yet in backend (12-byte encoding
+      needs custom MCCodeEmitter support); SETR+SHLV+ORV sequence still used for large constants
 
 ## Next steps
 
-### Step 16 — LDIDX32 hardware bug workaround
-- Hardware `LDIDX32` inverts `addr[2]` — replace with `LDIDX64` + `ANDV 0xFFFFFFFF` to zero-extend
-- Required for correct 32-bit frame-slot loads in all code paths
+### Step 17 — SETR64 12-byte encoding
+- Add `KCInst96` base class (96-bit `Inst` field, `Size = 12`)
+- Add `SETR64` instruction (opcode `0x00000FE`, format: op24+rd4 / lo32 / hi32)
+- Update `KlaussCPUAsmPrinter` / MCCodeEmitter to emit 12-byte instructions
+- Replace `SETR+SHLV+ORV` in `Select()` ISD::Constant handler with single `SETR64`

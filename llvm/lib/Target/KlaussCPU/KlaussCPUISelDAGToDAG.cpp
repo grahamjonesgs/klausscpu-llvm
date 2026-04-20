@@ -176,18 +176,17 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
         return;
       }
 
-      // 8/16-bit frame-slot loads → MEMGET8/16 with the FrameIndex as the
-      // address.  eliminateFrameIndex will scavenge a register and materialise
-      // R15+offset before these instructions during PEI.
+      // 8/16-bit frame-slot loads → LDIDX8/16 (base+offset RRV format).
+      // eliminateFrameIndex rewrites Ptr→R15 and Off→slot_offset normally.
       if (LN->getExtensionType() == ISD::ZEXTLOAD ||
           LN->getExtensionType() == ISD::EXTLOAD) {
         unsigned LoadOpc = 0;
         if (LN->getMemoryVT() == MVT::i8)
-          LoadOpc = KlaussCPU::MEMGET8;
+          LoadOpc = KlaussCPU::LDIDX8;
         else if (LN->getMemoryVT() == MVT::i16)
-          LoadOpc = KlaussCPU::MEMGET16;
+          LoadOpc = KlaussCPU::LDIDX16;
         if (LoadOpc) {
-          SDValue Ops[] = {Ptr, LN->getChain()};
+          SDValue Ops[] = {Ptr, Off, LN->getChain()};
           SDNode *Res = CurDAG->getMachineNode(LoadOpc, DL,
                                                 CurDAG->getVTList(MVT::i64,
                                                                   MVT::Other),
@@ -235,17 +234,16 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
         return;
       }
 
-      // 8/16-bit frame-slot stores → MEMSET8/16 with the FrameIndex as the
-      // address.  eliminateFrameIndex will scavenge a register and materialise
-      // R15+offset before these instructions during PEI.
+      // 8/16-bit frame-slot stores → STIDX8/16 (base+offset RRV format).
+      // eliminateFrameIndex rewrites Ptr→R15 and Off→slot_offset normally.
       if (SN->isTruncatingStore()) {
         unsigned StoreOpc = 0;
         if (SN->getMemoryVT() == MVT::i8)
-          StoreOpc = KlaussCPU::MEMSET8;
+          StoreOpc = KlaussCPU::STIDX8;
         else if (SN->getMemoryVT() == MVT::i16)
-          StoreOpc = KlaussCPU::MEMSET16;
+          StoreOpc = KlaussCPU::STIDX16;
         if (StoreOpc) {
-          SDValue Ops[] = {SN->getValue(), Ptr, SN->getChain()};
+          SDValue Ops[] = {SN->getValue(), Ptr, Off, SN->getChain()};
           SDNode *Res = CurDAG->getMachineNode(StoreOpc, DL,
                                                 CurDAG->getVTList(MVT::Other),
                                                 Ops);
@@ -294,8 +292,8 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
   // sequence:  SETR rd, hi32  →  SHLV rd, 32  →  ORV rd, lo32
   // giving  rd = {hi32, lo32}  (full 64-bit value).
   //
-  // NOTE: SETR64 (hardware instruction) has a known hi32 fetch bug
-  // (r_PC[2] condition inverted) and must NOT be used.
+  // NOTE: SETR64 hardware bug fixed April 2026, but the 12-byte encoding is not
+  // yet supported in the MCCodeEmitter — keep SETR+SHLV+ORV for now.
   if (N->getOpcode() == ISD::Constant) {
     auto *C = cast<ConstantSDNode>(N);
     int64_t Val = C->getSExtValue();

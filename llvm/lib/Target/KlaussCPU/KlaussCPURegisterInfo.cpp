@@ -16,11 +16,9 @@
 
 #include "KlaussCPURegisterInfo.h"
 #include "KlaussCPUFrameLowering.h"
-#include "KlaussCPUInstrInfo.h"
 #include "KlaussCPUSubtarget.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
-#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
 #include "llvm/Support/ErrorHandling.h"
 
@@ -69,38 +67,16 @@ bool KlaussCPURegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
                                                  RegScavenger *RS) const {
   assert(SPAdj == 0 && "Unexpected SPAdj");
   MachineInstr &MI = *II;
-  MachineBasicBlock &MBB = *MI.getParent();
-  MachineFunction &MF = *MI.getParent()->getParent();
-  const MachineFrameInfo &MFI = MF.getFrameInfo();
-  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
-  DebugLoc DL = MI.getDebugLoc();
+  const MachineFrameInfo &MFI = MI.getParent()->getParent()->getFrameInfo();
 
   int FrameIndex = MI.getOperand(FIOperandNum).getIndex();
   int64_t BaseOffset = MFI.getObjectOffset(FrameIndex);
 
-  // Sub-word register-addressed instructions (MEMGET8/16, MEMSET8/16) and
-  // their 32-bit counterparts (MEMGET32, MEMSET32) have no offset operand —
-  // only a single register address.  We materialise R15 + offset into a
-  // scratch register via the register scavenger, then replace the FrameIndex
-  // with that register.
-  unsigned Opc = MI.getOpcode();
-  if (Opc == KlaussCPU::MEMGET8  || Opc == KlaussCPU::MEMGET16 ||
-      Opc == KlaussCPU::MEMSET8  || Opc == KlaussCPU::MEMSET16 ||
-      Opc == KlaussCPU::MEMGET32 || Opc == KlaussCPU::MEMSET32) {
-    assert(RS && "Register scavenger required for sub-word frame slot access");
-    Register Scratch = RS->scavengeRegisterBackwards(
-        KlaussCPU::GPRRegClass, II, /*RestoreAfter=*/false, SPAdj);
-    // SETR scratch, <offset>     ; scratch = sign_extend(offset, 32→64)
-    BuildMI(MBB, II, DL, TII.get(KlaussCPU::SETR), Scratch)
-        .addImm(BaseOffset);
-    // ADDR scratch, R15, scratch ; scratch = R15 + offset (frame address)
-    BuildMI(MBB, II, DL, TII.get(KlaussCPU::ADDR), Scratch)
-        .addReg(KlaussCPU::R15)
-        .addReg(Scratch);
-    MI.getOperand(FIOperandNum).ChangeToRegister(Scratch, /*isDef=*/false);
-    return true;
-  }
-
+  // All frame-slot instructions use RRV format (base + offset): LDIDX64/32/16/8
+  // and STIDX64/32/16/8.  MEMGET8/16/MEMSET8/16 (register-addressed, no offset)
+  // are only emitted via tablegen patterns for plain GPR addresses and will never
+  // carry a FrameIndex operand.
+  //
   // Standard case: instruction has a (base, offset) pair at
   // [FIOperandNum, FIOperandNum+1].  Replace FI with R15 and fold in the
   // frame-slot offset.
