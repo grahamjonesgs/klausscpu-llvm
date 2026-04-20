@@ -400,10 +400,27 @@ SelectionDAGTargetInfo    TSI;
     - SETR64 hardware bug confirmed fixed (April 2026) — not yet in backend (12-byte encoding
       needs custom MCCodeEmitter support); SETR+SHLV+ORV sequence still used for large constants
 
+---
+
+17. ✅ SETR64 — single-instruction 64-bit constant load
+    - `KCInst96` base class added: `field bits<96> Inst`, `let Size = 12`
+      (safe: no `-gen-emitter` in CMakeLists, so `getBinaryCodeForInstr` is never generated)
+    - `V64_ld` format: word0[31:8]=op24, word0[7:4]=rd, word1=lo32, word2=hi32
+    - `SETR64` def: opcode `0x0000FE`, `"setr64\t$rd, $lo, $hi"`, `(ins simm32:$lo, simm32:$hi)`
+    - `Select()` ISD::Constant handler: `SETR+SHLV+ORV` (3 instrs) → single `SETR64`
+    - Smoke tests:
+      ```
+      5000000000:   setr64 r12, 705032704, 1
+      -5000000000:  setr64 r12, -705032704, -2
+      INT64_MAX:    setr64 r12, -1, 2147483647
+      ```
+    - Note: clang binary needs full rebuild to emit new `stidx32`/`ldidx32` mnemonics
+      (Step 16 mnemonic changes; `llc` binary is correct)
+
 ## Next steps
 
-### Step 17 — SETR64 12-byte encoding
-- Add `KCInst96` base class (96-bit `Inst` field, `Size = 12`)
-- Add `SETR64` instruction (opcode `0x00000FE`, format: op24+rd4 / lo32 / hi32)
-- Update `KlaussCPUAsmPrinter` / MCCodeEmitter to emit 12-byte instructions
-- Replace `SETR+SHLV+ORV` in `Select()` ISD::Constant handler with single `SETR64`
+### Step 18 — MCCodeEmitter + MCAsmBackend (ELF object file output)
+- Register `MCCodeEmitter` and `MCAsmBackend` in `LLVMInitializeKlaussCPUTargetMC()`
+- Implement `encodeInstruction()` for 32-bit, 64-bit, and 96-bit (SETR64) instructions
+- Implement fixups for branch/call targets (symbol references in Vbr/Vcall formats)
+- Enable `llc -filetype=obj` to produce ELF object files
