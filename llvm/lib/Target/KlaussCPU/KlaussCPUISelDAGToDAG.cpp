@@ -175,6 +175,28 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
         CurDAG->RemoveDeadNode(N);
         return;
       }
+
+      // 8/16-bit frame-slot loads → MEMGET8/16 with the FrameIndex as the
+      // address.  eliminateFrameIndex will scavenge a register and materialise
+      // R15+offset before these instructions during PEI.
+      if (LN->getExtensionType() == ISD::ZEXTLOAD ||
+          LN->getExtensionType() == ISD::EXTLOAD) {
+        unsigned LoadOpc = 0;
+        if (LN->getMemoryVT() == MVT::i8)
+          LoadOpc = KlaussCPU::MEMGET8;
+        else if (LN->getMemoryVT() == MVT::i16)
+          LoadOpc = KlaussCPU::MEMGET16;
+        if (LoadOpc) {
+          SDValue Ops[] = {Ptr, LN->getChain()};
+          SDNode *Res = CurDAG->getMachineNode(LoadOpc, DL,
+                                                CurDAG->getVTList(MVT::i64,
+                                                                  MVT::Other),
+                                                Ops);
+          ReplaceUses(N, Res);
+          CurDAG->RemoveDeadNode(N);
+          return;
+        }
+      }
     }
   }
 
@@ -211,6 +233,25 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
                                               Ops);
         ReplaceNode(N, Res);
         return;
+      }
+
+      // 8/16-bit frame-slot stores → MEMSET8/16 with the FrameIndex as the
+      // address.  eliminateFrameIndex will scavenge a register and materialise
+      // R15+offset before these instructions during PEI.
+      if (SN->isTruncatingStore()) {
+        unsigned StoreOpc = 0;
+        if (SN->getMemoryVT() == MVT::i8)
+          StoreOpc = KlaussCPU::MEMSET8;
+        else if (SN->getMemoryVT() == MVT::i16)
+          StoreOpc = KlaussCPU::MEMSET16;
+        if (StoreOpc) {
+          SDValue Ops[] = {SN->getValue(), Ptr, SN->getChain()};
+          SDNode *Res = CurDAG->getMachineNode(StoreOpc, DL,
+                                                CurDAG->getVTList(MVT::Other),
+                                                Ops);
+          ReplaceNode(N, Res);
+          return;
+        }
       }
     }
   }

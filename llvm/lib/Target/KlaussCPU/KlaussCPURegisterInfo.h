@@ -26,6 +26,15 @@ public:
 
   BitVector getReservedRegs(const MachineFunction &MF) const override;
 
+  // Enable the real register scavenger so eliminateFrameIndex receives a
+  // non-null RS for sub-word frame-slot access (MEMGET8/16, MEMSET8/16).
+  // requiresFrameIndexScavenging must remain false (the default) — returning
+  // true there switches PEI into virtual-register mode, which passes nullptr
+  // to eliminateFrameIndex instead.
+  bool requiresRegisterScavenging(const MachineFunction &MF) const override {
+    return true;
+  }
+
   bool eliminateFrameIndex(MachineBasicBlock::iterator II, int SPAdj,
                            unsigned FIOperandNum,
                            RegScavenger *RS = nullptr) const override;

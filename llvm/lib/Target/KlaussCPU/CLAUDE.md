@@ -356,11 +356,28 @@ SelectionDAGTargetInfo    TSI;
       global_var:             .long 42
       ```
 
-## Next steps
+---
 
-### Step 15 — i8/i16 frame-slot access (eliminateFrameIndex scavenging)
-- Implement register scavenging in `eliminateFrameIndex` for MEMGET8/16/MEMSET8/16
-- Required for -O0 functions with local `char`/`short` variables on the stack
+15. ✅ i8/i16 frame-slot access — register scavenging in `eliminateFrameIndex`
+    - `requiresRegisterScavenging()` → `true` in `KlaussCPURegisterInfo.h` (creates RS in PEI)
+    - **LLVM 23 gotcha:** `requiresFrameIndexScavenging()` must remain `false`.  Returning `true`
+      switches PEI to virtual-register mode which sets `FrameIndexEliminationScavenging = false`
+      → `eliminateFrameIndex` receives `nullptr` for RS.  The correct combination is:
+      `requiresRegisterScavenging()=true`, `requiresFrameIndexScavenging()=false` (default) →
+      `FrameIndexEliminationScavenging = (RS && !false) = true` → real RS passed.
+    - `eliminateFrameIndex` detects MEMGET8/16/MEMSET8/16 (and MEMGET32/MEMSET32 defensively),
+      scavenges a scratch reg, emits `SETR scratch, <offset>` + `ADDR scratch, R15, scratch`,
+      replaces the FrameIndex operand with scratch.
+    - `KlaussCPUISelDAGToDAG.cpp`: explicit i8/i16 FrameIndex LOAD/STORE handlers emit
+      `MEMGET8/16` and `MEMSET8/16` with `TargetFrameIndex` as the address operand (consistent
+      with how i32/i64 are handled, rather than leaving it to `SelectCode`).
+    - Smoke tests:
+      ```
+      volatile byte store+load:   setr rN,-1; addr rN,r15,rN; memset8 r0,rN; setr r14,-1; addr r14,r15,r14; memget8 r12,r14
+      volatile short store+load:  setr rN,-2; addr rN,r15,rN; memset16 r0,rN; setr r14,-2; addr r14,r15,r14; memget16 r12,r14
+      ```
+
+## Next steps
 
 ### Step 16 — LDIDX32 hardware bug workaround
 - Hardware `LDIDX32` inverts `addr[2]` — replace with `LDIDX64` + `ANDV 0xFFFFFFFF` to zero-extend
