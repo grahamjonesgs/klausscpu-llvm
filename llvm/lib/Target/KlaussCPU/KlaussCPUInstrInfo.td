@@ -81,6 +81,23 @@ class KCInst64<dag outs, dag ins, string asmstr, list<dag> pat = []>
   let DecoderNamespace = "KlaussCPU";
 }
 
+// 12-byte (3-word) instruction: opcode word + lo32 + hi32.
+// Used for SETR64.  No MCCodeEmitter is registered in this backend
+// (text assembly only), so bits<96> is safe — getBinaryCodeForInstr()
+// is never generated.
+class KCInst96<dag outs, dag ins, string asmstr, list<dag> pat = []>
+    : Instruction {
+  let Namespace        = "KlaussCPU";
+  let Size             = 12;
+  dag OutOperandList   = outs;
+  dag InOperandList    = ins;
+  let AsmString        = asmstr;
+  let Pattern          = pat;
+  field bits<96> Inst;
+  field bits<96> SoftFail = 0;
+  let DecoderNamespace = "KlaussCPU";
+}
+
 //===----------------------------------------------------------------------===//
 // Format: RRR  rd = rs1 op rs2
 // [31:12]=op20  [11:8]=rd  [7:4]=rs1  [3:0]=rs2
@@ -280,6 +297,24 @@ class Vsp<bits<32> op, string asmstr>
   bits<32> imm;
   let Inst{63-32} = op;
   let Inst{31-0}  = imm;
+}
+
+//===----------------------------------------------------------------------===//
+// Format: V64   register ← 64-bit immediate  (3-word, 12-byte)
+// Word0[31:8]=op24  Word0[7:4]=rd  Word0[3:0]=0  Word1=lo32  Word2=hi32
+// Result: rd = (hi32 << 32) | lo32
+//===----------------------------------------------------------------------===//
+
+class V64_ld<bits<24> op, string asmstr, list<dag> pat = []>
+    : KCInst96<(outs GPR:$rd), (ins simm32:$lo, simm32:$hi), asmstr, pat> {
+  bits<4>  rd;
+  bits<32> lo;
+  bits<32> hi;
+  let Inst{95-72} = op;
+  let Inst{71-68} = rd;
+  let Inst{67-64} = 0;
+  let Inst{63-32} = lo;
+  let Inst{31-0}  = hi;
 }
 
 //===----------------------------------------------------------------------===//
@@ -526,6 +561,11 @@ def JMPR_R  : R_in<0x0000102, (ins GPR:$reg), "jmpr\t$reg"> {
 // Load 32-bit immediate (sign-extended to 64 bits)
 def SETR    : RV_ld<0x0000080, "setr\t$rd, $imm">;
 
+// Load full 64-bit immediate: rd = (hi32 << 32) | lo32
+// Hardware bug in original silicon (PC[2] address inversion for hi32 fetch)
+// fixed April 2026.  Use instead of SETR+SHLV+ORV for large constants.
+def SETR64  : V64_ld<0x0000FE, "setr64\t$rd, $lo, $hi">;
+
 // In-place immediate operations (rd op= imm32)
 def ADDV    : RV_2addr<0x0000081, "addv\t$rd, $imm">;
 def MINUSV  : RV_2addr<0x0000082, "minusv\t$rd, $imm">;
@@ -584,10 +624,7 @@ def STIDX8  : RRV_st<0x0000C5, "stidx8\t$rs_data, $base, $offset">;
 def simm32_imm : ImmLeaf<i64, [{return isInt<32>(Imm);}]>;
 
 // Materialize a signed 32-bit constant into a GPR using SETR.
-// Covers values in [-2^31, 2^31-1].
-// Large 64-bit constants use the SETR+SHLV+ORV sequence in Select().
-// NOTE: SETR64 (hardware fixed April 2026) uses a 12-byte encoding not yet
-// supported in the backend MCCodeEmitter — keep SETR+SHLV+ORV for now.
+// Large 64-bit constants (outside simm32) use SETR64 in Select().
 def : Pat<(i64 simm32_imm:$imm), (SETR simm32_imm:$imm)>;
 
 // Global addresses and external symbols are materialized in C++ Select()

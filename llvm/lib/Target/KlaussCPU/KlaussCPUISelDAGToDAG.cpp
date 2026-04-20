@@ -288,36 +288,21 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
   }
 
   // ---- ISD::Constant: 64-bit values that don't fit in simm32 --------------
-  // SETR covers [-2^31, 2^31-1].  For larger values, emit the 3-instruction
-  // sequence:  SETR rd, hi32  →  SHLV rd, 32  →  ORV rd, lo32
-  // giving  rd = {hi32, lo32}  (full 64-bit value).
-  //
-  // NOTE: SETR64 hardware bug fixed April 2026, but the 12-byte encoding is not
-  // yet supported in the MCCodeEmitter — keep SETR+SHLV+ORV for now.
+  // SETR covers [-2^31, 2^31-1].  Larger values use SETR64 (hardware fixed
+  // April 2026): a single 12-byte instruction rd = (hi32 << 32) | lo32.
   if (N->getOpcode() == ISD::Constant) {
     auto *C = cast<ConstantSDNode>(N);
     int64_t Val = C->getSExtValue();
     if (!isInt<32>(Val)) {
       SDLoc DL(N);
-      uint32_t Lo = static_cast<uint32_t>(static_cast<uint64_t>(Val));
-      int32_t  Hi = static_cast<int32_t>(static_cast<uint64_t>(Val) >> 32);
-
-      // SETR rd, Hi   (sign-extends Hi to 64 bits)
-      SDValue HiImm = CurDAG->getTargetConstant(Hi, DL, MVT::i64);
-      SDNode *SetR  = CurDAG->getMachineNode(KlaussCPU::SETR, DL, MVT::i64, HiImm);
-
-      // SHLV rd, 32   (rd = rd << 32 → {Hi, 0})
-      SDValue ShAmt = CurDAG->getTargetConstant(32, DL, MVT::i64);
-      SDNode *Shlv  = CurDAG->getMachineNode(KlaussCPU::SHLV, DL, MVT::i64,
-                                              {SDValue(SetR, 0), ShAmt});
-
-      // ORV rd, Lo    (rd = rd | zero_ext(Lo) → {Hi, Lo})
-      SDValue LoImm = CurDAG->getTargetConstant(static_cast<int32_t>(Lo),
-                                                 DL, MVT::i64);
-      SDNode *Orv   = CurDAG->getMachineNode(KlaussCPU::ORV, DL, MVT::i64,
-                                              {SDValue(Shlv, 0), LoImm});
-
-      ReplaceNode(N, Orv);
+      uint64_t UVal = static_cast<uint64_t>(Val);
+      SDValue LoImm = CurDAG->getTargetConstant(
+          static_cast<int32_t>(static_cast<uint32_t>(UVal)), DL, MVT::i64);
+      SDValue HiImm = CurDAG->getTargetConstant(
+          static_cast<int32_t>(UVal >> 32), DL, MVT::i64);
+      SDNode *Res = CurDAG->getMachineNode(KlaussCPU::SETR64, DL, MVT::i64,
+                                            {LoImm, HiImm});
+      ReplaceNode(N, Res);
       return;
     }
     // simm32 constants: fall through to SelectCode (matched by SETR pattern).
