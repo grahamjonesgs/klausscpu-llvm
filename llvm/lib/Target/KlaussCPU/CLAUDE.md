@@ -417,10 +417,46 @@ SelectionDAGTargetInfo    TSI;
     - Note: clang binary needs full rebuild to emit new `stidx32`/`ldidx32` mnemonics
       (Step 16 mnemonic changes; `llc` binary is correct)
 
+---
+
+18. ✅ MCCodeEmitter + MCAsmBackend — `llc -filetype=obj` ELF output
+    - **No `-gen-emitter`**: manual encoder avoids `bits<96>` overflow in `getBinaryCodeForInstr()`
+    - New files: `MCTargetDesc/KlaussCPUFixupKinds.h`, `KlaussCPUMCCodeEmitter.cpp`,
+      `KlaussCPUAsmBackend.cpp`
+    - `KlaussCPUFixupKinds.h`: single custom fixup `FK_KlaussCPU_ABS32` (DWARF column 17)
+    - `KlaussCPUMCCodeEmitter`: manual per-format encoder for all 12 instruction formats;
+      big-endian 32-bit words emitted via `emitBE32()`; SETR64 handled first (12-byte, 3 words);
+      branch/call fixups use `MCFixup::create(4, expr, FK_KlaussCPU_ABS32)` (byte offset 4 = word 1)
+    - `KlaussCPUAsmBackend`: LLVM v23 API signatures; `applyFixup` writes 32-bit address big-endian
+      into `Data[0..3]`; NOP = `0x0000F010`; ELF ELFCLASS32 / ELFDATA2LSB / EM_NONE / R_KCPU_ABS32=1
+    - **LLVM v23 gotchas**:
+      - `MCFixupKindInfo` is in `MCAsmBackend.h` — no separate `MCFixupKindInfo.h`
+      - `applyFixup` signature: `(const MCFragment &, const MCFixup &, const MCValue &, uint8_t *Data, uint64_t, bool)` — `Data` points directly at fixup byte
+      - `getNumFixupKinds()` removed; `getRelocType(const MCFixup &, const MCValue &, bool IsPCRel)` (no MCContext)
+      - `getFixupKindInfo` returns by value (not `const &`)
+      - `mayNeedRelaxation` / `fixupNeedsRelaxation` removed — default impls suffice
+    - **DwarfRegNum fix**: registers had no DWARF numbers → `getDwarfRegNum` returned -1 →
+      assertion `RAReg <= 255` fired in `MCDwarf.cpp::EmitCIE`.  Fixed by adding `DwarfRegNum<[N]>`
+      to R0–R15 (0–15), SP (16), and virtual `RA` pseudo-register (17) in `KlaussCPURegisterInfo.td`.
+      `InitKlaussCPUMCRegisterInfo(X, KlaussCPU::RA)` now passes column 17 as the DWARF RA column.
+    - Smoke test (`define i64 @add(i64 %a, i64 %b) { ret i64 (add %a %b) }`):
+      ```
+      llc -march=klausscpu -filetype=obj → ELF 32-bit LSB relocatable, no machine
+      .text bytes (6 × 4B big-endian):
+        0x0000400F  push  r15
+        0x0000403F  getsp r15
+        0x00010C01  addr  r12, r0, r1
+        0x0000404F  setsp r15
+        0x0000401F  pop   r15
+        0x00001012  ret
+      ```
+    - Known pre-existing issue: `CALL_I` missing implicit-def of `$r12` → regalloc crash when
+      call return value is used; does not affect -filetype=asm; fix in next step.
+
 ## Next steps
 
-### Step 18 — MCCodeEmitter + MCAsmBackend (ELF object file output)
-- Register `MCCodeEmitter` and `MCAsmBackend` in `LLVMInitializeKlaussCPUTargetMC()`
-- Implement `encodeInstruction()` for 32-bit, 64-bit, and 96-bit (SETR64) instructions
-- Implement fixups for branch/call targets (symbol references in Vbr/Vcall formats)
-- Enable `llc -filetype=obj` to produce ELF object files
+### Step 19 — Fix CALL_I implicit-def of return register
+- Add `implicit-def $r12` (and any other clobbered caller-saved regs) to `CALL_I` / `CALL_R`
+  in `KlaussCPUInstrInfo.td` so that regalloc can see the return value as defined
+- Re-test `-filetype=obj` with a function that uses a call return value
+- Then: linker script / startup code / full program link flow

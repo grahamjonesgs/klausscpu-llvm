@@ -48,7 +48,8 @@ static MCInstrInfo *createKlaussCPUMCInstrInfo() {
 static MCRegisterInfo *createKlaussCPUMCRegisterInfo(const Triple & /*TT*/) {
   MCRegisterInfo *X = new MCRegisterInfo();
   // RA=0: KlaussCPU uses a stack-based return (no dedicated link register).
-  InitKlaussCPUMCRegisterInfo(X, /*RA=*/0);
+  // RA = virtual DWARF-only column 17; KlaussCPU has no hardware link register.
+  InitKlaussCPUMCRegisterInfo(X, KlaussCPU::RA);
   return X;
 }
 
@@ -85,4 +86,8 @@ LLVMInitializeKlaussCPUTargetMC() {
 
   // Text assembly printer.
   TargetRegistry::RegisterMCInstPrinter(T, createKlaussCPUMCInstPrinter);
+
+  // Code emitter + assembler backend: enables -filetype=obj ELF output.
+  TargetRegistry::RegisterMCCodeEmitter(T, createKlaussCPUMCCodeEmitter);
+  TargetRegistry::RegisterMCAsmBackend(T, createKlaussCPUAsmBackend);
 }

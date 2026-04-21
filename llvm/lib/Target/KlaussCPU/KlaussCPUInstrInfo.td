@@ -82,9 +82,9 @@ class KCInst64<dag outs, dag ins, string asmstr, list<dag> pat = []>
 }
 
 // 12-byte (3-word) instruction: opcode word + lo32 + hi32.
-// Used for SETR64.  No MCCodeEmitter is registered in this backend
-// (text assembly only), so bits<96> is safe — getBinaryCodeForInstr()
-// is never generated.
+// Used for SETR64.  KlaussCPUMCCodeEmitter handles this opcode manually
+// before consulting any tablegen-generated emitter table, so bits<96>
+// never overflows the uint64_t return type of getBinaryCodeForInstr().
 class KCInst96<dag outs, dag ins, string asmstr, list<dag> pat = []>
     : Instruction {
   let Namespace        = "KlaussCPU";

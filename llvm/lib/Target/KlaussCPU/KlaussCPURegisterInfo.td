@@ -29,39 +29,48 @@ class KlaussCPUReg<bits<4> Enc, string n, list<string> alt = []>
 let Namespace = "KlaussCPU" in {
 
   // ---- General-purpose 64-bit registers ----
+  // DwarfRegNum columns 0–15 match register number.
 
   // Caller-saved: argument registers
-  def R0  : KlaussCPUReg<0,  "r0",  ["A"]>;   // A — arg0
-  def R1  : KlaussCPUReg<1,  "r1",  ["B"]>;   // B — arg1
-  def R2  : KlaussCPUReg<2,  "r2",  ["C"]>;   // C — arg2
-  def R3  : KlaussCPUReg<3,  "r3",  ["D"]>;   // D — arg3
+  def R0  : KlaussCPUReg<0,  "r0",  ["A"]>, DwarfRegNum<[0]>;    // A — arg0
+  def R1  : KlaussCPUReg<1,  "r1",  ["B"]>, DwarfRegNum<[1]>;    // B — arg1
+  def R2  : KlaussCPUReg<2,  "r2",  ["C"]>, DwarfRegNum<[2]>;    // C — arg2
+  def R3  : KlaussCPUReg<3,  "r3",  ["D"]>, DwarfRegNum<[3]>;    // D — arg3
 
   // Callee-saved
-  def R4  : KlaussCPUReg<4,  "r4",  ["E"]>;   // E
-  def R5  : KlaussCPUReg<5,  "r5",  ["F"]>;   // F
-  def R6  : KlaussCPUReg<6,  "r6",  ["G"]>;   // G
-  def R7  : KlaussCPUReg<7,  "r7",  ["H"]>;   // H
+  def R4  : KlaussCPUReg<4,  "r4",  ["E"]>, DwarfRegNum<[4]>;    // E
+  def R5  : KlaussCPUReg<5,  "r5",  ["F"]>, DwarfRegNum<[5]>;    // F
+  def R6  : KlaussCPUReg<6,  "r6",  ["G"]>, DwarfRegNum<[6]>;    // G
+  def R7  : KlaussCPUReg<7,  "r7",  ["H"]>, DwarfRegNum<[7]>;    // H
 
   // Caller-saved temporaries (not used by rcc as arg/return regs)
-  def R8  : KlaussCPUReg<8,  "r8",  ["I"]>;   // I
-  def R9  : KlaussCPUReg<9,  "r9",  ["J"]>;   // J
-  def R10 : KlaussCPUReg<10, "r10", ["K"]>;   // K
-  def R11 : KlaussCPUReg<11, "r11", ["L"]>;   // L
+  def R8  : KlaussCPUReg<8,  "r8",  ["I"]>, DwarfRegNum<[8]>;    // I
+  def R9  : KlaussCPUReg<9,  "r9",  ["J"]>, DwarfRegNum<[9]>;    // J
+  def R10 : KlaussCPUReg<10, "r10", ["K"]>, DwarfRegNum<[10]>;   // K
+  def R11 : KlaussCPUReg<11, "r11", ["L"]>, DwarfRegNum<[11]>;   // L
 
   // Caller-saved: return value and temporaries
-  def R12 : KlaussCPUReg<12, "r12", ["M"]>;   // M — return value
-  def R13 : KlaussCPUReg<13, "r13", ["N"]>;   // N
-  def R14 : KlaussCPUReg<14, "r14", ["O"]>;   // O
+  def R12 : KlaussCPUReg<12, "r12", ["M"]>, DwarfRegNum<[12]>;   // M — return value
+  def R13 : KlaussCPUReg<13, "r13", ["N"]>, DwarfRegNum<[13]>;   // N
+  def R14 : KlaussCPUReg<14, "r14", ["O"]>, DwarfRegNum<[14]>;   // O
 
   // Frame pointer (callee-saved; reserved when frame pointer is active)
-  def R15 : KlaussCPUReg<15, "r15", ["P"]>;   // P — frame pointer
+  def R15 : KlaussCPUReg<15, "r15", ["P"]>, DwarfRegNum<[15]>;   // P — frame pointer
 
   // ---- Stack pointer: separate 32-bit hardware register ----
   // Not a GPR; never an operand to ALU or load/store instructions.
   // Referenced by frame lowering via getStackPointerRegisterToSaveRestore().
-  def SP  : Register<"sp"> {
+  def SP  : Register<"sp">, DwarfRegNum<[16]> {
     let Namespace = "KlaussCPU";
     let HWEncoding{3-0} = 0;   // no encoding in data-path instructions
+  }
+
+  // ---- Virtual return-address DWARF column ----
+  // KlaussCPU has no hardware link register; CALL saves the return address
+  // directly to [SP].  This pseudo-register (column 17) exists only for the
+  // DWARF CIE return_address_register field — it is never allocated.
+  def RA  : Register<"ra">, DwarfRegNum<[17]> {
+    let Namespace = "KlaussCPU";
   }
 
 } // end Namespace = "KlaussCPU"
