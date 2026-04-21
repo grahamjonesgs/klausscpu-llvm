@@ -545,9 +545,11 @@ let Uses = [SP], Defs = [SP], hasSideEffects = 1 in
 def ADDSP_I : Vsp<0x00004050, "addsp\t$imm">;
 
 // Indirect call / jump via register
-def CALLR_R : R_in<0x0000407, (ins GPR:$reg), "callr\t$reg"> {
-  let isCall = 1;
-}
+// Defs: all caller-saved GPRs clobbered by the ABI (R0-R3=args, R8-R14=temps+return)
+let isCall = 1,
+    Uses = [SP],
+    Defs = [R0, R1, R2, R3, R8, R9, R10, R11, R12, R13, R14] in
+def CALLR_R : R_in<0x0000407, (ins GPR:$reg), "callr\t$reg">;
 def JMPR_R  : R_in<0x0000102, (ins GPR:$reg), "jmpr\t$reg"> {
   let isBranch         = 1;
   let isIndirectBranch = 1;
@@ -710,6 +712,9 @@ def JMPULE  : Vbr_cond<0x0000101A, "jmpule\t$target">;
 def JMPUGT  : Vbr_cond<0x0000101B, "jmpugt\t$target">;
 def JMPUGE  : Vbr_cond<0x0000101C, "jmpuge\t$target">;
 
+// Defs: all caller-saved GPRs clobbered by the ABI (R0-R3=args, R8-R14=temps+return)
+let Uses = [SP],
+    Defs = [R0, R1, R2, R3, R8, R9, R10, R11, R12, R13, R14] in
 def CALL_I  : Vcall<0x00001009, "call\t$target">;
 
 //===----------------------------------------------------------------------===//

@@ -73,7 +73,7 @@ public:
   // Data points to the first byte of the fixup location (byte 4 of the 8-byte
   // branch/call instruction, as specified by MCFixup offset=4 in the emitter).
   // Write the resolved 32-bit address big-endian into bytes [0..3].
-  void applyFixup(const MCFragment &, const MCFixup &Fixup,
+  void applyFixup(const MCFragment &F, const MCFixup &Fixup,
                   const MCValue &Target, uint8_t *Data,
                   uint64_t Value, bool IsResolved) override {
     if (Fixup.getKind() != KlaussCPU::FK_KlaussCPU_ABS32)
@@ -83,6 +83,7 @@ public:
     Data[1] = (Addr >> 16) & 0xFF;
     Data[2] = (Addr >>  8) & 0xFF;
     Data[3] = (Addr >>  0) & 0xFF;
+    maybeAddReloc(F, Fixup, Target, Value, IsResolved);
   }
 
   // ── NOP padding ──────────────────────────────────────────────────────────
