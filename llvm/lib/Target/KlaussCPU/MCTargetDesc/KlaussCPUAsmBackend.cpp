@@ -38,13 +38,12 @@ public:
   KlaussCPUELFObjectWriter()
       : MCELFObjectTargetWriter(/*Is64Bit=*/false,
                                  /*OSABI=*/0,
-                                 /*EMachine=*/ELF::EM_NONE,
+                                 /*EMachine=*/ELF::EM_KLAUSSCPU,
                                  /*HasRelocationAddend=*/true) {}
 
-  // R_KCPU_ABS32 = 1: custom 32-bit absolute-address relocation.
   unsigned getRelocType(const MCFixup &Fixup, const MCValue &Target,
                         bool IsPCRel) const override {
-    return 1;
+    return ELF::R_KLAUSSCPU_ABS32;
   }
 };
 

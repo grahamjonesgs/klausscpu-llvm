@@ -69,6 +69,8 @@ void elf::setTarget(Ctx &ctx) {
     return setLoongArchTargetInfo(ctx);
   case EM_MIPS:
     return setMipsTargetInfo(ctx);
+  case EM_KLAUSSCPU:
+    return setKlaussCPUTargetInfo(ctx);
   case EM_MSP430:
     return setMSP430TargetInfo(ctx);
   case EM_PPC:

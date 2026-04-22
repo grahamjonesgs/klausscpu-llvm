@@ -451,12 +451,37 @@ SelectionDAGTargetInfo    TSI;
         0x00001012  ret
       ```
     - Known pre-existing issue: `CALL_I` missing implicit-def of `$r12` → regalloc crash when
-      call return value is used; does not affect -filetype=asm; fix in next step.
+      call return value is used; does not affect -filetype=asm; fixed in Step 19.
+
+---
+
+19. ✅ Fix CALL_I implicit defs + ELF relocation emission
+    - **CALL_I / CALLR_R `Defs`**: added `Defs = [R0,R1,R2,R3,R8,R9,R10,R11,R12,R13,R14]` and
+      `Uses = [SP]`; without this regalloc crashed with "using an undefined physical register $r12"
+      when a call's return value was used
+    - **`applyFixup` missing `maybeAddReloc()`**: every backend must call
+      `maybeAddReloc(F, Fixup, Target, Value, IsResolved)` at the end of `applyFixup` to emit
+      RELA entries; without it, the bytes were zeroed but no `.rela.text` section was generated
+    - **Incremental build fix**: `.ninja_deps` was persistently corrupted from earlier `pkill ninja`
+      kills; fixed by deleting `.ninja_deps` + `.ninja_log` and doing one clean rebuild.
+      Future builds touching only KlaussCPU `.td` files now take ~20–90 steps, not 1300+.
+      **Never use `pkill ninja` — use Ctrl+C (SIGINT) instead.**
+    - Smoke test: `foo(i64 %a) → call bar(i64 %a); ret i64` compiles to ELF with:
+      - `.rela.text` section, entry: `offset=0x14 type=1(R_KCPU_ABS32) sym=bar addend=0`
+      - Correct call encoding: word[4]=`0x00001009` (opcode), word[5]=`0x00000000` (to-be-relocated)
 
 ## Next steps
 
-### Step 19 — Fix CALL_I implicit-def of return register
-- Add `implicit-def $r12` (and any other clobbered caller-saved regs) to `CALL_I` / `CALL_R`
-  in `KlaussCPUInstrInfo.td` so that regalloc can see the return value as defined
-- Re-test `-filetype=obj` with a function that uses a call return value
-- Then: linker script / startup code / full program link flow
+### Step 20 — LLD port (EM_KLAUSSCPU + R_KLAUSSCPU_ABS32)
+- Define `EM_KLAUSSCPU = 0x4B43` in `llvm/include/llvm/BinaryFormat/ELF.h`
+- Update ELF writer to use `EM_KLAUSSCPU` instead of `EM_NONE`
+- Write `lld/ELF/Arch/KlaussCPU.cpp` — minimal TargetInfo handling `R_KLAUSSCPU_ABS32`
+- Wire into `lld/ELF/Driver.cpp` and `lld/ELF/CMakeLists.txt`
+- Smoke test: `ld.lld -o foo foo.o bar.o`
+
+### Step 21 — Linker script + crt0
+- Write `klausscpu.ld` for 128 MiB RAM layout
+- Write minimal `crt0.s` (init SP, call main, halt)
+- Produce loadable flat binary
+
+### Step 22 — End-to-end hello world on hardware

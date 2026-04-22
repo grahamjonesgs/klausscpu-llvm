@@ -325,6 +325,7 @@ enum {
   EM_VE = 251,            // NEC SX-Aurora VE
   EM_CSKY = 252,          // C-SKY 32-bit processor
   EM_LOONGARCH = 258,     // LoongArch
+  EM_KLAUSSCPU = 0x4B43,  // KlaussCPU (home-designed; 'K'<<8|'C')
 };
 
 // Object file classes.
@@ -1028,6 +1029,11 @@ enum : unsigned {
 // ELF Relocation types for MSP430
 enum {
 #include "ELFRelocs/MSP430.def"
+};
+
+// ELF Relocation types for KlaussCPU.
+enum {
+#include "ELFRelocs/KlaussCPU.def"
 };
 
 // ELF Relocation type for VE.

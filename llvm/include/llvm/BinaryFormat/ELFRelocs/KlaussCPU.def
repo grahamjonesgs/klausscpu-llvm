@@ -1,0 +1,6 @@
+#ifndef ELF_RELOC
+#error "ELF_RELOC must be defined before including this file"
+#endif
+
+ELF_RELOC(R_KLAUSSCPU_NONE,    0)
+ELF_RELOC(R_KLAUSSCPU_ABS32,   1)  // 32-bit absolute address (big-endian, word 1 of 8-byte instr)
