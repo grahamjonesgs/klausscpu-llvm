@@ -55,6 +55,8 @@ public:
 private:
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerExternalSymbol(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSTACKSAVE(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSTACKRESTORE(SDValue Op, SelectionDAG &DAG) const;
 };
 
 } // namespace llvm

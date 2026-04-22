@@ -87,8 +87,8 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
 
   // ---- Stack operations ----
   setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i64, Expand);
-  setOperationAction(ISD::STACKSAVE,          MVT::Other, Expand);
-  setOperationAction(ISD::STACKRESTORE,       MVT::Other, Expand);
+  setOperationAction(ISD::STACKSAVE,          MVT::Other, Custom);
+  setOperationAction(ISD::STACKRESTORE,       MVT::Other, Custom);
 
   // ---- Global addresses / symbols ----
   // All symbols are 32-bit addresses (128 MiB RAM); lowered to TargetGlobalAddress
@@ -142,6 +142,8 @@ SDValue KlaussCPUTargetLowering::LowerOperation(SDValue Op,
   switch (Op.getOpcode()) {
   case ISD::GlobalAddress:  return LowerGlobalAddress(Op, DAG);
   case ISD::ExternalSymbol: return LowerExternalSymbol(Op, DAG);
+  case ISD::STACKSAVE:      return LowerSTACKSAVE(Op, DAG);
+  case ISD::STACKRESTORE:   return LowerSTACKRESTORE(Op, DAG);
   default:
     llvm_unreachable("KlaussCPU: unimplemented LowerOperation opcode");
   }
@@ -163,6 +165,27 @@ SDValue KlaussCPUTargetLowering::LowerExternalSymbol(SDValue Op,
   auto *N = cast<ExternalSymbolSDNode>(Op);
   SDValue TES = DAG.getTargetExternalSymbol(N->getSymbol(), MVT::i64);
   return DAG.getNode(KlaussCPUISD::ADDR, SDLoc(N), MVT::i64, TES);
+}
+
+// __builtin_stack_save() / __builtin_stack_restore() support.
+// SP is a 32-bit register; promote to/from pointer width (i64) as needed.
+
+SDValue KlaussCPUTargetLowering::LowerSTACKSAVE(SDValue Op,
+                                                  SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  SDValue Chain = Op.getOperand(0);
+  SDValue SP32 = DAG.getCopyFromReg(Chain, DL, KlaussCPU::SP, MVT::i32);
+  SDValue SP64 = DAG.getNode(ISD::ZERO_EXTEND, DL, MVT::i64, SP32);
+  return DAG.getMergeValues({SP64, SDValue(SP32.getNode(), 1)}, DL);
+}
+
+SDValue KlaussCPUTargetLowering::LowerSTACKRESTORE(SDValue Op,
+                                                     SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  SDValue Chain  = Op.getOperand(0);
+  SDValue NewSP64 = Op.getOperand(1);
+  SDValue NewSP32 = DAG.getNode(ISD::TRUNCATE, DL, MVT::i32, NewSP64);
+  return DAG.getCopyToReg(Chain, DL, KlaussCPU::SP, NewSP32);
 }
 
 const char *

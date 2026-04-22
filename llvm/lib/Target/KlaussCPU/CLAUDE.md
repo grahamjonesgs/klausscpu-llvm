@@ -470,18 +470,59 @@ SelectionDAGTargetInfo    TSI;
       - `.rela.text` section, entry: `offset=0x14 type=1(R_KCPU_ABS32) sym=bar addend=0`
       - Correct call encoding: word[4]=`0x00001009` (opcode), word[5]=`0x00000000` (to-be-relocated)
 
+20. ✅ LLD port — `EM_KLAUSSCPU = 0x4B43` / `R_KLAUSSCPU_ABS32 = 1`
+    - `llvm/include/llvm/BinaryFormat/ELF.h`: added `EM_KLAUSSCPU = 0x4B43` and
+      `#include "ELFRelocs/KlaussCPU.def"` section
+    - `llvm/include/llvm/BinaryFormat/ELFRelocs/KlaussCPU.def`: `R_KLAUSSCPU_NONE=0`,
+      `R_KLAUSSCPU_ABS32=1`
+    - `lld/ELF/Arch/KlaussCPU.cpp` (new): `getRelExpr` → `R_ABS`; `relocate` → `write32be`
+    - `lld/ELF/Target.h/.cpp`: `setKlaussCPUTargetInfo` declared + dispatched from `EM_KLAUSSCPU`
+    - `lld/ELF/Driver.cpp`: `"elf32klausscpu"` emulation wired in
+    - `lld/ELF/CMakeLists.txt`: `Arch/KlaussCPU.cpp` added
+    - **Also fixed**: `KlaussCPUMCCodeEmitter::encode64` for `SETR` now handles both
+      immediate and MCExpr operands.  Global address loads (`setr r12, sym`) add a
+      `FK_KlaussCPU_ABS32` fixup at byte offset 4 (same slot as call targets) so the
+      linker fills in the 32-bit symbol address.
+    - Smoke test:
+      ```
+      llc -filetype=obj → .o with EM_KLAUSSCPU; ld.lld -m elf32klausscpu → ELF 32-bit LSB
+      ```
+
+---
+
+21. ✅ Linker script + crt0 — flat ELF for 128 MiB RAM
+    - `runtime/klausscpu.ld`: ENTRY(_start); RAM 0x0–0x7FFFFFF (128 MiB); layout:
+      `.text` → `.data` → `.bss`; exports `__bss_start`, `__bss_end`, `_stack_top = 0x08000000`
+    - `runtime/crt0.c`: BSS clear (byte loop), `call main(0,NULL)`, infinite loop halt.
+      `_start` placed in `.text._start` so it lands at address 0.
+    - `runtime/hello.c`: minimal UART test (memory-mapped TX byte at `0xF0000000`).
+    - `runtime/Makefile`: one-line `make hello.elf` / `make hello.bin` build.
+    - `ISD::STACKSAVE` / `ISD::STACKRESTORE` lowered to GETSP / SETSP via
+      `CopyFromReg` / `CopyToReg` on `KlaussCPU::SP` (enables `__builtin_stack_restore`
+      for optional SW stack init).
+    - **Stack init note**: `_start`'s prologue (PUSH R15) runs before the function body.
+      The hardware Verilog reset must set SP to a valid RAM address (recommended:
+      `0x08000000`) before fetching the first instruction.  If SP = 0x08000000 on reset:
+      - PUSH R15 → SP = 0x07FFFFF8, writes old R15 to [0x07FFFFF8..0x07FFFFFF] ✓
+      - Remaining stack grows down from there.
+    - Smoke test:
+      ```
+      clang -target klausscpu-unknown-elf -O1 -nostdlib -nostdinc -fno-builtin \
+            -ffreestanding -c crt0.c hello.c
+      ld.lld -T klausscpu.ld -o hello.elf crt0.o hello.o
+      → ELF 32-bit LSB executable, *unknown arch 0x4b43*
+        _start @ 0x00000000, main @ 0x0000008c
+        __bss_start/__bss_end @ 0x00000110, _stack_top = 0x08000000
+      ```
+
 ## Next steps
 
-### Step 20 — LLD port (EM_KLAUSSCPU + R_KLAUSSCPU_ABS32)
-- Define `EM_KLAUSSCPU = 0x4B43` in `llvm/include/llvm/BinaryFormat/ELF.h`
-- Update ELF writer to use `EM_KLAUSSCPU` instead of `EM_NONE`
-- Write `lld/ELF/Arch/KlaussCPU.cpp` — minimal TargetInfo handling `R_KLAUSSCPU_ABS32`
-- Wire into `lld/ELF/Driver.cpp` and `lld/ELF/CMakeLists.txt`
-- Smoke test: `ld.lld -o foo foo.o bar.o`
-
-### Step 21 — Linker script + crt0
-- Write `klausscpu.ld` for 128 MiB RAM layout
-- Write minimal `crt0.s` (init SP, call main, halt)
-- Produce loadable flat binary
-
 ### Step 22 — End-to-end hello world on hardware
+- Configure Verilog reset to set SP = 0x08000000
+- Adjust `hello.c` UART_BASE to match hardware register map
+- Load `hello.elf` onto FPGA via loader / JTAG
+- Verify "Hello, KlaussCPU!\n" on UART console
+
+### Step 23 — Inline assembly support
+- Add `KlaussCPUAsmParser` (registers, basic mnemonic parsing)
+- Enables naked functions and direct SP init without hardware dependency

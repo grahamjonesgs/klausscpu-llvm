@@ -278,8 +278,21 @@ uint64_t KlaussCPUMCCodeEmitter::encode64(
     const MCInst &MI, SmallVectorImpl<MCFixup> &Fixups) const {
   switch (MI.getOpcode()) {
 
-  // ── RV_ld (rd, imm32) ────────────────────────────────────────────────────
-  case KlaussCPU::SETR:    return fmtRV_ld(0x0000080, MI);
+  // ── RV_ld (rd, imm32-or-symbol) ─────────────────────────────────────────
+  // SETR is used both for plain immediates and for global-address loads.
+  // When the operand is an MCExpr (symbol reference), emit a fixup at word 1
+  // (byte offset 4) so the linker fills in the 32-bit absolute address.
+  case KlaussCPU::SETR: {
+    uint64_t W0 = (static_cast<uint64_t>(0x0000080u) << 36)
+                | (static_cast<uint64_t>(getReg(MI, 0)) << 32);
+    const MCOperand &MO = MI.getOperand(1);
+    if (MO.isImm())
+      return W0 | static_cast<uint32_t>(MO.getImm());
+    assert(MO.isExpr() && "SETR: operand 1 must be imm or expr");
+    Fixups.push_back(MCFixup::create(
+        4, MO.getExpr(), MCFixupKind(KlaussCPU::FK_KlaussCPU_ABS32)));
+    return W0;
+  }
 
   // ── RV_2addr (rd=rs tied, imm32 at operand 2) ────────────────────────────
   case KlaussCPU::ADDV:    return fmtRV_2addr(0x0000081, MI);
