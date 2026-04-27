@@ -5,10 +5,32 @@
 //===----------------------------------------------------------------------===//
 
 #include "KlaussCPU.h"
+#include "clang/Basic/Builtins.h"
 #include "clang/Basic/MacroBuilder.h"
+#include "clang/Basic/TargetBuiltins.h"
 
 using namespace clang;
 using namespace clang::targets;
+
+static constexpr int NumKlaussCPUBuiltins =
+    KlaussCPU::LastTSBuiltin - Builtin::FirstTSBuiltin;
+
+static constexpr llvm::StringTable KlaussCPUBuiltinStrings =
+    CLANG_BUILTIN_STR_TABLE_START
+#define BUILTIN CLANG_BUILTIN_STR_TABLE
+#include "clang/Basic/BuiltinsKlaussCPU.def"
+    ;
+
+static constexpr auto KlaussCPUBuiltinInfos =
+    Builtin::MakeInfos<NumKlaussCPUBuiltins>({
+#define BUILTIN CLANG_BUILTIN_ENTRY
+#include "clang/Basic/BuiltinsKlaussCPU.def"
+    });
+
+llvm::SmallVector<Builtin::InfosShard>
+KlaussCPUTargetInfo::getTargetBuiltins() const {
+  return {{&KlaussCPUBuiltinStrings, KlaussCPUBuiltinInfos}};
+}
 
 // R0–R15 (16 GPRs).
 static const char *const GCCRegNames[] = {

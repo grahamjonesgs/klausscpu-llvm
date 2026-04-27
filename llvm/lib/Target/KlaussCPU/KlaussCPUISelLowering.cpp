@@ -125,6 +125,8 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::UMAX,  MVT::i64, Legal);
   setOperationAction(ISD::SETCC, MVT::i64, Legal);
 
+  setOperationAction(ISD::TRAP, MVT::Other, Legal);
+
   // ---- Varargs ----
   setOperationAction(ISD::VASTART, MVT::Other, Expand);
   setOperationAction(ISD::VAARG,   MVT::Other, Expand);

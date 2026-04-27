@@ -42,13 +42,18 @@ void _start(void) {
     __builtin_stack_restore((void *)_stack_top);
 #endif
 
+    /* Signal that _start has been reached. */
+    __builtin_klausscpu_leds(0xAAAA);
+
+    /* Hardware spin-wait — allow UART and peripherals to settle. */
+    __builtin_klausscpu_delayv(0x500);
+
     /* Zero-fill BSS */
     for (char *p = __bss_start; p != __bss_end; ++p)
         *p = 0;
 
     main(0, (char **)0);
 
-    /* Halt: spin forever (HALT_I instruction via infinite loop). */
-    while (1)
-        ;
+    /* Halt the CPU. */
+    __builtin_trap();
 }

@@ -515,14 +515,49 @@ SelectionDAGTargetInfo    TSI;
         __bss_start/__bss_end @ 0x00000110, _stack_top = 0x08000000
       ```
 
+---
+
+22. ✅ UART intrinsics + clang builtins — end-to-end hello world
+    - **`IntrinsicsKlaussCPU.td`** (new): 7 LLVM intrinsics with `TargetPrefix = "klausscpu"` —
+      `int_klausscpu_txr`, `txmemr`, `txcharmemr`, `txstrmemr` (void, side-effects),
+      `rxrb`, `rxrnb` (i64 result, side-effects), `newline` (void, side-effects)
+    - **`Intrinsics.td`**: `include "llvm/IR/IntrinsicsKlaussCPU.td"` added
+    - **`llvm/include/llvm/IR/CMakeLists.txt`**: added `tablegen(LLVM IntrinsicsKlaussCPU.h -gen-intrinsic-enums -intrinsic-prefix=klausscpu)` — **critical**: including `.td` is not enough; each target needs an explicit entry to generate its per-target header
+    - **`BuiltinsKlaussCPU.def`** (new): 7 `BUILTIN()` entries mapping `__builtin_klausscpu_*`
+    - **`TargetBuiltins.h`**: added `namespace KlaussCPU { enum { ... } }` following XCore pattern
+    - **`clang/lib/Basic/Targets/KlaussCPU.h/.cpp`**: `getTargetBuiltins()` wired via `InfosShard` table
+    - **`clang/lib/CodeGen/TargetBuiltins/KlaussCPU.cpp`** (new): `EmitKlaussCPUBuiltinExpr()` emits
+      LLVM intrinsic calls for all 7 builtins
+    - **`CGBuiltin.cpp`**: dispatch `case llvm::Triple::klausscpu:` added
+    - **`CodeGenFunction.h`**: `EmitKlaussCPUBuiltinExpr` declared
+    - **`KlaussCPUISelDAGToDAG.cpp`**: INTRINSIC_VOID handler (txr/txmemr/txcharmemr/txstrmemr/newline)
+      and INTRINSIC_W_CHAIN handler (rxrb/rxrnb) using `ReplaceUses` + `RemoveDeadNode`
+    - **`uart_stubs.c`** (new in runtime/): C UART API using `__builtin_klausscpu_*`
+      - `uart_putc` uses `static volatile char _uart_char_buf` global (not stack local) so
+        TXCHARMEMR_R gets a SETR-resolved address, not a FrameIndex that eliminateFrameIndex
+        cannot handle for R-format instructions
+      - `typedef unsigned long long uint64_t` instead of `<stdint.h>` (unavailable with -nostdinc)
+    - **`hello.c`** updated: calls `uart_puts()` + `uart_newline()` via uart_stubs API
+    - **Makefile** updated: `uart_stubs.o` compiled and linked; `OBJCOPY` uses `$(BUILD_DIR)/bin/llvm-objcopy`
+    - Smoke test:
+      ```
+      make hello.elf  → ELF 32-bit LSB executable, *unknown arch 0x4b43*
+                         _start @ 0x00000000, .text = 402 bytes
+      make hello.bin  → 402-byte flat binary for FPGA loader
+      uart_stubs.s emits: txr, txcharmemr, txstrmemr, newline, rxrb, rxrnb
+      ```
+    - RXRNB zero_flag note: hardware sets zero_flag=1 when FIFO empty but does NOT write
+      the destination register; the returned value is undefined when FIFO empty.
+      Documented in uart_stubs.c; use `uart_getc_blocking()` for reliable receive.
+    - Hardware step remaining: load `hello.bin` onto FPGA, verify UART output.
+
 ## Next steps
 
-### Step 22 — End-to-end hello world on hardware
-- Configure Verilog reset to set SP = 0x08000000
-- Adjust `hello.c` UART_BASE to match hardware register map
-- Load `hello.elf` onto FPGA via loader / JTAG
+### Step 23 — FPGA hardware test
+- Load `hello.bin` onto FPGA via loader / JTAG
 - Verify "Hello, KlaussCPU!\n" on UART console
+- Hardware must have SP = 0x08000000 on reset
 
-### Step 23 — Inline assembly support
+### Step 24 — Inline assembly support
 - Add `KlaussCPUAsmParser` (registers, basic mnemonic parsing)
 - Enables naked functions and direct SP init without hardware dependency

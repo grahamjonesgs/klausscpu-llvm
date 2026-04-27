@@ -727,6 +727,43 @@ def NOP_I   : I0<0x0000F010, (outs), (ins), "nop">;
 def HALT_I  : I0<0x0000F011, (outs), (ins), "halt">;
 
 //===----------------------------------------------------------------------===//
+// UART / I-O instructions (hasSideEffects prevents reordering/elimination)
+//===----------------------------------------------------------------------===//
+
+let hasSideEffects = 1 in {
+  // Send 64-bit register as 16 hex digits over UART.
+  def TXR_R        : R_in <0x0000501, (ins GPR:$reg), "txr\t$reg">;
+  // Send 64-bit value at mem[reg] as hex over UART.
+  def TXMEMR_R     : R_in <0x0000502, (ins GPR:$reg), "txmemr\t$reg">;
+  // Send byte at mem[reg] as ASCII character over UART.
+  def TXCHARMEMR_R : R_in <0x0000503, (ins GPR:$reg), "txcharmemr\t$reg">;
+  // Send null-terminated string at mem[reg] over UART.
+  def TXSTRMEMR_R  : R_in <0x0000504, (ins GPR:$reg), "txstrmemr\t$reg">;
+  // Blocking receive: wait for UART byte, write to rd.
+  def RXRB_R       : R_out<0x0000505, (outs GPR:$rd),  "rxrb\t$rd">;
+  // Non-blocking receive: write UART byte to rd; zero_flag=1 if FIFO empty.
+  def RXRNB_R      : R_out<0x0000506, (outs GPR:$rd),  "rxrnb\t$rd">;
+  // Send CR+LF over UART.
+  def NEWLINE_I    : I0<0x00005001, (outs), (ins), "newline">;
+
+  // ── LEDs / 7-seg / delay ──────────────────────────────────────────────────
+  // Set 16 on-board LEDs from register bits [15:0].
+  def LEDR_R      : R_in<0x0000300, (ins GPR:$reg), "ledr\t$reg">;
+  // Set 7-seg display 1 from register.
+  def SEG7_1R_R   : R_in<0x0000302, (ins GPR:$reg), "7seg1r\t$reg">;
+  // Set 7-seg display 2 from register.
+  def SEG7_2R_R   : R_in<0x0000303, (ins GPR:$reg), "7seg2r\t$reg">;
+  // Set both 7-seg displays from register.
+  def SEG7R_R     : R_in<0x0000304, (ins GPR:$reg), "7segr\t$reg">;
+  // Blank both 7-seg displays.
+  def SEG7BLANK_I : I0<0x00003073, (outs), (ins), "7segblank">;
+  // Hardware spin-wait: stall for imm32 clock cycles (immediate form).
+  def DELAYV_I    : Vsp<0x0000F013, "delayv\t$imm">;
+  // Hardware spin-wait: stall for rs clock cycles (register form).
+  def DELAYR_R    : R_in<0x0000F00, (ins GPR:$reg), "delayr\t$reg">;
+}
+
+//===----------------------------------------------------------------------===//
 // Call patterns — matched from KlaussCPUISD::CALL nodes emitted by LowerCall.
 //===----------------------------------------------------------------------===//
 

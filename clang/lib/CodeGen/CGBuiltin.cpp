@@ -111,6 +111,8 @@ static Value *EmitTargetArchBuiltinExpr(CodeGenFunction *CGF,
     return CGF->EmitAMDGPUBuiltinExpr(BuiltinID, E);
   case llvm::Triple::systemz:
     return CGF->EmitSystemZBuiltinExpr(BuiltinID, E);
+  case llvm::Triple::klausscpu:
+    return CGF->EmitKlaussCPUBuiltinExpr(BuiltinID, E);
   case llvm::Triple::nvptx:
   case llvm::Triple::nvptx64:
     return CGF->EmitNVPTXBuiltinExpr(BuiltinID, E);

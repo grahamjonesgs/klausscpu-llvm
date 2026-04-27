@@ -20,15 +20,15 @@ public:
   KlaussCPUTargetInfo(const llvm::Triple &Triple, const TargetOptions &)
       : TargetInfo(Triple) {
     // 64-bit little-endian; all primitive types are 64-bit-aligned.
-    // DataLayout: e-m:e-p:64:64-i64:64-n64
+    // int is standard 32-bit; use long for 64-bit quantities.
     LongWidth = LongAlign = 64;
     LongLongWidth = LongLongAlign = 64;
     PointerWidth = PointerAlign = 64;
-    SizeType = UnsignedLong;
+    SizeType    = UnsignedLong;
     PtrDiffType = SignedLong;
-    IntPtrType = SignedLong;
-    IntMaxType = SignedLong;
-    Int64Type = SignedLong;
+    IntPtrType  = SignedLong;
+    IntMaxType  = SignedLong;
+    Int64Type   = SignedLong;
     resetDataLayout("e-m:e-p:64:64-i64:64-i128:128-n64");
     TLSSupported = false;
     // No hardware FP.
@@ -52,9 +52,7 @@ public:
     return TargetInfo::VoidPtrBuiltinVaList;
   }
 
-  llvm::SmallVector<Builtin::InfosShard> getTargetBuiltins() const override {
-    return {};
-  }
+  llvm::SmallVector<Builtin::InfosShard> getTargetBuiltins() const override;
 
   bool validateAsmConstraint(const char *&Name,
                              TargetInfo::ConstraintInfo &Info) const override {

@@ -1,0 +1,38 @@
+//===-- BuiltinsKlaussCPU.def - KlaussCPU Builtin function database -------===//
+//
+// KlaussCPU target-specific builtin functions.
+// Format: BUILTIN(Name, TypeString, Attributes)
+//
+// Type string encoding (see Builtins.def for full reference):
+//   v  = void
+//   ULLi = unsigned long long (i64 on KlaussCPU)
+//   v*   = void*  (pointer — used for raw-memory UART instructions)
+//   cC*  = const char*
+//   n    = nothrow, no-return-value-check
+//
+//===----------------------------------------------------------------------===//
+
+// UART transmit instructions
+BUILTIN(__builtin_klausscpu_txr,        "vULLi", "n")
+BUILTIN(__builtin_klausscpu_txmemr,     "vvC*",  "n")
+BUILTIN(__builtin_klausscpu_txcharmemr, "vvC*",  "n")
+BUILTIN(__builtin_klausscpu_txstrmemr,  "vcC*",  "n")
+
+// UART receive instructions
+BUILTIN(__builtin_klausscpu_rxrb,       "ULLi",  "n")
+BUILTIN(__builtin_klausscpu_rxrnb,      "ULLi",  "n")
+
+// UART control
+BUILTIN(__builtin_klausscpu_newline,    "v",     "n")
+
+// LEDs / 7-seg display
+BUILTIN(__builtin_klausscpu_leds,       "vULLi", "n")
+BUILTIN(__builtin_klausscpu_seg7_1,     "vULLi", "n")
+BUILTIN(__builtin_klausscpu_seg7_2,     "vULLi", "n")
+BUILTIN(__builtin_klausscpu_seg7,       "vULLi", "n")
+BUILTIN(__builtin_klausscpu_seg7blank,  "v",     "n")
+
+// Hardware delay
+BUILTIN(__builtin_klausscpu_delayv,     "vULLi", "n")
+
+#undef BUILTIN

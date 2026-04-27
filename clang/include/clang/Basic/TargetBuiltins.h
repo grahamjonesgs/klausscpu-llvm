@@ -442,6 +442,16 @@ namespace clang {
     };
   }
 
+  /// KlaussCPU builtins
+  namespace KlaussCPU {
+    enum {
+        LastTIBuiltin = clang::Builtin::FirstTSBuiltin-1,
+#define BUILTIN(ID, TYPE, ATTRS) BI##ID,
+#include "clang/Basic/BuiltinsKlaussCPU.def"
+        LastTSBuiltin
+    };
+  }
+
   /// XCore builtins
   namespace XCore {
     enum {

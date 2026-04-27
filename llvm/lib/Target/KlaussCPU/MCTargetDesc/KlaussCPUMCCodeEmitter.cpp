@@ -260,10 +260,29 @@ uint32_t KlaussCPUMCCodeEmitter::encode32(const MCInst &MI) const {
   case KlaussCPU::POP_R:   return fmtR(0x0000401, MI, 0);
   case KlaussCPU::GETSP_R: return fmtR(0x0000403, MI, 0);
 
+  // ── UART / I-O — R_in (operand 0 = source register) ─────────────────────
+  case KlaussCPU::TXR_R:        return fmtR(0x0000501, MI, 0);
+  case KlaussCPU::TXMEMR_R:     return fmtR(0x0000502, MI, 0);
+  case KlaussCPU::TXCHARMEMR_R: return fmtR(0x0000503, MI, 0);
+  case KlaussCPU::TXSTRMEMR_R:  return fmtR(0x0000504, MI, 0);
+
+  // ── UART / I-O — R_out (operand 0 = destination register) ───────────────
+  case KlaussCPU::RXRB_R:       return fmtR(0x0000505, MI, 0);
+  case KlaussCPU::RXRNB_R:      return fmtR(0x0000506, MI, 0);
+
+  // ── LEDs / 7-seg ─────────────────────────────────────────────────────────
+  case KlaussCPU::LEDR_R:       return fmtR(0x0000300, MI, 0);
+  case KlaussCPU::SEG7_1R_R:    return fmtR(0x0000302, MI, 0);
+  case KlaussCPU::SEG7_2R_R:    return fmtR(0x0000303, MI, 0);
+  case KlaussCPU::SEG7R_R:      return fmtR(0x0000304, MI, 0);
+
   // ── I0 (fixed opcode, no register/immediate operands) ────────────────────
-  case KlaussCPU::RET_I:   return 0x00001012;
-  case KlaussCPU::NOP_I:   return 0x0000F010;
-  case KlaussCPU::HALT_I:  return 0x0000F011;
+  case KlaussCPU::NEWLINE_I:    return 0x00005001;
+  case KlaussCPU::SEG7BLANK_I:  return 0x00003073;
+  case KlaussCPU::DELAYR_R:     return fmtR(0x0000F00, MI, 0);
+  case KlaussCPU::RET_I:     return 0x00001012;
+  case KlaussCPU::NOP_I:     return 0x0000F010;
+  case KlaussCPU::HALT_I:    return 0x0000F011;
 
   default:
     llvm_unreachable("unhandled 4-byte KlaussCPU instruction in encode32");
@@ -346,8 +365,9 @@ uint64_t KlaussCPUMCCodeEmitter::encode64(
   // ── Vcall ─────────────────────────────────────────────────────────────────
   case KlaussCPU::CALL_I:  return fmtVbr(0x00001009, MI, Fixups);
 
-  // ── Vsp (ADDSP: fixed op32, signed imm32 at operand 0) ───────────────────
-  case KlaussCPU::ADDSP_I: return fmtVimm(0x00004050, MI);
+  // ── Vsp (ADDSP / DELAYV: fixed op32, signed imm32 at operand 0) ──────────
+  case KlaussCPU::ADDSP_I:  return fmtVimm(0x00004050, MI);
+  case KlaussCPU::DELAYV_I: return fmtVimm(0x0000F013, MI);
 
   default:
     llvm_unreachable("unhandled 8-byte KlaussCPU instruction in encode64");
@@ -365,13 +385,14 @@ void KlaussCPUMCCodeEmitter::encodeInstruction(
   unsigned Opcode = MI.getOpcode();
 
   // SETR64: 12-byte instruction (three big-endian 32-bit words).
-  // Word0 = op24 in [31:8], rd in [7:4], 0 in [3:0].
+  // Word0 uses R format: op28 in bits[31:4], rd in bits[3:0].
+  // opcode = 0x00000FE → Word0 = (0x00000FE << 4) | rd = 0x00000FEx
   // Word1 = lo32, Word2 = hi32.
   if (Opcode == KlaussCPU::SETR64) {
     unsigned Rd = getReg(MI, 0);
     uint32_t Lo = getImm32(MI, 1);
     uint32_t Hi = getImm32(MI, 2);
-    emitBE32((static_cast<uint32_t>(0x0000FEu) << 8) | (Rd << 4), CB);
+    emitBE32((static_cast<uint32_t>(0x00000FEu) << 4) | Rd, CB);
     emitBE32(Lo, CB);
     emitBE32(Hi, CB);
     return;
