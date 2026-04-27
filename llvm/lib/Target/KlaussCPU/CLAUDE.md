@@ -551,13 +551,49 @@ SelectionDAGTargetInfo    TSI;
       Documented in uart_stubs.c; use `uart_getc_blocking()` for reliable receive.
     - Hardware step remaining: load `hello.bin` onto FPGA, verify UART output.
 
-## Next steps
+---
 
-### Step 23 — FPGA hardware test
-- Load `hello.bin` onto FPGA via loader / JTAG
-- Verify "Hello, KlaussCPU!\n" on UART console
-- Hardware must have SP = 0x08000000 on reset
+23. ✅ Hardware bring-up — first working C program on real KlaussCPU silicon
+    - **Linker script**: `.text` moved from `0x00000000` to `0x00000020` — first 32 bytes of RAM
+      are the hardware heap header; code must start at 0x20. Binary is loaded at 0x0020 by the
+      hardware loader. All JMP/CALL targets and global address constants were 0x20 too low before
+      this fix.
+    - **ISD::TRAP → HALT_I**: `setOperationAction(ISD::TRAP, MVT::Other, Legal)` +
+      C++ `Select()` handler emits `HALT_I`; `__builtin_trap()` in crt0.c now halts the CPU
+      instead of calling `abort`.
+    - **LED/7-seg/delay builtins** (Step 22b): `LEDR_R`, `SEG7R_R`, `SEG7BLANK_I`, `DELAYV_I`,
+      `DELAYR_R` instructions; 6 new `__builtin_klausscpu_*` builtins; `io_stubs.c` adds
+      `leds()`, `seg7()`, `seg7blank()`, `delay_hw()` C functions.
+      - `DELAYV_I` takes a constant immediate — DAG handler checks `isa<ConstantSDNode>` and
+        falls back to `DELAYR_R` for variable cycle counts.
+      - `int_klausscpu_delayv` uses `llvm_i64_ty` (not i32) to avoid PromoteIntegerOperand crash.
+    - **SETR64 encoding bug fixed**: word0 was `(0x0000FE << 8) | (rd << 4)` = 0x0000FE10 for
+      r1; hardware expects R-format `(0x00000FE << 4) | rd` = 0x00000FE1. Fixed in
+      `KlaussCPUMCCodeEmitter.cpp`. The V64_ld format comment in CLAUDE.md was wrong.
+    - **Hardware memory model** (critical, discovered during bring-up):
+      - `MEMGET8` uses **scrambled byte addressing**: logical address A reads from physical
+        `(A & ~3) | (3 - (A & 3))` within each 4-byte word. Byte 0 of a word is at offset +3,
+        not offset 0. Consequence: a byte loop over a C string gives each 4-byte chunk reversed.
+      - `MEMGET32` returns the 32-bit word with the **lowest-address byte in bits[31:24]**
+        (MSB-first / big-endian word value). Extracting bytes with `(word >> 0) & 0xFF` gives
+        the LAST byte; use `(word >> 24) & 0xFF` for the FIRST byte.
+      - `STIDX8` + `TXCHARMEMR` pair: consistent — both use the same scrambled addressing,
+        so storing a char to `_uart_char_buf` and then calling TXCHARMEMR works correctly.
+      - **Rule**: never use `MEMGET8` to read sequential bytes from string literals.
+        Use `MEMGET32` + MSB-first bit extraction: `for (shift = 24; shift >= 0; shift -= 8)`.
+      - `TXSTRMEMR`: reads 32-bit words and sends MSB-first — correct for rcc-assembled strings
+        (which were stored in big-endian word format) but wrong for C strings (sequential bytes).
+        Use the `uart_puts()` MEMGET32 loop instead.
+    - **hello.c** checkpoints: `leds(0x0001)` / `seg7(0x0001)` on entry to main; `0x0003` after
+      puts; `0x0007` after newline. Confirmed working on hardware.
+    - **Final result**: `Hello, KlaussCPU!\r\n` printed correctly; LEDs show 0x0007; CPU halts. ✅
+
+## Next steps
 
 ### Step 24 — Inline assembly support
 - Add `KlaussCPUAsmParser` (registers, basic mnemonic parsing)
 - Enables naked functions and direct SP init without hardware dependency
+
+### Step 25 — Full libc-style string library
+- Implement `strlen`, `strcpy`, `strcmp` using MEMGET32 + MSB-first extraction
+- All string functions must use the word-read pattern; document this in a header
