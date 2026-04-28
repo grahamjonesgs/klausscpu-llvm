@@ -15,9 +15,13 @@
 #include "KlaussCPURegisterInfo.h"
 #include "KlaussCPUSubtarget.h"
 #include "llvm/CodeGen/CallingConvLower.h"
+#include "KlaussCPUInstrInfo.h"
+#include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/IR/CallingConv.h"
@@ -56,11 +60,13 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::FMUL,  MVT::f64, Expand);
   setOperationAction(ISD::FDIV,  MVT::f64, Expand);
 
-  // ---- No CMOV → expand SELECT ----
-  for (MVT VT : MVT::integer_valuetypes()) {
-    setOperationAction(ISD::SELECT,    VT, Expand);
-    setOperationAction(ISD::SELECT_CC, VT, Expand);
-  }
+  // ---- No CMOV: SELECT → Custom (emits SELECT_PSEUDO → branches via
+  //   EmitInstrWithCustomInserter).  SELECT_CC → Expand which lowers to
+  //   SETCC + SELECT; that SELECT then goes through our Custom handler.
+  //   Both SELECT and SELECT_CC must NOT both be Expand — the legalizer
+  //   asserts if SELECT_CC tries to expand via SELECT that is also Expand.
+  setOperationAction(ISD::SELECT,    MVT::i64, Custom);
+  setOperationAction(ISD::SELECT_CC, MVT::i64, Expand);
 
   // ---- Sub-word loads / stores ----
   // Hardware has MEMGET8/16/32 (zero-extending, register-addressed) and
@@ -98,7 +104,13 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::ExternalSymbol, MVT::i64, Custom);
 
   // ---- Branch/control ----
+  // KlaussCPU has no indirect branch instruction.  Disable jump-table
+  // generation entirely so switch statements lower to decision trees.
+  // BR_JT+BRIND remain Expand as a safety net — they should never appear
+  // since setMinimumJumpTableEntries(INT_MAX) prevents their creation.
+  setMinimumJumpTableEntries(INT_MAX);
   setOperationAction(ISD::BR_JT,  MVT::Other, Expand);
+  setOperationAction(ISD::BRIND,  MVT::Other, Expand);
   setOperationAction(ISD::BRCOND, MVT::Other, Expand); // expands to BR_CC
   // BR_CC with i64 operands is Legal — handled by KlaussCPUDAGToDAGISel::Select()
   // which emits CMPRR_I/CMPRV_I + the appropriate conditional JMP instruction.
@@ -144,6 +156,7 @@ SDValue KlaussCPUTargetLowering::LowerOperation(SDValue Op,
   switch (Op.getOpcode()) {
   case ISD::GlobalAddress:  return LowerGlobalAddress(Op, DAG);
   case ISD::ExternalSymbol: return LowerExternalSymbol(Op, DAG);
+  case ISD::SELECT:         return LowerSELECT(Op, DAG);
   case ISD::STACKSAVE:      return LowerSTACKSAVE(Op, DAG);
   case ISD::STACKRESTORE:   return LowerSTACKRESTORE(Op, DAG);
   default:
@@ -196,6 +209,7 @@ KlaussCPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case KlaussCPUISD::RET_GLUE: return "KlaussCPUISD::RET_GLUE";
   case KlaussCPUISD::CALL:     return "KlaussCPUISD::CALL";
   case KlaussCPUISD::ADDR:     return "KlaussCPUISD::ADDR";
+  case KlaussCPUISD::SELECT:   return "KlaussCPUISD::SELECT";
   default: return nullptr;
   }
 }
@@ -288,6 +302,11 @@ SDValue KlaussCPUTargetLowering::LowerReturn(
 
 SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                                             SmallVectorImpl<SDValue> &InVals) const {
+  // KlaussCPU has no tail-call optimization — our calling convention uses a
+  // dedicated CALL instruction that saves LR, so TCO would need a special
+  // JMP-to-callee sequence we haven't implemented.
+  CLI.IsTailCall = false;
+
   SelectionDAG &DAG          = CLI.DAG;
   SDLoc        &DL           = CLI.DL;
   SDValue       Chain        = CLI.Chain;
@@ -388,4 +407,71 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
   }
 
   return Chain;
+}
+
+// SELECT: no hardware CMOV — emit a KlaussCPUISD::SELECT node which is
+// selected to SELECT_PSEUDO and then expanded to branches by
+// EmitInstrWithCustomInserter below.
+SDValue KlaussCPUTargetLowering::LowerSELECT(SDValue Op,
+                                               SelectionDAG &DAG) const {
+  return DAG.getNode(KlaussCPUISD::SELECT, SDLoc(Op), Op.getValueType(),
+                     Op.getOperand(0), Op.getOperand(1), Op.getOperand(2));
+}
+
+// Expand SELECT_PSEUDO to a diamond with a PHI at the sink:
+//
+//   TestBB:  CMPRV cond, 0
+//            JMPE  SinkBB      ← cond==0 → false path (directly to sink)
+//            (fall through to TrueBB)
+//   TrueBB:  (empty, falls through to SinkBB)
+//   SinkBB:  DstReg = PHI [ FalseReg, TestBB ], [ TrueReg, TrueBB ]
+//            ... (rest of original BB) ...
+//
+// This preserves SSA: DstReg has exactly one definition (the PHI).
+// FalseReg and TrueReg are defined in the original BB which dominates all paths.
+MachineBasicBlock *KlaussCPUTargetLowering::EmitInstrWithCustomInserter(
+    MachineInstr &MI, MachineBasicBlock *BB) const {
+
+  assert(MI.getOpcode() == KlaussCPU::SELECT_PSEUDO);
+
+  const KlaussCPUInstrInfo &TII =
+      *BB->getParent()->getSubtarget<KlaussCPUSubtarget>().getInstrInfo();
+  DebugLoc DL = MI.getDebugLoc();
+  MachineFunction *MF = BB->getParent();
+  const BasicBlock *LLVMBB = BB->getBasicBlock();
+
+  Register DstReg   = MI.getOperand(0).getReg();
+  Register CondReg  = MI.getOperand(1).getReg();
+  Register TrueReg  = MI.getOperand(2).getReg();
+  Register FalseReg = MI.getOperand(3).getReg();
+
+  MachineBasicBlock *TrueBB = MF->CreateMachineBasicBlock(LLVMBB);
+  MachineBasicBlock *SinkBB = MF->CreateMachineBasicBlock(LLVMBB);
+
+  MachineFunction::iterator It = ++BB->getIterator();
+  MF->insert(It, TrueBB);
+  MF->insert(It, SinkBB);
+
+  // Move the tail of BB (after the SELECT_PSEUDO) into SinkBB.
+  SinkBB->splice(SinkBB->begin(), BB,
+                 std::next(MI.getIterator()), BB->end());
+  SinkBB->transferSuccessorsAndUpdatePHIs(BB);
+
+  // TestBB: compare cond with 0; if equal (cond==0) jump to SinkBB (false path),
+  // otherwise fall through to TrueBB.
+  BuildMI(BB, DL, TII.get(KlaussCPU::CMPRV_I)).addReg(CondReg).addImm(0);
+  BuildMI(BB, DL, TII.get(KlaussCPU::JMPE)).addMBB(SinkBB);
+  BB->addSuccessor(SinkBB);   // false path (JMPE taken)
+  BB->addSuccessor(TrueBB);   // true path  (fall through)
+
+  // TrueBB: empty, just falls through to SinkBB.
+  TrueBB->addSuccessor(SinkBB);
+
+  // SinkBB: PHI merges the two incoming values; DstReg has exactly one def.
+  BuildMI(*SinkBB, SinkBB->begin(), DL, TII.get(TargetOpcode::PHI), DstReg)
+      .addReg(FalseReg).addMBB(BB)     // from TestBB when JMPE taken (cond==0)
+      .addReg(TrueReg).addMBB(TrueBB); // from TrueBB when cond!=0
+
+  MI.eraseFromParent();
+  return SinkBB;
 }

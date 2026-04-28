@@ -26,6 +26,9 @@ enum NodeType : unsigned {
             // to getMachineNode() and then call ReplaceNode() on it — that
             // would cause ReplaceAllUsesWith to create a self-referential
             // SETR instruction ("%0 = SETR %0").
+  SELECT,   // (cond:i64, trueV:i64, falseV:i64) -> i64
+            // Custom ISD node: lowered by Select() to SELECT_PSEUDO, then
+            // expanded to branches by EmitInstrWithCustomInserter.
 };
 } // namespace KlaussCPUISD
 
@@ -57,6 +60,12 @@ private:
   SDValue LowerExternalSymbol(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSTACKSAVE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSTACKRESTORE(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSELECT(SDValue Op, SelectionDAG &DAG) const;
+
+public:
+  MachineBasicBlock *
+  EmitInstrWithCustomInserter(MachineInstr &MI,
+                               MachineBasicBlock *BB) const override;
 };
 
 } // namespace llvm

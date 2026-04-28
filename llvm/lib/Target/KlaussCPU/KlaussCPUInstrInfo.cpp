@@ -79,3 +79,4 @@ void KlaussCPUInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   BuildMI(MBB, I, DL, get(KlaussCPU::COPY_R), DestReg)
       .addReg(SrcReg, getKillRegState(KillSrc));
 }
+

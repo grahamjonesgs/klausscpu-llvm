@@ -19,8 +19,9 @@ class LLVM_LIBRARY_VISIBILITY KlaussCPUTargetInfo : public TargetInfo {
 public:
   KlaussCPUTargetInfo(const llvm::Triple &Triple, const TargetOptions &)
       : TargetInfo(Triple) {
-    // 64-bit little-endian; all primitive types are 64-bit-aligned.
-    // int is standard 32-bit; use long for 64-bit quantities.
+    // 64-bit little-endian; native word = 64 bits.
+    // int/long/long long are all 64-bit, matching the rcc compiler ABI.
+    IntWidth = IntAlign = 64;
     LongWidth = LongAlign = 64;
     LongLongWidth = LongLongAlign = 64;
     PointerWidth = PointerAlign = 64;

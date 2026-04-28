@@ -529,6 +529,12 @@ class Pseudo<dag outs, dag ins, list<dag> pattern = []>
 def ADJCALLSTACKDOWN : Pseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2)>;
 def ADJCALLSTACKUP   : Pseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2)>;
 
+// SELECT without CMOV: expanded to compare + conditional branches by
+// EmitInstrWithCustomInserter in KlaussCPUInstrInfo.cpp.
+let usesCustomInserter = 1, hasSideEffects = 0 in
+def SELECT_PSEUDO : Pseudo<(outs GPR:$dst),
+                            (ins GPR:$cond, GPR:$trueV, GPR:$falseV)>;
+
 //===----------------------------------------------------------------------===//
 // Stack management (used by frame lowering; no isel patterns)
 //===----------------------------------------------------------------------===//
@@ -564,8 +570,6 @@ def JMPR_R  : R_in<0x0000102, (ins GPR:$reg), "jmpr\t$reg"> {
 def SETR    : RV_ld<0x0000080, "setr\t$rd, $imm">;
 
 // Load full 64-bit immediate: rd = (hi32 << 32) | lo32
-// Hardware bug in original silicon (PC[2] address inversion for hi32 fetch)
-// fixed April 2026.  Use instead of SETR+SHLV+ORV for large constants.
 def SETR64  : V64_ld<0x0000FE, "setr64\t$rd, $lo, $hi">;
 
 // In-place immediate operations (rd op= imm32)

@@ -177,7 +177,7 @@ SelectionDAGTargetInfo    TSI;
 - `DAG.getTargetGlobalAddress(same_params)` is **CSE-deduplicated** — calling it twice returns the *same* `SDNode*`. If you then call `getMachineNode(SETR, DL, MVT::i64, SDValue(tga_node, 0))` and `ReplaceNode(tga_node, setr_node)`, `ReplaceAllUsesWith` rewrites SETR's own operand from `tga_node` to `setr_node` → self-referential machine instruction `%0 = SETR %0` → RegAllocFast crash `"no reload in start block. Missing vreg def?"`.
 - **Fix — ADDR wrapper node:** `LowerGlobalAddress` / `LowerExternalSymbol` wrap the TargetGlobalAddress in a `KlaussCPUISD::ADDR` node. `Select()` then replaces `ADDR` (not TGA) with `SETR(TGA)`. `ReplaceAllUsesWith(ADDR, SETR)` never touches TGA → no circular reference.
 - Call-site callee addresses **bypass `LowerOperation`** — `LowerCall` calls `DAG.getTargetGlobalAddress()` directly, and the bare TGA is consumed by the `CALL_I` tablegen pattern. Never wrap call-target TGAs in ADDR.
-- Hardware `SETR64` is **buggy** (inverts PC[2] of the address). Use the 3-instruction sequence `SETR hi32 ; SHLV 32 ; ORV lo32` for any 64-bit constant (including global addresses).
+- `SETR64` is a single 12-byte instruction for 64-bit constants: `rd = (hi32 << 32) | lo32`. Use it for any i64 constant that does not fit in a simm32. Global addresses are always ≤ 32 bits and use SETR, not SETR64.
 - `SDUse` iterators: `for (auto UI = N->use_begin(); UI != N->use_end(); ++UI)` — `*UI` is an `SDUse&`. Access the user node via `UI->getUser()` (arrow, not dot).
 
 ---
@@ -309,17 +309,16 @@ SelectionDAGTargetInfo    TSI;
 ---
 
 13. ✅ Large constant materialization + global address lowering
-    - Hardware `SETR64` is buggy — use 3-instruction sequence: `SETR hi32 ; SHLV 32 ; ORV lo32`
-    - `ISD::Constant` i64 values > INT32_MAX handled in C++ `Select()` (ISD::Constant handler)
+    - `ISD::Constant` i64 values > INT32_MAX handled in C++ `Select()` → single `SETR64` instruction
     - `ISD::GlobalAddress` / `ISD::ExternalSymbol` → Custom in ISelLowering
     - `LowerGlobalAddress` / `LowerExternalSymbol` wrap TGA/TES in `KlaussCPUISD::ADDR` node
       (avoids CSE-induced self-referential SETR — see LLVM 23 gotcha above)
     - `Select()` ADDR handler: `getMachineNode(SETR, DL, MVT::i64, Sym)` + `ReplaceNode(ADDR, SETR)`
     - Direct calls (`call @foo`) still use `CALL_I` tablegen pattern — callee TGA bypasses LowerOperation
-    - Smoke tests:
+    - Smoke tests (after Step 17 SETR64 implementation):
       ```
-      large constant 5000000000:    setr r12, 1; shlv r12, 32; orv r12, 705032704
-      large constant -5000000000:   setr r12, -2; shlv r12, 32; orv r12, -705032704
+      large constant 5000000000:    setr64 r12, 705032704, 1
+      large constant -5000000000:   setr64 r12, -705032704, -2
       global variable read:         setr r12, g; ldidx64 r12, r12, 0
       global variable write:        setr r12, g; stidx64 r0, r12, 0
       return global address:        setr r12, g
@@ -397,8 +396,7 @@ SelectionDAGTargetInfo    TSI;
     - **SIGN_EXTEND_INREG i32 → Legal** in ISelLowering (was Expand → shift pair)
     - **Tablegen patterns** added for LDIDX8/16 and STIDX8/16 with GPR base + simm32 offset
       (struct/array fields); MEMGET8/16 patterns kept for pure GPR-address (no offset) access
-    - SETR64 hardware bug confirmed fixed (April 2026) — not yet in backend (12-byte encoding
-      needs custom MCCodeEmitter support); SETR+SHLV+ORV sequence still used for large constants
+    - SETR64 hardware bug (PC[2] inversion) confirmed fixed April 2026; backend updated in Step 17
 
 ---
 
@@ -407,15 +405,13 @@ SelectionDAGTargetInfo    TSI;
       (safe: no `-gen-emitter` in CMakeLists, so `getBinaryCodeForInstr` is never generated)
     - `V64_ld` format: word0[31:8]=op24, word0[7:4]=rd, word1=lo32, word2=hi32
     - `SETR64` def: opcode `0x0000FE`, `"setr64\t$rd, $lo, $hi"`, `(ins simm32:$lo, simm32:$hi)`
-    - `Select()` ISD::Constant handler: `SETR+SHLV+ORV` (3 instrs) → single `SETR64`
+    - `Select()` ISD::Constant handler: single `SETR64` for any i64 not fitting in simm32
     - Smoke tests:
       ```
       5000000000:   setr64 r12, 705032704, 1
       -5000000000:  setr64 r12, -705032704, -2
       INT64_MAX:    setr64 r12, -1, 2147483647
       ```
-    - Note: clang binary needs full rebuild to emit new `stidx32`/`ldidx32` mnemonics
-      (Step 16 mnemonic changes; `llc` binary is correct)
 
 ---
 
@@ -570,30 +566,131 @@ SelectionDAGTargetInfo    TSI;
     - **SETR64 encoding bug fixed**: word0 was `(0x0000FE << 8) | (rd << 4)` = 0x0000FE10 for
       r1; hardware expects R-format `(0x00000FE << 4) | rd` = 0x00000FE1. Fixed in
       `KlaussCPUMCCodeEmitter.cpp`. The V64_ld format comment in CLAUDE.md was wrong.
-    - **Hardware memory model** (critical, discovered during bring-up):
-      - `MEMGET8` uses **scrambled byte addressing**: logical address A reads from physical
-        `(A & ~3) | (3 - (A & 3))` within each 4-byte word. Byte 0 of a word is at offset +3,
-        not offset 0. Consequence: a byte loop over a C string gives each 4-byte chunk reversed.
+    - **Hardware memory model** (discovered during bring-up; see Step 25 for subsequent fix):
+      - `MEMGET8` correctly coded per spec: byte N → bits[8(N mod 8)+7 : 8(N mod 8)].
       - `MEMGET32` returns the 32-bit word with the **lowest-address byte in bits[31:24]**
         (MSB-first / big-endian word value). Extracting bytes with `(word >> 0) & 0xFF` gives
         the LAST byte; use `(word >> 24) & 0xFF` for the FIRST byte.
-      - `STIDX8` + `TXCHARMEMR` pair: consistent — both use the same scrambled addressing,
-        so storing a char to `_uart_char_buf` and then calling TXCHARMEMR works correctly.
-      - **Rule**: never use `MEMGET8` to read sequential bytes from string literals.
-        Use `MEMGET32` + MSB-first bit extraction: `for (shift = 24; shift >= 0; shift -= 8)`.
-      - `TXSTRMEMR`: reads 32-bit words and sends MSB-first — correct for rcc-assembled strings
-        (which were stored in big-endian word format) but wrong for C strings (sequential bytes).
-        Use the `uart_puts()` MEMGET32 loop instead.
+      - `STIDX8/STIDX16/LDIDX8/LDIDX16` had a **byte-ordering bug** at Step 23 time: lane 0
+        mapped to the MSByte (big-endian) instead of the LSByte. They were self-consistent with
+        each other but inconsistent with MEMGET8/MEMSET8. Fixed in hardware (see Step 25).
+      - `STIDX8` + `TXCHARMEMR` pair: both use the same lane mapping, so the store→transmit
+        pattern for `_uart_char_buf` is self-consistent regardless.
+      - `uart_puts()` uses `MEMGET32` + MSB-first extraction to read string literals from
+        .rodata (unaffected by the LDIDX8 bug since .rodata is written by the linker, not STIDX8).
+      - `TXSTRMEMR`: reads 32-bit words and sends MSB-first — correct for rcc strings
+        but wrong for C strings. Use the `uart_puts()` MEMGET32 loop instead.
     - **hello.c** checkpoints: `leds(0x0001)` / `seg7(0x0001)` on entry to main; `0x0003` after
       puts; `0x0007` after newline. Confirmed working on hardware.
     - **Final result**: `Hello, KlaussCPU!\r\n` printed correctly; LEDs show 0x0007; CPU halts. ✅
 
+24. ✅ Runtime library + test programs — adventure.elf, test_64bit.elf
+    - **libc.c** (runtime/): putchar, print_str, newline, getchar, print_int, print_hex_prefix,
+      strlen, strcmp, strcpy, memset, memcpy, malloc, calloc, realloc, free, heap_get_top, heap_words_used.
+      Heap block header: 24 bytes (size, flags, pad). Heap start written to address 0 for rcc compat.
+    - **adventure.c** and **test_64bit.c** updated to use UART/IO functions from uart_stubs.c/io_stubs.c.
+    - **Makefile** updated: RUNTIME_OBJS = crt0.o uart_stubs.o io_stubs.o; added libc.o; adventure.elf,
+      test_64bit.elf targets.
+    - **Bug fixes during this step**:
+      - **Jump tables**: switch statements compiled to jump tables (BR_JT+BRIND) — no indirect branch
+        in KlaussCPU. Fixed: `setMinimumJumpTableEntries(INT_MAX)` + `setOperationAction(ISD::BRIND, Expand)`.
+      - **Tail call assertion**: `LowerCall emitted return value for tail call` — KlaussCPU has no TCO.
+        Fixed: `CLI.IsTailCall = false` at top of `LowerCall`.
+      - **FrameIndex in CopyToReg (critical)**: passing a stack-local array address to a function call
+        creates `CopyToReg(chain, R0, TargetFrameIndex)`. `InstrEmitter::getVR` asserts because TFI
+        is not a value node. Fixed (RISC-V pattern): `ISD::FrameIndex` handler in `Select()` now emits
+        `SETR rd, TFI` (machine node with virtual register output). `eliminateFrameIndex` detects
+        `SETR rd, <FrameIndex>` and expands to `SETR rd, offset; ADDR rd, R15, rd`.
+      - **FrameIndex in ADDR (variable-index array access)**: `buf[i]` creates `ADDR(TFI, var)`.
+        With the SETR approach above, TFI is now inside SETR — ADDR sees a GPR (SETR output) and never
+        has a FrameIndex operand → no scavenging needed for this case.
+      - **eliminateFrameIndex scavenging code** kept as safety net for unexpected FI positions in
+        non-standard instructions.
+    - **Build**: `make adventure.bin test_64bit.bin` → 9389 / 8875 byte flat binaries.
+
+---
+
+25. ✅ CPU hardware fixes (April 2026)
+    - **LDIDX8/STIDX8/LDIDX16/STIDX16 byte-ordering corrected**: lane N now maps to
+      `bits[8N+7:8N]` for bytes and `bits[16N+15:16N]` for halfwords (little-endian, matching
+      CPU_ARCHITECTURE.md §1 and all other load/store instructions). Previously lane 0 mapped to
+      the MSByte (big-endian). The four instructions were self-consistent with each other so
+      LDIDX8/STIDX8 round-trips worked, but mixing with MEMGET8/MEMSET8 or LDIDX32 on the same
+      address produced byte-swapped values within each 8-byte doubleword.
+      Byte-enables: STIDX8 now `0000_0001 << lane`, STIDX16 now `0000_0011 << lane`,
+      matching MEMSET8/MEMSET16.
+    - **SETR64 PC[2]-inversion bug fixed**: earlier silicon inverted address bit 2 during the
+      hi32 fetch of the 12-byte encoding; now functions correctly. Backend already updated in
+      Step 17; no code changes needed.
+    - **MEMGET8 confirmed correct**: per spec `byte N → bits[8(N mod 8)+7 : 8(N mod 8)]`.
+      No backend changes required.
+    - **No backend changes needed**: LDIDX8/16/STIDX8/16 are already emitted correctly by the
+      backend — the hardware now matches what the compiler expects.
+
+---
+
+26. ✅ Fix uart_puts after HW LDIDX8/TXSTRMEMR byte-ordering fix
+    - **Root cause**: after the April 2026 HW fix, both TXSTRMEMR and LDIDX8/MEMGET8 scan bytes
+      LSB-first (bits[7:0] first) within each 32-bit big-endian physical word.  Since the first
+      char 'H' is at bits[31:24], these instructions send/read the LAST char first → reversed
+      4-byte groups ("lleH" instead of "Hell").
+    - **The only correct instruction for C string output**: MEMGET32, which returns the raw
+      32-bit physical word with the first (lowest-address) byte at bits[31:24].  Extract with
+      `(word >> 24) & 0xFF` for char 0, `(word >> 16) & 0xFF` for char 1, etc.
+    - **Why not just `const uint32_t *`**: `unsigned int` = 64 bits on KlaussCPU
+      (`IntWidth=64` in `KlaussCPUTargetInfo`), so `*w++` generates LDIDX64, not MEMGET32.
+    - **Fix**: added `__builtin_klausscpu_memget32(const void *ptr)` intrinsic:
+      - `IntrinsicsKlaussCPU.td`: `int_klausscpu_memget32` with `[IntrReadMem, IntrArgMemOnly]`
+        → lowers as `ISD::INTRINSIC_W_CHAIN` (chain-aware load)
+      - `BuiltinsKlaussCPU.def`: `BUILTIN(__builtin_klausscpu_memget32, "ULLivC*", "n")`
+      - `clang/lib/CodeGen/TargetBuiltins/KlaussCPU.cpp`: emits `klausscpu_memget32` intrinsic
+      - `KlaussCPUISelDAGToDAG.cpp` `INTRINSIC_W_CHAIN` handler: emits `getMachineNode(MEMGET32,
+        DL, {MVT::i64, MVT::Other}, {Ptr, Chain})` — chain threads correctly (same pattern as
+        LDIDX64 manual selection)
+    - **uart_puts rewritten** (`runtime/uart_stubs.c`): uses `__builtin_klausscpu_memget32`
+      in a `while(1)` / `for(shift=24; shift>=0; shift-=8)` loop; pointer advances by 4 each
+      outer iteration.  `uart_println` inlined as `uart_puts` + `newline`.
+    - **Generated assembly verified**: `memget32 r8, r0` appears in uart_puts; inner loop emits
+      `shrr / andr / cmprv / memset8 / txcharmemr` — byte extraction + transmission correct.
+    - **Binaries rebuilt**: hello.bin (898 B), adventure.bin (9333 B), test_64bit.bin (8787 B).
+    - **Regression**: adventure.c strings were partially printed (e.g. "y.", "e.", "g") because
+      .rodata strings are NOT guaranteed 4-byte aligned — strings are packed end-to-end.  An
+      unaligned string pointer (addr & 3 ≠ 0) caused MEMGET32 to read from the aligned word
+      BELOW the pointer, hitting a null terminator from the preceding string and stopping early.
+    - **Final fix — unaligned-aware uart_puts** (same Step 26 rebuild):
+      Compute `misalign = addr & 3`; if non-zero, call MEMGET32 on `addr & ~3` and start the
+      extraction loop from `shift = 24 - 8 * misalign` (skipping the bytes before the string),
+      then advance p to the next 4-byte boundary and continue with the aligned loop.
+      Generated assembly verified: `setr r9, -4; andr r9, r0, r9; memget32 r8, r9` for the
+      aligned address computation; `setr r9, 32; subr r10, r9, r10` for the pre-decremented
+      initial shift; both loops emit `memget32`.
+    - **Binaries rebuilt**: hello.bin (1226 B), adventure.bin (9661 B), test_64bit.bin (9115 B).
+
+---
+
+## Hardware memory model (authoritative)
+
+**Physical memory**: big-endian words — the lowest-address byte of each 32-bit word is stored
+at bits[31:24].  So the first char 'H' of "Hello..." is at bits[31:24] of the first word.
+
+| Instruction | Byte ordering after April 2026 HW fix | Use for C strings? |
+|---|---|---|
+| MEMGET32 | first byte at bits[31:24] (MSB-first) | ✅ YES — use with shift=24..0 |
+| MEMGET8 / LDIDX8 | bits[7:0] = byte at that lane (LE-lane) | ❌ reversed within 4B group |
+| TXSTRMEMR | scans bits[7:0] first (LE-lane) | ❌ reversed within 4B group |
+| LDIDX64 | not changed by April fix (still big-endian?) | untested — do not rely on |
+
+**Rule**: always use `__builtin_klausscpu_memget32` for reading C string literals from .rodata.
+
+---
+
 ## Next steps
 
-### Step 24 — Inline assembly support
+### Step 27 — Hardware test: run hello.bin, adventure.bin, test_64bit.bin on board
+- hello.bin: should print "Hello, KlaussCPU!\r\n" correctly (was broken by HW fix)
+- adventure.bin: text adventure, uses UART for I/O
+- test_64bit.bin: 64-bit arithmetic/string/heap test suite, prints pass/fail via UART
+
+### Step 28 — Inline assembly support
 - Add `KlaussCPUAsmParser` (registers, basic mnemonic parsing)
 - Enables naked functions and direct SP init without hardware dependency
-
-### Step 25 — Full libc-style string library
-- Implement `strlen`, `strcpy`, `strcmp` using MEMGET32 + MSB-first extraction
-- All string functions must use the word-read pattern; document this in a header

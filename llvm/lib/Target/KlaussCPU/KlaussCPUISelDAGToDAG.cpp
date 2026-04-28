@@ -80,16 +80,30 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
     return;
   }
 
-  // ---- ISD::FrameIndex → TargetFrameIndex --------------------------------
-  // KlaussCPU has no i32 register class, so pointers are promoted from i32 to
-  // i64 during type legalization.  We produce a TargetFrameIndex typed as i64
-  // so it can serve as a GPR-class operand in LDIDX64 / STIDX64.
-  // eliminateFrameIndex (KlaussCPURegisterInfo) later rewrites the operand to
-  // R15 + frame_slot_offset.
+  // ---- ISD::FrameIndex → SETR(TargetFrameIndex) ---------------------------
+  // A bare TargetFrameIndex (TFI) is only a placeholder operand inside a
+  // machine instruction; it is NOT a value node that InstrEmitter can assign
+  // to a virtual register.  If a FrameIndex is used in a CopyToReg (e.g.
+  // passing a stack-local array as a function argument) or in an ADD (variable-
+  // indexed stack access), InstrEmitter::getVR would assert.
+  //
+  // Fix (same pattern as RISC-V ADDI(TFI,0)): wrap TFI inside a SETR machine
+  // node.  SETR produces a proper virtual register i64 output that can be used
+  // in CopyToReg and ADD.  eliminateFrameIndex later expands
+  //   SETR rd, <TFI>
+  // into
+  //   SETR rd, frame_slot_offset          ; rd = offset
+  //   ADDR rd, R15, rd                    ; rd = R15 + offset  (frame address)
+  //
+  // Tablegen load/store patterns with GPR address cover all memory-op cases
+  // that follow, so the LDIDX/STIDX C++ handlers below fall through to
+  // SelectCode and match naturally.
   if (N->getOpcode() == ISD::FrameIndex) {
     int FI = cast<FrameIndexSDNode>(N)->getIndex();
+    SDLoc DL(N);
     SDValue TFI = CurDAG->getTargetFrameIndex(FI, MVT::i64);
-    ReplaceNode(N, TFI.getNode());
+    SDNode *Res = CurDAG->getMachineNode(KlaussCPU::SETR, DL, MVT::i64, TFI);
+    ReplaceNode(N, Res);
     return;
   }
 
@@ -289,8 +303,8 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
   }
 
   // ---- ISD::Constant: 64-bit values that don't fit in simm32 --------------
-  // SETR covers [-2^31, 2^31-1].  Larger values use SETR64 (hardware fixed
-  // April 2026): a single 12-byte instruction rd = (hi32 << 32) | lo32.
+  // SETR covers [-2^31, 2^31-1].  Larger values use SETR64: a single
+  // 12-byte instruction rd = (hi32 << 32) | lo32.
   if (N->getOpcode() == ISD::Constant) {
     auto *C = cast<ConstantSDNode>(N);
     int64_t Val = C->getSExtValue();
@@ -375,6 +389,16 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
     SDValue JmpOps[] = {Dest, SDValue(CmpNode, 0) /* chain from compare */};
     SDNode *JmpNode = CurDAG->getMachineNode(JmpOpc, DL, MVT::Other, JmpOps);
     ReplaceNode(N, JmpNode);
+    return;
+  }
+
+  // ---- KlaussCPUISD::SELECT → SELECT_PSEUDO (custom inserter) -------------
+  if (N->getOpcode() == KlaussCPUISD::SELECT) {
+    SDLoc DL(N);
+    SDNode *Res = CurDAG->getMachineNode(
+        KlaussCPU::SELECT_PSEUDO, DL, N->getValueType(0),
+        {N->getOperand(0), N->getOperand(1), N->getOperand(2)});
+    ReplaceNode(N, Res);
     return;
   }
 
@@ -495,6 +519,18 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
       SDNode *Res = CurDAG->getMachineNode(
           KlaussCPU::RXRNB_R, DL,
           CurDAG->getVTList(MVT::i64, MVT::Other), {Chain});
+      ReplaceUses(N, Res);
+      CurDAG->RemoveDeadNode(N);
+      return;
+    }
+    case Intrinsic::klausscpu_memget32: {
+      // MEMGET32 rd, rs — read 32-bit physical word at address in rs.
+      // The Chain threads through to maintain memory ordering; the explicit
+      // address operand maps to rs in the RR instruction encoding.
+      SDValue Ptr = N->getOperand(2);
+      SDNode *Res = CurDAG->getMachineNode(
+          KlaussCPU::MEMGET32, DL,
+          CurDAG->getVTList(MVT::i64, MVT::Other), {Ptr, Chain});
       ReplaceUses(N, Res);
       CurDAG->RemoveDeadNode(N);
       return;

@@ -1,8 +1,10 @@
 # KlaussCPU build Makefile
 #
 # Usage:
-#   make hello          — build hello.elf from hello.c + uart_stubs.c
-#   make hello.bin      — produce a flat binary loadable on the FPGA
+#   make hello          — hello world (uart test)
+#   make adventure      — text adventure game
+#   make test_64bit     — 64-bit CPU test suite
+#   make <name>.bin     — flat binary for FPGA loader
 #   make clean
 #
 # Point BUILD_DIR at your llvm-project/build directory if needed.
@@ -24,10 +26,14 @@ LD_SCRIPT   = $(dir $(lastword $(MAKEFILE_LIST)))klausscpu.ld
 CRT0_SRC    = $(dir $(lastword $(MAKEFILE_LIST)))crt0.c
 UART_SRC    = $(dir $(lastword $(MAKEFILE_LIST)))uart_stubs.c
 IO_SRC      = $(dir $(lastword $(MAKEFILE_LIST)))io_stubs.c
+LIBC_SRC    = $(dir $(lastword $(MAKEFILE_LIST)))libc.c
+
+# Common objects needed by every program
+RUNTIME_OBJS = crt0.o uart_stubs.o io_stubs.o
 
 # ── Default target ────────────────────────────────────────────────────────────
 
-.PHONY: all clean
+.PHONY: all clean adventure test_64bit
 
 all: hello.elf
 
@@ -45,12 +51,28 @@ uart_stubs.o: $(UART_SRC)
 io_stubs.o: $(IO_SRC)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+libc.o: $(LIBC_SRC)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
 # ── Link ──────────────────────────────────────────────────────────────────────
 
-hello.elf: hello.o uart_stubs.o io_stubs.o crt0.o
-	$(LLD) -T $(LD_SCRIPT) -o $@ crt0.o uart_stubs.o io_stubs.o hello.o
+hello.elf: hello.o $(RUNTIME_OBJS)
+	$(LLD) -T $(LD_SCRIPT) -o $@ $(RUNTIME_OBJS) hello.o
 	@echo "==> $@ built"
 	@file $@
+
+adventure.elf: adventure.o libc.o $(RUNTIME_OBJS)
+	$(LLD) -T $(LD_SCRIPT) -o $@ $(RUNTIME_OBJS) libc.o adventure.o
+	@echo "==> $@ built"
+	@file $@
+
+test_64bit.elf: test_64bit.o libc.o $(RUNTIME_OBJS)
+	$(LLD) -T $(LD_SCRIPT) -o $@ $(RUNTIME_OBJS) libc.o test_64bit.o
+	@echo "==> $@ built"
+	@file $@
+
+adventure:   adventure.elf   adventure.bin
+test_64bit:  test_64bit.elf  test_64bit.bin
 
 # ── Flat binary for FPGA loader ───────────────────────────────────────────────
 

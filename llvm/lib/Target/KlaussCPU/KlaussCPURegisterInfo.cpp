@@ -19,8 +19,10 @@
 #include "KlaussCPUSubtarget.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/MathExtras.h"
 
 #define GET_REGINFO_TARGET_DESC
 #include "KlaussCPUGenRegisterInfo.inc"
@@ -67,22 +69,68 @@ bool KlaussCPURegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
                                                  RegScavenger *RS) const {
   assert(SPAdj == 0 && "Unexpected SPAdj");
   MachineInstr &MI = *II;
-  const MachineFrameInfo &MFI = MI.getParent()->getParent()->getFrameInfo();
+  MachineBasicBlock &MBB = *MI.getParent();
+  MachineFunction &MF = *MBB.getParent();
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
 
   int FrameIndex = MI.getOperand(FIOperandNum).getIndex();
   int64_t BaseOffset = MFI.getObjectOffset(FrameIndex);
 
-  // All frame-slot instructions use RRV format (base + offset): LDIDX64/32/16/8
-  // and STIDX64/32/16/8.  MEMGET8/16/MEMSET8/16 (register-addressed, no offset)
-  // are only emitted via tablegen patterns for plain GPR addresses and will never
-  // carry a FrameIndex operand.
-  //
-  // Standard case: instruction has a (base, offset) pair at
+  // Special case: SETR rd, <TFI>  (frame address materialisation).
+  // The ISD::FrameIndex handler in Select() wraps every FrameIndex in SETR so
+  // that it produces a proper virtual register for InstrEmitter.  Expand to:
+  //   SETR rd, BaseOffset       ; rd = frame slot offset (relative to R15)
+  //   ADDR rd, R15, rd          ; rd = R15 + offset = absolute frame address
+  if (MI.getOpcode() == KlaussCPU::SETR &&
+      FIOperandNum == 1 &&
+      MI.getNumOperands() == 2) {
+    Register Dst = MI.getOperand(0).getReg();
+    DebugLoc DL = MI.getDebugLoc();
+    assert(isInt<32>(BaseOffset) && "Frame offset out of SETR simm32 range");
+    BuildMI(MBB, II, DL, TII.get(KlaussCPU::SETR), Dst).addImm(BaseOffset);
+    BuildMI(MBB, II, DL, TII.get(KlaussCPU::ADDR), Dst)
+        .addReg(KlaussCPU::R15)
+        .addReg(Dst, RegState::Kill);
+    MI.eraseFromParent();
+    return true;
+  }
+
+  // Standard case: load/store instructions have (base, imm_offset) at
   // [FIOperandNum, FIOperandNum+1].  Replace FI with R15 and fold in the
   // frame-slot offset.
-  int64_t Offset = BaseOffset + MI.getOperand(FIOperandNum + 1).getImm();
-  MI.getOperand(FIOperandNum).ChangeToRegister(KlaussCPU::R15, /*isDef=*/false);
-  MI.getOperand(FIOperandNum + 1).ChangeToImmediate(Offset);
+  if (FIOperandNum + 1 < MI.getNumOperands() &&
+      MI.getOperand(FIOperandNum + 1).isImm()) {
+    int64_t Offset = BaseOffset + MI.getOperand(FIOperandNum + 1).getImm();
+    MI.getOperand(FIOperandNum).ChangeToRegister(KlaussCPU::R15, false);
+    MI.getOperand(FIOperandNum + 1).ChangeToImmediate(Offset);
+    return false;
+  }
+
+  // Non-standard case: FrameIndex is used as a plain register operand in an
+  // arithmetic instruction (e.g., ADDR rd, TFI, var_reg).  This occurs when C
+  // code accesses a stack array with a variable index: buf[i].
+  //
+  // Materialise (R15 + BaseOffset) into a scratch register before the
+  // instruction, then replace the FrameIndex operand with that register.
+  //   SETR  scratch, BaseOffset
+  //   ADDR  scratch, R15, scratch    →  scratch = &buf[0]
+  //   ADDR  rd, scratch, var_reg     →  rd = &buf[i]   (original insn, patched)
+  assert(RS && "Register scavenger required for variable-indexed stack access");
+  assert(isInt<32>(BaseOffset) && "Frame offset out of SETR simm32 range");
+
+  DebugLoc DL = MI.getDebugLoc();
+  Register Scratch = RS->scavengeRegisterBackwards(
+      KlaussCPU::GPRRegClass, II, /*RestoreAfter=*/false, SPAdj);
+
+  BuildMI(MBB, II, DL, TII.get(KlaussCPU::SETR), Scratch).addImm(BaseOffset);
+  BuildMI(MBB, II, DL, TII.get(KlaussCPU::ADDR), Scratch)
+      .addReg(KlaussCPU::R15)
+      .addReg(Scratch, RegState::Kill);
+
+  MI.getOperand(FIOperandNum).ChangeToRegister(Scratch, /*isDef=*/false,
+                                               /*isImp=*/false,
+                                               /*isKill=*/true);
   return false;
 }
 

@@ -9,7 +9,6 @@
 //         -ffreestanding -c uart_stubs.c
 
 typedef unsigned long long uint64_t;
-typedef unsigned int       uint32_t;
 
 // ---------------------------------------------------------------------------
 // Transmit: send 64-bit register value as 16 hex digits over UART.
@@ -34,17 +33,43 @@ void uart_putc(char c) {
 // ---------------------------------------------------------------------------
 // Transmit: send null-terminated string over UART.
 //
-// MEMGET8 (byte load) uses scrambled addressing: byte at logical address A
-// is read from physical address (A & ~3) | (3 - (A & 3)), reversing bytes
-// within every 4-byte word.  MEMGET32 (32-bit LE load) is consistent: byte
-// at the lowest word address lands in bits[7:0] of the returned value.
-// So we read 4 chars at a time as a uint32_t and extract bytes via right-
-// shift, which gives the correct sequential byte order.
+// Physical memory is big-endian: the first (lowest-address) byte of a string
+// is stored at bits[31:24] of the 32-bit physical word.  MEMGET32 returns
+// this raw word, so extracting bytes with decreasing shift (24, 16, 8, 0)
+// gives the bytes in correct sequential order.
+//
+// TXSTRMEMR and LDIDX8 both use LE-lane mapping (after April 2026 HW fix):
+// they scan from bits[7:0] first, which is the LAST byte in a big-endian word.
+// Using either of those here would produce reversed 4-byte groups.
+// MEMGET32 is the only instruction that correctly reads big-endian .rodata.
+//
+// Unaligned handling: .rodata strings are NOT guaranteed to be 4-byte aligned.
+// MEMGET32 reads from the 4-byte aligned address containing the pointer.  When
+// the string starts at byte offset N within a 32-bit word (N = addr & 3), we
+// start extraction at shift = 24 - 8*N to skip the bytes before the string,
+// then continue with fully-aligned 4-byte reads.
 // ---------------------------------------------------------------------------
 void uart_puts(const char *s) {
-    const uint32_t *w = (const uint32_t *)s;
+    const char *p = s;
+
+    // Handle misaligned start.
+    uint64_t misalign = (uint64_t)p & 3;
+    if (misalign != 0) {
+        const char *aligned = (const char *)((uint64_t)p & ~(uint64_t)3);
+        uint64_t word = __builtin_klausscpu_memget32((const void *)aligned);
+        int shift;
+        for (shift = 24 - 8 * (int)misalign; shift >= 0; shift -= 8) {
+            char c = (char)((word >> shift) & 0xFF);
+            if (c == '\0') return;
+            _uart_char_buf = c;
+            __builtin_klausscpu_txcharmemr((const void *)&_uart_char_buf);
+        }
+        p = aligned + 4;
+    }
+
+    // Aligned loop: read 4 bytes at a time.
     while (1) {
-        uint32_t word = *w++;
+        uint64_t word = __builtin_klausscpu_memget32((const void *)p);
         int shift;
         for (shift = 24; shift >= 0; shift -= 8) {
             char c = (char)((word >> shift) & 0xFF);
@@ -52,6 +77,7 @@ void uart_puts(const char *s) {
             _uart_char_buf = c;
             __builtin_klausscpu_txcharmemr((const void *)&_uart_char_buf);
         }
+        p += 4;
     }
 }
 
@@ -86,17 +112,6 @@ uint64_t uart_getc_nonblocking(void) {
 // Convenience: puts() + newline (matches libc puts() semantics roughly).
 // ---------------------------------------------------------------------------
 void uart_println(const char *s) {
-    const uint32_t *w = (const uint32_t *)s;
-    while (1) {
-        uint32_t word = *w++;
-        int shift;
-        for (shift = 24; shift >= 0; shift -= 8) {
-            char c = (char)((word >> shift) & 0xFF);
-            if (c == '\0') goto done;
-            _uart_char_buf = c;
-            __builtin_klausscpu_txcharmemr((const void *)&_uart_char_buf);
-        }
-    }
-done:
+    uart_puts(s);
     __builtin_klausscpu_newline();
 }

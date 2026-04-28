@@ -58,4 +58,11 @@ let TargetPrefix = "klausscpu" in {
   // DELAYV/DELAYR: hardware spin-wait for N clock cycles.
   def int_klausscpu_delayv
       : Intrinsic<[], [llvm_i64_ty], [IntrHasSideEffects]>;
+
+  // MEMGET32: read 32-bit value at address in register, zero-extend to i64.
+  // Returns the raw physical 32-bit word; in big-endian physical memory the
+  // lowest-address byte is at bits[31:24] of the result.  Use shift=24..0 to
+  // extract bytes in correct order.
+  def int_klausscpu_memget32
+      : Intrinsic<[llvm_i64_ty], [llvm_ptr_ty], [IntrReadMem, IntrArgMemOnly]>;
 }
