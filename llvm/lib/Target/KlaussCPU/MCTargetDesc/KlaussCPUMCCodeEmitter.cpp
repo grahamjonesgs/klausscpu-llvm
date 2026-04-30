@@ -329,11 +329,16 @@ uint64_t KlaussCPUMCCodeEmitter::encode64(
   // ── RV_cmp (rs, imm32) ───────────────────────────────────────────────────
   case KlaussCPU::CMPRV_I: return fmtRV_cmp(0x0000083, MI);
 
+  // ── RRV ALU (rd, rs, imm32) ──────────────────────────────────────────────
+  case KlaussCPU::ADDI: return fmtRRV_ld(0x000002, MI);
+
   // ── RRV loads (rd, base, offset32) ───────────────────────────────────────
-  case KlaussCPU::LDIDX64: return fmtRRV_ld(0x0000FC, MI);
-  case KlaussCPU::LDIDX32: return fmtRRV_ld(0x0000C0, MI);
-  case KlaussCPU::LDIDX16: return fmtRRV_ld(0x0000C2, MI);
-  case KlaussCPU::LDIDX8:  return fmtRRV_ld(0x0000C4, MI);
+  case KlaussCPU::LDIDX64:   return fmtRRV_ld(0x0000FC, MI);
+  case KlaussCPU::LDIDX32:   return fmtRRV_ld(0x0000C0, MI);
+  case KlaussCPU::LDIDX16:   return fmtRRV_ld(0x0000C2, MI);
+  case KlaussCPU::LDIDX8:    return fmtRRV_ld(0x0000C4, MI);
+  case KlaussCPU::LDIDX8_S:  return fmtRRV_ld(0x0000C6, MI);
+  case KlaussCPU::LDIDX16_S: return fmtRRV_ld(0x0000C7, MI);
 
   // ── RRV stores (rs_data, base, offset32) ─────────────────────────────────
   case KlaussCPU::STIDX64: return fmtRRV_st(0x0000FD, MI);

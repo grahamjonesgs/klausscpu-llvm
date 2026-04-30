@@ -58,11 +58,23 @@ public:
 private:
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerExternalSymbol(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerJumpTable(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerBR_JT(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSTACKSAVE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSTACKRESTORE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSELECT(SDValue Op, SelectionDAG &DAG) const;
 
 public:
+  unsigned getJumpTableEncoding() const override;
+
+  // EK_Custom32: emit each entry as a 4-byte absolute target address.
+  // The assembler emits R_KLAUSSCPU_ABS32 for each entry; the linker fills
+  // in the correct address regardless of which ELF section the table lands in.
+  const MCExpr *LowerCustomJumpTableEntry(const MachineJumpTableInfo *,
+                                           const MachineBasicBlock *MBB,
+                                           unsigned, MCContext &Ctx) const override;
+
+
   MachineBasicBlock *
   EmitInstrWithCustomInserter(MachineInstr &MI,
                                MachineBasicBlock *BB) const override;

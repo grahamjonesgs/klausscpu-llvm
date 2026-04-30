@@ -71,11 +71,14 @@ public:
 
   // Data points to the first byte of the fixup location (byte 4 of the 8-byte
   // branch/call instruction, as specified by MCFixup offset=4 in the emitter).
-  // Write the resolved 32-bit address big-endian into bytes [0..3].
   void applyFixup(const MCFragment &F, const MCFixup &Fixup,
                   const MCValue &Target, uint8_t *Data,
                   uint64_t Value, bool IsResolved) override {
-    if (Fixup.getKind() != KlaussCPU::FK_KlaussCPU_ABS32)
+    MCFixupKind Kind = Fixup.getKind();
+    // Our instruction fixup (CALL/SETR word-1 slot) and standard 4-byte data
+    // references (.long symbol, used for EK_Custom32 jump table entries) both
+    // encode a 32-bit LE absolute address at the fixup location.
+    if (Kind != KlaussCPU::FK_KlaussCPU_ABS32 && Kind != FK_Data_4)
       return;
     uint32_t Addr = static_cast<uint32_t>(Value);
     Data[0] = (Addr >>  0) & 0xFF;

@@ -230,6 +230,18 @@ class RV_cmp<bits<28> op, string asmstr>
 // [63:40]=op24  [39:36]=rd  [35:32]=rs  [31:0]=offset32
 //===----------------------------------------------------------------------===//
 
+// ALU variant: rd = rs op sign_extend(imm32) — no memory side-effect.
+class RRV_alu<bits<24> op, string asmstr, list<dag> pat = []>
+    : KCInst64<(outs GPR:$rd), (ins GPR:$rs, simm32:$imm), asmstr, pat> {
+  bits<4>  rd;
+  bits<4>  rs;
+  bits<32> imm;
+  let Inst{63-40} = op;
+  let Inst{39-36} = rd;
+  let Inst{35-32} = rs;
+  let Inst{31-0}  = imm;
+}
+
 // Indexed 64-bit load: rd = mem64[base + offset]
 class RRV_ld<bits<24> op, string asmstr, list<dag> pat = []>
     : KCInst64<(outs GPR:$rd), (ins GPR:$base, simm32:$offset), asmstr, pat> {
@@ -585,6 +597,11 @@ def MULV    : RV_2addr<0x00000B8, "mulv\t$rd, $imm">;
 def DIVV    : RV_2addr<0x00000B9, "divv\t$rd, $imm">;
 def MODV    : RV_2addr<0x00000BA, "modv\t$rd, $imm">;
 
+// reg+imm32 add: rd = rs + sign_extend(imm32). Two distinct regs; sign-extends.
+// Replaces the SETR+ADDR two-instruction sequence for frame-address materialisation.
+// Pattern deferred: simm32_imm is not yet defined here; see isel patterns section.
+def ADDI : RRV_alu<0x000002, "addi\t$rd, $rs, $imm">;
+
 // Compare register to immediate — flags only (same side-effect caveat as CMPRR_I)
 def CMPRV_I : RV_cmp<0x0000083, "cmprv\t$rs, $imm"> { let hasSideEffects = 1; }
 
@@ -609,10 +626,12 @@ def STIDX64 : RRV_st<0x0000FD, "stidx64\t$rs_data, $base, $offset">;
 def LDIDX32 : RRV_ld<0x0000C0, "ldidx32\t$rd, $base, $offset">;
 def STIDX32 : RRV_st<0x0000C1, "stidx32\t$rs_data, $base, $offset">;
 
-def LDIDX16 : RRV_ld<0x0000C2, "ldidx16\t$rd, $base, $offset"> { let mayLoad = 1; }
-def STIDX16 : RRV_st<0x0000C3, "stidx16\t$rs_data, $base, $offset">;
-def LDIDX8  : RRV_ld<0x0000C4, "ldidx8\t$rd, $base, $offset">  { let mayLoad = 1; }
-def STIDX8  : RRV_st<0x0000C5, "stidx8\t$rs_data, $base, $offset">;
+def LDIDX16   : RRV_ld<0x0000C2, "ldidx16\t$rd, $base, $offset">   { let mayLoad = 1; }
+def STIDX16   : RRV_st<0x0000C3, "stidx16\t$rs_data, $base, $offset">;
+def LDIDX8    : RRV_ld<0x0000C4, "ldidx8\t$rd, $base, $offset">    { let mayLoad = 1; }
+def STIDX8    : RRV_st<0x0000C5, "stidx8\t$rs_data, $base, $offset">;
+def LDIDX8_S  : RRV_ld<0x0000C6, "ldidx8s\t$rd, $base, $offset">   { let mayLoad = 1; }
+def LDIDX16_S : RRV_ld<0x0000C7, "ldidx16s\t$rd, $base, $offset">  { let mayLoad = 1; }
 
 //===----------------------------------------------------------------------===//
 // Load / store isel patterns
@@ -632,6 +651,9 @@ def simm32_imm : ImmLeaf<i64, [{return isInt<32>(Imm);}]>;
 // Materialize a signed 32-bit constant into a GPR using SETR.
 // Large 64-bit constants (outside simm32) use SETR64 in Select().
 def : Pat<(i64 simm32_imm:$imm), (SETR simm32_imm:$imm)>;
+
+// Register + signed-32-bit constant addition → ADDI (one instruction).
+def : Pat<(i64 (add GPR:$rs, simm32_imm:$imm)), (ADDI GPR:$rs, simm32_imm:$imm)>;
 
 // Global addresses and external symbols are materialized in C++ Select()
 // via SETR (non-call uses) to avoid the "leaf node not emitted" crash.
@@ -777,3 +799,17 @@ def : Pat<(KlaussCPUCallNode (i64 tglobaladdr:$func)),
           (CALL_I tglobaladdr:$func)>;
 def : Pat<(KlaussCPUCallNode (i64 texternalsym:$func)),
           (CALL_I texternalsym:$func)>;
+
+// Indirect call via register (function pointer).
+def : Pat<(KlaussCPUCallNode (i64 GPR:$func)),
+          (CALLR_R GPR:$func)>;
+
+// Sign-extending byte/halfword loads — pure GPR address (no base+offset needed).
+def : Pat<(i64 (sextloadi8  (i64 GPR:$addr))), (LDIDX8_S  GPR:$addr, 0)>;
+def : Pat<(i64 (sextloadi16 (i64 GPR:$addr))), (LDIDX16_S GPR:$addr, 0)>;
+
+// Sign-extending byte/halfword loads — GPR base + signed-32 offset.
+def : Pat<(i64 (sextloadi8  (add (i64 GPR:$base), simm32_imm:$off))),
+          (LDIDX8_S  GPR:$base, simm32_imm:$off)>;
+def : Pat<(i64 (sextloadi16 (add (i64 GPR:$base), simm32_imm:$off))),
+          (LDIDX16_S GPR:$base, simm32_imm:$off)>;

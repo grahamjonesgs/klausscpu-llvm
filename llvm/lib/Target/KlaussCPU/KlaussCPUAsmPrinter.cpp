@@ -66,6 +66,10 @@ static MCOperand lowerMachineOperand(const MachineOperand &MO,
     return MCOperand::createExpr(MCSymbolRefExpr::create(
         AP.GetExternalSymbolSymbol(MO.getSymbolName()), AP.OutContext));
 
+  case MachineOperand::MO_JumpTableIndex:
+    return MCOperand::createExpr(MCSymbolRefExpr::create(
+        AP.GetJTISymbol(MO.getIndex()), AP.OutContext));
+
   default:
     llvm_unreachable("KlaussCPU AsmPrinter: unhandled operand type");
   }

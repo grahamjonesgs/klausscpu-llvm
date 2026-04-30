@@ -18,6 +18,9 @@
 #include "KlaussCPUInstrInfo.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/MachineJumpTableInfo.h"
+#include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCExpr.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -69,10 +72,11 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::SELECT_CC, MVT::i64, Expand);
 
   // ---- Sub-word loads / stores ----
-  // Hardware has MEMGET8/16/32 (zero-extending, register-addressed) and
-  // LDIDX32/STIDX32 (base+offset, 32-bit).  No hardware sign-extending loads.
+  // Hardware has LDIDX8/16/32 (zero-extending, base+offset) and
+  // LDIDX8_S/LDIDX16_S (sign-extending, base+offset).  No sign-extending i32 load.
   //
-  // SEXTLOAD expands → ZEXTLOAD + SIGN_EXTEND_INREG.
+  // SEXTLOAD i8/i16 → Legal (LDIDX8_S / LDIDX16_S hardware instructions).
+  // SEXTLOAD i32   → Expand → ZEXTLOAD + SIGN_EXTEND_INREG (SEXTW).
   // SIGN_EXTEND_INREG i8/i16 → Legal (SEXTB/SEXTH hardware instructions).
   // SIGN_EXTEND_INREG i32 → Legal (SEXTW hardware instruction, fixed April 2026).
   for (MVT VT : {MVT::i8, MVT::i16, MVT::i32}) {
@@ -81,6 +85,8 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
     setLoadExtAction(ISD::SEXTLOAD, MVT::i64, VT, Expand);
     setLoadExtAction(ISD::SEXTLOAD, MVT::i32, VT, Expand);
   }
+  setLoadExtAction(ISD::SEXTLOAD, MVT::i64, MVT::i8,  Legal);
+  setLoadExtAction(ISD::SEXTLOAD, MVT::i64, MVT::i16, Legal);
   setTruncStoreAction(MVT::i64, MVT::i8,  Legal);
   setTruncStoreAction(MVT::i64, MVT::i16, Legal);
   setTruncStoreAction(MVT::i64, MVT::i32, Legal);
@@ -102,15 +108,14 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   // valid addresses, so sign-ext == zero-ext).
   setOperationAction(ISD::GlobalAddress,  MVT::i64, Custom);
   setOperationAction(ISD::ExternalSymbol, MVT::i64, Custom);
+  setOperationAction(ISD::JumpTable,      MVT::i64, Custom);
 
   // ---- Branch/control ----
-  // KlaussCPU has no indirect branch instruction.  Disable jump-table
-  // generation entirely so switch statements lower to decision trees.
-  // BR_JT+BRIND remain Expand as a safety net — they should never appear
-  // since setMinimumJumpTableEntries(INT_MAX) prevents their creation.
-  setMinimumJumpTableEntries(INT_MAX);
-  setOperationAction(ISD::BR_JT,  MVT::Other, Expand);
-  setOperationAction(ISD::BRIND,  MVT::Other, Expand);
+  // JMPR is available.  Jump tables use EK_LabelDifference32 (4-byte entries
+  // storing target-base offsets) — safe for ELFCLASS32.  BR_JT is Custom:
+  // LowerBR_JT loads the 32-bit offset and adds the table base, then BRIND.
+  setOperationAction(ISD::BR_JT,  MVT::Other, Custom);
+  setOperationAction(ISD::BRIND,  MVT::Other, Legal);
   setOperationAction(ISD::BRCOND, MVT::Other, Expand); // expands to BR_CC
   // BR_CC with i64 operands is Legal — handled by KlaussCPUDAGToDAGISel::Select()
   // which emits CMPRR_I/CMPRV_I + the appropriate conditional JMP instruction.
@@ -156,6 +161,8 @@ SDValue KlaussCPUTargetLowering::LowerOperation(SDValue Op,
   switch (Op.getOpcode()) {
   case ISD::GlobalAddress:  return LowerGlobalAddress(Op, DAG);
   case ISD::ExternalSymbol: return LowerExternalSymbol(Op, DAG);
+  case ISD::JumpTable:      return LowerJumpTable(Op, DAG);
+  case ISD::BR_JT:          return LowerBR_JT(Op, DAG);
   case ISD::SELECT:         return LowerSELECT(Op, DAG);
   case ISD::STACKSAVE:      return LowerSTACKSAVE(Op, DAG);
   case ISD::STACKRESTORE:   return LowerSTACKRESTORE(Op, DAG);
@@ -180,6 +187,55 @@ SDValue KlaussCPUTargetLowering::LowerExternalSymbol(SDValue Op,
   auto *N = cast<ExternalSymbolSDNode>(Op);
   SDValue TES = DAG.getTargetExternalSymbol(N->getSymbol(), MVT::i64);
   return DAG.getNode(KlaussCPUISD::ADDR, SDLoc(N), MVT::i64, TES);
+}
+
+SDValue KlaussCPUTargetLowering::LowerJumpTable(SDValue Op,
+                                                  SelectionDAG &DAG) const {
+  auto *N = cast<JumpTableSDNode>(Op);
+  SDValue TJT = DAG.getTargetJumpTable(N->getIndex(), MVT::i64);
+  return DAG.getNode(KlaussCPUISD::ADDR, SDLoc(N), MVT::i64, TJT);
+}
+
+// Jump tables use EK_Custom32: each 4-byte entry holds the absolute 32-bit
+// target address.  The assembler emits R_KLAUSSCPU_ABS32 per entry; the
+// linker fills them in regardless of which ELF section the table lands in.
+// Dispatch: load 4-byte entry (absolute address), zero-extend, BRIND.
+SDValue KlaussCPUTargetLowering::LowerBR_JT(SDValue Op,
+                                              SelectionDAG &DAG) const {
+  SDValue Chain = Op.getOperand(0);
+  SDValue Table = Op.getOperand(1);
+  SDValue Index = Op.getOperand(2);
+  SDLoc DL(Op);
+
+  auto *JT = cast<JumpTableSDNode>(Table);
+  SDValue Base = DAG.getNode(KlaussCPUISD::ADDR, DL, MVT::i64,
+                              DAG.getTargetJumpTable(JT->getIndex(), MVT::i64));
+
+  // EntryAddr = Base + Index * 4
+  SDValue Scaled = DAG.getNode(ISD::SHL, DL, MVT::i64,
+                                Index, DAG.getConstant(2, DL, MVT::i64));
+  SDValue EntryAddr = DAG.getNode(ISD::ADD, DL, MVT::i64, Base, Scaled);
+
+  // Load the 4-byte absolute target address from the table (zero-extend).
+  // All code addresses fit in 32 bits, so zero-extension is correct.
+  SDValue Target = DAG.getExtLoad(ISD::ZEXTLOAD, DL, MVT::i64, Chain,
+                                   EntryAddr, MachinePointerInfo(), MVT::i32);
+
+  return DAG.getNode(ISD::BRIND, DL, MVT::Other,
+                     Target.getValue(1), Target.getValue(0));
+}
+
+// EK_Custom32 entry: emit the basic block's absolute address as an MCExpr.
+// The assembler produces an R_KLAUSSCPU_ABS32 relocation; the linker resolves
+// it to the final 32-bit address of the target basic block.
+const MCExpr *KlaussCPUTargetLowering::LowerCustomJumpTableEntry(
+    const MachineJumpTableInfo *, const MachineBasicBlock *MBB,
+    unsigned, MCContext &Ctx) const {
+  return MCSymbolRefExpr::create(MBB->getSymbol(), Ctx);
+}
+
+unsigned KlaussCPUTargetLowering::getJumpTableEncoding() const {
+  return MachineJumpTableInfo::EK_Custom32;
 }
 
 // __builtin_stack_save() / __builtin_stack_restore() support.

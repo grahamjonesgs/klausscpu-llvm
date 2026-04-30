@@ -80,29 +80,23 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
     return;
   }
 
-  // ---- ISD::FrameIndex → SETR(TargetFrameIndex) ---------------------------
+  // ---- ISD::FrameIndex → ADDI(TargetFrameIndex, 0) ------------------------
   // A bare TargetFrameIndex (TFI) is only a placeholder operand inside a
   // machine instruction; it is NOT a value node that InstrEmitter can assign
   // to a virtual register.  If a FrameIndex is used in a CopyToReg (e.g.
   // passing a stack-local array as a function argument) or in an ADD (variable-
   // indexed stack access), InstrEmitter::getVR would assert.
   //
-  // Fix (same pattern as RISC-V ADDI(TFI,0)): wrap TFI inside a SETR machine
-  // node.  SETR produces a proper virtual register i64 output that can be used
-  // in CopyToReg and ADD.  eliminateFrameIndex later expands
-  //   SETR rd, <TFI>
-  // into
-  //   SETR rd, frame_slot_offset          ; rd = offset
-  //   ADDR rd, R15, rd                    ; rd = R15 + offset  (frame address)
-  //
-  // Tablegen load/store patterns with GPR address cover all memory-op cases
-  // that follow, so the LDIDX/STIDX C++ handlers below fall through to
-  // SelectCode and match naturally.
+  // Emit ADDI rd, <TFI>, 0.  eliminateFrameIndex sees TFI at the rs slot
+  // (FIOperandNum=1) with imm=0 at FIOperandNum+1, and rewrites to:
+  //   ADDI rd, R15, frame_slot_offset   (one instruction, replaces SETR+ADDR)
   if (N->getOpcode() == ISD::FrameIndex) {
     int FI = cast<FrameIndexSDNode>(N)->getIndex();
     SDLoc DL(N);
     SDValue TFI = CurDAG->getTargetFrameIndex(FI, MVT::i64);
-    SDNode *Res = CurDAG->getMachineNode(KlaussCPU::SETR, DL, MVT::i64, TFI);
+    SDValue Off0 = CurDAG->getTargetConstant(0, DL, MVT::i64);
+    SDNode *Res = CurDAG->getMachineNode(KlaussCPU::ADDI, DL, MVT::i64,
+                                         {TFI, Off0});
     ReplaceNode(N, Res);
     return;
   }
@@ -191,8 +185,7 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
         return;
       }
 
-      // 8/16-bit frame-slot loads → LDIDX8/16 (base+offset RRV format).
-      // eliminateFrameIndex rewrites Ptr→R15 and Off→slot_offset normally.
+      // 8/16-bit zero/any-extending frame-slot loads → LDIDX8/16.
       if (LN->getExtensionType() == ISD::ZEXTLOAD ||
           LN->getExtensionType() == ISD::EXTLOAD) {
         unsigned LoadOpc = 0;
@@ -200,6 +193,25 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
           LoadOpc = KlaussCPU::LDIDX8;
         else if (LN->getMemoryVT() == MVT::i16)
           LoadOpc = KlaussCPU::LDIDX16;
+        if (LoadOpc) {
+          SDValue Ops[] = {Ptr, Off, LN->getChain()};
+          SDNode *Res = CurDAG->getMachineNode(LoadOpc, DL,
+                                                CurDAG->getVTList(MVT::i64,
+                                                                  MVT::Other),
+                                                Ops);
+          ReplaceUses(N, Res);
+          CurDAG->RemoveDeadNode(N);
+          return;
+        }
+      }
+
+      // 8/16-bit sign-extending frame-slot loads → LDIDX8_S/LDIDX16_S.
+      if (LN->getExtensionType() == ISD::SEXTLOAD) {
+        unsigned LoadOpc = 0;
+        if (LN->getMemoryVT() == MVT::i8)
+          LoadOpc = KlaussCPU::LDIDX8_S;
+        else if (LN->getMemoryVT() == MVT::i16)
+          LoadOpc = KlaussCPU::LDIDX16_S;
         if (LoadOpc) {
           SDValue Ops[] = {Ptr, Off, LN->getChain()};
           SDNode *Res = CurDAG->getMachineNode(LoadOpc, DL,
@@ -331,6 +343,19 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
     SDLoc DL(N);
     SDValue Ops[] = {Dest, Chain};
     SDNode *Res = CurDAG->getMachineNode(KlaussCPU::JMP, DL, MVT::Other, Ops);
+    ReplaceNode(N, Res);
+    return;
+  }
+
+  // ---- ISD::BRIND → JMPR_R (indirect register branch) --------------------
+  // ISD::BRIND: (chain, target_reg)
+  // Used for computed gotos and as the primitive emitted by BR_JT expansion.
+  if (N->getOpcode() == ISD::BRIND) {
+    SDValue Chain  = N->getOperand(0);
+    SDValue Target = N->getOperand(1);
+    SDLoc DL(N);
+    SDNode *Res = CurDAG->getMachineNode(KlaussCPU::JMPR_R, DL,
+                                         MVT::Other, {Target, Chain});
     ReplaceNode(N, Res);
     return;
   }
