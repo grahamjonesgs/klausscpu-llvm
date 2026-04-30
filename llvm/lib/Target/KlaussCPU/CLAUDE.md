@@ -733,6 +733,37 @@ SelectionDAGTargetInfo    TSI;
 
 ---
 
+29. ✅ Tailored runtime test programs + minimal soft-FP runtime
+    - **Five new programs** under `runtime/`:
+      - `expr.c` — recursive-descent expression evaluator (`+ - * / % ( )` and unary minus,
+        precedence + parens).  Stresses deep recursion, char parsing, and large
+        if/else ladders (no jump tables on KlaussCPU).
+      - `bst.c` — binary search tree workout: insert / find / in-order walk / delete
+        (with in-order-successor for two-child nodes) / post-order free.  Stresses the
+        libc heap allocator (malloc/free/coalesce) and recursion with pointer args.
+      - `crypto.c` — CRC32 (zlib / IEEE 802.3), SHA-256 (FIPS 180-4 vectors for "",
+        "a", "abc", and the 56-byte test message), and Base64 encode/decode round-trip
+        (RFC 4648 §10 vectors plus a binary round-trip).  Heavy 32-bit modular
+        arithmetic, bit rotates, byte-level memory access via static tables.
+      - `queens.c` — N-queens backtracker; counts solutions for N=1..9 against
+        OEIS A000170 [1, 0, 0, 2, 10, 4, 40, 92, 352] and prints the first N=8 board.
+        Deep recursion with backtracking + tight inner loops.
+      - `test_fp.c` — `float` arithmetic smoke test (T1–T9): conversions, add/sub/mul/div,
+        exact cancellation, comparisons, negation, and a geometric-series partial sum.
+    - **`softfp.c`** — minimal IEEE 754 single-precision soft-FP runtime providing the
+      compiler-rt-ABI symbols LLVM emits when expanding `float` ops:
+      `__floatsisf`, `__floatunsisf`, `__fixsfsi`, `__fixunssfsi`, `__addsf3`, `__subsf3`,
+      `__mulsf3`, `__divsf3`, `__negsf2`, `__eqsf2`, `__nesf2`, `__ltsf2`, `__lesf2`,
+      `__gtsf2`, `__gesf2`.  Round-to-nearest-even, NORMAL values only — subnormals
+      flushed to zero, Inf/NaN not handled (operations on them yield garbage).  Suitable
+      for the test program; vendor compiler-rt for full IEEE conformance.
+    - **`Makefile`** updated: new per-program rules; `make all` builds every `.bin`.
+    - **No backend changes required** — the existing `setOperationAction(ISD::FADD, MVT::f32, Expand)`
+      etc. in `KlaussCPUISelLowering.cpp` already drives LLVM to emit libcalls; we just
+      provided implementations.
+
+---
+
 ## Hardware memory model (authoritative, post Fix-1)
 
 **Physical memory**: little-endian — byte at address X is at `bits[8*(X mod 4)+7 : 8*(X mod 4)]`
@@ -750,11 +781,11 @@ of the 32-bit word.  The DataLayout `e` (little-endian) now matches the hardware
 
 ## Next steps
 
-### Step 29 — Hardware test: run hello.bin, adventure.bin, test_64bit.bin on board
-- hello.bin: "Hello, KlaussCPU!\r\n" via `txstrmemr`
-- adventure.bin: all strings via `txstrmemr`, should fully work
-- test_64bit.bin: post int=32 migration — verify all T1–T16 pass; T3b is new
+### Step 30 — Hardware test: run all .bin programs on board
+- hello.bin / adventure.bin / test_64bit.bin
+- expr.bin / bst.bin / crypto.bin / queens.bin (post int=32 + tailored tests)
+- test_fp.bin (links softfp.o)
 
-### Step 30 — FPGA Fix 2: JMPR indirect branch
-### Step 31 — FPGA Fix 4: ADDI rd, rs, imm32
-### Step 32 — Inline assembly support (KlaussCPUAsmParser)
+### Step 31 — FPGA Fix 2: JMPR indirect branch
+### Step 32 — FPGA Fix 4: ADDI rd, rs, imm32
+### Step 33 — Inline assembly support (KlaussCPUAsmParser)
