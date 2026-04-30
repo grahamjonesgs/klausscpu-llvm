@@ -4,7 +4,9 @@
 // All functions assume the KlaussCPU hardware memory model:
 //   - Physical memory is little-endian: byte at address X in bits[8*(X mod 4)+7:8*(X mod 4)].
 //   - LDIDX8/STIDX8 use LE-lane mapping, consistent with physical memory.
-//   - int = 64-bit (matching the rcc ABI).
+//   - int = 32-bit; long, long long, void* are all 64-bit.
+//     The hardware heap-header word at address 0 is 8 bytes wide, so anything
+//     reading or writing it must use a 64-bit-pointer cast.
 
 typedef unsigned long long uint64_t;
 typedef long long           int64_t;
@@ -94,7 +96,8 @@ void *memcpy(void *dst, void *src, int n) {
 //
 // The heap starts at _end (first byte after .bss) and grows upward.
 // heap_start is written to address 0x0000 (the hardware heap-header area)
-// so test programs can read it with  int *mem = (int*)0; hs = mem[0];
+// as a 64-bit value, so test programs read it with
+//   long long *mem = (long long*)0; hs = mem[0];
 
 extern char _end[];   // first byte past .bss, from linker script
 
@@ -106,9 +109,11 @@ static char *g_heap_top  = 0;
 static void heap_init(void) {
     g_heap_base = _end;
     g_heap_top  = _end;
-    // Write heap start into the hardware heap-header area at address 0.
-    int *addr0 = (int *)0;
-    addr0[0] = (int)(uint64_t)g_heap_base;
+    // Write the 64-bit heap-start value into the hardware heap-header area
+    // at address 0.  Must be a 64-bit store: the hardware reserves 8 bytes
+    // here, and `int` is now 32 bits.
+    uint64_t *addr0 = (uint64_t *)0;
+    addr0[0] = (uint64_t)g_heap_base;
 }
 
 static uint64_t align8(uint64_t n) {
@@ -178,9 +183,12 @@ void *realloc(void *ptr, uint64_t newsize) {
     return newptr;
 }
 
-// Return the current heap top as an integer address.
-int heap_get_top(void) {
-    return (int)(uint64_t)g_heap_top;
+// Return the current heap top as a 64-bit address.  Returning `int` would
+// truncate the (32-bit) address to the low 32 bits and sign-extend it to
+// 64 bits when read by callers — fine for valid 128 MiB addresses, but
+// confusing.  Use the unambiguous wider type.
+long long heap_get_top(void) {
+    return (long long)(uint64_t)g_heap_top;
 }
 
 // Return the total number of 8-byte words currently in-use by live allocations.

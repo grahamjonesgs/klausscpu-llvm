@@ -8,8 +8,9 @@ the fix is in place.
 
 The CPU is a 64-bit RISC processor implemented in Verilog/SystemVerilog on a
 Digilent Nexys A7 (Artix-7) FPGA.  The LLVM backend targets it as
-`klausscpu-unknown-elf` with DataLayout `e-m:e-p:64:64-i64:64-i128:128-n64`
-(little-endian, 64-bit pointers).  16 GPRs (R0–R15), 32-bit PC/SP, 128 MiB RAM.
+`klausscpu-unknown-elf` with DataLayout `e-m:e-p:64:64-i64:64-i128:128-n32:64`
+(little-endian, 64-bit pointers, C `int` = 32 bits).  16 GPRs (R0–R15),
+32-bit PC/SP, 128 MiB RAM.
 
 ---
 
@@ -309,7 +310,8 @@ without any workarounds in the compiler or runtime library.
 |---|---|
 | GPRs | R0–R15, 64-bit; R15 = frame pointer |
 | PC / SP | 32-bit (128 MiB RAM) |
-| DataLayout | `e-m:e-p:64:64-i64:64-i128:128-n64` |
+| DataLayout | `e-m:e-p:64:64-i64:64-i128:128-n32:64` |
+| C type model | `int`=32; `long`/`long long`/`void*`=64 |
 | Calling convention | Args: R0–R3; Return: R12; Callee-saved: R4–R7, R15 |
 | Code load address | 0x00000020 (first 32 bytes are heap header) |
 | Stack top | 0x08000000 (set by hardware reset) |

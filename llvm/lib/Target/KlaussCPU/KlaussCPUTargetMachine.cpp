@@ -2,17 +2,19 @@
 //
 // KlaussCPU LLVM backend — target machine implementation.
 //
-// DataLayout: e-m:e-p:64:64-i64:64-i128:128-n64
-//   e       = little-endian (memory bus and register file)
-//   m:e     = ELF name mangling
-//   p:64:64 = pointers are 64-bit (GPR-width); the hardware only uses bits
-//             [31:0] of an address (128 MiB RAM), but LLVM's type legalizer
-//             has no built-in handler for promoting ISD::FrameIndex from i32
-//             to i64.  Making pointers 64-bit avoids the issue: FrameIndex is
-//             typed as i64 (a legal GPR type) from the outset.  The hardware
-//             naturally ignores the upper 32 bits of every address.
-//   i64:64  = 64-bit integers are 64-bit aligned
-//   n64     = native integer width is 64 bits (the only GPR class)
+// DataLayout: e-m:e-p:64:64-i64:64-i128:128-n32:64
+//   e         = little-endian (memory bus and register file)
+//   m:e       = ELF name mangling
+//   p:64:64   = pointers are 64-bit (GPR-width); the hardware only uses bits
+//               [31:0] of an address (128 MiB RAM), but LLVM's type legalizer
+//               has no built-in handler for promoting ISD::FrameIndex from i32
+//               to i64.  Making pointers 64-bit avoids the issue: FrameIndex is
+//               typed as i64 (a legal GPR type) from the outset.  The hardware
+//               naturally ignores the upper 32 bits of every address.
+//   i64:64    = 64-bit integers are 64-bit aligned
+//   n32:64    = i32 (C int) and i64 (long, long long, pointer) are advertised
+//               as native widths.  i32 has no register class; it is promoted
+//               to i64 by the type legalizer for ALU operations.
 //
 //===----------------------------------------------------------------------===//
 
@@ -34,7 +36,7 @@ using namespace llvm;
 
 // KlaussCPU DataLayout string — fixed for this architecture.
 static const char KlaussCPUDataLayout[] =
-    "e-m:e-p:64:64-i64:64-i128:128-n64";
+    "e-m:e-p:64:64-i64:64-i128:128-n32:64";
 
 extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void
 LLVMInitializeKlaussCPUTarget() {

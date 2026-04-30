@@ -19,9 +19,9 @@ class LLVM_LIBRARY_VISIBILITY KlaussCPUTargetInfo : public TargetInfo {
 public:
   KlaussCPUTargetInfo(const llvm::Triple &Triple, const TargetOptions &)
       : TargetInfo(Triple) {
-    // 64-bit little-endian; native word = 64 bits.
-    // int/long/long long are all 64-bit, matching the rcc compiler ABI.
-    IntWidth = IntAlign = 64;
+    // 64-bit little-endian; GPR width = 64 bits.
+    // int is 32-bit (standard C); long, long long, and pointers are 64-bit.
+    IntWidth = IntAlign = 32;
     LongWidth = LongAlign = 64;
     LongLongWidth = LongLongAlign = 64;
     PointerWidth = PointerAlign = 64;
@@ -30,7 +30,7 @@ public:
     IntPtrType  = SignedLong;
     IntMaxType  = SignedLong;
     Int64Type   = SignedLong;
-    resetDataLayout("e-m:e-p:64:64-i64:64-i128:128-n64");
+    resetDataLayout("e-m:e-p:64:64-i64:64-i128:128-n32:64");
     TLSSupported = false;
     // No hardware FP.
     HasFloat128 = false;

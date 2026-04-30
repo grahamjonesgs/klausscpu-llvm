@@ -14,7 +14,8 @@ LLVM trunk (v23).  Use the **RISC-V backend** as the style reference, not X86 or
 | PC / SP | 32-bit (128 MiB RAM addressable) |
 | Memory bus | little-endian |
 | Register file | little-endian |
-| DataLayout | `e-m:e-p:64:64-i64:64-i128:128-n64` |
+| DataLayout | `e-m:e-p:64:64-i64:64-i128:128-n32:64` |
+| C type model | `int`=32; `long`/`long long`/`void*`=64 |
 | Hardware FP | none — soft-float only |
 | CMOV | none — SELECT must be expanded |
 | Atomics | none — `setMaxAtomicSizeInBitsSupported(0)` |
@@ -688,6 +689,50 @@ SelectionDAGTargetInfo    TSI;
 
 ---
 
+28. ✅ C `int` migrated from 64-bit to 32-bit (standard C type model)
+    - **Motivation**: third-party C code (Embench, test-suite kernels, file-format code)
+      assumes `sizeof(int)==4`; arrays of `int` halve in memory; first-class i32 codegen
+      paths (LDIDX32/STIDX32, MEMGET32/MEMSET32, SEXTW/ZEXTW) get exercised on every
+      ordinary `int` operation rather than as corner cases.
+    - **`clang/lib/Basic/Targets/KlaussCPU.h`**: `IntWidth = IntAlign = 32`; DataLayout
+      changed to `e-m:e-p:64:64-i64:64-i128:128-n32:64` (`n32:64` advertises both i32 and
+      i64 as native widths). `long`, `long long`, and pointers stay 64-bit.
+    - **`KlaussCPUTargetMachine.cpp`**: matching DataLayout string update + comment block.
+    - **`KlaussCPUCallingConv.td`**: `CC_KlaussCPU` and `RetCC_KlaussCPU` now begin with
+      `CCIfType<[i8, i16, i32], CCPromoteToType<i64>>` so sub-word arguments and returns
+      are promoted to GPR-width before register/stack assignment. Without this, calls
+      passing or returning `int` would fail CC analysis since the GPR class is i64-only.
+    - **No `KlaussCPUISelLowering.cpp` change required**: the GPR class is still i64-only,
+      so the type legalizer naturally promotes i32 ALU ops to i64.  Existing `setLoadExtAction`
+      / `setTruncStoreAction` / `SIGN_EXTEND_INREG i32 = Legal` settings already cover the
+      i32-as-memory-only model.
+    - **Runtime updates**:
+      - `runtime/libc.c`: `heap_get_top` returns `long long` (was `int` — now too narrow);
+        `heap_init` writes the heap-start pointer to address 0 as `uint64_t *` rather than
+        `int *` (the hardware reserves 8 bytes there).
+      - `runtime/test_64bit.c`: rewritten so each test uses the right type — T1–T7 retyped
+        to `long long` since they specifically exercise 64-bit shifts/multiplies/comparisons;
+        new T3b checks signed `int` wrap-around at INT32_MAX; T10 split into existing-
+        homogeneous-int (T10a–c) and new mixed-width T10d (`sum6_mixed`) which exercises
+        i32→i64 promotion at call boundaries; T14 split into T14a (32-bit globals via
+        `g_val`) and T14b (64-bit globals via `g_val64`); T15 expanded with both an `int[]`
+        (sizeof=4, dist=12) and a `long long[]` (sizeof=8, dist=24) walk; T16 retyped to
+        `long long *` since the libc heap is 8-byte-slotted; new `check_eq64` helper.
+    - **Files NOT requiring changes**:
+      - `runtime/adventure.c` — uses `int` only for small enums + `print_int(long long)`.
+      - `runtime/hello.c` — `unsigned long long` everywhere.
+      - `runtime/uart_stubs.c`, `io_stubs.c`, `crt0.c` — explicit fixed-width types.
+    - **Codegen-corner risks worth verifying after rebuild**:
+      - `int add(int a, int b)` smoke: expect SEXTW on each arg post-load, R12 holds
+        promoted i64 return.
+      - `long load_int(int *p) { return *p; }` — should emit MEMGET32 / LDIDX32 (zero-
+        extending) followed by SEXTW for sign-extended widening, or no SEXTW for the
+        unsigned variant.
+      - Functions returning `int` whose result is then stored back to memory — should emit
+        MEMSET32/STIDX32 (truncating store), not STIDX64.
+
+---
+
 ## Hardware memory model (authoritative, post Fix-1)
 
 **Physical memory**: little-endian — byte at address X is at `bits[8*(X mod 4)+7 : 8*(X mod 4)]`
@@ -705,11 +750,11 @@ of the 32-bit word.  The DataLayout `e` (little-endian) now matches the hardware
 
 ## Next steps
 
-### Step 28 — Hardware test: run hello.bin, adventure.bin, test_64bit.bin on board
+### Step 29 — Hardware test: run hello.bin, adventure.bin, test_64bit.bin on board
 - hello.bin: "Hello, KlaussCPU!\r\n" via `txstrmemr`
 - adventure.bin: all strings via `txstrmemr`, should fully work
-- test_64bit.bin: T12 strings should now pass
+- test_64bit.bin: post int=32 migration — verify all T1–T16 pass; T3b is new
 
-### Step 29 — FPGA Fix 2: JMPR indirect branch
-### Step 30 — FPGA Fix 4: ADDI rd, rs, imm32
-### Step 31 — Inline assembly support (KlaussCPUAsmParser)
+### Step 30 — FPGA Fix 2: JMPR indirect branch
+### Step 31 — FPGA Fix 4: ADDI rd, rs, imm32
+### Step 32 — Inline assembly support (KlaussCPUAsmParser)
