@@ -33,7 +33,7 @@ RUNTIME_OBJS = crt0.o uart_stubs.o io_stubs.o
 
 # ── Default target ────────────────────────────────────────────────────────────
 
-.PHONY: all clean adventure test_64bit
+.PHONY: all clean hello adventure test_64bit
 
 all: hello.elf
 
@@ -56,8 +56,8 @@ libc.o: $(LIBC_SRC)
 
 # ── Link ──────────────────────────────────────────────────────────────────────
 
-hello.elf: hello.o $(RUNTIME_OBJS)
-	$(LLD) -T $(LD_SCRIPT) -o $@ $(RUNTIME_OBJS) hello.o
+hello.elf: hello.o libc.o $(RUNTIME_OBJS)
+	$(LLD) -T $(LD_SCRIPT) -o $@ $(RUNTIME_OBJS) libc.o hello.o
 	@echo "==> $@ built"
 	@file $@
 
@@ -71,6 +71,7 @@ test_64bit.elf: test_64bit.o libc.o $(RUNTIME_OBJS)
 	@echo "==> $@ built"
 	@file $@
 
+hello:       hello.elf       hello.bin
 adventure:   adventure.elf   adventure.bin
 test_64bit:  test_64bit.elf  test_64bit.bin
 

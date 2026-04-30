@@ -6,10 +6,9 @@
  * sizeof(int) = sizeof(void*) = 8.
  *
  * Note on string literals and char arrays (T11-T13):
- *   STIDX8/MEMGET8 use scrambled byte addressing; write+read via the same
- *   address is always consistent.  String literal comparisons via strcmp work
- *   because both sides use the same scrambled addressing.  strlen counts
- *   correctly because the null terminator is found at the expected position.
+ *   Physical memory is little-endian (FPGA fix applied April 2026).
+ *   LDIDX8/STIDX8 use LE-lane mapping consistent with physical memory, so
+ *   strcpy, strcmp, and strlen all work correctly with standard C byte access.
  */
 
 /* Runtime provided by libc.c + uart_stubs.c */

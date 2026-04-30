@@ -78,23 +78,23 @@ public:
     if (Fixup.getKind() != KlaussCPU::FK_KlaussCPU_ABS32)
       return;
     uint32_t Addr = static_cast<uint32_t>(Value);
-    Data[0] = (Addr >> 24) & 0xFF;
-    Data[1] = (Addr >> 16) & 0xFF;
-    Data[2] = (Addr >>  8) & 0xFF;
-    Data[3] = (Addr >>  0) & 0xFF;
+    Data[0] = (Addr >>  0) & 0xFF;
+    Data[1] = (Addr >>  8) & 0xFF;
+    Data[2] = (Addr >> 16) & 0xFF;
+    Data[3] = (Addr >> 24) & 0xFF;
     maybeAddReloc(F, Fixup, Target, Value, IsResolved);
   }
 
   // ── NOP padding ──────────────────────────────────────────────────────────
 
-  // NOP_I = 0x0000F010 (4-byte, big-endian: 00 00 F0 10).
+  // NOP_I = 0x0000F010 (4-byte, little-endian: 10 F0 00 00).
   // KlaussCPU instructions are 4-byte aligned; reject sub-word padding.
   bool writeNopData(raw_ostream &OS, uint64_t Count,
                     const MCSubtargetInfo *STI) const override {
     if (Count % 4 != 0)
       return false;
     for (uint64_t i = 0, n = Count / 4; i < n; ++i)
-      OS.write("\x00\x00\xF0\x10", 4);
+      OS.write("\x10\xF0\x00\x00", 4);
     return true;
   }
 

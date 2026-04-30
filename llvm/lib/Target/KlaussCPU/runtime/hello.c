@@ -9,18 +9,22 @@ void uart_puts(const char *s);
 void uart_newline(void);
 void leds(unsigned long long val);
 void seg7(unsigned long long val);
+void delay_hw(unsigned long long cycles);
 
 int main(int argc, char **argv) {
-    leds(0x0001);               // checkpoint 1: entered main
+    leds(0x0001);
     seg7(0x0001);
 
-    uart_puts("Hello, KlaussCPU!");
-    leds(0x0003);               // checkpoint 2: puts returned
+    uart_puts("Hello, KlaussCPU! 1");
+    uart_newline();
+    delay_hw(5000);
+
+    uart_puts("Hello, KlaussCPU! 2");
+    uart_newline();
+    delay_hw(5000);
+
+    leds(0x0003);
     seg7(0x0003);
 
-    uart_newline();
-    leds(0x0007);               // checkpoint 3: newline returned
-    seg7(0x0007);
-
     return 0;
-}
+} 

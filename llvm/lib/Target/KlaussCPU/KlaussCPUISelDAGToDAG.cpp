@@ -523,18 +523,6 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
       CurDAG->RemoveDeadNode(N);
       return;
     }
-    case Intrinsic::klausscpu_memget32: {
-      // MEMGET32 rd, rs — read 32-bit physical word at address in rs.
-      // The Chain threads through to maintain memory ordering; the explicit
-      // address operand maps to rs in the RR instruction encoding.
-      SDValue Ptr = N->getOperand(2);
-      SDNode *Res = CurDAG->getMachineNode(
-          KlaussCPU::MEMGET32, DL,
-          CurDAG->getVTList(MVT::i64, MVT::Other), {Ptr, Chain});
-      ReplaceUses(N, Res);
-      CurDAG->RemoveDeadNode(N);
-      return;
-    }
     default:
       break;
     }

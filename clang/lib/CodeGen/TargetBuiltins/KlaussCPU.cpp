@@ -113,16 +113,6 @@ CodeGenFunction::EmitKlaussCPUBuiltinExpr(unsigned BuiltinID,
     return Builder.CreateCall(F, {Cycles});
   }
 
-  // unsigned long long __builtin_klausscpu_memget32(const void *ptr)
-  // → %v = call i64 @llvm.klausscpu.memget32(ptr %ptr)
-  // Returns the raw 32-bit physical word zero-extended to i64.
-  // In big-endian physical memory: first byte (lowest address) at bits[31:24].
-  case KlaussCPU::BI__builtin_klausscpu_memget32: {
-    Value *Ptr = EmitScalarExpr(E->getArg(0));
-    Function *F = CGM.getIntrinsic(Intrinsic::klausscpu_memget32);
-    return Builder.CreateCall(F, {Ptr});
-  }
-
   default:
     return nullptr;
   }

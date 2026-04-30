@@ -2,9 +2,9 @@
 //
 // Converts MCInst to raw bytes for ELF object output.
 //
-// All instruction words are written big-endian (most-significant byte first),
-// matching the KlaussCPU instruction-fetch unit.  Data accesses on the bus
-// remain little-endian (DataLayout 'e').
+// All instruction words are written little-endian (least-significant byte first),
+// matching the KlaussCPU LE physical memory.  The CPU instruction-fetch unit
+// reads each 32-bit word with the byte at the lowest address in bits[7:0].
 //
 // Instruction word layouts (tablegen bit numbering; bit N = 2^N):
 //
@@ -76,12 +76,12 @@ private:
     return static_cast<uint32_t>(MI.getOperand(OpNo).getImm());
   }
 
-  // Emit a 32-bit value big-endian (MSB at lowest address).
-  static void emitBE32(uint32_t V, SmallVectorImpl<char> &CB) {
-    CB.push_back(static_cast<char>((V >> 24) & 0xFF));
-    CB.push_back(static_cast<char>((V >> 16) & 0xFF));
-    CB.push_back(static_cast<char>((V >>  8) & 0xFF));
+  // Emit a 32-bit value little-endian (LSB at lowest address).
+  static void emitLE32(uint32_t V, SmallVectorImpl<char> &CB) {
     CB.push_back(static_cast<char>((V >>  0) & 0xFF));
+    CB.push_back(static_cast<char>((V >>  8) & 0xFF));
+    CB.push_back(static_cast<char>((V >> 16) & 0xFF));
+    CB.push_back(static_cast<char>((V >> 24) & 0xFF));
   }
 
   // ── Per-format encoding helpers ───────────────────────────────────────────
@@ -392,19 +392,19 @@ void KlaussCPUMCCodeEmitter::encodeInstruction(
     unsigned Rd = getReg(MI, 0);
     uint32_t Lo = getImm32(MI, 1);
     uint32_t Hi = getImm32(MI, 2);
-    emitBE32((static_cast<uint32_t>(0x00000FEu) << 4) | Rd, CB);
-    emitBE32(Lo, CB);
-    emitBE32(Hi, CB);
+    emitLE32((static_cast<uint32_t>(0x00000FEu) << 4) | Rd, CB);
+    emitLE32(Lo, CB);
+    emitLE32(Hi, CB);
     return;
   }
 
   unsigned Size = MCII.get(Opcode).getSize();
   if (Size == 4) {
-    emitBE32(encode32(MI), CB);
+    emitLE32(encode32(MI), CB);
   } else if (Size == 8) {
     uint64_t Bits = encode64(MI, Fixups);
-    emitBE32(static_cast<uint32_t>(Bits >> 32), CB); // high word (opcode+regs)
-    emitBE32(static_cast<uint32_t>(Bits),        CB); // low word (imm/target)
+    emitLE32(static_cast<uint32_t>(Bits >> 32), CB); // high word (opcode+regs)
+    emitLE32(static_cast<uint32_t>(Bits),        CB); // low word (imm/target)
   } else {
     llvm_unreachable("unexpected KlaussCPU instruction size in encodeInstruction");
   }

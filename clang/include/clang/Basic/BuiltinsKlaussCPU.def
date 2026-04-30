@@ -35,8 +35,4 @@ BUILTIN(__builtin_klausscpu_seg7blank,  "v",     "n")
 // Hardware delay
 BUILTIN(__builtin_klausscpu_delayv,     "vULLi", "n")
 
-// Memory read: MEMGET32 — read 32-bit word at address, zero-extend to uint64.
-// In big-endian physical memory the first (lowest-address) byte is at bits[31:24].
-BUILTIN(__builtin_klausscpu_memget32,   "ULLivC*", "n")
-
 #undef BUILTIN

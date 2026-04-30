@@ -668,29 +668,48 @@ SelectionDAGTargetInfo    TSI;
 
 ---
 
-## Hardware memory model (authoritative)
+27. ✅ LE physical memory CPU fix + backend update
+    - **CPU fix applied**: physical memory changed to little-endian — byte at address X now at
+      `bits[8*(X mod 4)+7 : 8*(X mod 4)]` of the 32-bit word.  LDIDX8/STIDX8, MEMGET8/MEMSET8,
+      and TXSTRMEMR all use LE-lane and are now consistent with physical memory.
+    - **`__builtin_klausscpu_memget32` intrinsic removed** — no longer needed:
+      - `IntrinsicsKlaussCPU.td`: `int_klausscpu_memget32` removed
+      - `BuiltinsKlaussCPU.def`: `BUILTIN(__builtin_klausscpu_memget32, ...)` removed
+      - `clang/lib/CodeGen/TargetBuiltins/KlaussCPU.cpp`: case removed
+      - `KlaussCPUISelDAGToDAG.cpp`: `INTRINSIC_W_CHAIN` handler for `klausscpu_memget32` removed
+    - **`uart_stubs.c` simplified**: `uart_puts` → single `txstrmemr` call;
+      `uart_println` → `txstrmemr` + `newline`.  All MEMGET32 loop and unalignment
+      handling removed.  `uart_putc` unchanged (still uses `_uart_char_buf` global + TXCHARMEMR).
+    - **`libc.c` comment updated**: removed references to MEMGET32/scrambled addressing.
+    - **`test_64bit.c` comment updated**: note updated to reflect LE physical memory.
+    - **Expected**: T12 strings now passes (`strcpy`/`strlen`/`strcmp` work correctly with
+      standard C byte access via LDIDX8 with LE-lane matching LE physical memory).
+    - **Binaries rebuilt** after LLVM + Clang rebuild.
 
-**Physical memory**: big-endian words — the lowest-address byte of each 32-bit word is stored
-at bits[31:24].  So the first char 'H' of "Hello..." is at bits[31:24] of the first word.
+---
 
-| Instruction | Byte ordering after April 2026 HW fix | Use for C strings? |
+## Hardware memory model (authoritative, post Fix-1)
+
+**Physical memory**: little-endian — byte at address X is at `bits[8*(X mod 4)+7 : 8*(X mod 4)]`
+of the 32-bit word.  The DataLayout `e` (little-endian) now matches the hardware.
+
+| Instruction | Byte ordering | Use for C strings? |
 |---|---|---|
-| MEMGET32 | first byte at bits[31:24] (MSB-first) | ✅ YES — use with shift=24..0 |
-| MEMGET8 / LDIDX8 | bits[7:0] = byte at that lane (LE-lane) | ❌ reversed within 4B group |
-| TXSTRMEMR | scans bits[7:0] first (LE-lane) | ❌ reversed within 4B group |
-| LDIDX64 | not changed by April fix (still big-endian?) | untested — do not rely on |
-
-**Rule**: always use `__builtin_klausscpu_memget32` for reading C string literals from .rodata.
+| LDIDX8 / MEMGET8 | lane N = bits[8N+7:8N] (LE) — correct | ✅ YES — `*s++` works |
+| STIDX8 / MEMSET8 | lane N = bits[8N+7:8N] (LE) — correct | ✅ YES |
+| TXSTRMEMR | scans lane 0 first = lowest address first | ✅ YES — `txstrmemr(s)` works |
+| MEMGET32 | first byte at bits[7:0], last at bits[31:24] | use with shift=0,8,16,24 |
+| LDIDX64 | 8 bytes, LE lane order | ✅ standard 64-bit load |
 
 ---
 
 ## Next steps
 
-### Step 27 — Hardware test: run hello.bin, adventure.bin, test_64bit.bin on board
-- hello.bin: should print "Hello, KlaussCPU!\r\n" correctly (was broken by HW fix)
-- adventure.bin: text adventure, uses UART for I/O
-- test_64bit.bin: 64-bit arithmetic/string/heap test suite, prints pass/fail via UART
+### Step 28 — Hardware test: run hello.bin, adventure.bin, test_64bit.bin on board
+- hello.bin: "Hello, KlaussCPU!\r\n" via `txstrmemr`
+- adventure.bin: all strings via `txstrmemr`, should fully work
+- test_64bit.bin: T12 strings should now pass
 
-### Step 28 — Inline assembly support
-- Add `KlaussCPUAsmParser` (registers, basic mnemonic parsing)
-- Enables naked functions and direct SP init without hardware dependency
+### Step 29 — FPGA Fix 2: JMPR indirect branch
+### Step 30 — FPGA Fix 4: ADDI rd, rs, imm32
+### Step 31 — Inline assembly support (KlaussCPUAsmParser)

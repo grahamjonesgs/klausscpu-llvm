@@ -2,8 +2,8 @@
 //
 // Provides I/O adapters, string functions, and a simple heap allocator.
 // All functions assume the KlaussCPU hardware memory model:
-//   - MEMGET8/STIDX8 use scrambled byte addressing (write+read consistent).
-//   - String literals in .rodata must be read via uart_puts (MEMGET32 + MSB-first).
+//   - Physical memory is little-endian: byte at address X in bits[8*(X mod 4)+7:8*(X mod 4)].
+//   - LDIDX8/STIDX8 use LE-lane mapping, consistent with physical memory.
 //   - int = 64-bit (matching the rcc ABI).
 
 typedef unsigned long long uint64_t;

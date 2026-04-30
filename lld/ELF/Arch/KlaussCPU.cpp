@@ -56,9 +56,9 @@ void KlaussCPU::relocate(uint8_t *loc, const Relocation &rel,
                           uint64_t val) const {
   switch (rel.type) {
   case R_KLAUSSCPU_ABS32:
-    // 32-bit absolute address, big-endian (instruction word 1).
+    // 32-bit absolute address, little-endian (LE physical memory).
     checkUInt(ctx, loc, val, 32, rel);
-    write32be(loc, static_cast<uint32_t>(val));
+    write32le(loc, static_cast<uint32_t>(val));
     break;
   default:
     llvm_unreachable("unrecognized KlaussCPU relocation");
