@@ -8,6 +8,7 @@
 #   make bst            — binary search tree workout (heap stress)
 #   make crypto         — CRC32 + SHA-256 + Base64 round-trip
 #   make queens         — N-queens backtracker
+#   make test_switch    — switch/case → BR_JT → JMPR_R dispatch test
 #   make test_fp        — soft-FP test (links softfp.o)
 #   make all            — every .bin
 #   make <name>.bin     — flat binary for FPGA loader
@@ -40,7 +41,7 @@ RUNTIME_OBJS = crt0.o uart_stubs.o io_stubs.o
 
 # ── Default target ────────────────────────────────────────────────────────────
 
-PROGRAMS = hello adventure test_64bit expr bst crypto queens test_fp
+PROGRAMS = hello adventure test_64bit expr bst crypto queens test_switch test_fp
 
 .PHONY: all clean $(PROGRAMS)
 
@@ -103,6 +104,11 @@ queens.elf: queens.o libc.o $(RUNTIME_OBJS)
 	@echo "==> $@ built"
 	@file $@
 
+test_switch.elf: test_switch.o libc.o $(RUNTIME_OBJS)
+	$(LLD) -T $(LD_SCRIPT) -o $@ $(RUNTIME_OBJS) libc.o test_switch.o
+	@echo "==> $@ built"
+	@file $@
+
 test_fp.elf: test_fp.o softfp.o libc.o $(RUNTIME_OBJS)
 	$(LLD) -T $(LD_SCRIPT) -o $@ $(RUNTIME_OBJS) libc.o softfp.o test_fp.o
 	@echo "==> $@ built"
@@ -115,6 +121,7 @@ expr:        expr.elf        expr.bin
 bst:         bst.elf         bst.bin
 crypto:      crypto.elf      crypto.bin
 queens:      queens.elf      queens.bin
+test_switch: test_switch.elf test_switch.bin
 test_fp:     test_fp.elf     test_fp.bin
 
 # ── Flat binary for FPGA loader ───────────────────────────────────────────────

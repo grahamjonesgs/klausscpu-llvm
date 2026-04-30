@@ -19,7 +19,8 @@ LLVM trunk (v23).  Use the **RISC-V backend** as the style reference, not X86 or
 | Hardware FP | none — soft-float only |
 | CMOV | none — SELECT must be expanded |
 | Atomics | none — `setMaxAtomicSizeInBitsSupported(0)` |
-| Sign-extending loads | none — SEXTLOAD i8/i16/i32 → Expand |
+| Sign-extending loads | i8/i16: hardware (LDIDX8_S/LDIDX16_S); i32: SEXTLOAD → Expand → SEXTW |
+| Indirect branch / call | JMPR / CALLR — jump tables and function pointers supported |
 
 ### Instruction encoding families
 
@@ -781,11 +782,27 @@ of the 32-bit word.  The DataLayout `e` (little-endian) now matches the hardware
 
 ## Next steps
 
+All five FPGA hardware fixes have shipped in silicon (see
+`FPGA_FIXES_HISTORY.md`).  Backend support is in place for jump tables
+(`BR_JT` → `MEMGET32` of `EK_Custom32` table → `JMPR_R`), function-pointer
+calls (`CALLR_R`), one-instruction frame address materialisation (`ADDI`),
+and one-instruction signed sub-word loads (`LDIDX8_S`/`LDIDX16_S`).
+
 ### Step 30 — Hardware test: run all .bin programs on board
 - hello.bin / adventure.bin / test_64bit.bin
 - expr.bin / bst.bin / crypto.bin / queens.bin (post int=32 + tailored tests)
+- test_switch.bin (BR_JT → JMPR_R end-to-end, post Fix 2)
 - test_fp.bin (links softfp.o)
 
-### Step 31 — FPGA Fix 2: JMPR indirect branch
-### Step 32 — FPGA Fix 4: ADDI rd, rs, imm32
-### Step 33 — Inline assembly support (KlaussCPUAsmParser)
+### Step 31 — Inline assembly support (KlaussCPUAsmParser)
+- enables `asm volatile (...)` and `__asm__` blocks in C
+- prerequisite for hand-written critical sections (e.g. UART driver primitives,
+  context save/restore in a future RTOS port)
+
+### Step 32 — Vendor compiler-rt builtins for full soft-FP conformance
+- replace hand-written `softfp.c` with compiler-rt's `addsf3.c` / `mulsf3.c` /
+  etc., either by file-vendoring (Option A in the conversation history) or
+  full compiler-rt build integration (Option B)
+- enables correct subnormal / Inf / NaN handling
+- adds double-precision (`__adddf3` etc.) and integer-divide builtins
+  (`__udivdi3`, `__umoddi3`) if needed for larger programs

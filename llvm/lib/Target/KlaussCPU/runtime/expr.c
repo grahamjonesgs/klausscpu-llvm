@@ -2,8 +2,9 @@
  *
  * Compile via Makefile:  make expr.elf  &&  make expr.bin
  *
- * Tests deep recursion, char parsing, large if/else ladders (no jump tables
- * on KlaussCPU), and integer arithmetic with mixed precedence.
+ * Tests deep recursion, char parsing, and integer arithmetic with mixed
+ * precedence.  Uses if/else chains rather than switch — see test_switch.c
+ * for the BR_JT → JMPR_R path.
  *
  * Grammar:
  *     expr   := term   (('+' | '-') term)*
