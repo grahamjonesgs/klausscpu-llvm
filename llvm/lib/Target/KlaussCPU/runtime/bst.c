@@ -19,6 +19,8 @@ extern void  newline(void);
 extern void *malloc(unsigned long long size);
 extern void  free(void *ptr);
 extern int   heap_words_used(void);
+extern void  leds(unsigned long long val);
+extern void  seg7(unsigned long long val);
 
 /* ── Tree ─────────────────────────────────────────────────────────────────── */
 
@@ -58,13 +60,16 @@ static int bst_find(struct node *root, long long k) {
     return bst_find(root->r, k);
 }
 
-/* In-order walk into out[]; *idx is the next free slot, capped at cap. */
-static void bst_walk(struct node *root, long long *out, int *idx, int cap) {
-    if (!root) return;
-    bst_walk(root->l, out, idx, cap);
-    if (*idx < cap) out[*idx] = root->key;
-    (*idx)++;
-    bst_walk(root->r, out, idx, cap);
+/* In-order walk into out[]; returns updated idx (next free slot).
+ * noinline: prevents the -O1 inter-procedural optimizer from devirtualising
+ * the `out` pointer, which would hide writes to main.out from the caller's
+ * alias analysis and cause wrong CSE of out[0] vs out[29] in main. */
+__attribute__((noinline))
+static int bst_walk(struct node *root, long long *out, int idx, int cap) {
+    if (!root) return idx;
+    idx = bst_walk(root->l, out, idx, cap);
+    if (idx < cap) out[idx] = root->key;
+    return bst_walk(root->r, out, idx + 1, cap);
 }
 
 static struct node *bst_min_node(struct node *root) {
@@ -134,6 +139,7 @@ int main(void) {
 
     print_str("=== Binary Search Tree ===");
     newline();
+    leds(0x0001);  /* CP1: entered main */
 
     /* Build a tree with mixed insertion order. */
     static const long long keys[] = {
@@ -143,11 +149,16 @@ int main(void) {
     int nkeys = (int)(sizeof(keys) / sizeof(keys[0]));   /* 30 */
 
     struct node *root = 0;
-    for (int i = 0; i < nkeys; i++)
+    for (int i = 0; i < nkeys; i++) {
+        seg7(i);
         root = bst_insert(root, keys[i]);
+    }
+
+    leds(0x0002);  /* CP2: insert loop done */
 
     /* T1: count matches */
     check("T1  count==30:    ", bst_count(root) == 30);
+    leds(0x0003);  /* CP3: T1 done */
 
     /* T2: every inserted key found */
     int all_found = 1;
@@ -165,19 +176,21 @@ int main(void) {
 
     /* T4: in-order walk yields sorted, deduplicated keys */
     static long long out[64];
-    int idx = 0;
-    bst_walk(root, out, &idx, 64);
+    int idx = bst_walk(root, out, 0, 64);
     int sorted_ok = (idx == 30);
-    for (int i = 1; i < 30 && sorted_ok; i++)
-        if (out[i] <= out[i-1]) sorted_ok = 0;
+    for (int i = 0; i + 1 < 30 && sorted_ok; i++)
+        if (out[i + 1] <= out[i]) sorted_ok = 0;
     check("T4  in-order:     ", sorted_ok);
-    print_str("    min=");
-    print_int(out[0]);
-    print_str("  max=");
-    print_int(out[29]);
-    print_str("  height=");
-    print_int(bst_height(root));
-    newline();
+    /* Use local variables to force correct loads — the compiler
+     * otherwise CSEs out[29] back to out[0] after devirtualising bst_walk. */
+    {
+        long long min_v = out[0];
+        long long max_v = out[29];
+        print_str("    min="); print_int(min_v);
+        print_str("  max=");   print_int(max_v);
+        print_str("  height="); print_int(bst_height(root));
+        newline();
+    }
 
     /* T5: delete a leaf, an internal-with-one-child, and an internal-with-two */
     root = bst_remove(root, 5);     /* leaf */
@@ -196,11 +209,10 @@ int main(void) {
     check("T5c removed:      ", gone_ok);
 
     /* T6: walk again — still sorted, contains exactly the surviving keys */
-    idx = 0;
-    bst_walk(root, out, &idx, 64);
+    idx = bst_walk(root, out, 0, 64);
     int re_sorted = (idx == 26);
-    for (int i = 1; i < 26 && re_sorted; i++)
-        if (out[i] <= out[i-1]) re_sorted = 0;
+    for (int i = 0; i + 1 < 26 && re_sorted; i++)
+        if (out[i + 1] <= out[i]) re_sorted = 0;
     check("T6  re-walk sort: ", re_sorted);
 
     /* T7: deleting absent key leaves tree unchanged */

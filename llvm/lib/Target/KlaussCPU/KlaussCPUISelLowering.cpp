@@ -79,6 +79,11 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   // SEXTLOAD i32   → Expand → ZEXTLOAD + SIGN_EXTEND_INREG (SEXTW).
   // SIGN_EXTEND_INREG i8/i16 → Legal (SEXTB/SEXTH hardware instructions).
   // SIGN_EXTEND_INREG i32 → Legal (SEXTW hardware instruction, fixed April 2026).
+  // i1 loads: GlobalOpt at -O1 can shrink a bool-valued global to i1; promote to
+  // i8 so the existing MEMGET8/LDIDX8 paths handle it.
+  for (MVT ExtVT : {MVT::i64, MVT::i32})
+    for (ISD::LoadExtType ET : {ISD::ZEXTLOAD, ISD::EXTLOAD, ISD::SEXTLOAD})
+      setLoadExtAction(ET, ExtVT, MVT::i1, Promote);
   for (MVT VT : {MVT::i8, MVT::i16, MVT::i32}) {
     setLoadExtAction(ISD::ZEXTLOAD, MVT::i64, VT, Legal);
     setLoadExtAction(ISD::EXTLOAD,  MVT::i64, VT, Legal);
@@ -90,6 +95,7 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setTruncStoreAction(MVT::i64, MVT::i8,  Legal);
   setTruncStoreAction(MVT::i64, MVT::i16, Legal);
   setTruncStoreAction(MVT::i64, MVT::i32, Legal);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1,  Expand);
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i8,  Legal);
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i16, Legal);
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i32, Legal);

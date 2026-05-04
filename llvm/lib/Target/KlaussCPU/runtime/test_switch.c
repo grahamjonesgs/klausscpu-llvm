@@ -141,7 +141,7 @@ int main(void) {
     /* T3: switch inside a loop with fallthrough cases */
     {
         int ok = 1;
-        ok = ok && (score("hello world") == 1+3+3+3+1+0+3+1+3+3+1);
+        ok = ok && (score("hello world") == 3+1+3+3+1+0+3+1+3+3+3);
         ok = ok && (score("AEIOU")       == 2+2+2+2+2);
         ok = ok && (score("aeiou")       == 1+1+1+1+1);
         ok = ok && (score("")            == 0);

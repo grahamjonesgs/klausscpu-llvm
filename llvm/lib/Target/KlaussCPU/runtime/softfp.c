@@ -95,6 +95,26 @@ float __floatunsisf(uint32_t a) {
     return u2f(mkfp(0, exp, mantissa));
 }
 
+/* Float → signed 64-bit int (truncating, like C cast).
+ * Needed because `long` is 64-bit on KlaussCPU. */
+int64_t __fixsfdi(float fa) {
+    uint32_t a = f2u(fa);
+    int sign = (int)(a >> 31);
+    int exp  = (int)((a >> EBITS) & EMASK);
+    uint32_t mant = (a & MMASK) | (exp ? (1u << EBITS) : 0);
+
+    int unbiased = exp - BIAS;
+    if (exp == 0)        return 0;
+    if (unbiased < 0)    return 0;
+    if (unbiased > 62)   return sign ? (int64_t)0x8000000000000000ULL : 0x7FFFFFFFFFFFFFFFLL;
+
+    uint64_t result;
+    if (unbiased >= EBITS) result = (uint64_t)mant << (unbiased - EBITS);
+    else                   result = (uint64_t)mant >> (EBITS - unbiased);
+
+    return sign ? -(int64_t)result : (int64_t)result;
+}
+
 /* Float → signed 32-bit int (truncating, like C cast).
  * Out-of-range and NaN return INT32_MAX / INT32_MIN per compiler-rt. */
 int32_t __fixsfsi(float fa) {
@@ -223,9 +243,11 @@ float __mulsf3(float fa, float fb) {
     /* 24x24 → 48-bit product. */
     uint64_t prod = (uint64_t)ma * (uint64_t)mb;
 
-    /* Leading 1 of prod is at bit 46 or bit 47.  Normalize so it sits at
-     * bit 47, then we have 24 significant bits in [47..24]. */
-    int exp = ea + eb - BIAS;
+    /* Leading 1 of prod is at bit 46 or bit 47.  Significands are each in
+     * [1,2), so their product is in [1,4).  Base exponent accounts for the
+     * case where leading 1 is at bit 47 (product ≥ 2); if it's at bit 46
+     * instead, we shift left and decrement. */
+    int exp = ea + eb - BIAS + 1;
     if ((prod & (1ULL << 47)) == 0) {
         prod <<= 1;
         exp--;
@@ -266,7 +288,10 @@ float __divsf3(float fa, float fb) {
     uint64_t q = numer / mb;
     uint64_t rem = numer - q * mb;
 
-    int exp = ea - eb + BIAS;
+    /* Quotient (ma/mb) ∈ [0.5,2).  If ratio < 1 (bit 25 not set), the
+     * significand is in [0.5,1) and needs a ×2 normalisation which costs
+     * one exponent unit; account for that here so both branches land right. */
+    int exp = ea - eb + BIAS - 1;
 
     /* q is 25 bits.  Leading 1 should be at bit 24; if it's at bit 25,
      * shift right and bump exp. */
@@ -316,3 +341,15 @@ int __ltsf2(float a, float b) { return compare(a, b); }
 int __lesf2(float a, float b) { return compare(a, b); }
 int __gtsf2(float a, float b) { return compare(a, b); }
 int __gesf2(float a, float b) { return compare(a, b); }
+
+/* Returns non-zero if either argument is NaN (exponent=0xFF, mantissa≠0).
+ * O0 prevents -O1 from recognising the bit-pattern as fcmp uno and replacing
+ * the body with a call to __unordsf2 itself (infinite recursion). */
+__attribute__((optnone))
+int __unordsf2(float fa, float fb) {
+    uint32_t a = f2u(fa);
+    uint32_t b = f2u(fb);
+    int a_nan = ((a & 0x7F800000u) == 0x7F800000u) && (a & MMASK);
+    int b_nan = ((b & 0x7F800000u) == 0x7F800000u) && (b & MMASK);
+    return a_nan || b_nan;
+}

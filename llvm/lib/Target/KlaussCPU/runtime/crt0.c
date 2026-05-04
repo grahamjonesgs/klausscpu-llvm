@@ -24,10 +24,15 @@
 extern int main(int argc, char **argv);
 
 /* Linker-script symbols marking the BSS region */
-extern char __bss_start[], __bss_end[];
+extern char __bss_start[], __bss_end[], _end[];
 
 /* _stack_top: the address of this symbol IS the stack-top value (0x08000000). */
 extern char _stack_top[];
+
+/* Heap top pointer owned by libc.c; initialised here so the compiler in
+ * libc.c cannot constant-fold it (cross-TU write prevents the optimisation
+ * that was replacing the scan base with literal 0). */
+extern char *g_heap_top;
 
 __attribute__((noreturn, used))
 void _start(void) {
@@ -48,9 +53,26 @@ void _start(void) {
     /* Hardware spin-wait — allow UART and peripherals to settle. */
     __builtin_klausscpu_delayv(0x500);
 
+    /* Checkpoint: about to clear BSS. */
+    __builtin_klausscpu_leds(0xBBBB);
+
     /* Zero-fill BSS */
     for (char *p = __bss_start; p != __bss_end; ++p)
         *p = 0;
+
+    /* Initialise heap: must happen after BSS clear (which zeroed g_heap_top),
+     * and before main so the compiler in libc.c sees a non-zero g_heap_top. */
+    g_heap_top = _end;
+
+    /* Write heap start address to the hardware heap-header slot at address 0.
+     * volatile prevents the compiler from treating the null dereference as UB
+     * and eliding/transforming the store.  Physical address 0 is valid RAM
+     * on KlaussCPU (the hardware reserves the first 32 bytes as the heap
+     * header; code starts at 0x0020). */
+    *(volatile unsigned long long *)0 = (unsigned long long)(char *)_end;
+
+    /* Checkpoint: BSS cleared, heap initialised, about to call main. */
+    __builtin_klausscpu_leds(0xCCCC);
 
     main(0, (char **)0);
 

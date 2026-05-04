@@ -208,7 +208,7 @@ int main(void) {
     check("\t10\t*\t10\t", 100);
 
     /* Deep nesting — exercises recursion depth */
-    check("(((((((1+2)*3)+4)*5)+6)*7)+8)", 668);
+    check("(((((((1+2)*3)+4)*5)+6)*7)+8)", 505);
     check("1+(2+(3+(4+(5+(6+(7+(8+9)))))))", 45);
 
     /* Large values fit in long long but not int */
@@ -218,7 +218,7 @@ int main(void) {
     /* Mixed precedence chains */
     check("2+3*4-5*6+7", -9);
     check("100-50+25-12+6-3", 66);
-    check("2*3*4+5*6*7+8*9", 304);
+    check("2*3*4+5*6*7+8*9", 306);
 
     /* Error cases */
     check_err("");

@@ -98,34 +98,31 @@ void *memcpy(void *dst, void *src, int n) {
 // heap_start is written to address 0x0000 (the hardware heap-header area)
 // as a 64-bit value, so test programs read it with
 //   long long *mem = (long long*)0; hs = mem[0];
+//
+// g_heap_base was removed: the compiler eliminated it and replaced the scan
+// start with literal 0, corrupting the code section.  We now use the linker
+// symbol _end directly — the compiler cannot constant-fold a linker symbol.
 
 extern char _end[];   // first byte past .bss, from linker script
 
 #define HDR_SZ  24    // header size in bytes
 
-static char *g_heap_base = 0;
-static char *g_heap_top  = 0;
-
-static void heap_init(void) {
-    g_heap_base = _end;
-    g_heap_top  = _end;
-    // Write the 64-bit heap-start value into the hardware heap-header area
-    // at address 0.  Must be a 64-bit store: the hardware reserves 8 bytes
-    // here, and `int` is now 32 bits.
-    uint64_t *addr0 = (uint64_t *)0;
-    addr0[0] = (uint64_t)g_heap_base;
-}
+// g_heap_top is non-static so crt0.c can initialise it before main().
+// The compiler cannot constant-fold it (cross-TU write from crt0) so it
+// must reload it at the start of every malloc call.
+char *g_heap_top = 0;
 
 static uint64_t align8(uint64_t n) {
     return (n + 7) & ~(uint64_t)7;
 }
 
 void *malloc(uint64_t size) {
-    if (!g_heap_base) heap_init();
     size = align8(size);
 
-    // First-fit: search existing free blocks.
-    char *p = g_heap_base;
+    // First-fit: search existing free blocks, always starting from _end.
+    // Using _end directly (a linker symbol) prevents the compiler from
+    // substituting literal 0 as the scan base.
+    char *p = _end;
     while (p < g_heap_top) {
         uint64_t *hdr = (uint64_t *)p;
         if (hdr[1] == 1 && hdr[0] >= size) {   // free and big enough
@@ -194,7 +191,7 @@ long long heap_get_top(void) {
 // Return the total number of 8-byte words currently in-use by live allocations.
 int heap_words_used(void) {
     int words = 0;
-    char *p = g_heap_base;
+    char *p = _end;
     while (p < g_heap_top) {
         uint64_t *hdr = (uint64_t *)p;
         if (hdr[1] == 0)                    // in-use

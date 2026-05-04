@@ -9,6 +9,7 @@
 #include "TargetInfo/KlaussCPUTargetInfo.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
@@ -58,9 +59,14 @@ static MCOperand lowerMachineOperand(const MachineOperand &MO,
     return MCOperand::createExpr(
         MCSymbolRefExpr::create(MO.getMBB()->getSymbol(), AP.OutContext));
 
-  case MachineOperand::MO_GlobalAddress:
-    return MCOperand::createExpr(
-        MCSymbolRefExpr::create(AP.getSymbol(MO.getGlobal()), AP.OutContext));
+  case MachineOperand::MO_GlobalAddress: {
+    const MCExpr *Sym =
+        MCSymbolRefExpr::create(AP.getSymbol(MO.getGlobal()), AP.OutContext);
+    if (int64_t Off = MO.getOffset())
+      Sym = MCBinaryExpr::createAdd(
+          Sym, MCConstantExpr::create(Off, AP.OutContext), AP.OutContext);
+    return MCOperand::createExpr(Sym);
+  }
 
   case MachineOperand::MO_ExternalSymbol:
     return MCOperand::createExpr(MCSymbolRefExpr::create(
