@@ -244,6 +244,18 @@ unsigned KlaussCPUTargetLowering::getJumpTableEncoding() const {
   return MachineJumpTableInfo::EK_Custom32;
 }
 
+std::pair<unsigned, const TargetRegisterClass *>
+KlaussCPUTargetLowering::getRegForInlineAsmConstraint(
+    const TargetRegisterInfo *TRI, StringRef Constraint, MVT VT) const {
+  if (Constraint.size() == 1) {
+    switch (Constraint[0]) {
+    case 'r':
+      return {0, &KlaussCPU::GPRRegClass};
+    }
+  }
+  return TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
+}
+
 // __builtin_stack_save() / __builtin_stack_restore() support.
 // SP is a 32-bit register; promote to/from pointer width (i64) as needed.
 

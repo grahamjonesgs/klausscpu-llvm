@@ -10,6 +10,7 @@
 #   make queens         — N-queens backtracker
 #   make test_switch    — switch/case → BR_JT → JMPR_R dispatch test
 #   make test_fp        — soft-FP test (links compiler-rt builtins)
+#   make test_asm       — inline assembly test (step 31)
 #   make all            — every .bin
 #   make <name>.bin     — flat binary for FPGA loader
 #   make clean
@@ -26,15 +27,17 @@ OBJCOPY = $(BUILD_DIR)/bin/llvm-objcopy
 TARGET  = klausscpu-unknown-elf
 TRIPLE  = $(TARGET)
 
-CFLAGS  = -target $(TRIPLE) -O1 -nostdlib -nostdinc \
-          -fno-builtin -ffreestanding
+# The KlaussCPU toolchain class (KlaussCPUToolChain) automatically injects
+# -ffreestanding and restricts includes to Clang's own headers, so -nostdlib,
+# -nostdinc, -fno-builtin, and -ffreestanding are no longer needed here.
+CFLAGS  = -target $(TRIPLE) -O1
 
-# compiler-rt builtins live in-tree; use -nostdlibinc (keeps Clang's own
-# stdint.h / stdbool.h / limits.h) rather than -nostdinc.
+# compiler-rt builtins need an extra -I for their own headers.
+# -nostdlibinc is still specified explicitly to be safe (suppresses any system
+# libc headers while keeping Clang's stdint.h/stdbool.h/limits.h).
 BUILTINS    = $(shell git rev-parse --show-toplevel)/compiler-rt/lib/builtins
-CRT_FLAGS   = -target $(TRIPLE) -O1 -nostdlib -nostdlibinc \
-              -fno-builtin -ffreestanding -I$(BUILTINS) \
-              -D__SOFTFP__
+CRT_FLAGS   = -target $(TRIPLE) -O1 -nostdlibinc \
+              -I$(BUILTINS) -D__SOFTFP__
 
 # Single-precision soft-FP from compiler-rt.
 # __SOFTFP__ selects the pure-integer path in fixsfdi/fixunssfdi (no double).
@@ -57,7 +60,7 @@ RUNTIME_OBJS = crt0.o uart_stubs.o io_stubs.o
 
 # ── Default target ────────────────────────────────────────────────────────────
 
-PROGRAMS = hello adventure test_64bit expr bst crypto queens test_switch test_fp
+PROGRAMS = hello adventure test_64bit expr bst crypto queens test_switch test_fp test_asm
 
 .PHONY: all clean $(PROGRAMS)
 
@@ -135,6 +138,11 @@ test_fp.elf: test_fp.o $(CRT_FP_OBJS) libc.o $(RUNTIME_OBJS)
 	@echo "==> $@ built"
 	@file $@
 
+test_asm.elf: test_asm.o libc.o $(RUNTIME_OBJS)
+	$(LLD) -T $(LD_SCRIPT) -o $@ $(RUNTIME_OBJS) libc.o test_asm.o
+	@echo "==> $@ built"
+	@file $@
+
 hello:       hello.elf       hello.bin
 adventure:   adventure.elf   adventure.bin
 test_64bit:  test_64bit.elf  test_64bit.bin
@@ -144,6 +152,7 @@ crypto:      crypto.elf      crypto.bin
 queens:      queens.elf      queens.bin
 test_switch: test_switch.elf test_switch.bin
 test_fp:     test_fp.elf     test_fp.bin
+test_asm:    test_asm.elf    test_asm.bin
 
 # ── Flat binary for FPGA loader ───────────────────────────────────────────────
 

@@ -35,6 +35,10 @@ public:
 
   void emitInstruction(const MachineInstr *MI) override;
 
+  // Inline asm operand substitution: called for each $N in an asm string.
+  bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
+                       const char *ExtraCode, raw_ostream &OS) override;
+
   static char ID;
 };
 
@@ -92,6 +96,27 @@ void KlaussCPUAsmPrinter::emitInstruction(const MachineInstr *MI) {
   }
 
   EmitToStreamer(*OutStreamer, Inst);
+}
+
+bool KlaussCPUAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
+                                           const char *ExtraCode,
+                                           raw_ostream &OS) {
+  // Delegate modifier letters ('c', 'n', 'a', 's') to the base class.
+  if (ExtraCode && ExtraCode[0])
+    return AsmPrinter::PrintAsmOperand(MI, OpNo, ExtraCode, OS);
+
+  // No modifier: print the raw register name or immediate value.
+  const MachineOperand &MO = MI->getOperand(OpNo);
+  switch (MO.getType()) {
+  case MachineOperand::MO_Register:
+    OS << KlaussCPUInstPrinter::getRegisterName(MO.getReg());
+    return false;
+  case MachineOperand::MO_Immediate:
+    OS << MO.getImm();
+    return false;
+  default:
+    return true;
+  }
 }
 
 extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void

@@ -31,24 +31,46 @@ def KlaussCPUCallNode : SDNode<"KlaussCPUISD::CALL", SDT_KlaussCPUCall,
 
 
 //===----------------------------------------------------------------------===//
+// Assembler operand match classes
+// Used by the AsmParser to validate and render parsed operands.
+//===----------------------------------------------------------------------===//
+
+// Matches any immediate expression (integer literal or label).
+def AnyImmAsmOperand : AsmOperandClass {
+  let Name            = "AnyImm";
+  let PredicateMethod = "isImm";
+  let RenderMethod    = "addImmOperands";
+}
+
+def BrTargetAsmOperand : AsmOperandClass {
+  let Name            = "BrTarget";
+  let PredicateMethod = "isImm";
+  let RenderMethod    = "addImmOperands";
+}
+
+//===----------------------------------------------------------------------===//
 // Operand types
 //===----------------------------------------------------------------------===//
 
 def simm32 : Operand<i64> {
-  let DecoderMethod = "decodeSimm32";
+  let DecoderMethod    = "decodeSimm32";
+  let ParserMatchClass = AnyImmAsmOperand;
 }
 
 def uimm32 : Operand<i64> {
-  let DecoderMethod = "decodeUimm32";
+  let DecoderMethod    = "decodeUimm32";
+  let ParserMatchClass = AnyImmAsmOperand;
 }
 
 // 32-bit absolute branch/call target address
 def BrTarget32 : Operand<OtherVT> {
-  let EncoderMethod = "encodeBrTarget";
+  let EncoderMethod    = "encodeBrTarget";
+  let ParserMatchClass = BrTargetAsmOperand;
 }
 
 def CallTarget32 : Operand<i64> {
-  let EncoderMethod = "encodeBrTarget";
+  let EncoderMethod    = "encodeBrTarget";
+  let ParserMatchClass = BrTargetAsmOperand;
 }
 
 //===----------------------------------------------------------------------===//

@@ -8,6 +8,7 @@ tablegen(LLVM KlaussCPUGenSubtargetInfo.inc -gen-subtarget)
 tablegen(LLVM KlaussCPUGenCallingConv.inc   -gen-callingconv)
 tablegen(LLVM KlaussCPUGenDAGISel.inc       -gen-dag-isel)
 tablegen(LLVM KlaussCPUGenAsmWriter.inc     -gen-asm-writer)
+tablegen(LLVM KlaussCPUGenAsmMatcher.inc   -gen-asm-matcher)
 add_public_tablegen_target(KlaussCPUCommonTableGen)
 
 add_llvm_target(KlaussCPUCodeGen
@@ -39,5 +40,6 @@ add_llvm_target(KlaussCPUCodeGen
   KlaussCPU
 )
 
+add_subdirectory(AsmParser)
 add_subdirectory(MCTargetDesc)
 add_subdirectory(TargetInfo)

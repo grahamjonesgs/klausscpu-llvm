@@ -65,6 +65,11 @@ private:
   SDValue LowerSELECT(SDValue Op, SelectionDAG &DAG) const;
 
 public:
+  // Inline assembly constraint support.
+  std::pair<unsigned, const TargetRegisterClass *>
+  getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
+                                StringRef Constraint, MVT VT) const override;
+
   unsigned getJumpTableEncoding() const override;
 
   // EK_Custom32: emit each entry as a 4-byte absolute target address.
