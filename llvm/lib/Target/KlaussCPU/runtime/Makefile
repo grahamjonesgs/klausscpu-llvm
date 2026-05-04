@@ -39,18 +39,12 @@ CRT_FLAGS   = -target $(TRIPLE) -O1 -nostdlib -nostdlibinc \
 # Single-precision soft-FP from compiler-rt.
 # __SOFTFP__ selects the pure-integer path in fixsfdi/fixunssfdi (no double).
 # fp_mode_stub.o provides __fe_getround / __fe_raise_inexact stubs.
-#
-# addsf3 / subsf3 / negsf2 are intentionally excluded: compiler-rt's addsf3
-# uses rep_clz() → __builtin_clz(), which the backend expands as
-# "shlr r, x, 32; clz r" (64-bit CLZ assumed).  The hardware CLZ instruction
-# only examines the lower 32 bits of the register, so after the shift the
-# result is clz(0)=32 rather than the correct count → wrong renormalisation.
-# softfp_addsub.o provides those three functions via a while-loop that
-# requires no CLZ instruction.
-CRT_FP_NAMES = mulsf3 divsf3 comparesf2 \
+# The hardware CLZ instruction is 64-bit, matching what LLVM's __builtin_clz
+# expansion emits ("shlr r, x, 32; clz r"), so all compiler-rt routines are
+# used directly.
+CRT_FP_NAMES = addsf3 subsf3 mulsf3 divsf3 negsf2 comparesf2 \
                floatsisf floatunsisf fixsfsi fixsfdi fixunssfsi fixunssfdi
-CRT_FP_OBJS  = $(patsubst %, crt-%.o, $(CRT_FP_NAMES)) \
-               fp_mode_stub.o softfp_addsub.o
+CRT_FP_OBJS  = $(patsubst %, crt-%.o, $(CRT_FP_NAMES)) fp_mode_stub.o
 
 LD_SCRIPT   = $(dir $(lastword $(MAKEFILE_LIST)))klausscpu.ld
 CRT0_SRC    = $(dir $(lastword $(MAKEFILE_LIST)))crt0.c
@@ -90,13 +84,9 @@ libc.o: $(LIBC_SRC)
 crt-%.o: $(BUILTINS)/%.c
 	$(CC) $(CRT_FLAGS) -c -o $@ $<
 
-# fp_mode_stub and softfp_addsub live in this directory; compile with CFLAGS
-# (no -I$(BUILTINS) needed — they are self-contained)
+# fp_mode_stub lives in this directory but needs CRT_FLAGS (-I$(BUILTINS))
 fp_mode_stub.o: fp_mode_stub.c
 	$(CC) $(CRT_FLAGS) -c -o $@ $<
-
-softfp_addsub.o: softfp_addsub.c
-	$(CC) $(CFLAGS) -c -o $@ $<
 
 # ── Link ──────────────────────────────────────────────────────────────────────
 
