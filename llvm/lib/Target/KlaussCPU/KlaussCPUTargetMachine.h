@@ -10,6 +10,7 @@
 #include "KlaussCPUSubtarget.h"
 #include "llvm/CodeGen/CodeGenTargetMachineImpl.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
+#include "llvm/Support/Allocator.h"
 #include <optional>
 
 namespace llvm {
@@ -31,6 +32,10 @@ public:
   }
 
   TargetPassConfig *createPassConfig(PassManagerBase &PM) override;
+
+  MachineFunctionInfo *
+  createMachineFunctionInfo(BumpPtrAllocator &Allocator, const Function &F,
+                             const TargetSubtargetInfo *STI) const override;
 
   TargetLoweringObjectFile *getObjFileLowering() const override {
     return TLOF.get();

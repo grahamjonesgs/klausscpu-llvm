@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "KlaussCPUISelLowering.h"
+#include "KlaussCPUMachineFunctionInfo.h"
 #include "KlaussCPURegisterInfo.h"
 #include "KlaussCPUSubtarget.h"
 #include "llvm/CodeGen/CallingConvLower.h"
@@ -29,6 +30,7 @@
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/Support/ErrorHandling.h"
+#include <optional>
 
 using namespace llvm;
 
@@ -151,7 +153,9 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::TRAP, MVT::Other, Legal);
 
   // ---- Varargs ----
-  setOperationAction(ISD::VASTART, MVT::Other, Expand);
+  // VASTART stores the address of the first variadic argument into the va_list.
+  // VAARG/VACOPY/VAEND are handled inline by Clang for VoidPtrBuiltinVaList.
+  setOperationAction(ISD::VASTART, MVT::Other, Custom);
   setOperationAction(ISD::VAARG,   MVT::Other, Expand);
   setOperationAction(ISD::VACOPY,  MVT::Other, Expand);
   setOperationAction(ISD::VAEND,   MVT::Other, Expand);
@@ -172,6 +176,7 @@ SDValue KlaussCPUTargetLowering::LowerOperation(SDValue Op,
   case ISD::SELECT:         return LowerSELECT(Op, DAG);
   case ISD::STACKSAVE:      return LowerSTACKSAVE(Op, DAG);
   case ISD::STACKRESTORE:   return LowerSTACKRESTORE(Op, DAG);
+  case ISD::VASTART:        return LowerVASTART(Op, DAG);
   default:
     llvm_unreachable("KlaussCPU: unimplemented LowerOperation opcode");
   }
@@ -277,6 +282,22 @@ SDValue KlaussCPUTargetLowering::LowerSTACKRESTORE(SDValue Op,
   return DAG.getCopyToReg(Chain, DL, KlaussCPU::SP, NewSP32);
 }
 
+// va_start(ap, last_named) — store the address of the first variadic argument
+// into *ap.  With VoidPtrBuiltinVaList, ap is just a void * that va_arg bumps.
+SDValue KlaussCPUTargetLowering::LowerVASTART(SDValue Op,
+                                               SelectionDAG &DAG) const {
+  MachineFunction &MF = DAG.getMachineFunction();
+  int VaFI = MF.getInfo<KlaussCPUMachineFunctionInfo>()->getVarArgsFrameIndex();
+
+  SDLoc DL(Op);
+  SDValue FIN = DAG.getFrameIndex(VaFI, getPointerTy(DAG.getDataLayout()));
+
+  // Store the frame address (= pointer to first vararg slot) into *ap.
+  const Value *SV = cast<SrcValueSDNode>(Op.getOperand(2))->getValue();
+  return DAG.getStore(Op.getOperand(0), DL, FIN, Op.getOperand(1),
+                       MachinePointerInfo(SV));
+}
+
 const char *
 KlaussCPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   switch (Opcode) {
@@ -319,13 +340,59 @@ SDValue KlaussCPUTargetLowering::LowerFormalArguments(
       InVals.push_back(DAG.getCopyFromReg(Chain, DL, VReg, MVT::i64));
     } else {
       assert(VA.isMemLoc() && "Unexpected CCValAssign loc type");
-      // Offset is relative to the incoming SP (already ≥ 32 due to pre-reserve).
+      // Offset is relative to incoming SP (≥ 32 due to pre-reserve).
+      // eliminateFrameIndex adds 8 for fixed objects (R15 = incoming_SP - 8).
       int FI = MF.getFrameInfo().CreateFixedObject(8, VA.getLocMemOffset(),
                                                     /*isImmutable=*/true);
       SDValue FIN = DAG.getFrameIndex(FI, getPointerTy(DAG.getDataLayout()));
       InVals.push_back(DAG.getLoad(MVT::i64, DL, Chain, FIN,
                                     MachinePointerInfo::getFixedStack(MF, FI)));
     }
+  }
+
+  if (IsVarArg) {
+    // Argument registers R0–R3.  C requires at least one named parameter before
+    // '...', so the first unallocated register is R1 at the earliest.
+    static const MCPhysReg ArgRegs[] = {
+        KlaussCPU::R0, KlaussCPU::R1, KlaussCPU::R2, KlaussCPU::R3};
+    constexpr unsigned NumArgRegs = 4;
+
+    // Index of the first unallocated (= first potential vararg) register.
+    unsigned FirstVaReg =
+        CCInfo.getFirstUnallocated(ArrayRef<MCPhysReg>(ArgRegs, NumArgRegs));
+
+    auto &MFI = MF.getFrameInfo();
+
+    // Arg register R_I sits in the caller's "reserved area" at [incoming_SP + I*8].
+    // We save R_{FirstVaReg}..R3 there so they are contiguous with stack args at
+    // [incoming_SP+32..], allowing va_arg to advance a plain pointer through all args.
+    //
+    // eliminateFrameIndex adds 8 for fixed objects (R15 = incoming_SP - 8), so
+    // CreateFixedObject with offset F yields the correct R15-relative offset F+8.
+
+    std::optional<int> VaArgFI;
+    SmallVector<SDValue, 4> Stores;
+    for (unsigned I = FirstVaReg; I < NumArgRegs; ++I) {
+      int SlotOff = (int)(I * 8); // R_I → [incoming_SP + I*8]
+      int FI = MFI.CreateFixedObject(8, SlotOff, /*isImmutable=*/false);
+      if (!VaArgFI)
+        VaArgFI = FI;
+      Register VReg = RegInfo.createVirtualRegister(&KlaussCPU::GPRRegClass);
+      RegInfo.addLiveIn(ArgRegs[I], VReg);
+      SDValue FIN = DAG.getFrameIndex(FI, getPointerTy(DAG.getDataLayout()));
+      SDValue Val = DAG.getCopyFromReg(Chain, DL, VReg, MVT::i64);
+      Stores.push_back(DAG.getStore(Chain, DL, Val, FIN,
+                                     MachinePointerInfo::getFixedStack(MF, FI)));
+    }
+    if (!Stores.empty())
+      Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other, Stores);
+
+    // If all registers were used for named args, the first vararg is on the stack.
+    if (!VaArgFI)
+      VaArgFI = MFI.CreateFixedObject(8, (int)CCInfo.getStackSize(),
+                                       /*isImmutable=*/false);
+
+    MF.getInfo<KlaussCPUMachineFunctionInfo>()->setVarArgsFrameIndex(*VaArgFI);
   }
 
   return Chain;

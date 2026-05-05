@@ -77,6 +77,12 @@ bool KlaussCPURegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   int FrameIndex = MI.getOperand(FIOperandNum).getIndex();
   int64_t BaseOffset = MFI.getObjectOffset(FrameIndex);
 
+  // Fixed objects (FrameIndex < 0) store incoming-SP-relative offsets.
+  // R15 = incoming_SP - 8 (PUSH R15 in prologue), so add 8 to convert.
+  // Non-fixed (local) objects have R15-relative offsets already (set by PEI).
+  if (MFI.isFixedObjectIndex(FrameIndex))
+    BaseOffset += 8;
+
   // Standard case: load/store instructions have (base, imm_offset) at
   // [FIOperandNum, FIOperandNum+1].  Replace FI with R15 and fold in the
   // frame-slot offset.

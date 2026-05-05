@@ -52,6 +52,117 @@ void print_hex_prefix(int64_t val) {
 // any byte written via STIDX8 at address A is read back correctly by MEMGET8
 // at the same address A (both use the same scrambled physical slot).
 
+// ── printf ───────────────────────────────────────────────────────────────────
+// Minimal printf supporting: %d %i %u %x %X %c %s %ld %li %lu %lx %lX %%
+//
+// All integer varargs are promoted to 64-bit by the KlaussCPU calling convention,
+// so we read them as `long` (= int64_t, 8 bytes) regardless of the format width.
+// For %c and %s the vararg is also 8 bytes (pointer or char padded to 64 bits).
+
+#include <stdarg.h>
+
+// Translate \n → \r\n for serial terminals; pass all other chars unchanged.
+static void _putc_crlf(char c) {
+    if (c == '\n') uart_putc('\r');
+    uart_putc(c);
+}
+
+static void _puthex(uint64_t v, int upper) {
+    char buf[17];
+    int i = 0;
+    if (v == 0) { uart_putc('0'); return; }
+    while (v) {
+        int d = (int)(v & 0xF);
+        buf[i++] = d < 10 ? '0' + d : (upper ? 'A' : 'a') + d - 10;
+        v >>= 4;
+    }
+    int j;
+    for (j = i - 1; j >= 0; j--)
+        uart_putc(buf[j]);
+}
+
+static void _putulong(uint64_t v) {
+    char buf[22];
+    int i = 0;
+    if (v == 0) { uart_putc('0'); return; }
+    while (v) {
+        buf[i++] = '0' + (int)(v % 10);
+        v /= 10;
+    }
+    int j;
+    for (j = i - 1; j >= 0; j--)
+        uart_putc(buf[j]);
+}
+
+int printf(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    int count = 0;
+    while (*fmt) {
+        if (*fmt != '%') {
+            _putc_crlf(*fmt++);
+            count++;
+            continue;
+        }
+        fmt++; // skip '%'
+        int is_long = 0;
+        if (*fmt == 'l') { is_long = 1; fmt++; }
+        (void)is_long; // all ints promoted to 64-bit anyway
+        switch (*fmt) {
+        case 'd': case 'i': {
+            long raw = va_arg(ap, long);
+            // %d reads a C int (32-bit); the calling convention zero-extends it to
+            // 64-bit (AExt), so we must sign-extend back from the lower 32 bits.
+            // %ld uses the full 64-bit long value as-is.
+            int64_t v = is_long ? (int64_t)raw : (int64_t)(int)raw;
+            if (v < 0) { uart_putc('-'); v = -v; }
+            _putulong((uint64_t)v);
+            break;
+        }
+        case 'u': {
+            long raw = va_arg(ap, long);
+            // %u is an unsigned int (32-bit); mask upper bits for correctness.
+            uint64_t v = is_long ? (uint64_t)raw : (uint64_t)(unsigned int)raw;
+            _putulong(v);
+            break;
+        }
+        case 'x': {
+            long raw = va_arg(ap, long);
+            uint64_t v = is_long ? (uint64_t)raw : (uint64_t)(unsigned int)raw;
+            _puthex(v, 0);
+            break;
+        }
+        case 'X': {
+            long raw = va_arg(ap, long);
+            uint64_t v = is_long ? (uint64_t)raw : (uint64_t)(unsigned int)raw;
+            _puthex(v, 1);
+            break;
+        }
+        case 'c': {
+            char c = (char)va_arg(ap, long);
+            _putc_crlf(c);
+            break;
+        }
+        case 's': {
+            char *s = (char *)va_arg(ap, long);
+            while (*s) _putc_crlf(*s++);
+            break;
+        }
+        case '%':
+            uart_putc('%');
+            break;
+        default:
+            uart_putc('%');
+            _putc_crlf(*fmt);
+            break;
+        }
+        fmt++;
+        count++;
+    }
+    va_end(ap);
+    return count;
+}
+
 int strlen(char *s) {
     int n = 0;
     while (s[n] != '\0') n++;

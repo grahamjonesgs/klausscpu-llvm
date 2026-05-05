@@ -19,6 +19,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "KlaussCPUTargetMachine.h"
+#include "KlaussCPUMachineFunctionInfo.h"
 #include "TargetInfo/KlaussCPUTargetInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
@@ -80,6 +81,14 @@ public:
 TargetPassConfig *
 KlaussCPUTargetMachine::createPassConfig(PassManagerBase &PM) {
   return new KlaussCPUPassConfig(*this, PM);
+}
+
+MachineFunctionInfo *
+KlaussCPUTargetMachine::createMachineFunctionInfo(BumpPtrAllocator &Allocator,
+                                                   const Function &F,
+                                                   const TargetSubtargetInfo *STI) const {
+  return KlaussCPUMachineFunctionInfo::create<KlaussCPUMachineFunctionInfo>(
+      Allocator, F, STI);
 }
 
 bool KlaussCPUPassConfig::addInstSelector() {

@@ -11,6 +11,7 @@
 #   make test_switch    — switch/case → BR_JT → JMPR_R dispatch test
 #   make test_fp        — soft-FP test (links compiler-rt builtins)
 #   make test_asm       — inline assembly test (step 31)
+#   make test_printf    — varargs / printf test (step 34)
 #   make all            — every .bin
 #   make <name>.bin     — flat binary for FPGA loader
 #   make clean
@@ -39,14 +40,24 @@ BUILTINS    = $(shell git rev-parse --show-toplevel)/compiler-rt/lib/builtins
 CRT_FLAGS   = -target $(TRIPLE) -O1 -nostdlibinc \
               -I$(BUILTINS) -D__SOFTFP__
 
-# Single-precision soft-FP from compiler-rt.
-# __SOFTFP__ selects the pure-integer path in fixsfdi/fixunssfdi (no double).
-# fp_mode_stub.o provides __fe_getround / __fe_raise_inexact stubs.
-# The hardware CLZ instruction is 64-bit, matching what LLVM's __builtin_clz
-# expansion emits ("shlr r, x, 32; clz r"), so all compiler-rt routines are
-# used directly.
-CRT_FP_NAMES = addsf3 subsf3 mulsf3 divsf3 negsf2 comparesf2 \
+# compiler-rt soft-FP and integer-division builtins.
+# __SOFTFP__ selects pure-integer paths in fix*di/fixuns*di (avoids double dep).
+# fp_mode_stub.o provides __fe_getround/__fe_raise_inexact (no fenv on KlaussCPU).
+# CLZ is 64-bit on hardware so all __builtin_clz expansions work correctly.
+
+# Single-precision float
+CRT_SF_NAMES = addsf3 subsf3 mulsf3 divsf3 negsf2 comparesf2 \
                floatsisf floatunsisf fixsfsi fixsfdi fixunssfsi fixunssfdi
+
+# Double-precision float + float<->double conversions
+CRT_DF_NAMES = adddf3 subdf3 muldf3 divdf3 negdf2 comparedf2 \
+               floatsidf floatunsidf fixdfsi fixdfdi fixunsdfsi fixunsdfdi \
+               extendsfdf2 truncdfsf2
+
+# Integer division (needed for variable-divisor / and % on 32- and 64-bit)
+CRT_INT_NAMES = udivsi3 divsi3 udivdi3 divdi3 umoddi3 moddi3 udivmoddi4
+
+CRT_FP_NAMES = $(CRT_SF_NAMES) $(CRT_DF_NAMES) $(CRT_INT_NAMES)
 CRT_FP_OBJS  = $(patsubst %, crt-%.o, $(CRT_FP_NAMES)) fp_mode_stub.o
 
 LD_SCRIPT   = $(dir $(lastword $(MAKEFILE_LIST)))klausscpu.ld
@@ -60,7 +71,7 @@ RUNTIME_OBJS = crt0.o uart_stubs.o io_stubs.o
 
 # ── Default target ────────────────────────────────────────────────────────────
 
-PROGRAMS = hello adventure test_64bit expr bst crypto queens test_switch test_fp test_asm
+PROGRAMS = hello adventure test_64bit expr bst crypto queens test_switch test_fp test_asm test_printf
 
 .PHONY: all clean $(PROGRAMS)
 
@@ -143,6 +154,11 @@ test_asm.elf: test_asm.o libc.o $(RUNTIME_OBJS)
 	@echo "==> $@ built"
 	@file $@
 
+test_printf.elf: test_printf.o libc.o $(RUNTIME_OBJS)
+	$(LLD) -T $(LD_SCRIPT) -o $@ $(RUNTIME_OBJS) libc.o test_printf.o
+	@echo "==> $@ built"
+	@file $@
+
 hello:       hello.elf       hello.bin
 adventure:   adventure.elf   adventure.bin
 test_64bit:  test_64bit.elf  test_64bit.bin
@@ -153,6 +169,7 @@ queens:      queens.elf      queens.bin
 test_switch: test_switch.elf test_switch.bin
 test_fp:     test_fp.elf     test_fp.bin
 test_asm:    test_asm.elf    test_asm.bin
+test_printf: test_printf.elf test_printf.bin
 
 # ── Flat binary for FPGA loader ───────────────────────────────────────────────
 
