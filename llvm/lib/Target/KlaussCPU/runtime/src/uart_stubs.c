@@ -24,21 +24,27 @@ void uart_tx_hex(uint64_t val) {
 static volatile char _uart_char_buf;
 
 // ---------------------------------------------------------------------------
-// Transmit: send a single character (byte) over UART.
+// Raw single-byte send — no CR conversion.
 // ---------------------------------------------------------------------------
-void uart_putc(char c) {
+static void _uart_raw(char c) {
     _uart_char_buf = c;
     __builtin_klausscpu_txcharmemr((const void *)&_uart_char_buf);
 }
 
 // ---------------------------------------------------------------------------
-// Transmit: send null-terminated string over UART.
-//
-// With LE physical memory, TXSTRMEMR transmits bytes in address order
-// (lowest address first), which is correct for C strings.
+// Transmit: send a single character (byte) over UART.
+// '\n' is expanded to CR+LF so all output looks correct on a serial terminal.
+// ---------------------------------------------------------------------------
+void uart_putc(char c) {
+    if (c == '\n') _uart_raw('\r');
+    _uart_raw(c);
+}
+
+// ---------------------------------------------------------------------------
+// Transmit: send null-terminated string over UART (with CR+LF conversion).
 // ---------------------------------------------------------------------------
 void uart_puts(const char *s) {
-    __builtin_klausscpu_txstrmemr((const void *)s);
+    while (*s) uart_putc(*s++);
 }
 
 // ---------------------------------------------------------------------------
@@ -70,6 +76,6 @@ uint64_t uart_getc_nonblocking(void) {
 // Convenience: puts() + newline.
 // ---------------------------------------------------------------------------
 void uart_println(const char *s) {
-    __builtin_klausscpu_txstrmemr((const void *)s);
+    uart_puts(s);
     __builtin_klausscpu_newline();
 }

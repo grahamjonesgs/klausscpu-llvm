@@ -41,7 +41,11 @@ SECTIONS {
         __bss_end = .;
     } > RAM
 
-    /* Symbols used by crt0 */
+    /* Heap bounds used by picolibc's __fallback_sbrk / malloc */
+    __heap_start = .;
+    __heap_end   = ORIGIN(RAM) + LENGTH(RAM) - 0x10000;  /* leave 64 KiB for stack */
+
+    /* Symbols used by crt0 and picolibc */
     _end        = .;
     _stack_top  = ORIGIN(RAM) + LENGTH(RAM);   /* = 0x08000000 */
 }

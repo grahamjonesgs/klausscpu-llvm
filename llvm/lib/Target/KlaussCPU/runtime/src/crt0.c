@@ -29,10 +29,6 @@ extern char __bss_start[], __bss_end[], _end[];
 /* _stack_top: the address of this symbol IS the stack-top value (0x08000000). */
 extern char _stack_top[];
 
-/* Heap top pointer owned by libc.c; initialised here so the compiler in
- * libc.c cannot constant-fold it (cross-TU write prevents the optimisation
- * that was replacing the scan base with literal 0). */
-extern char *g_heap_top;
 
 __attribute__((noreturn, used))
 void _start(void) {
@@ -59,10 +55,6 @@ void _start(void) {
     /* Zero-fill BSS */
     for (char *p = __bss_start; p != __bss_end; ++p)
         *p = 0;
-
-    /* Initialise heap: must happen after BSS clear (which zeroed g_heap_top),
-     * and before main so the compiler in libc.c sees a non-zero g_heap_top. */
-    g_heap_top = _end;
 
     /* Write heap start address to the hardware heap-header slot at address 0.
      * volatile prevents the compiler from treating the null dereference as UB

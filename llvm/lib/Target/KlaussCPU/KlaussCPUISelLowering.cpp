@@ -150,6 +150,22 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::UMAX,  MVT::i64, Legal);
   setOperationAction(ISD::SETCC, MVT::i64, Legal);
 
+  // No hardware rotate — expand to (shl | lshr) pairs.
+  setOperationAction(ISD::ROTL, MVT::i64, Expand);
+  setOperationAction(ISD::ROTR, MVT::i64, Expand);
+  setOperationAction(ISD::ROTL, MVT::i32, Expand);
+  setOperationAction(ISD::ROTR, MVT::i32, Expand);
+
+  // No 128-bit multiply node — expand UMUL_LOHI/SMUL_LOHI to MUL + MULHU/MULHS.
+  setOperationAction(ISD::UMUL_LOHI, MVT::i64, Expand);
+  setOperationAction(ISD::SMUL_LOHI, MVT::i64, Expand);
+
+  // 128-bit shift halves (from __uint128_t arithmetic in e.g. Ryu).
+  // Lowered to pairs of i64 shifts + SELECT.
+  setOperationAction(ISD::SHL_PARTS, MVT::i64, Custom);
+  setOperationAction(ISD::SRL_PARTS, MVT::i64, Custom);
+  setOperationAction(ISD::SRA_PARTS, MVT::i64, Custom);
+
   setOperationAction(ISD::TRAP, MVT::Other, Legal);
 
   // ---- Varargs ----
@@ -177,9 +193,90 @@ SDValue KlaussCPUTargetLowering::LowerOperation(SDValue Op,
   case ISD::STACKSAVE:      return LowerSTACKSAVE(Op, DAG);
   case ISD::STACKRESTORE:   return LowerSTACKRESTORE(Op, DAG);
   case ISD::VASTART:        return LowerVASTART(Op, DAG);
+  case ISD::SHL_PARTS:      return LowerShiftLeftParts(Op, DAG);
+  case ISD::SRL_PARTS:      return LowerShiftRightParts(Op, DAG, /*IsSRA=*/false);
+  case ISD::SRA_PARTS:      return LowerShiftRightParts(Op, DAG, /*IsSRA=*/true);
   default:
     llvm_unreachable("KlaussCPU: unimplemented LowerOperation opcode");
   }
+}
+
+SDValue KlaussCPUTargetLowering::LowerShiftLeftParts(SDValue Op,
+                                                       SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  SDValue Lo = Op.getOperand(0);
+  SDValue Hi = Op.getOperand(1);
+  SDValue Shamt = Op.getOperand(2);
+  EVT VT = MVT::i64;
+
+  // if (Shamt - 64) < 0:   // Shamt < 64
+  //   new_Lo = Lo << Shamt
+  //   new_Hi = (Hi << Shamt) | (Lo >> 1 >> (63 - Shamt))
+  // else:
+  //   new_Lo = 0
+  //   new_Hi = Lo << (Shamt - 64)
+
+  SDValue Zero       = DAG.getConstant(0, DL, VT);
+  SDValue One        = DAG.getConstant(1, DL, VT);
+  SDValue Minus64    = DAG.getSignedConstant(-64, DL, VT);
+  SDValue SixtyThree = DAG.getConstant(63, DL, VT);
+  SDValue ShamtMinus64  = DAG.getNode(ISD::ADD, DL, VT, Shamt, Minus64);
+  SDValue SixtyThreeMShamt = DAG.getNode(ISD::SUB, DL, VT, SixtyThree, Shamt);
+
+  SDValue LoTrue       = DAG.getNode(ISD::SHL, DL, VT, Lo, Shamt);
+  SDValue ShiftRight1Lo = DAG.getNode(ISD::SRL, DL, VT, Lo, One);
+  SDValue ShiftRightLo  = DAG.getNode(ISD::SRL, DL, VT, ShiftRight1Lo, SixtyThreeMShamt);
+  SDValue ShiftLeftHi   = DAG.getNode(ISD::SHL, DL, VT, Hi, Shamt);
+  SDValue HiTrue  = DAG.getNode(ISD::OR,  DL, VT, ShiftLeftHi, ShiftRightLo);
+  SDValue HiFalse = DAG.getNode(ISD::SHL, DL, VT, Lo, ShamtMinus64);
+
+  SDValue CC = DAG.getSetCC(DL, VT, ShamtMinus64, Zero, ISD::SETLT);
+  Lo = DAG.getNode(ISD::SELECT, DL, VT, CC, LoTrue, Zero);
+  Hi = DAG.getNode(ISD::SELECT, DL, VT, CC, HiTrue, HiFalse);
+
+  SDValue Parts[2] = {Lo, Hi};
+  return DAG.getMergeValues(Parts, DL);
+}
+
+SDValue KlaussCPUTargetLowering::LowerShiftRightParts(SDValue Op,
+                                                        SelectionDAG &DAG,
+                                                        bool IsSRA) const {
+  SDLoc DL(Op);
+  SDValue Lo = Op.getOperand(0);
+  SDValue Hi = Op.getOperand(1);
+  SDValue Shamt = Op.getOperand(2);
+  EVT VT = MVT::i64;
+
+  // if (Shamt - 64) < 0:   // Shamt < 64
+  //   new_Lo = (Lo >> Shamt) | ((Hi << 1) << (63 - Shamt))
+  //   new_Hi = Hi >> Shamt  (arithmetic for SRA, logical for SRL)
+  // else:
+  //   new_Lo = Hi >> (Shamt - 64)  (arithmetic for SRA, logical for SRL)
+  //   new_Hi = IsSRA ? Hi >> 63 : 0
+
+  unsigned ShiftRightOp = IsSRA ? ISD::SRA : ISD::SRL;
+
+  SDValue Zero       = DAG.getConstant(0, DL, VT);
+  SDValue One        = DAG.getConstant(1, DL, VT);
+  SDValue Minus64    = DAG.getSignedConstant(-64, DL, VT);
+  SDValue SixtyThree = DAG.getConstant(63, DL, VT);
+  SDValue ShamtMinus64    = DAG.getNode(ISD::ADD, DL, VT, Shamt, Minus64);
+  SDValue SixtyThreeMShamt = DAG.getNode(ISD::SUB, DL, VT, SixtyThree, Shamt);
+
+  SDValue ShiftRightLo = DAG.getNode(ISD::SRL, DL, VT, Lo, Shamt);
+  SDValue ShiftLeftHi1 = DAG.getNode(ISD::SHL, DL, VT, Hi, One);
+  SDValue ShiftLeftHi  = DAG.getNode(ISD::SHL, DL, VT, ShiftLeftHi1, SixtyThreeMShamt);
+  SDValue LoTrue  = DAG.getNode(ISD::OR,          DL, VT, ShiftRightLo, ShiftLeftHi);
+  SDValue HiTrue  = DAG.getNode(ShiftRightOp,     DL, VT, Hi, Shamt);
+  SDValue LoFalse = DAG.getNode(ShiftRightOp,     DL, VT, Hi, ShamtMinus64);
+  SDValue HiFalse = IsSRA ? DAG.getNode(ISD::SRA, DL, VT, Hi, SixtyThree) : Zero;
+
+  SDValue CC = DAG.getSetCC(DL, VT, ShamtMinus64, Zero, ISD::SETLT);
+  Lo = DAG.getNode(ISD::SELECT, DL, VT, CC, LoTrue, LoFalse);
+  Hi = DAG.getNode(ISD::SELECT, DL, VT, CC, HiTrue, HiFalse);
+
+  SDValue Parts[2] = {Lo, Hi};
+  return DAG.getMergeValues(Parts, DL);
 }
 
 SDValue KlaussCPUTargetLowering::LowerGlobalAddress(SDValue Op,
@@ -268,18 +365,23 @@ SDValue KlaussCPUTargetLowering::LowerSTACKSAVE(SDValue Op,
                                                   SelectionDAG &DAG) const {
   SDLoc DL(Op);
   SDValue Chain = Op.getOperand(0);
-  SDValue SP32 = DAG.getCopyFromReg(Chain, DL, KlaussCPU::SP, MVT::i32);
-  SDValue SP64 = DAG.getNode(ISD::ZERO_EXTEND, DL, MVT::i64, SP32);
-  return DAG.getMergeValues({SP64, SDValue(SP32.getNode(), 1)}, DL);
+  // Use GETSP_R directly to avoid CopyFromReg(SP, i32) which fails
+  // type legalization (SP has no legal i32 register class path).
+  SDValue SP64 = SDValue(DAG.getMachineNode(KlaussCPU::GETSP_R, DL, MVT::i64), 0);
+  return DAG.getMergeValues({SP64, Chain}, DL);
 }
 
 SDValue KlaussCPUTargetLowering::LowerSTACKRESTORE(SDValue Op,
                                                      SelectionDAG &DAG) const {
   SDLoc DL(Op);
-  SDValue Chain  = Op.getOperand(0);
+  SDValue Chain   = Op.getOperand(0);
   SDValue NewSP64 = Op.getOperand(1);
-  SDValue NewSP32 = DAG.getNode(ISD::TRUNCATE, DL, MVT::i32, NewSP64);
-  return DAG.getCopyToReg(Chain, DL, KlaussCPU::SP, NewSP32);
+  // SETSP_R takes a 64-bit GPR and writes bits[31:0] to SP.
+  // Use it directly to avoid TRUNCATE i64→i32 and CopyToReg(SP, i32)
+  // which both hit type-legalization issues.
+  SDNode *SetSP = DAG.getMachineNode(KlaussCPU::SETSP_R, DL, MVT::Other,
+                                      {NewSP64, Chain});
+  return SDValue(SetSP, 0);
 }
 
 // va_start(ap, last_named) — store the address of the first variadic argument
@@ -602,11 +704,18 @@ MachineBasicBlock *KlaussCPUTargetLowering::EmitInstrWithCustomInserter(
   // otherwise fall through to TrueBB.
   BuildMI(BB, DL, TII.get(KlaussCPU::CMPRV_I)).addReg(CondReg).addImm(0);
   BuildMI(BB, DL, TII.get(KlaussCPU::JMPE)).addMBB(SinkBB);
-  BB->addSuccessor(SinkBB);   // false path (JMPE taken)
-  BB->addSuccessor(TrueBB);   // true path  (fall through)
+  // Use explicit 50/50 probabilities: addSuccessor() with unknown probability
+  // leaves Probs empty while Successors grows, causing an assertion in any
+  // pass that reads branch probabilities (MachineBlockPlacement, BranchFolder).
+  // addSuccessorWithoutProb: puts the block in "no probability tracking" mode.
+  // Using explicit probabilities would cause the branch folder to crash when
+  // it later calls addSuccessor(Unknown) on the same block, creating a
+  // Probs.size() != Successors.size() mismatch.
+  BB->addSuccessorWithoutProb(SinkBB); // false path (JMPE taken)
+  BB->addSuccessorWithoutProb(TrueBB); // true path  (fall through)
 
   // TrueBB: empty, just falls through to SinkBB.
-  TrueBB->addSuccessor(SinkBB);
+  TrueBB->addSuccessorWithoutProb(SinkBB);
 
   // SinkBB: PHI merges the two incoming values; DstReg has exactly one def.
   BuildMI(*SinkBB, SinkBB->begin(), DL, TII.get(TargetOpcode::PHI), DstReg)

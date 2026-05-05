@@ -61,13 +61,16 @@ define i64 @eq_zero(i64 %a) {
 ; CHECK-NEXT:    push r15
 ; CHECK-NEXT:    getsp r15
 ; CHECK-NEXT:    setr r12, 0
-; CHECK-NEXT:    cmpeqr r14, r0, r12
+; CHECK-NEXT:    cmpeqr r12, r0, r12
+; CHECK-NEXT:    cmprv r12, 0
+; CHECK-NEXT:    jmpe .LBB3_1
+; CHECK-NEXT:    jmp .LBB3_2
+; CHECK-NEXT:  .LBB3_1:
 ; CHECK-NEXT:    setr r12, 20
-; CHECK-NEXT:    cmprv r14, 0
-; CHECK-NEXT:    jmpe .LBB3_2
-; CHECK-NEXT:  # %bb.1:
-; CHECK-NEXT:    setr r12, 10
+; CHECK-NEXT:    jmp .LBB3_3
 ; CHECK-NEXT:  .LBB3_2:
+; CHECK-NEXT:    setr r12, 10
+; CHECK-NEXT:  .LBB3_3:
 ; CHECK-NEXT:    setsp r15
 ; CHECK-NEXT:    pop r15
 ; CHECK-NEXT:    ret
@@ -101,6 +104,7 @@ define i64 @if_else(i64 %a, i64 %b) {
 ; CHECK-NEXT:    push r15
 ; CHECK-NEXT:    getsp r15
 ; CHECK-NEXT:    cmprr r0, r1
+; CHECK-NEXT:    jmple .LBB5_2
 ; CHECK-NEXT:  # %bb.1: # %then
 ; CHECK-NEXT:    addi r12, r0, 1
 ; CHECK-NEXT:    jmp .LBB5_3
@@ -134,6 +138,7 @@ define i64 @countdown(i64 %n) {
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
 ; CHECK-NEXT:    addi r12, r12, -1
 ; CHECK-NEXT:    cmprv r12, 0
+; CHECK-NEXT:    jmpgt .LBB6_1
 ; CHECK-NEXT:  # %bb.2: # %exit
 ; CHECK-NEXT:    setsp r15
 ; CHECK-NEXT:    pop r15
@@ -162,6 +167,7 @@ define i64 @sum_loop(i64 %n) {
 ; CHECK-NEXT:    addr r12, r12, r14
 ; CHECK-NEXT:    addi r14, r14, 1
 ; CHECK-NEXT:    cmprr r14, r0
+; CHECK-NEXT:    jmplt .LBB7_1
 ; CHECK-NEXT:  # %bb.2: # %exit
 ; CHECK-NEXT:    setsp r15
 ; CHECK-NEXT:    pop r15

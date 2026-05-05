@@ -87,25 +87,40 @@ bool KlaussCPUInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
                                         MachineBasicBlock *&FBB,
                                         SmallVectorImpl<MachineOperand> &Cond,
                                         bool AllowModify) const {
-  MachineBasicBlock::iterator I = MBB.end();
-  if (I == MBB.begin())
-    return false; // empty block — fall through
+  // BranchFolder uses AllowModify=true.  Our conditional branches are
+  // CMPRR/V + JMPxx pairs; insertBranch only supports unconditional JMP, so
+  // we refuse analysis when modification is requested.
+  if (AllowModify)
+    return true;
 
-  // Skip debug instructions.
-  while (I != MBB.begin() && std::prev(I)->isDebugInstr())
-    --I;
-  if (I == MBB.begin())
-    return false;
+  // Read-only analysis (MachineBlockPlacement, canFallThrough, …).
+  // Scan backward to identify the last branch(es).
+  MachineBasicBlock::reverse_iterator I = MBB.rbegin();
+  while (I != MBB.rend() && I->isDebugInstr())
+    ++I;
 
-  --I;
-  // Only handle a single trailing unconditional JMP.
+  if (I == MBB.rend() || !isBranchOpcode(I->getOpcode()))
+    return false; // no branches
+
   if (I->getOpcode() == KlaussCPU::JMP) {
+    // Unconditional branch — may be preceded by a conditional one.
     TBB = I->getOperand(0).getMBB();
-    return false;
+    ++I;
+    while (I != MBB.rend() && I->isDebugInstr())
+      ++I;
+    if (I != MBB.rend() && isBranchOpcode(I->getOpcode()) &&
+        I->getOpcode() != KlaussCPU::JMP) {
+      // Conditional branch followed by unconditional: TBB = cond target, FBB = uncond.
+      FBB = TBB;
+      TBB = I->getOperand(0).getMBB();
+      Cond.push_back(MachineOperand::CreateImm(I->getOpcode()));
+    }
+  } else {
+    // Conditional branch with fallthrough.
+    TBB = I->getOperand(0).getMBB();
+    Cond.push_back(MachineOperand::CreateImm(I->getOpcode()));
   }
-
-  // Anything else (conditional branches, non-branch) we cannot analyze.
-  return true;
+  return false;
 }
 
 unsigned KlaussCPUInstrInfo::removeBranch(MachineBasicBlock &MBB,
@@ -133,16 +148,35 @@ unsigned KlaussCPUInstrInfo::insertBranch(MachineBasicBlock &MBB,
                                            ArrayRef<MachineOperand> Cond,
                                            const DebugLoc &DL,
                                            int *BytesAdded) const {
-  // Only unconditional branches are supported here.
-  // Conditional branch sequences (CMPRR/CMPRV + JMPxx) are multi-instruction
-  // and must be inserted by the code generator, not the branch folder.
   assert(TBB && "insertBranch must not be called with null TBB");
-  assert(Cond.empty() && !FBB &&
-         "KlaussCPU: only unconditional branches in insertBranch");
-  BuildMI(&MBB, DL, get(KlaussCPU::JMP)).addMBB(TBB);
+  unsigned Count = 0;
+  int Bytes = 0;
+
+  if (Cond.empty()) {
+    // Unconditional branch.
+    assert(!FBB && "Unexpected FBB with unconditional branch");
+    BuildMI(&MBB, DL, get(KlaussCPU::JMP)).addMBB(TBB);
+    Count = 1;
+    Bytes = 8;
+  } else {
+    // Conditional branch: Cond[0] holds the JMPxx opcode.
+    // The preceding CMPRR/CMPRV is already in the block (removeBranch only
+    // removes branch instructions, not compares) so we just emit the jump.
+    assert(Cond.size() == 1 && "Expected exactly one Cond operand");
+    unsigned CondOpc = Cond[0].getImm();
+    BuildMI(&MBB, DL, get(CondOpc)).addMBB(TBB);
+    Count = 1;
+    Bytes = 8;
+    if (FBB) {
+      BuildMI(&MBB, DL, get(KlaussCPU::JMP)).addMBB(FBB);
+      Count++;
+      Bytes += 8;
+    }
+  }
+
   if (BytesAdded)
-    *BytesAdded = 8;
-  return 1;
+    *BytesAdded = Bytes;
+  return Count;
 }
 
 void KlaussCPUInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
