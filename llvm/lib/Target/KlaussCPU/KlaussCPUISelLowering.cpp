@@ -476,10 +476,10 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
   SmallVector<std::pair<Register, SDValue>, 8> RegsToPass;
   SmallVector<SDValue, 4> MemOpChains;
 
-  // SP is a 32-bit hardware register.  Copy it as i32, then zero-extend to
-  // i64 so address arithmetic uses the same type as pointer operands (i64).
-  SDValue SP32 = DAG.getCopyFromReg(Chain, DL, KlaussCPU::SP, MVT::i32);
-  SDValue SP   = DAG.getNode(ISD::ZERO_EXTEND, DL, PtrVT, SP32);
+  // Use GETSP_R to read the 32-bit SP into an i64 GPR (zero-extends).
+  // Avoid getCopyFromReg(SP, i32): the type legalizer cannot promote
+  // i32 CopyFromReg nodes for physical-only registers (no i32 reg class).
+  SDValue SP = SDValue(DAG.getMachineNode(KlaussCPU::GETSP_R, DL, PtrVT), 0);
 
   for (unsigned I = 0, E = ArgLocs.size(); I != E; ++I) {
     const CCValAssign &VA = ArgLocs[I];

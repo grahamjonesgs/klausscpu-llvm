@@ -31,6 +31,22 @@ public:
   // CallFrameDestroyOpcode and set via the KlaussCPUGenInstrInfo constructor
   // parameters — see KlaussCPUInstrInfo.cpp.
 
+  // Branch analysis: recognize JMP (unconditional) at the tail of a block.
+  // Conditional branches (CMPRR/CMPRV + JMPxx) return true (not analyzed)
+  // since they are two-instruction sequences.
+  bool analyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
+                     MachineBasicBlock *&FBB,
+                     SmallVectorImpl<MachineOperand> &Cond,
+                     bool AllowModify = false) const override;
+
+  unsigned removeBranch(MachineBasicBlock &MBB,
+                        int *BytesRemoved = nullptr) const override;
+
+  unsigned insertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
+                        MachineBasicBlock *FBB,
+                        ArrayRef<MachineOperand> Cond, const DebugLoc &DL,
+                        int *BytesAdded = nullptr) const override;
+
   void copyPhysReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
                    const DebugLoc &DL, Register DestReg, Register SrcReg,
                    bool KillSrc, bool RenamableDest = false,

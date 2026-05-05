@@ -67,15 +67,105 @@ void KlaussCPUInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
       .setMIFlag(Flags);
 }
 
+// Return true if MI is any branch instruction (unconditional or conditional).
+static bool isBranchOpcode(unsigned Opc) {
+  switch (Opc) {
+  case KlaussCPU::JMP:
+  case KlaussCPU::JMPE:  case KlaussCPU::JMPNE:
+  case KlaussCPU::JMPLT: case KlaussCPU::JMPLE:
+  case KlaussCPU::JMPGT: case KlaussCPU::JMPGE:
+  case KlaussCPU::JMPULT: case KlaussCPU::JMPULE:
+  case KlaussCPU::JMPUGT: case KlaussCPU::JMPUGE:
+    return true;
+  default:
+    return false;
+  }
+}
+
+bool KlaussCPUInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
+                                        MachineBasicBlock *&TBB,
+                                        MachineBasicBlock *&FBB,
+                                        SmallVectorImpl<MachineOperand> &Cond,
+                                        bool AllowModify) const {
+  MachineBasicBlock::iterator I = MBB.end();
+  if (I == MBB.begin())
+    return false; // empty block — fall through
+
+  // Skip debug instructions.
+  while (I != MBB.begin() && std::prev(I)->isDebugInstr())
+    --I;
+  if (I == MBB.begin())
+    return false;
+
+  --I;
+  // Only handle a single trailing unconditional JMP.
+  if (I->getOpcode() == KlaussCPU::JMP) {
+    TBB = I->getOperand(0).getMBB();
+    return false;
+  }
+
+  // Anything else (conditional branches, non-branch) we cannot analyze.
+  return true;
+}
+
+unsigned KlaussCPUInstrInfo::removeBranch(MachineBasicBlock &MBB,
+                                           int *BytesRemoved) const {
+  MachineBasicBlock::iterator I = MBB.end();
+  unsigned Count = 0;
+  while (I != MBB.begin()) {
+    --I;
+    if (I->isDebugInstr())
+      continue;
+    if (!isBranchOpcode(I->getOpcode()))
+      break;
+    I->eraseFromParent();
+    I = MBB.end();
+    ++Count;
+  }
+  if (BytesRemoved)
+    *BytesRemoved = Count * 8; // every branch instruction is 8 bytes
+  return Count;
+}
+
+unsigned KlaussCPUInstrInfo::insertBranch(MachineBasicBlock &MBB,
+                                           MachineBasicBlock *TBB,
+                                           MachineBasicBlock *FBB,
+                                           ArrayRef<MachineOperand> Cond,
+                                           const DebugLoc &DL,
+                                           int *BytesAdded) const {
+  // Only unconditional branches are supported here.
+  // Conditional branch sequences (CMPRR/CMPRV + JMPxx) are multi-instruction
+  // and must be inserted by the code generator, not the branch folder.
+  assert(TBB && "insertBranch must not be called with null TBB");
+  assert(Cond.empty() && !FBB &&
+         "KlaussCPU: only unconditional branches in insertBranch");
+  BuildMI(&MBB, DL, get(KlaussCPU::JMP)).addMBB(TBB);
+  if (BytesAdded)
+    *BytesAdded = 8;
+  return 1;
+}
+
 void KlaussCPUInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                       MachineBasicBlock::iterator I,
                                       const DebugLoc &DL,
                                       Register DestReg, Register SrcReg,
                                       bool KillSrc, bool RenamableDest,
                                       bool RenamableSrc) const {
-  // All physical registers are 64-bit GPRs — emit COPY_R rd, rs.
+  // SP ↔ GPR: use GETSP_R / SETSP_R.
+  if (SrcReg == KlaussCPU::SP) {
+    assert(KlaussCPU::GPRRegClass.contains(DestReg));
+    BuildMI(MBB, I, DL, get(KlaussCPU::GETSP_R), DestReg);
+    return;
+  }
+  if (DestReg == KlaussCPU::SP) {
+    assert(KlaussCPU::GPRRegClass.contains(SrcReg));
+    BuildMI(MBB, I, DL, get(KlaussCPU::SETSP_R))
+        .addReg(SrcReg, getKillRegState(KillSrc));
+    return;
+  }
+  // GPR → GPR.
   assert(KlaussCPU::GPRRegClass.contains(DestReg, SrcReg) &&
-         "KlaussCPU copyPhysReg: only GPR→GPR copies supported");
+         "KlaussCPU copyPhysReg: only GPR↔GPR or SP↔GPR copies supported");
   BuildMI(MBB, I, DL, get(KlaussCPU::COPY_R), DestReg)
       .addReg(SrcReg, getKillRegState(KillSrc));
 }
