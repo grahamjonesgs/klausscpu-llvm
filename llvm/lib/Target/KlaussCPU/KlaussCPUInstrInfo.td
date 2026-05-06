@@ -773,6 +773,7 @@ let isReturn = 1, isTerminator = 1, isBarrier = 1 in
 def RET_I   : I0<0x00001012, (outs), (ins), "ret", [(KlaussCPURetGlue)]>;
 def NOP_I   : I0<0x0000F010, (outs), (ins), "nop">;
 def HALT_I  : I0<0x0000F011, (outs), (ins), "halt">;
+def IRET_I  : I0<0x00006011, (outs), (ins), "iret">;
 
 //===----------------------------------------------------------------------===//
 // UART / I-O instructions (hasSideEffects prevents reordering/elimination)

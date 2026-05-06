@@ -279,10 +279,10 @@ uint32_t KlaussCPUMCCodeEmitter::encode32(const MCInst &MI) const {
   // ── I0 (fixed opcode, no register/immediate operands) ────────────────────
   case KlaussCPU::NEWLINE_I:    return 0x00005001;
   case KlaussCPU::SEG7BLANK_I:  return 0x00003073;
-  case KlaussCPU::DELAYR_R:     return fmtR(0x0000F00, MI, 0);
   case KlaussCPU::RET_I:     return 0x00001012;
   case KlaussCPU::NOP_I:     return 0x0000F010;
   case KlaussCPU::HALT_I:    return 0x0000F011;
+  case KlaussCPU::IRET_I:    return 0x00006011;
 
   default:
     llvm_unreachable("unhandled 4-byte KlaussCPU instruction in encode32");
@@ -372,7 +372,6 @@ uint64_t KlaussCPUMCCodeEmitter::encode64(
 
   // ── Vsp (ADDSP / DELAYV: fixed op32, signed imm32 at operand 0) ──────────
   case KlaussCPU::ADDSP_I:  return fmtVimm(0x00004050, MI);
-  case KlaussCPU::DELAYV_I: return fmtVimm(0x0000F013, MI);
 
   default:
     llvm_unreachable("unhandled 8-byte KlaussCPU instruction in encode64");

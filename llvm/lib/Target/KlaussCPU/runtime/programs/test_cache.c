@@ -27,7 +27,7 @@
  */
 
 #include <stdio.h>
-#include "mmio.h"
+#include "../mmio.h"
 
 /* ── Buffers (BSS — zero-init, not in kbt payload) ───────────────────────── */
 

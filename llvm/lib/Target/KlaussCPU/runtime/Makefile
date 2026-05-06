@@ -80,7 +80,7 @@ FATFS_OBJS  = ff.o ffunicode.o ffsystem.o sd.o diskio.o
 
 PROGRAMS = hello adventure test_64bit expr bst crypto queens \
            test_switch test_fp test_asm test_printf fs_demo \
-           test_fatfs_printf test_big test_cache
+           test_fatfs_printf test_big test_cache test_rtos
 
 .PHONY: all clean $(PROGRAMS)
 
@@ -204,6 +204,23 @@ test_cache.elf: test_cache.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,test_cache.o)
 
 test_cache: test_cache.elf
+
+# RTOS objects (linked only into test_rtos)
+RTOS_OBJS = rtos.o context_switch.o
+
+rtos.o: src/rtos.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+context_switch.o: src/context_switch.S
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+test_rtos.o: programs/test_rtos.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+test_rtos.elf: test_rtos.o $(RTOS_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,$(RTOS_OBJS) test_rtos.o)
+
+test_rtos: test_rtos.elf
 
 # ── Inspect helpers ───────────────────────────────────────────────────────────
 
