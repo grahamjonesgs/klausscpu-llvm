@@ -74,6 +74,45 @@ static inline uint32_t rgb12(uint8_t r, uint8_t g, uint8_t b) {
 #define REG_LEDS        (*(volatile uint32_t *)(IO_BASE + 0x0000u))
 #define REG_SWITCHES    (*(volatile uint32_t *)(IO_BASE + 0x0008u))
 
+/* ── Cache controller — 0xF005_xxxx ─────────────────────────────────────── */
+/* 2-way set-associative write-back, 64 KB total, 16-byte lines, 2048 sets.  */
+/* Counters are 64-bit and free-running; clear with CACHE_CTRL_CLEAR.        */
+
+#define CACHE_BASE            (MMIO_BASE + 0x00050000u)
+
+#define REG_CACHE_CTRL        (*(volatile uint32_t *)(CACHE_BASE + 0x0000u))
+#define REG_CACHE_INFO        (*(volatile uint64_t *)(CACHE_BASE + 0x0008u))
+#define REG_CACHE_RD_HITS     (*(volatile uint64_t *)(CACHE_BASE + 0x0040u))
+#define REG_CACHE_RD_MISSES   (*(volatile uint64_t *)(CACHE_BASE + 0x0048u))
+#define REG_CACHE_WR_HITS     (*(volatile uint64_t *)(CACHE_BASE + 0x0050u))
+#define REG_CACHE_WR_MISSES   (*(volatile uint64_t *)(CACHE_BASE + 0x0058u))
+#define REG_CACHE_WRITEBACKS  (*(volatile uint64_t *)(CACHE_BASE + 0x0060u))
+#define REG_CACHE_STALL_CYC   (*(volatile uint64_t *)(CACHE_BASE + 0x0068u))
+
+/* CACHE_CTRL: bit 0 is write-1-auto-clear; clears all six counters. */
+#define CACHE_CTRL_CLEAR      (1u << 0)
+
+/* Field extractors for the read-only CACHE_INFO register.
+ * Expected value for current build: 0x0001_0000_1008_0002
+ *   ways=2, sets=2048, line=16 B, total=64 KB                              */
+#define CACHE_INFO_WAYS(v)        ((uint32_t)( (v)        & 0xFFu))
+#define CACHE_INFO_SETS(v)        ((uint32_t)(((v) >>  8) & 0xFFFFu))
+#define CACHE_INFO_LINE_BYTES(v)  ((uint32_t)(((v) >> 24) & 0xFFu))
+#define CACHE_INFO_TOTAL_BYTES(v) ((uint32_t)( (v) >> 32))
+
+/* ── Interrupt controller / timer — 0xF00F_xxxx ─────────────────────────── */
+
+#define INTC_BASE       (MMIO_BASE + 0x000F0000u)
+
+#define REG_INT_MASK    (*(volatile uint32_t *)(INTC_BASE + 0x0000u))
+#define REG_INT_PEND    (*(volatile uint32_t *)(INTC_BASE + 0x0008u))
+#define REG_INT_VEC(n)  (*(volatile uint32_t *)(INTC_BASE + 0x0010u + 8u*(n)))
+#define REG_TIMER_PER   (*(volatile uint32_t *)(INTC_BASE + 0x0030u))
+#define REG_TIMER_CNT   (*(volatile uint32_t *)(INTC_BASE + 0x0038u))
+#define REG_CLOCK_MS    (*(volatile uint64_t *)(INTC_BASE + 0x0040u))  /* atomic 64-bit */
+
+#define INT_SRC_TIMER   0u
+
 /* ── Convenience wrappers ────────────────────────────────────────────────── */
 /* These match the old io_stubs.c calling convention so existing programs    */
 /* need only add #include "mmio.h" and remove the extern declarations.       */

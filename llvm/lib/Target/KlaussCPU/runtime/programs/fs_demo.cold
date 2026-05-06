@@ -1,0 +1,178 @@
+/*
+ * fs_demo.c — KlaussCPU FatFs demonstration
+ *
+ * Mounts the SD card, lists the root directory, reads a known file
+ * (0:/hello.txt), writes a test file (0:/klcpu.txt), and reports
+ * pass/fail via printf and the 7-segment display.
+ *
+ * Prepare the SD card on host:
+ *   mkfs.fat -F32 /dev/sdX1
+ *   echo "hello world" > /mnt/hello.txt
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include "ff.h"
+#include "mmio.h"
+
+/* ── Helpers ─────────────────────────────────────────────────────────────── */
+
+static int g_pass, g_fail;
+
+static void report(const char *name, int ok) {
+    if (ok) {
+        g_pass++;
+        printf("  PASS  %s\n", name);
+    } else {
+        g_fail++;
+        printf("  FAIL  %s\n", name);
+    }
+}
+
+/* ── Tests ───────────────────────────────────────────────────────────────── */
+
+static FATFS fs;
+
+static void test_mount(void) {
+    printf("\n--- Mount ---\n");
+    FRESULT fr = f_mount(&fs, "0:", 1);   /* 1 = mount immediately */
+    report("f_mount", fr == FR_OK);
+    if (fr != FR_OK)
+        printf("  f_mount error: %d\n", (int)fr);
+}
+
+static void test_dir(void) {
+    printf("\n--- Root directory ---\n");
+    DIR dir;
+    FRESULT fr = f_opendir(&dir, "0:/");
+    if (fr != FR_OK) {
+        printf("  f_opendir error: %d\n", (int)fr);
+        report("f_opendir", 0);
+        return;
+    }
+    report("f_opendir", 1);
+
+    FILINFO fno;
+    int count = 0;
+    while (1) {
+        fr = f_readdir(&dir, &fno);
+        if (fr != FR_OK || fno.fname[0] == '\0') break;
+        printf("  %-20s  %9lu bytes\n", fno.fname, (unsigned long)fno.fsize);
+        count++;
+    }
+    f_closedir(&dir);
+    printf("  %d entries\n", count);
+    report("f_readdir", fr == FR_OK);
+}
+
+static void test_read(void) {
+    printf("\n--- Read 0:/hello.txt ---\n");
+    FIL fil;
+    FRESULT fr = f_open(&fil, "0:/hello.txt", FA_READ);
+    if (fr != FR_OK) {
+        printf("  f_open error: %d\n", (int)fr);
+        report("read hello.txt", 0);
+        return;
+    }
+
+    char buf[64];
+    UINT br;
+    fr = f_read(&fil, buf, sizeof(buf) - 1, &br);
+    f_close(&fil);
+    if (fr != FR_OK) {
+        printf("  f_read error: %d\n", (int)fr);
+        report("read hello.txt", 0);
+        return;
+    }
+    buf[br] = '\0';
+    printf("  %u bytes: \"%s\"\n", (unsigned)br, buf);
+    /* Expect the file to start with "hello" */
+    report("read hello.txt", br > 0 && strncmp(buf, "hello", 5) == 0);
+}
+
+static void test_write(void) {
+    printf("\n--- Write 0:/klcpu.txt ---\n");
+    FIL fil;
+    FRESULT fr = f_open(&fil, "0:/klcpu.txt", FA_WRITE | FA_CREATE_ALWAYS);
+    if (fr != FR_OK) {
+        printf("  f_open error: %d\n", (int)fr);
+        report("write klcpu.txt", 0);
+        return;
+    }
+
+    const char *msg = "KlaussCPU FatFs write test\n";
+    UINT bw;
+    fr = f_write(&fil, msg, (UINT)strlen(msg), &bw);
+    f_sync(&fil);
+    f_close(&fil);
+    if (fr != FR_OK || bw != (UINT)strlen(msg)) {
+        printf("  f_write error: %d (wrote %u)\n", (int)fr, (unsigned)bw);
+        report("write klcpu.txt", 0);
+        return;
+    }
+    printf("  wrote %u bytes OK\n", (unsigned)bw);
+
+    /* Read it back to verify. */
+    fr = f_open(&fil, "0:/klcpu.txt", FA_READ);
+    if (fr != FR_OK) { report("write klcpu.txt", 0); return; }
+    char rbuf[64];
+    UINT br;
+    fr = f_read(&fil, rbuf, sizeof(rbuf) - 1, &br);
+    f_close(&fil);
+    rbuf[br] = '\0';
+    int ok = (fr == FR_OK) && (br == (UINT)strlen(msg)) &&
+             (strcmp(rbuf, msg) == 0);
+    if (!ok) printf("  readback mismatch: \"%s\"\n", rbuf);
+    report("write klcpu.txt", ok);
+}
+
+static void test_large_write(void) {
+    printf("\n--- 1 KiB pattern write/read ---\n");
+    static uint8_t wbuf[1024];
+    for (int i = 0; i < 1024; i++) wbuf[i] = (uint8_t)(i & 0xFF);
+
+    FIL fil;
+    FRESULT fr = f_open(&fil, "0:/pattern.bin", FA_WRITE | FA_CREATE_ALWAYS);
+    if (fr != FR_OK) { printf("  open error: %d\n", (int)fr); report("1KiB pattern", 0); return; }
+    UINT bw;
+    fr = f_write(&fil, wbuf, sizeof(wbuf), &bw);
+    f_sync(&fil);
+    f_close(&fil);
+    if (fr != FR_OK || bw != sizeof(wbuf)) { report("1KiB pattern write", 0); return; }
+
+    fr = f_open(&fil, "0:/pattern.bin", FA_READ);
+    if (fr != FR_OK) { report("1KiB pattern read", 0); return; }
+    static uint8_t rbuf[1024];
+    UINT br;
+    fr = f_read(&fil, rbuf, sizeof(rbuf), &br);
+    f_close(&fil);
+    int ok = (fr == FR_OK) && (br == sizeof(rbuf)) &&
+             (memcmp(wbuf, rbuf, sizeof(wbuf)) == 0);
+    printf("  wrote %u, read %u, %s\n", (unsigned)bw, (unsigned)br,
+           ok ? "match" : "MISMATCH");
+    report("1KiB pattern", ok);
+}
+
+/* ── main ────────────────────────────────────────────────────────────────── */
+
+int main(void) {
+    g_pass = g_fail = 0;
+    printf("=== KlaussCPU FatFs Demo ===\n");
+
+    test_mount();
+    test_dir();
+    test_read();
+    test_write();
+    test_large_write();
+
+    printf("\n=== Results: %d pass, %d fail ===\n", g_pass, g_fail);
+
+    if (g_fail == 0) {
+        REG_SEG_ALL = 0x00FACADE;   /* "FACADE" — all good */
+        REG_LEDS    = 0xFFFF;
+    } else {
+        REG_SEG_ALL = 0x000000FF;   /* error count on lower digits */
+        REG_LEDS    = (uint32_t)g_fail;
+    }
+    return g_fail;
+}

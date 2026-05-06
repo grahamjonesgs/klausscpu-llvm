@@ -21,6 +21,11 @@
  *   SETSP r0             → bytes 00 00 40 40               (4 bytes)
  */
 
+/* Debug LED checkpoints: visible on the board, narrow down crash phase.
+ * Each write is a different nibble so a glance at the LEDs tells you where
+ * startup got to.  Defined via direct MMIO so crt0 needs no extra includes. */
+#define _CRT_LEDS  (*(volatile unsigned int *)0xF0040000u)
+
 extern int main(int argc, char **argv);
 extern void __stdio_init(void);
 
@@ -37,20 +42,28 @@ void _start(void) {
     __builtin_stack_restore((void *)_stack_top);
 #endif
 
+    _CRT_LEDS = 0x1111;   /* checkpoint A: entered _start */
+
     for (char *p = __bss_start; p != __bss_end; ++p)
         *p = 0;
+
+    _CRT_LEDS = 0x2222;   /* checkpoint B: BSS clear done */
 
     /* Write heap start to the hardware heap-header slot at address 0. */
     *(volatile unsigned long long *)0 = (unsigned long long)(char *)_end;
 
-    /* Software startup delay — replaces the removed DELAYV hardware opcode.
-     * Gives the UART receiver time to be ready before the first output.
-     * Loop count matches the old DELAYV 0x500 intent; each iteration takes
-     * several cycles so total is similar to the original hardware delay. */
+    _CRT_LEDS = 0x3333;   /* checkpoint C: heap header written */
+
+    /* Software startup delay — gives UART receiver time to be ready. */
     for (volatile unsigned int i = 0; i < 5000; i++)
         ;
 
+    _CRT_LEDS = 0x4444;   /* checkpoint D: delay done */
+
     __stdio_init();
+
+    _CRT_LEDS = 0x5555;   /* checkpoint E: stdio init done, calling main */
+
     main(0, (char **)0);
 
     __builtin_trap();
