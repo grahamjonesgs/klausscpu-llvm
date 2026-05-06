@@ -3,6 +3,7 @@
 crt-*.o
 *.elf
 *.s
+!src/*.S
 
 # FPGA loader output
 *.code
