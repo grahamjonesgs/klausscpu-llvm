@@ -62,8 +62,8 @@ CRT_FP_OBJS  = $(patsubst %, crt-%.o, $(CRT_FP_NAMES)) fp_mode_stub.o
 LD_SCRIPT = $(dir $(lastword $(MAKEFILE_LIST)))klausscpu.ld
 
 # Objects linked into every program.
-RUNTIME_OBJS = crt0.o uart_stubs.o io_stubs.o
-LIBC_OBJS    = syscalls.o compat.o setjmp.o
+RUNTIME_OBJS = crt0.o uart_stubs.o
+LIBC_OBJS    = syscalls.o stdio_handles.o setjmp.o
 LIBC_LINK    = $(PICOLIBC)/lib/libc.a
 
 # ── Default target ────────────────────────────────────────────────────────────

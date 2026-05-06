@@ -1,17 +1,12 @@
 /* adventure.c — Mini text adventure for KlaussCPU (LLVM backend port).
  *
- * Compile via Makefile:  make adventure.elf  &&  make adventure.bin
+ * Compile via Makefile:  make adventure.elf
  *
  * Commands: n/s/e/w = move, l = look, g = get, u = use, i = inventory, q = quit
  * Goal: find torch, find key (needs torch), unlock door, escape!
  */
 
-/* Runtime provided by libc.c + uart_stubs.c */
-extern void putchar(int ch);
-extern void print_str(char *s);
-extern void print_int(long long n);
-extern void newline(void);
-extern int  getchar(void);
+#include <stdio.h>
 
 /* ── Game state ──────────────────────────────────────────────────────────── */
 
@@ -35,7 +30,8 @@ int read_cmd(void)
     int c;
     int cmd;
 
-    print_str("> ");
+    printf("> ");
+    fflush(stdout);
     cmd = getchar();
     putchar(cmd);
 
@@ -45,7 +41,7 @@ int read_cmd(void)
         while (c != 13 && c != 10)
             c = getchar();
     }
-    newline();
+    putchar('\n');
 
     /* Uppercase to lowercase */
     if (cmd >= 'A' && cmd <= 'Z')
@@ -58,62 +54,59 @@ int read_cmd(void)
 void look(void)
 {
     if (room == ROOM_CELL) {
-        print_str("You are in a cold stone cell."); newline();
-        print_str("Moonlight seeps through a crack."); newline();
-        if (!(items & HAS_TORCH)) {
-            print_str("A rusty TORCH sits on the wall."); newline();
-        }
-        print_str("A passage leads NORTH."); newline();
+        puts("You are in a cold stone cell.");
+        puts("Moonlight seeps through a crack.");
+        if (!(items & HAS_TORCH))
+            puts("A rusty TORCH sits on the wall.");
+        puts("A passage leads NORTH.");
     }
     else if (room == ROOM_HALL) {
-        print_str("You stand in a long hallway."); newline();
+        puts("You stand in a long hallway.");
         if (items & HAS_TORCH) {
-            print_str("Your torch reveals wall scratches:"); newline();
-            print_str("THE ARMORY HIDES SECRETS"); newline();
+            puts("Your torch reveals wall scratches:");
+            puts("THE ARMORY HIDES SECRETS");
         }
         else {
-            print_str("It is very dark here."); newline();
+            puts("It is very dark here.");
         }
-        print_str("Exits: S=cell E=armory N=door"); newline();
+        puts("Exits: S=cell E=armory N=door");
     }
     else if (room == ROOM_ARMORY) {
-        print_str("You enter a dusty armory."); newline();
-        print_str("Broken swords line the walls."); newline();
+        puts("You enter a dusty armory.");
+        puts("Broken swords line the walls.");
         if (!(items & HAS_KEY)) {
-            if (items & HAS_TORCH) {
-                print_str("Torchlight glints off a brass KEY!"); newline();
-            }
-            else {
-                print_str("Something metallic glints..."); newline();
-            }
+            if (items & HAS_TORCH)
+                puts("Torchlight glints off a brass KEY!");
+            else
+                puts("Something metallic glints...");
         }
         else {
-            print_str("Nothing else of interest here."); newline();
+            puts("Nothing else of interest here.");
         }
-        print_str("Exit: W=hallway"); newline();
+        puts("Exit: W=hallway");
     }
     else if (room == ROOM_DOOR) {
-        print_str("A massive iron door blocks the way."); newline();
-        print_str("There is a keyhole."); newline();
+        puts("A massive iron door blocks the way.");
+        puts("There is a keyhole.");
         if (items & HAS_KEY) {
-            print_str("The brass key might fit..."); newline();
-            print_str("Type u to USE the key."); newline();
+            puts("The brass key might fit...");
+            puts("Type u to USE the key.");
         }
         else {
-            print_str("It is locked. You need a key."); newline();
+            puts("It is locked. You need a key.");
         }
-        print_str("Exit: S=hallway"); newline();
+        puts("Exit: S=hallway");
     }
 }
 
 /* Inventory */
 void show_inventory(void)
 {
-    print_str("You carry: ");
-    if (items == 0)          print_str("nothing");
-    if (items & HAS_TORCH)   print_str("[torch] ");
-    if (items & HAS_KEY)     print_str("[key] ");
-    newline();
+    printf("You carry: ");
+    if (items == 0)          printf("nothing");
+    if (items & HAS_TORCH)   printf("[torch] ");
+    if (items & HAS_KEY)     printf("[key] ");
+    putchar('\n');
 }
 
 /* Pick up items */
@@ -121,19 +114,19 @@ void do_get(void)
 {
     if (room == ROOM_CELL && !(items & HAS_TORCH)) {
         items = items | HAS_TORCH;
-        print_str("You take the torch. Flames dance!"); newline();
+        puts("You take the torch. Flames dance!");
     }
     else if (room == ROOM_ARMORY && !(items & HAS_KEY)) {
         if (items & HAS_TORCH) {
             items = items | HAS_KEY;
-            print_str("You pick up the brass key."); newline();
+            puts("You pick up the brass key.");
         }
         else {
-            print_str("You fumble in the dark..."); newline();
+            puts("You fumble in the dark...");
         }
     }
     else {
-        print_str("Nothing to pick up here."); newline();
+        puts("Nothing to pick up here.");
     }
 }
 
@@ -141,12 +134,12 @@ void do_get(void)
 void do_use(void)
 {
     if (room == ROOM_DOOR && (items & HAS_KEY)) {
-        print_str("You insert the key... CLICK!"); newline();
-        print_str("The door groans open. Starlight!"); newline();
+        puts("You insert the key... CLICK!");
+        puts("The door groans open. Starlight!");
         room = ROOM_FREE;
     }
     else {
-        print_str("Nothing useful to do here."); newline();
+        puts("Nothing useful to do here.");
     }
 }
 
@@ -155,21 +148,21 @@ void do_move(int dir)
 {
     if (room == ROOM_CELL) {
         if (dir == 'n') { room = ROOM_HALL; }
-        else { print_str("You cannot go that way."); newline(); return; }
+        else { puts("You cannot go that way."); return; }
     }
     else if (room == ROOM_HALL) {
         if      (dir == 's') { room = ROOM_CELL;   }
         else if (dir == 'e') { room = ROOM_ARMORY; }
         else if (dir == 'n') { room = ROOM_DOOR;   }
-        else { print_str("You cannot go that way."); newline(); return; }
+        else { puts("You cannot go that way."); return; }
     }
     else if (room == ROOM_ARMORY) {
         if (dir == 'w') { room = ROOM_HALL; }
-        else { print_str("You cannot go that way."); newline(); return; }
+        else { puts("You cannot go that way."); return; }
     }
     else if (room == ROOM_DOOR) {
         if (dir == 's') { room = ROOM_HALL; }
-        else { print_str("You cannot go that way."); newline(); return; }
+        else { puts("You cannot go that way."); return; }
     }
     look();
 }
@@ -184,37 +177,36 @@ int main(void)
     turns = 0;
     alive = 1;
 
-    print_str("========================================"); newline();
-    print_str("   DUNGEON ESCAPE"); newline();
-    print_str("   Running on KlaussCPU!"); newline();
-    print_str("========================================"); newline();
-    print_str("Commands: n/s/e/w=move l=look"); newline();
-    print_str("  g=get u=use i=inventory q=quit"); newline();
-    newline();
-    print_str("You awaken on cold stone..."); newline();
-    newline();
+    puts("========================================");
+    puts("   DUNGEON ESCAPE");
+    puts("   Running on KlaussCPU!");
+    puts("========================================");
+    puts("Commands: n/s/e/w=move l=look");
+    puts("  g=get u=use i=inventory q=quit");
+    putchar('\n');
+    puts("You awaken on cold stone...");
+    putchar('\n');
     look();
 
     while (alive) {
         cmd = read_cmd();
         turns = turns + 1;
 
-        if      (cmd == 'q') { print_str("You surrender to the darkness..."); newline(); alive = 0; }
+        if      (cmd == 'q') { puts("You surrender to the darkness..."); alive = 0; }
         else if (cmd == 'l') { look(); }
         else if (cmd == 'i') { show_inventory(); }
         else if (cmd == 'g') { do_get(); }
         else if (cmd == 'u') { do_use(); }
         else if (cmd == 'n' || cmd == 's' || cmd == 'e' || cmd == 'w') { do_move(cmd); }
-        else                 { print_str("Huh? Try n/s/e/w/l/g/u/i/q"); newline(); }
+        else                 { puts("Huh? Try n/s/e/w/l/g/u/i/q"); }
 
         if (room == ROOM_FREE) {
-            newline();
-            print_str("*** YOU ESCAPED THE DUNGEON! ***"); newline();
-            print_str("Turns: "); print_int(turns); newline();
+            puts("\n*** YOU ESCAPED THE DUNGEON! ***");
+            printf("Turns: %d\n", turns);
             alive = 0;
         }
     }
 
-    print_str("Game over."); newline();
+    puts("Game over.");
     return 0;
 }

@@ -13,14 +13,8 @@
  * CRC32 values match the IEEE 802.3 / zlib variant.
  */
 
-extern void  print_str(char *s);
-extern void  print_int(long long n);
-extern void  print_hex_prefix(long long val);
-extern void  newline(void);
-extern int   strlen(char *s);
-extern int   strcmp(char *a, char *b);
-extern void *memset(void *p, int val, int n);
-extern void *memcpy(void *dst, void *src, int n);
+#include <stdio.h>
+#include <string.h>
 
 typedef unsigned int       uint32_t;
 typedef int                int32_t;
@@ -31,25 +25,20 @@ static int g_pass;
 static int g_fail;
 
 static void check(char *name, int ok) {
-    print_str(name);
-    if (ok) { print_str("PASS"); g_pass++; }
-    else    { print_str("FAIL"); g_fail++; }
-    newline();
+    printf("%s%s\n", name, ok ? "PASS" : "FAIL");
+    if (ok) g_pass++; else g_fail++;
 }
 
 static void check_hex(char *name, uint32_t got, uint32_t expected) {
-    print_str(name);
+    printf("%s", name);
     if (got == expected) {
-        print_str("PASS");
+        printf("PASS\n");
         g_pass++;
     } else {
-        print_str("FAIL  got=");
-        print_hex_prefix((long long)(uint64_t)got);
-        print_str(" exp=");
-        print_hex_prefix((long long)(uint64_t)expected);
+        printf("FAIL  got=0x%016llx exp=0x%016llx\n",
+               (unsigned long long)got, (unsigned long long)expected);
         g_fail++;
     }
-    newline();
 }
 
 /* ── CRC32 (IEEE 802.3 / zlib) ────────────────────────────────────────────── */
@@ -220,8 +209,7 @@ int main(void) {
     g_pass = 0;
     g_fail = 0;
 
-    print_str("=== Crypto / Hash ===");
-    newline();
+    printf("=== Crypto / Hash ===\n");
 
     /* CRC32 vectors (zlib / IEEE 802.3) */
     {
@@ -318,12 +306,6 @@ int main(void) {
     }
 
     /* Summary */
-    newline();
-    print_str("Results: ");
-    print_int(g_pass);
-    print_str(" pass, ");
-    print_int(g_fail);
-    print_str(" fail");
-    newline();
+    printf("\nResults: %d pass, %d fail\n", g_pass, g_fail);
     return g_fail;
 }

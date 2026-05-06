@@ -11,18 +11,14 @@
  * each queen in the first solution found.
  */
 
-extern void print_str(char *s);
-extern void print_int(long long n);
-extern void newline(void);
+#include <stdio.h>
 
 static int g_pass;
 static int g_fail;
 
 static void check(char *name, int ok) {
-    print_str(name);
-    if (ok) { print_str("PASS"); g_pass++; }
-    else    { print_str("FAIL"); g_fail++; }
-    newline();
+    printf("%s%s\n", name, ok ? "PASS" : "FAIL");
+    if (ok) g_pass++; else g_fail++;
 }
 
 /* ── N-queens count ───────────────────────────────────────────────────────── */
@@ -96,8 +92,7 @@ int main(void) {
     g_pass = 0;
     g_fail = 0;
 
-    print_str("=== N-Queens Backtracker ===");
-    newline();
+    printf("=== N-Queens Backtracker ===\n");
 
     /* Known solution counts for N=1..8 (OEIS A000170). */
     static const int expected[] = { 1, 0, 0, 2, 10, 4, 40, 92 };
@@ -106,19 +101,13 @@ int main(void) {
 
     for (int n = 1; n <= 8; n++) {
         int got = count_solutions(n, 0, cols);
-        print_str("N=");
-        print_int(n);
-        print_str(": ");
-        print_int(got);
         if (got == expected[n - 1]) {
-            print_str("  PASS");
+            printf("N=%d: %d  PASS\n", n, got);
             g_pass++;
         } else {
-            print_str("  FAIL exp=");
-            print_int(expected[n - 1]);
+            printf("N=%d: %d  FAIL exp=%d\n", n, got, expected[n - 1]);
             g_fail++;
         }
-        newline();
     }
 
     /* Display the first N=8 solution. */
@@ -128,24 +117,21 @@ int main(void) {
         check("Find first N=8:   ", found);
 
         if (found) {
-            print_str("    cols=[");
+            printf("    cols=[");
             for (int i = 0; i < 8; i++) {
-                print_int(cols8[i]);
-                if (i < 7) print_str(",");
+                printf("%d", cols8[i]);
+                if (i < 7) printf(",");
             }
-            print_str("]");
-            newline();
+            printf("]\n");
 
             check("Verify legal:     ", verify(8, cols8));
 
             /* Print the board (row-major; '.' empty, 'Q' queen). */
             for (int r = 0; r < 8; r++) {
-                print_str("    ");
-                for (int c = 0; c < 8; c++) {
-                    if (cols8[r] == c) print_str("Q ");
-                    else               print_str(". ");
-                }
-                newline();
+                printf("    ");
+                for (int c = 0; c < 8; c++)
+                    printf("%s", cols8[r] == c ? "Q " : ". ");
+                printf("\n");
             }
         }
     }
@@ -156,13 +142,6 @@ int main(void) {
         check("N=9 count==352:   ", got9 == 352);
     }
 
-    /* Summary */
-    newline();
-    print_str("Results: ");
-    print_int(g_pass);
-    print_str(" pass, ");
-    print_int(g_fail);
-    print_str(" fail");
-    newline();
+    printf("\nResults: %d pass, %d fail\n", g_pass, g_fail);
     return g_fail;
 }

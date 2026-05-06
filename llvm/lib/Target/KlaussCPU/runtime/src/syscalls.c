@@ -1,11 +1,14 @@
 // syscalls.c — KlaussCPU libgloss: connects picolibc to the hardware.
 //
 // Provides:
-//  - stdin/stdout/stderr FILE objects backed by the UART (FDEV_SETUP_STREAM)
+//  - UART callbacks (_uart_put / _uart_get) used by stdio_handles.c
 //  - _sbrk for heap growth (malloc)
 //  - POSIX stubs (_write/_read/_exit/etc.) as fallback
 //
 // Build: compiled as part of every program, same flags as the program itself.
+//
+// NOTE: stdin/stdout/stderr and the FILE structs live in stdio_handles.c which
+// does NOT include <stdio.h>, avoiding the 'FILE * const stdout' const conflict.
 
 #include <stdio.h>
 #include <sys/types.h>
@@ -17,29 +20,19 @@
 extern void               uart_putc(char c);
 extern unsigned long long uart_getc_blocking(void);
 
-// ── FILE-backed stdin / stdout / stderr ──────────────────────────────────────
-// picolibc declares stdin/stdout/stderr as `extern FILE * const` and expects
-// the application to define the FILE objects and the pointers.
+// ── UART callbacks — non-static so stdio_handles.c can reference them ────────
 
-static int _uart_put(char c, FILE *f) {
+int _uart_put(char c, FILE *f) {
     (void)f;
     if (c == '\n') uart_putc('\r');  // CR+LF for serial terminals
     uart_putc(c);
     return 0;
 }
 
-static int _uart_get(FILE *f) {
+int _uart_get(FILE *f) {
     (void)f;
     return (int)(unsigned char)uart_getc_blocking();
 }
-
-static FILE _stdout_file = FDEV_SETUP_STREAM(_uart_put, NULL, NULL, _FDEV_SETUP_WRITE);
-static FILE _stdin_file  = FDEV_SETUP_STREAM(NULL, _uart_get, NULL, _FDEV_SETUP_READ);
-static FILE _stderr_file = FDEV_SETUP_STREAM(_uart_put, NULL, NULL, _FDEV_SETUP_WRITE);
-
-FILE * const stdout = &_stdout_file;
-FILE * const stdin  = &_stdin_file;
-FILE * const stderr = &_stderr_file;
 
 // ── Heap growth ───────────────────────────────────────────────────────────────
 extern char _end[];

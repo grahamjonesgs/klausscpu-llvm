@@ -14,11 +14,8 @@
  *             | digit+                    (non-negative integer literal)
  */
 
-extern void print_str(char *s);
-extern void print_int(long long n);
-extern void print_hex_prefix(long long val);
-extern void newline(void);
-extern int  strlen(char *s);
+#include <stdio.h>
+#include <string.h>
 
 /* ── Globals ──────────────────────────────────────────────────────────────── */
 
@@ -140,43 +137,34 @@ static long long evaluate(const char *src) {
 
 static void check(const char *src, long long expected) {
     long long got = evaluate((const char *)src);
-    print_str("[");
-    print_str((char *)src);
-    print_str("] = ");
-    print_int(got);
+    printf("[%s] = %lld", src, got);
     if (!g_err && got == expected) {
-        print_str("  PASS");
+        printf("  PASS");
         g_pass++;
     } else {
-        print_str("  FAIL exp=");
-        print_int(expected);
-        if (g_err) print_str(" (parse error)");
+        printf("  FAIL exp=%lld", expected);
+        if (g_err) printf(" (parse error)");
         g_fail++;
     }
-    newline();
+    printf("\n");
 }
 
 static void check_err(const char *src) {
     (void)evaluate((const char *)src);
-    print_str("[");
-    print_str((char *)src);
-    print_str("]");
     if (g_err) {
-        print_str("  PASS (rejected as expected)");
+        printf("[%s]  PASS (rejected as expected)\n", src);
         g_pass++;
     } else {
-        print_str("  FAIL (should have rejected)");
+        printf("[%s]  FAIL (should have rejected)\n", src);
         g_fail++;
     }
-    newline();
 }
 
 int main(void) {
     g_pass = 0;
     g_fail = 0;
 
-    print_str("=== Expression Evaluator ===");
-    newline();
+    printf("=== Expression Evaluator ===\n");
 
     /* Basics */
     check("0", 0);
@@ -229,13 +217,6 @@ int main(void) {
     check_err("1++");
     check_err("foo");
 
-    /* Summary */
-    newline();
-    print_str("Results: ");
-    print_int(g_pass);
-    print_str(" pass, ");
-    print_int(g_fail);
-    print_str(" fail");
-    newline();
+    printf("\nResults: %d pass, %d fail\n", g_pass, g_fail);
     return g_fail;
 }

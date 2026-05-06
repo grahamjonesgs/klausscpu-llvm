@@ -22,6 +22,7 @@
  */
 
 extern int main(int argc, char **argv);
+extern void __stdio_init(void);
 
 /* Linker-script symbols marking the BSS region */
 extern char __bss_start[], __bss_end[], _end[];
@@ -29,45 +30,28 @@ extern char __bss_start[], __bss_end[], _end[];
 /* _stack_top: the address of this symbol IS the stack-top value (0x08000000). */
 extern char _stack_top[];
 
-
 __attribute__((noreturn, used))
 void _start(void) {
 
 #ifdef KLAUSSCPU_SW_STACK_INIT
-    /*
-     * Option B: reset SP to the top of RAM.
-     * Requires hardware to have set SP to some valid RAM address before
-     * _start's prologue ran (so the PUSH R15 in the prologue was safe).
-     * After this call SP = 0x08000000 and the remaining stack is fully usable.
-     */
     __builtin_stack_restore((void *)_stack_top);
 #endif
 
-    /* Signal that _start has been reached. */
-    __builtin_klausscpu_leds(0xAAAA);
-
-    /* Hardware spin-wait — allow UART and peripherals to settle. */
-    __builtin_klausscpu_delayv(0x500);
-
-    /* Checkpoint: about to clear BSS. */
-    __builtin_klausscpu_leds(0xBBBB);
-
-    /* Zero-fill BSS */
     for (char *p = __bss_start; p != __bss_end; ++p)
         *p = 0;
 
-    /* Write heap start address to the hardware heap-header slot at address 0.
-     * volatile prevents the compiler from treating the null dereference as UB
-     * and eliding/transforming the store.  Physical address 0 is valid RAM
-     * on KlaussCPU (the hardware reserves the first 32 bytes as the heap
-     * header; code starts at 0x0020). */
+    /* Write heap start to the hardware heap-header slot at address 0. */
     *(volatile unsigned long long *)0 = (unsigned long long)(char *)_end;
 
-    /* Checkpoint: BSS cleared, heap initialised, about to call main. */
-    __builtin_klausscpu_leds(0xCCCC);
+    /* Software startup delay — replaces the removed DELAYV hardware opcode.
+     * Gives the UART receiver time to be ready before the first output.
+     * Loop count matches the old DELAYV 0x500 intent; each iteration takes
+     * several cycles so total is similar to the original hardware delay. */
+    for (volatile unsigned int i = 0; i < 5000; i++)
+        ;
 
+    __stdio_init();
     main(0, (char **)0);
 
-    /* Halt the CPU. */
     __builtin_trap();
 }

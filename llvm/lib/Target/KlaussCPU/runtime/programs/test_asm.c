@@ -14,17 +14,13 @@
  *   T7  — asm inside a loop
  */
 
-extern void print_str(char *s);
-extern void print_int(long long n);
-extern void newline(void);
+#include <stdio.h>
 
 static int g_pass;
 static int g_fail;
 
 static void check(char *name, int ok) {
-    print_str(name);
-    print_str(ok ? "PASS" : "FAIL");
-    newline();
+    printf("%s%s\n", name, ok ? "PASS" : "FAIL");
     if (ok) g_pass++; else g_fail++;
 }
 
@@ -131,8 +127,7 @@ int main(void) {
     g_pass = 0;
     g_fail = 0;
 
-    print_str("=== Inline Assembly Test ===");
-    newline();
+    printf("=== Inline Assembly Test ===\n");
 
     /* Signal entry via LEDs so hardware bring-up is visible. */
     asm_leds(0x1234);
@@ -206,14 +201,7 @@ int main(void) {
         check("T7 asm in loop:         ", ok);
     }
 
-    /* Summary */
-    newline();
-    print_str("Results: ");
-    print_int(g_pass);
-    print_str(" pass, ");
-    print_int(g_fail);
-    print_str(" fail");
-    newline();
+    printf("\nResults: %d pass, %d fail\n", g_pass, g_fail);
 
     asm_leds(g_fail == 0 ? 0xFFFF : 0xDEAD);
 

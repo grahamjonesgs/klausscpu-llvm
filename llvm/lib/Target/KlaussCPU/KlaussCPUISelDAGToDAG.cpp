@@ -468,57 +468,6 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
       ReplaceNode(N, Res);
       return;
     }
-    case Intrinsic::klausscpu_leds: {
-      SDValue Val = N->getOperand(2);
-      SDNode *Res = CurDAG->getMachineNode(KlaussCPU::LEDR_R, DL,
-                                            MVT::Other, {Val, Chain});
-      ReplaceNode(N, Res);
-      return;
-    }
-    case Intrinsic::klausscpu_seg7_1: {
-      SDValue Val = N->getOperand(2);
-      SDNode *Res = CurDAG->getMachineNode(KlaussCPU::SEG7_1R_R, DL,
-                                            MVT::Other, {Val, Chain});
-      ReplaceNode(N, Res);
-      return;
-    }
-    case Intrinsic::klausscpu_seg7_2: {
-      SDValue Val = N->getOperand(2);
-      SDNode *Res = CurDAG->getMachineNode(KlaussCPU::SEG7_2R_R, DL,
-                                            MVT::Other, {Val, Chain});
-      ReplaceNode(N, Res);
-      return;
-    }
-    case Intrinsic::klausscpu_seg7: {
-      SDValue Val = N->getOperand(2);
-      SDNode *Res = CurDAG->getMachineNode(KlaussCPU::SEG7R_R, DL,
-                                            MVT::Other, {Val, Chain});
-      ReplaceNode(N, Res);
-      return;
-    }
-    case Intrinsic::klausscpu_seg7blank: {
-      SDNode *Res = CurDAG->getMachineNode(KlaussCPU::SEG7BLANK_I, DL,
-                                            MVT::Other, {Chain});
-      ReplaceNode(N, Res);
-      return;
-    }
-    case Intrinsic::klausscpu_delayv: {
-      SDValue Cycles = N->getOperand(2);
-      SDNode *Res;
-      if (auto *CN = dyn_cast<ConstantSDNode>(Cycles)) {
-        // Constant cycle count: use immediate form (DELAYV).
-        SDValue Imm = CurDAG->getTargetConstant(CN->getZExtValue(), DL,
-                                                MVT::i64);
-        Res = CurDAG->getMachineNode(KlaussCPU::DELAYV_I, DL,
-                                     MVT::Other, {Imm, Chain});
-      } else {
-        // Variable cycle count: use register form (DELAYR).
-        Res = CurDAG->getMachineNode(KlaussCPU::DELAYR_R, DL,
-                                     MVT::Other, {Cycles, Chain});
-      }
-      ReplaceNode(N, Res);
-      return;
-    }
     default:
       break;
     }

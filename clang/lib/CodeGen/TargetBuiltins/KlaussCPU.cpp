@@ -72,47 +72,6 @@ CodeGenFunction::EmitKlaussCPUBuiltinExpr(unsigned BuiltinID,
     return Builder.CreateCall(F);
   }
 
-  // void __builtin_klausscpu_leds(unsigned long long val)
-  case KlaussCPU::BI__builtin_klausscpu_leds: {
-    Value *Val = EmitScalarExpr(E->getArg(0));
-    Function *F = CGM.getIntrinsic(Intrinsic::klausscpu_leds);
-    return Builder.CreateCall(F, {Val});
-  }
-
-  // void __builtin_klausscpu_seg7_1(unsigned long long val)
-  case KlaussCPU::BI__builtin_klausscpu_seg7_1: {
-    Value *Val = EmitScalarExpr(E->getArg(0));
-    Function *F = CGM.getIntrinsic(Intrinsic::klausscpu_seg7_1);
-    return Builder.CreateCall(F, {Val});
-  }
-
-  // void __builtin_klausscpu_seg7_2(unsigned long long val)
-  case KlaussCPU::BI__builtin_klausscpu_seg7_2: {
-    Value *Val = EmitScalarExpr(E->getArg(0));
-    Function *F = CGM.getIntrinsic(Intrinsic::klausscpu_seg7_2);
-    return Builder.CreateCall(F, {Val});
-  }
-
-  // void __builtin_klausscpu_seg7(unsigned long long val)
-  case KlaussCPU::BI__builtin_klausscpu_seg7: {
-    Value *Val = EmitScalarExpr(E->getArg(0));
-    Function *F = CGM.getIntrinsic(Intrinsic::klausscpu_seg7);
-    return Builder.CreateCall(F, {Val});
-  }
-
-  // void __builtin_klausscpu_seg7blank(void)
-  case KlaussCPU::BI__builtin_klausscpu_seg7blank: {
-    Function *F = CGM.getIntrinsic(Intrinsic::klausscpu_seg7blank);
-    return Builder.CreateCall(F);
-  }
-
-  // void __builtin_klausscpu_delayv(unsigned int cycles)
-  case KlaussCPU::BI__builtin_klausscpu_delayv: {
-    Value *Cycles = EmitScalarExpr(E->getArg(0));
-    Function *F = CGM.getIntrinsic(Intrinsic::klausscpu_delayv);
-    return Builder.CreateCall(F, {Cycles});
-  }
-
   default:
     return nullptr;
   }

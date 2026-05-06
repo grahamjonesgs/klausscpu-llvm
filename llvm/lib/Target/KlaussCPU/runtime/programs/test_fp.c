@@ -12,18 +12,14 @@
  * via integer truncation without worrying about round-off.
  */
 
-extern void print_str(char *s);
-extern void print_int(long long n);
-extern void newline(void);
+#include <stdio.h>
 
 static int g_pass;
 static int g_fail;
 
 static void check(char *name, int ok) {
-    print_str(name);
-    if (ok) { print_str("PASS"); g_pass++; }
-    else    { print_str("FAIL"); g_fail++; }
-    newline();
+    printf("%s%s\n", name, ok ? "PASS" : "FAIL");
+    if (ok) g_pass++; else g_fail++;
 }
 
 /* Helper: compare two floats for "close enough" by checking their integer
@@ -40,8 +36,7 @@ int main(void) {
     g_pass = 0;
     g_fail = 0;
 
-    print_str("=== Soft-FP Test ===");
-    newline();
+    printf("=== Soft-FP Test ===\n");
 
     /* T1: int -> float -> int round trip */
     {
@@ -184,13 +179,6 @@ int main(void) {
         check("T9b geom*256 == 511:      ", feq_int(scaled, 511));
     }
 
-    /* Summary */
-    newline();
-    print_str("Results: ");
-    print_int(g_pass);
-    print_str(" pass, ");
-    print_int(g_fail);
-    print_str(" fail");
-    newline();
+    printf("\nResults: %d pass, %d fail\n", g_pass, g_fail);
     return g_fail;
 }

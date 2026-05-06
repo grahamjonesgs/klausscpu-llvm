@@ -794,7 +794,7 @@ let hasSideEffects = 1 in {
   // Send CR+LF over UART.
   def NEWLINE_I    : I0<0x00005001, (outs), (ins), "newline">;
 
-  // ── LEDs / 7-seg / delay ──────────────────────────────────────────────────
+  // ── Legacy peripheral opcodes (still in hardware; accessible via inline asm)
   // Set 16 on-board LEDs from register bits [15:0].
   def LEDR_R      : R_in<0x0000300, (ins GPR:$reg), "ledr\t$reg">;
   // Set 7-seg display 1 from register.
@@ -805,10 +805,6 @@ let hasSideEffects = 1 in {
   def SEG7R_R     : R_in<0x0000304, (ins GPR:$reg), "7segr\t$reg">;
   // Blank both 7-seg displays.
   def SEG7BLANK_I : I0<0x00003073, (outs), (ins), "7segblank">;
-  // Hardware spin-wait: stall for imm32 clock cycles (immediate form).
-  def DELAYV_I    : Vsp<0x0000F013, "delayv\t$imm">;
-  // Hardware spin-wait: stall for rs clock cycles (register form).
-  def DELAYR_R    : R_in<0x0000F00, (ins GPR:$reg), "delayr\t$reg">;
 }
 
 //===----------------------------------------------------------------------===//

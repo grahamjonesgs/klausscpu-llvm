@@ -25,14 +25,4 @@ BUILTIN(__builtin_klausscpu_rxrnb,      "ULLi",  "n")
 // UART control
 BUILTIN(__builtin_klausscpu_newline,    "v",     "n")
 
-// LEDs / 7-seg display
-BUILTIN(__builtin_klausscpu_leds,       "vULLi", "n")
-BUILTIN(__builtin_klausscpu_seg7_1,     "vULLi", "n")
-BUILTIN(__builtin_klausscpu_seg7_2,     "vULLi", "n")
-BUILTIN(__builtin_klausscpu_seg7,       "vULLi", "n")
-BUILTIN(__builtin_klausscpu_seg7blank,  "v",     "n")
-
-// Hardware delay
-BUILTIN(__builtin_klausscpu_delayv,     "vULLi", "n")
-
 #undef BUILTIN
