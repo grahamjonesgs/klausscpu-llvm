@@ -23,7 +23,8 @@ static TCB      tasks[RTOS_MAX_TASKS];
 static uint64_t stacks[RTOS_MAX_TASKS][RTOS_STACK_WORDS];
 static int      n_tasks;
 
-TCB *g_current_tcb;
+TCB     *g_current_tcb;
+uint32_t g_tick_count;
 
 // ── task_create ────────────────────────────────────────────────────────────
 
@@ -60,10 +61,24 @@ int task_create(const char *name, void (*entry)(void)) {
     return t->id;
 }
 
+// ── tick_count_update ──────────────────────────────────────────────────────
+// Called from timer_handler ONLY (not from rtos_yield).
+// Increments the global tick counter and wakes any BLOCKED tasks whose
+// sleep period has elapsed.
+
+void tick_count_update(void) {
+    g_tick_count++;
+    for (int i = 0; i < n_tasks; i++) {
+        if (tasks[i].state == TASK_BLOCKED &&
+                (int32_t)(g_tick_count - tasks[i].wake_tick) >= 0)
+            tasks[i].state = TASK_READY;
+    }
+}
+
 // ── pick_next_task ─────────────────────────────────────────────────────────
-// Called from timer_handler (assembly) while running on the kernel stack.
-// Marks current task READY; selects next READY task round-robin; marks it
-// RUNNING and updates g_current_tcb.
+// Called from timer_handler and rtos_yield (assembly), on the kernel stack.
+// Marks current RUNNING task READY (unless it is BLOCKED); selects the next
+// READY task round-robin; marks it RUNNING and updates g_current_tcb.
 
 void pick_next_task(void) {
     int cur = g_current_tcb ? g_current_tcb->id : -1;
@@ -133,6 +148,23 @@ void rtos_start(void) {
 uint32_t rtos_task_switches(int id) {
     if (id < 0 || id >= n_tasks) return 0;
     return tasks[id].switches;
+}
+
+// ── rtos_sleep_ticks ───────────────────────────────────────────────────────
+// Block the calling task for at least `ticks` timer periods.
+// Sets state to BLOCKED (so pick_next_task skips us), records the wake tick,
+// then calls rtos_yield to immediately hand off the CPU.  tick_count_update
+// (called on every timer interrupt) will mark us READY again when the time
+// comes; rtos_yield's IRET will then re-enable the timer on return.
+
+void rtos_sleep_ticks(uint32_t ticks) {
+    rtos_mutex_lock();                            // disable timer atomically
+    g_current_tcb->state     = TASK_BLOCKED;
+    g_current_tcb->wake_tick = g_tick_count + ticks;
+    // rtos_yield (assembly) disables timer again (idempotent), then re-enables
+    // it via IRET — so we must NOT call rtos_mutex_unlock() here.
+    rtos_yield();
+    // Execution resumes here after wake_tick, with timer re-enabled by IRET.
 }
 
 // ── Idle canary check (call from a low-priority task if needed) ────────────

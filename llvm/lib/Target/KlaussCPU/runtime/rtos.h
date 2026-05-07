@@ -27,13 +27,14 @@
 typedef enum { TASK_READY = 0, TASK_RUNNING, TASK_BLOCKED, TASK_DEAD } TaskState;
 
 typedef struct {
-    uint32_t    sp;           // offset  0: saved stack pointer
+    uint32_t    sp;           // offset  0: saved stack pointer (assembly accesses this)
     uint32_t    stack_base;   // offset  4: lowest valid stack address (canary)
     uint32_t    stack_top;    // offset  8: initial SP (highest address)
     TaskState   state;        // offset 12
     int         id;           // offset 16
-    const char *name;         // offset 20: display name (pointer = 32-bit)
-    uint32_t    switches;     // offset 24: times this task was switched in
+    const char *name;         // offset 20: display name (pointer = 64-bit on this ABI)
+    uint32_t    switches;     // offset 28: times this task was switched in
+    uint32_t    wake_tick;    // offset 32: tick count at which a BLOCKED task wakes
 } TCB;
 
 // ── Mutex (critical section via interrupt mask) ────────────────────────────
@@ -59,16 +60,26 @@ static inline void rtos_mutex_unlock(void) { REG_INT_MASK = 1; }
 
 void     rtos_init(void);
 int      task_create(const char *name, void (*entry)(void));
-void     rtos_start(void);          // installs timer, launches first task, never returns
+void     rtos_start(void);           // installs timer, launches first task, never returns
 uint32_t rtos_task_switches(int id); // query context-switch count for task id
+
+// Yield the CPU to the next ready task immediately.  Safe to call from any
+// task; the caller resumes normally when re-scheduled.
+void rtos_yield(void);
+
+// Block the calling task for at least `ticks` timer periods (10 ms each at
+// default config), then resume.  Other tasks run while this task sleeps.
+void rtos_sleep_ticks(uint32_t ticks);
 
 // ── Internals (used by context_switch.S — not for application code) ────────
 
 void pick_next_task(void);          // called from timer handler; updates g_current_tcb
+void tick_count_update(void);       // increments g_tick_count and wakes sleepers
 extern void timer_handler(void);    // assembly ISR installed as INT_VEC0
 extern void rtos_first_task(void);  // assembly trampoline; launches first task
 
 extern TCB     *g_current_tcb;
 extern uint32_t g_kernel_stack_top;
+extern uint32_t g_tick_count;       // incremented once per timer tick
 
 #endif // RTOS_H
