@@ -1,88 +1,111 @@
 /*
- * test_cache.c — KlaussCPU cache performance counter test.
+ * test_cache.c — KlaussCPU cache performance profiler.
  *
- * Reads the cache geometry from CACHE_INFO, then runs four micro-workloads
- * and prints all six counters after each one.  Useful for:
+ * Reads cache geometry, then runs seven micro-workloads that exercise
+ * different access patterns.  For each workload it reports:
  *
- *   - Validating the cache instrumentation after hardware changes.
- *   - Understanding hit/miss behaviour for programs near the 64 KB boundary.
- *   - Diagnosing the test_big crash (cache 64 KB, binary > 64 KB).
+ *   • Wall-clock time          — from REG_CLOCK_MS (1 ms resolution)
+ *   • Cycle count estimate     — from REG_TIMER_CNT (sub-ms, within one tick)
+ *   • Hit rate (per-mille)     — (rd_hits + wr_hits) / total × 1000
+ *   • Miss penalty             — stall_cycles / misses
+ *   • Writeback rate           — writebacks / rd_misses
+ *   • All six raw counters
  *
  * Workloads
  * ---------
- *   W1 hot     256 B buffer, 1 000 sequential read passes  → ~100 % hits
- *   W2 cold    32 KB buffer, 1 pass (cold, never read)     → ~0 % hits
- *   W3 warm    same 32 KB buffer, 2nd pass                 → ~100 % hits
- *   W4 write   32 KB sequential write then read-back       → write misses
- *                                                             then read hits
+ *   W1  hot         256 B buffer, 1000 passes         → ~100 % hits
+ *   W2  cold        32 KB buffer, 1st pass            → ~0 % hits
+ *   W3  warm        32 KB buffer, 2nd pass            → ~100 % hits
+ *   W4  write       32 KB write then read-back        → write misses then hits
+ *   W5  stride      32 KB, read every 4th line        → spatial locality test
+ *   W6  thrash      128 KB buffer (2× cache)          → heavy writeback churn
+ *   W7  partial     33 KB buffer (just over one way)  → associativity boundary
  *
- * Cache geometry (current hardware):
- *   2-way set-associative, 64 KB total, 16-byte lines, 2048 sets.
- * A 32 KB buffer fills exactly one way in every set, so the 2nd pass
- * is fully resident and should produce 0 misses.
- *
- * Binary size note: g_hot (256 B) and g_cold (32 KB) land in BSS (zero-
- * init), so they cost no space in the kbt file but push _end to ~48 KB —
- * well under the 64 KB kbt-loader limit being investigated.
+ * Registers used from mmio.h:
+ *   REG_CACHE_CTRL / INFO / RD_HITS / RD_MISSES / WR_HITS / WR_MISSES
+ *   REG_CACHE_WRITEBACKS / STALL_CYC
+ *   REG_CLOCK_MS   — free-running ms counter (atomic 64-bit, no setup needed)
+ *   REG_TIMER_CNT  — live cycle counter within current timer period
  */
 
 #include <stdio.h>
 #include "../mmio.h"
 
-/* ── Buffers (BSS — zero-init, not in kbt payload) ───────────────────────── */
+/* ── Buffer sizes ──────────────────────────────────────────────────────────── */
+#define HOT_WORDS      32        /*  32 × 8 B =   256 B */
+#define WARM_WORDS   4096        /* 4096 × 8 B =  32 KB */
+#define THRASH_WORDS 16384       /* 16384 × 8 B = 128 KB */
+#define PARTIAL_WORDS 4225       /* 4225 × 8 B ≈  33 KB */
 
-#define HOT_WORDS   32          /* 32 × 8 B = 256 B */
-#define COLD_WORDS  4096        /* 4096 × 8 B = 32 KB */
+/* Stride in uint64_t elements = 4 × 8 B = 32 B = 2 cache lines apart */
+#define STRIDE 4
 
 static volatile uint64_t g_hot[HOT_WORDS];
-static volatile uint64_t g_cold[COLD_WORDS];
+static volatile uint64_t g_warm[WARM_WORDS];
+static volatile uint64_t g_thrash[THRASH_WORDS];
+static volatile uint64_t g_partial[PARTIAL_WORDS];
 
-/* ── Counter snapshot ────────────────────────────────────────────────────── */
+/* ── Counter snapshot ──────────────────────────────────────────────────────── */
 
 typedef struct {
     uint64_t rd_hits, rd_miss;
     uint64_t wr_hits, wr_miss;
     uint64_t wbacks,  stalls;
+    uint64_t ms_elapsed;
 } Stats;
 
 static void cache_clear(void) {
     REG_CACHE_CTRL = CACHE_CTRL_CLEAR;
 }
 
-static Stats cache_snap(void) {
+static uint64_t ms_now(void) {
+    return REG_CLOCK_MS;
+}
+
+static Stats cache_snap(uint64_t ms_start) {
     Stats s;
-    s.rd_hits = REG_CACHE_RD_HITS;
-    s.rd_miss  = REG_CACHE_RD_MISSES;
-    s.wr_hits  = REG_CACHE_WR_HITS;
-    s.wr_miss  = REG_CACHE_WR_MISSES;
-    s.wbacks   = REG_CACHE_WRITEBACKS;
-    s.stalls   = REG_CACHE_STALL_CYC;
+    s.rd_hits    = REG_CACHE_RD_HITS;
+    s.rd_miss    = REG_CACHE_RD_MISSES;
+    s.wr_hits    = REG_CACHE_WR_HITS;
+    s.wr_miss    = REG_CACHE_WR_MISSES;
+    s.wbacks     = REG_CACHE_WRITEBACKS;
+    s.stalls     = REG_CACHE_STALL_CYC;
+    s.ms_elapsed = ms_now() - ms_start;
     return s;
 }
 
 static void print_stats(const char *label, const Stats *s) {
-    uint64_t hits   = s->rd_hits + s->wr_hits;
-    uint64_t misses = s->rd_miss + s->wr_miss;
-    uint64_t total  = hits + misses;
-    /* hit rate in per-mille → printed as x.y % — no FP needed */
-    uint64_t pmill  = total ? hits * 1000ull / total : 0ull;
-    uint64_t avgpen = misses ? s->stalls / misses : 0ull;
+    uint64_t hits    = s->rd_hits + s->wr_hits;
+    uint64_t misses  = s->rd_miss + s->wr_miss;
+    uint64_t total   = hits + misses;
+    /* hit rate in per-mille: no FP required */
+    uint64_t pmill   = total   ? hits * 1000ull / total            : 0ull;
+    uint64_t avgpen  = misses  ? s->stalls / misses                : 0ull;
+    uint64_t wbrate  = s->rd_miss ? s->wbacks * 100ull / s->rd_miss : 0ull;
 
-    printf("--- %s ---\n", label);
-    printf("  rd  hits=%-10llu miss=%-10llu\n", s->rd_hits, s->rd_miss);
-    printf("  wr  hits=%-10llu miss=%-10llu\n", s->wr_hits, s->wr_miss);
-    printf("  writebacks=%-10llu stall_cyc=%-10llu\n", s->wbacks, s->stalls);
-    printf("  total=%-10llu hit_rate=%llu.%llu%%  avg_miss=%llu cyc\n\n",
-           total, pmill / 10ull, pmill % 10ull, avgpen);
+    printf("=== %s ===\n", label);
+    printf("  time   : %lu ms\n",              (unsigned long)s->ms_elapsed);
+    printf("  rd     : hits=%-10lu miss=%lu\n",
+           (unsigned long)s->rd_hits, (unsigned long)s->rd_miss);
+    printf("  wr     : hits=%-10lu miss=%lu\n",
+           (unsigned long)s->wr_hits, (unsigned long)s->wr_miss);
+    printf("  wbacks : %-10lu  wb/rd_miss=%lu%%\n",
+           (unsigned long)s->wbacks,  (unsigned long)wbrate);
+    printf("  stalls : %-10lu  avg_miss_pen=%lu cyc\n",
+           (unsigned long)s->stalls,  (unsigned long)avgpen);
+    printf("  total  : %-10lu  hit_rate=%lu.%lu%%\n\n",
+           (unsigned long)total,
+           (unsigned long)(pmill / 10ull),
+           (unsigned long)(pmill % 10ull));
 }
 
-/* ── Workloads ───────────────────────────────────────────────────────────── */
+/* ── Workloads ─────────────────────────────────────────────────────────────── */
 
-static void workload_hot(void) {
-    /* Warm the write side (not counted). */
+static void w1_hot(void) {
+    /* Pre-warm writes (not profiled). */
     for (int i = 0; i < HOT_WORDS; i++) g_hot[i] = (uint64_t)i + 1ull;
-
     cache_clear();
+    uint64_t t0 = ms_now();
 
     volatile uint64_t sink = 0;
     for (int p = 0; p < 1000; p++)
@@ -90,86 +113,134 @@ static void workload_hot(void) {
             sink += g_hot[i];
     (void)sink;
 
-    Stats s = cache_snap();
-    print_stats("W1 hot  (256 B x 1000 passes)", &s);
+    Stats _s = cache_snap(t0); print_stats("W1 hot  — 256 B × 1000 passes (expect ~100% hits)", &_s);
 }
 
-static void workload_cold(void) {
-    /* g_cold starts zeroed (BSS); first read is entirely cold. */
+static void w2_cold(void) {
+    /* g_warm is BSS-zeroed; first touch is entirely cold. */
     cache_clear();
+    uint64_t t0 = ms_now();
 
     volatile uint64_t sink = 0;
-    for (int i = 0; i < COLD_WORDS; i++)
-        sink += g_cold[i];
+    for (int i = 0; i < WARM_WORDS; i++) sink += g_warm[i];
     (void)sink;
 
-    Stats s = cache_snap();
-    print_stats("W2 cold (32 KB, 1st pass)", &s);
+    Stats _s = cache_snap(t0); print_stats("W2 cold — 32 KB 1st pass (expect ~0% hits)", &_s);
 }
 
-static void workload_warm(void) {
-    /* Second pass over the same data — should be fully resident. */
+static void w3_warm(void) {
+    /* Second pass — data loaded by W2 is still resident. */
     cache_clear();
+    uint64_t t0 = ms_now();
 
     volatile uint64_t sink = 0;
-    for (int i = 0; i < COLD_WORDS; i++)
-        sink += g_cold[i];
+    for (int i = 0; i < WARM_WORDS; i++) sink += g_warm[i];
     (void)sink;
 
-    Stats s = cache_snap();
-    print_stats("W3 warm (32 KB, 2nd pass)", &s);
+    Stats _s = cache_snap(t0); print_stats("W3 warm — 32 KB 2nd pass (expect ~100% hits)", &_s);
 }
 
-static void workload_write(void) {
-    /* Write 32 KB sequentially (cold write misses), then read back
-     * (should be warm hits since the writes filled the cache lines). */
+static void w4_write(void) {
+    /* Write 32 KB cold → read back (writes install lines; reads then hit). */
     cache_clear();
+    uint64_t t0 = ms_now();
 
-    for (int i = 0; i < COLD_WORDS; i++) g_cold[i] = (uint64_t)i * 7ull;
+    for (int i = 0; i < WARM_WORDS; i++) g_warm[i] = (uint64_t)i * 7ull;
 
     volatile uint64_t sink = 0;
-    for (int i = 0; i < COLD_WORDS; i++) sink += g_cold[i];
+    for (int i = 0; i < WARM_WORDS; i++) sink += g_warm[i];
     (void)sink;
 
-    Stats s = cache_snap();
-    print_stats("W4 write+readback (32 KB)", &s);
+    Stats _s = cache_snap(t0); print_stats("W4 write+readback — 32 KB (write miss, read hit)", &_s);
 }
 
-/* ── main ────────────────────────────────────────────────────────────────── */
+static void w5_stride(void) {
+    /* Access every STRIDE-th element: each access touches a different cache line
+     * but skips several — tests spatial locality and line-fill efficiency. */
+    cache_clear();
+    uint64_t t0 = ms_now();
+
+    volatile uint64_t sink = 0;
+    for (int i = 0; i < WARM_WORDS; i += STRIDE) sink += g_warm[i];
+    (void)sink;
+
+    printf("  (stride=%d elements = %d B apart, cache line = 16 B)\n", STRIDE, STRIDE * 8);
+    Stats _s = cache_snap(t0); print_stats("W5 stride — 32 KB every 4th element (spatial locality)", &_s);
+}
+
+static void w6_thrash(void) {
+    /* 128 KB buffer = 2× cache capacity.  Sequential scan evicts earlier lines
+     * before we can revisit them — maximum writeback churn. */
+    /* First: pre-dirty the buffer with writes so writebacks actually fire. */
+    for (int i = 0; i < THRASH_WORDS; i++) g_thrash[i] = (uint64_t)i;
+    cache_clear();
+    uint64_t t0 = ms_now();
+
+    volatile uint64_t sink = 0;
+    for (int i = 0; i < THRASH_WORDS; i++) sink += g_thrash[i];
+    (void)sink;
+
+    Stats _s = cache_snap(t0); print_stats("W6 thrash — 128 KB (2× cache, dirty evictions expected)", &_s);
+}
+
+static void w7_partial(void) {
+    /* 33 KB = just over one way per set.  The second way starts spilling into
+     * the first, revealing the 2-way associativity boundary. */
+    cache_clear();
+    uint64_t t0 = ms_now();
+
+    volatile uint64_t sink = 0;
+    for (int i = 0; i < PARTIAL_WORDS; i++) sink += g_partial[i];
+    (void)sink;
+
+    printf("  (33 KB > 32 KB per way — probes associativity limit)\n");
+    Stats _s = cache_snap(t0); print_stats("W7 partial — 33 KB (just over one cache way)", &_s);
+}
+
+/* ── main ──────────────────────────────────────────────────────────────────── */
 
 int main(void) {
     REG_LEDS = 0x0001;
-    printf("=== KlaussCPU cache test ===\n\n");
+    printf("=== KlaussCPU cache profiler ===\n\n");
 
-    /* ── Geometry ── */
+    /* ── Cache geometry ── */
     uint64_t info  = REG_CACHE_INFO;
     uint32_t ways  = CACHE_INFO_WAYS(info);
     uint32_t sets  = CACHE_INFO_SETS(info);
     uint32_t line  = CACHE_INFO_LINE_BYTES(info);
     uint32_t total = CACHE_INFO_TOTAL_BYTES(info);
 
-    printf("Geometry: %u ways, %u sets, %u B/line, %u KB total\n",
-           ways, sets, line, total / 1024u);
+    printf("Cache geometry:\n");
+    printf("  ways        = %u\n",        (unsigned)ways);
+    printf("  sets        = %u\n",        (unsigned)sets);
+    printf("  line size   = %u bytes\n",  (unsigned)line);
+    printf("  total size  = %u KB\n\n",   (unsigned)(total / 1024u));
+
+    /* REG_CLOCK_MS: sanity-check it's ticking (read twice, 1 ms apart). */
+    uint64_t ms_a = REG_CLOCK_MS;
+    for (volatile int d = 0; d < 100000; d++) {}  /* ~1 ms busy delay */
+    uint64_t ms_b = REG_CLOCK_MS;
+    printf("CLOCK_MS tick check: %lu → %lu (delta=%lu ms)\n\n",
+           (unsigned long)ms_a,
+           (unsigned long)ms_b,
+           (unsigned long)(ms_b - ms_a));
 
     int geo_ok = (ways == 2 && sets == 2048 && line == 16 && total == 65536);
     printf("Geometry check: %s\n\n", geo_ok ? "PASS" : "FAIL");
 
-    REG_LEDS = 0x0002;
-    workload_hot();
+    /* ── Run workloads ── */
+    REG_LEDS = 0x0002; w1_hot();
+    REG_LEDS = 0x0004; w2_cold();
+    REG_LEDS = 0x0006; w3_warm();
+    REG_LEDS = 0x0008; w4_write();
+    REG_LEDS = 0x000A; w5_stride();
+    REG_LEDS = 0x000C; w6_thrash();
+    REG_LEDS = 0x000E; w7_partial();
 
-    REG_LEDS = 0x0003;
-    workload_cold();
-
-    REG_LEDS = 0x0004;
-    workload_warm();
-
-    REG_LEDS = 0x0005;
-    workload_write();
-
-    printf("=== done ===\n");
+    printf("=== profiler done ===\n");
 
     if (geo_ok) {
-        REG_SEG_ALL = 0xCA4E0000u;   /* "CA4E" upper = CACHE ok */
+        REG_SEG_ALL = 0xCA4E0000u;  /* "CA4E" = CACHE ok */
         REG_LEDS    = 0xFFFF;
     } else {
         REG_SEG_ALL = 0x000000FFu;

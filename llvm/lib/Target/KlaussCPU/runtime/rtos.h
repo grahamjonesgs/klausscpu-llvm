@@ -63,12 +63,15 @@ int      task_create(const char *name, void (*entry)(void));
 void     rtos_start(void);           // installs timer, launches first task, never returns
 uint32_t rtos_task_switches(int id); // query context-switch count for task id
 
-// Yield the CPU to the next ready task immediately.  Safe to call from any
-// task; the caller resumes normally when re-scheduled.
+// Yield the CPU to the next ready task immediately.  The caller resumes
+// normally when re-scheduled.
+// PRECONDITION: must be called from within an RTOS task (after rtos_start).
+// Calling from main() before rtos_start() is undefined behaviour.
 void rtos_yield(void);
 
 // Block the calling task for at least `ticks` timer periods (10 ms each at
 // default config), then resume.  Other tasks run while this task sleeps.
+// No-op if called before rtos_start() (g_current_tcb == NULL).
 void rtos_sleep_ticks(uint32_t ticks);
 
 // ── Internals (used by context_switch.S — not for application code) ────────

@@ -158,6 +158,7 @@ uint32_t rtos_task_switches(int id) {
 // comes; rtos_yield's IRET will then re-enable the timer on return.
 
 void rtos_sleep_ticks(uint32_t ticks) {
+    if (!g_current_tcb) return;  // called before rtos_start() — no-op
     rtos_mutex_lock();                            // disable timer atomically
     g_current_tcb->state     = TASK_BLOCKED;
     g_current_tcb->wake_tick = g_tick_count + ticks;
