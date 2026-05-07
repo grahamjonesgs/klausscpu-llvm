@@ -7,6 +7,7 @@
 #include "../rtos.h"
 #include "../mmio.h"
 #include <string.h>
+#include <stdio.h>
 
 #define CANARY 0xDEADC0DEDEADC0DEULL
 
@@ -103,11 +104,20 @@ void rtos_init(void) {
     n_tasks       = 0;
     g_current_tcb = 0;
 
+    // Diagnostic: verify handler address and first instruction word.
+    uint32_t handler_addr = (uint32_t)(unsigned long)timer_handler;
+    uint32_t first_word   = *(volatile uint32_t *)(unsigned long)handler_addr;
+    printf("timer_handler addr  = 0x%08lx\n", (unsigned long)handler_addr);
+    printf("timer_handler[0]    = 0x%08lx (expect 0x00004000 = push r0)\n",
+           (unsigned long)first_word);
+
     // Install handler and set period.  Timer is NOT unmasked here;
     // rtos_first_task (assembly) unmasks it after switching to the first
     // task's stack so no tick can fire before the RTOS is fully live.
-    REG_INT_VEC(INT_SRC_TIMER) = (uint32_t)(unsigned long)timer_handler;
+    REG_INT_VEC(INT_SRC_TIMER) = handler_addr;
     REG_TIMER_PER = RTOS_TICK_CYCLES;
+    printf("INT_VEC[timer]      = 0x%08lx\n",
+           (unsigned long)REG_INT_VEC(INT_SRC_TIMER));
 }
 
 // ── rtos_start ─────────────────────────────────────────────────────────────

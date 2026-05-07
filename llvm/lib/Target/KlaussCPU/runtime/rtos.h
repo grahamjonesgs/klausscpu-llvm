@@ -18,7 +18,7 @@
 // ── Configuration ──────────────────────────────────────────────────────────
 
 #define RTOS_MAX_TASKS      8
-#define RTOS_STACK_WORDS    256     // 256 × 8 B = 2 KB per task
+#define RTOS_STACK_WORDS    2048    // 2048 × 8 B = 16 KB per task
 #define RTOS_TICK_CYCLES    1000000 // 10 ms @ 100 MHz
 
 // ── Task control block ─────────────────────────────────────────────────────
@@ -35,6 +35,25 @@ typedef struct {
     const char *name;         // offset 20: display name (pointer = 32-bit)
     uint32_t    switches;     // offset 24: times this task was switched in
 } TCB;
+
+// ── Mutex (critical section via interrupt mask) ────────────────────────────
+//
+// On a single-core CPU the only source of preemption is the timer interrupt.
+// Disabling it is sufficient for mutual exclusion — no hardware CAS needed.
+//
+// Usage:
+//   rtos_mutex_lock();
+//   ... shared resource access ...
+//   rtos_mutex_unlock();
+//
+// Note: do not hold the lock across long operations (e.g. full printf calls)
+// as it adds jitter to the RTOS tick.  For output, prefer uart_puts/uart_putc
+// which have no shared mutable state.
+
+#include "mmio.h"
+
+static inline void rtos_mutex_lock(void)   { REG_INT_MASK = 0; }
+static inline void rtos_mutex_unlock(void) { REG_INT_MASK = 1; }
 
 // ── API ────────────────────────────────────────────────────────────────────
 

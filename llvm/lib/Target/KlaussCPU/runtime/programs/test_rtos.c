@@ -28,17 +28,17 @@
 static volatile int done[3];
 
 /* ── Worker tasks ──────────────────────────────────────────────────────────
- * Each iteration:
- *   1. Set LEDs to own bit pattern so the oscilloscope/LEDs show switching.
- *   2. Print progress.
- *   3. Busy-wait ~200k cycles so the 10 ms timer fires several times
- *      mid-spin and preempts us into another task.
+ * Each printf is wrapped in rtos_mutex_lock/unlock (disables the timer
+ * interrupt for the duration of the call) so picolibc's shared stdout state
+ * is never accessed by two tasks concurrently.
  * ─────────────────────────────────────────────────────────────────────────*/
 
 static void task_a(void) {
     for (int i = 0; i < ITERS; i++) {
         REG_LEDS = 0x0001;
+        rtos_mutex_lock();
         printf("[A] %d\n", i);
+        rtos_mutex_unlock();
         for (volatile long j = 0; j < 200000L; j++) {}
     }
     done[0] = 1;
@@ -48,7 +48,9 @@ static void task_a(void) {
 static void task_b(void) {
     for (int i = 0; i < ITERS; i++) {
         REG_LEDS = 0x0002;
+        rtos_mutex_lock();
         printf("[B] %d\n", i);
+        rtos_mutex_unlock();
         for (volatile long j = 0; j < 200000L; j++) {}
     }
     done[1] = 1;
@@ -58,7 +60,9 @@ static void task_b(void) {
 static void task_c(void) {
     for (int i = 0; i < ITERS; i++) {
         REG_LEDS = 0x0004;
+        rtos_mutex_lock();
         printf("[C] %d\n", i);
+        rtos_mutex_unlock();
         for (volatile long j = 0; j < 200000L; j++) {}
     }
     done[2] = 1;
