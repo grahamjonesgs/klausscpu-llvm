@@ -69,9 +69,15 @@ int task_create(const char *name, void (*entry)(void)) {
 void tick_count_update(void) {
     g_tick_count++;
     for (int i = 0; i < n_tasks; i++) {
-        if (tasks[i].state == TASK_BLOCKED &&
-                (int32_t)(g_tick_count - tasks[i].wake_tick) >= 0)
-            tasks[i].state = TASK_READY;
+        // Only wake tasks that are sleeping on the tick counter (WAIT_TICK).
+        // Tasks blocked on semaphores or flags are woken by their respective
+        // signal/set functions, not by the timer tick.
+        if (tasks[i].state    == TASK_BLOCKED &&
+            tasks[i].wait_type == WAIT_TICK   &&
+                (int32_t)(g_tick_count - tasks[i].wake_tick) >= 0) {
+            tasks[i].state     = TASK_READY;
+            tasks[i].wait_type = WAIT_NONE;
+        }
     }
 }
 
@@ -161,11 +167,92 @@ void rtos_sleep_ticks(uint32_t ticks) {
     if (!g_current_tcb) return;  // called before rtos_start() — no-op
     rtos_mutex_lock();                            // disable timer atomically
     g_current_tcb->state     = TASK_BLOCKED;
+    g_current_tcb->wait_type = WAIT_TICK;
     g_current_tcb->wake_tick = g_tick_count + ticks;
     // rtos_yield (assembly) disables timer again (idempotent), then re-enables
     // it via IRET — so we must NOT call rtos_mutex_unlock() here.
     rtos_yield();
     // Execution resumes here after wake_tick, with timer re-enabled by IRET.
+}
+
+// ── Internal: wake the first task blocked on a given sync object ───────────
+// Returns 1 if a waiter was found and woken, 0 if none.
+// Caller must hold rtos_mutex_lock() across this call.
+
+static int wake_one(void *obj, WaitType type) {
+    for (int i = 0; i < n_tasks; i++) {
+        if (tasks[i].state     == TASK_BLOCKED &&
+            tasks[i].wait_type == type         &&
+            tasks[i].wait_obj  == obj) {
+            tasks[i].state     = TASK_READY;
+            tasks[i].wait_type = WAIT_NONE;
+            tasks[i].wait_obj  = NULL;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// ── Semaphore ──────────────────────────────────────────────────────────────
+
+void rtos_sem_init(RtosSem *s, int count) {
+    s->count = count;
+}
+
+// P operation: take one unit.  If count is already 0 block until a signal
+// hands the unit directly to us (signal does NOT increment count in that case).
+void rtos_sem_wait(RtosSem *s) {
+    if (!g_current_tcb) return;
+    rtos_mutex_lock();
+    if (s->count > 0) {
+        s->count--;
+        rtos_mutex_unlock();
+        return;
+    }
+    // Count is 0 — block until rtos_sem_signal hands the unit to us.
+    g_current_tcb->state     = TASK_BLOCKED;
+    g_current_tcb->wait_type = WAIT_SEM;
+    g_current_tcb->wait_obj  = s;
+    rtos_yield();   // IRET re-enables timer; sem_signal already set us READY
+    // On return the unit has been transferred; no decrement needed.
+}
+
+// V operation: wake one waiter (hand-off, no count change), or increment.
+void rtos_sem_signal(RtosSem *s) {
+    rtos_mutex_lock();
+    if (!wake_one(s, WAIT_SEM))
+        s->count++;     // no waiter — store for the next sem_wait
+    rtos_mutex_unlock();
+}
+
+// ── Event flag ──────────────────────────────────────────────────────────────
+
+void rtos_flag_init(RtosFlag *f) {
+    f->bits = 0;
+}
+
+// Set: wake one waiting task (hand-off), or mark pending if none.
+void rtos_flag_set(RtosFlag *f) {
+    rtos_mutex_lock();
+    if (!wake_one(f, WAIT_FLAG))
+        f->bits = 1;    // no waiter — store as pending for next flag_wait
+    rtos_mutex_unlock();
+}
+
+// Wait: take pending flag immediately, or block until signalled.
+void rtos_flag_wait(RtosFlag *f) {
+    if (!g_current_tcb) return;
+    rtos_mutex_lock();
+    if (f->bits) {
+        f->bits = 0;    // consume the pending flag
+        rtos_mutex_unlock();
+        return;
+    }
+    g_current_tcb->state     = TASK_BLOCKED;
+    g_current_tcb->wait_type = WAIT_FLAG;
+    g_current_tcb->wait_obj  = f;
+    rtos_yield();   // IRET re-enables timer; flag_set already set us READY
+    // On return the flag was handed off directly; bits stay 0.
 }
 
 // ── Idle canary check (call from a low-priority task if needed) ────────────

@@ -80,7 +80,7 @@ FATFS_OBJS  = ff.o ffunicode.o ffsystem.o sd.o diskio.o
 
 PROGRAMS = hello adventure test_64bit expr bst crypto queens \
            test_switch test_fp test_asm test_printf fs_demo \
-           test_fatfs_printf test_big test_cache test_rtos test_sd
+           test_fatfs_printf test_big test_cache test_rtos test_sd test_sync
 
 .PHONY: all clean $(PROGRAMS)
 
@@ -228,6 +228,14 @@ test_rtos.elf: test_rtos.o $(RTOS_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,$(RTOS_OBJS) test_rtos.o)
 
 test_rtos: test_rtos.elf
+
+test_sync.o: programs/test_sync.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+test_sync.elf: test_sync.o $(RTOS_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,$(RTOS_OBJS) test_sync.o)
+
+test_sync: test_sync.elf
 
 # ── Inspect helpers ───────────────────────────────────────────────────────────
 

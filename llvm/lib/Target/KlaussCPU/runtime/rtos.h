@@ -26,6 +26,14 @@
 
 typedef enum { TASK_READY = 0, TASK_RUNNING, TASK_BLOCKED, TASK_DEAD } TaskState;
 
+// What synchronisation object (if any) the task is currently blocking on.
+typedef enum {
+    WAIT_NONE = 0,  // not blocked, or timed sleep (rtos_sleep_ticks)
+    WAIT_TICK,      // blocking via rtos_sleep_ticks — woken by tick_count_update
+    WAIT_SEM,       // blocking on a semaphore — woken by rtos_sem_signal
+    WAIT_FLAG,      // blocking on an event flag — woken by rtos_flag_set
+} WaitType;
+
 typedef struct {
     uint32_t    sp;           // offset  0: saved stack pointer (assembly accesses this)
     uint32_t    stack_base;   // offset  4: lowest valid stack address (canary)
@@ -34,7 +42,9 @@ typedef struct {
     int         id;           // offset 16
     const char *name;         // offset 20: display name (pointer = 64-bit on this ABI)
     uint32_t    switches;     // offset 28: times this task was switched in
-    uint32_t    wake_tick;    // offset 32: tick count at which a BLOCKED task wakes
+    uint32_t    wake_tick;    // offset 32: tick count for WAIT_TICK wakeup
+    WaitType    wait_type;    // offset 36: which sync object we are waiting on
+    void       *wait_obj;     // offset 40: pointer to the RtosSem or RtosFlag (NULL=none)
 } TCB;
 
 // ── Mutex (critical section via interrupt mask) ────────────────────────────
@@ -73,6 +83,42 @@ void rtos_yield(void);
 // default config), then resume.  Other tasks run while this task sleeps.
 // No-op if called before rtos_start() (g_current_tcb == NULL).
 void rtos_sleep_ticks(uint32_t ticks);
+
+// ── Semaphore ──────────────────────────────────────────────────────────────
+// Counting semaphore.  Blocks the caller when count reaches 0.
+// Safe to signal from any task; safe to wait from any task after rtos_start.
+//
+// Typical use — binary semaphore (mutual exclusion):
+//   RtosSem s;  rtos_sem_init(&s, 1);
+//   rtos_sem_wait(&s); ... critical section ... rtos_sem_signal(&s);
+//
+// Typical use — counting semaphore (producer/consumer):
+//   RtosSem slots, items;
+//   rtos_sem_init(&slots, CAPACITY);  rtos_sem_init(&items, 0);
+//   producer: rtos_sem_wait(&slots); put(); rtos_sem_signal(&items);
+//   consumer: rtos_sem_wait(&items); get(); rtos_sem_signal(&slots);
+
+typedef struct { volatile int count; } RtosSem;
+
+void rtos_sem_init(RtosSem *s, int count);
+void rtos_sem_wait(RtosSem *s);    // P — decrement; block if already 0
+void rtos_sem_signal(RtosSem *s);  // V — wake one waiter, or increment if none
+
+// ── Event flag ─────────────────────────────────────────────────────────────
+// Binary event flag with auto-clear semantics.
+// rtos_flag_set   — wake one waiting task (hand-off), or store pending if none.
+// rtos_flag_wait  — take the flag if pending; block until set otherwise.
+//
+// Typical use — task synchronisation:
+//   RtosFlag f;  rtos_flag_init(&f);
+//   task A: do_work(); rtos_flag_set(&f);
+//   task B: rtos_flag_wait(&f); use_result();
+
+typedef struct { volatile uint32_t bits; } RtosFlag;
+
+void rtos_flag_init(RtosFlag *f);
+void rtos_flag_set(RtosFlag *f);   // signal; wake one waiter or set pending
+void rtos_flag_wait(RtosFlag *f);  // wait until set; auto-clear on take
 
 // ── Internals (used by context_switch.S — not for application code) ────────
 
