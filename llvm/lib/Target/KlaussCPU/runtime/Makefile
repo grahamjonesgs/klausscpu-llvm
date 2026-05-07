@@ -80,7 +80,7 @@ FATFS_OBJS  = ff.o ffunicode.o ffsystem.o sd.o diskio.o
 
 PROGRAMS = hello adventure test_64bit expr bst crypto queens \
            test_switch test_fp test_asm test_printf fs_demo \
-           test_fatfs_printf test_big test_cache test_rtos
+           test_fatfs_printf test_big test_cache test_rtos test_sd
 
 .PHONY: all clean $(PROGRAMS)
 
@@ -121,6 +121,9 @@ diskio.o: src/diskio.c
 
 # fs_demo needs the FatFs include path for ff.h
 fs_demo.o: programs/fs_demo.c
+	$(CC) $(FATFS_FLAGS) -c -o $@ $<
+
+test_sd.o: programs/test_sd.c
 	$(CC) $(FATFS_FLAGS) -c -o $@ $<
 
 # ── Link helper macro ─────────────────────────────────────────────────────────
@@ -170,6 +173,9 @@ test_printf.elf: test_printf.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 fs_demo.elf: fs_demo.o $(FATFS_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,$(FATFS_OBJS) fs_demo.o)
 
+test_sd.elf: test_sd.o $(FATFS_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,$(FATFS_OBJS) test_sd.o)
+
 # FatFs objects linked but no FatFs calls — isolation test for printf+FatFs interaction
 test_fatfs_printf.o: programs/test_fatfs_printf.c
 	$(CC) $(FATFS_FLAGS) -c -o $@ $<
@@ -198,6 +204,7 @@ test_asm:    test_asm.elf
 test_printf:       test_printf.elf
 fs_demo:           fs_demo.elf
 test_fatfs_printf: test_fatfs_printf.elf
+test_sd:           test_sd.elf
 test_big:          test_big.elf
 
 test_cache.elf: test_cache.o $(LIBC_OBJS) $(RUNTIME_OBJS)

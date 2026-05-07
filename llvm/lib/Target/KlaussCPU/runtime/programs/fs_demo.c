@@ -11,7 +11,7 @@
  *
  * Prepare the SD card on host:
  *   mkfs.fat -F32 /dev/sdX1
- *   echo "hello world" > /mnt/hello.txt
+ *   echo "Hello World" > /mnt/hello.txt
  */
 
 #include <stdio.h>
@@ -85,7 +85,7 @@ static void test_read(void) {
     }
     buf[br] = '\0';
     printf("  %u bytes: \"%s\"\n", (unsigned)br, buf);
-    report("read hello.txt", br > 0 && strncmp(buf, "hello", 5) == 0);
+    report("read hello.txt", br > 0 && strncmp(buf, "Hello", 5) == 0);
 }
 
 static void test_write(void) {
