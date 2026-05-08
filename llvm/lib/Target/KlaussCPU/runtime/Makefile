@@ -80,7 +80,8 @@ FATFS_OBJS  = ff.o ffunicode.o ffsystem.o sd.o diskio.o
 
 PROGRAMS = hello adventure test_64bit expr bst crypto queens \
            test_switch test_fp test_asm test_printf fs_demo \
-           test_fatfs_printf test_big test_cache test_rtos test_sd test_sync
+           test_fatfs_printf test_big test_cache test_rtos test_sd test_sync \
+           test_eth eth_test lwip_demo
 
 .PHONY: all clean $(PROGRAMS)
 
@@ -189,6 +190,68 @@ test_big.o: programs/test_big.c
 test_big.elf: test_big.o $(FATFS_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,$(FATFS_OBJS) test_big.o)
 
+# ── Ethernet / lwIP ───────────────────────────────────────────────────────────
+
+LWIP_DIR  = $(dir $(lastword $(MAKEFILE_LIST)))lwip
+LWIP_PORT = $(dir $(lastword $(MAKEFILE_LIST)))lwip_port
+
+LWIP_FLAGS = $(CFLAGS) \
+    -I$(LWIP_DIR)/src/include \
+    -I$(LWIP_PORT)
+
+# lwIP source files (core + IPv4 + netif + port)
+LWIP_CORE_NAMES = altcp altcp_alloc altcp_tcp def dns inet_chksum init ip \
+                  mem memp netif pbuf raw stats sys tcp tcp_in tcp_out timeouts udp
+LWIP_IPV4_NAMES = acd autoip dhcp etharp icmp igmp ip4 ip4_addr ip4_frag
+LWIP_NETIF_NAMES = ethernet
+LWIP_PORT_NAMES  = sys_arch ethernetif
+
+LWIP_OBJS = $(patsubst %, lwip_%.o, \
+    $(LWIP_CORE_NAMES) $(LWIP_IPV4_NAMES) $(LWIP_NETIF_NAMES) $(LWIP_PORT_NAMES))
+
+# Pattern rules — make uses whichever prerequisite file actually exists
+lwip_%.o: $(LWIP_DIR)/src/core/%.c
+	$(CC) $(LWIP_FLAGS) -c -o $@ $<
+
+lwip_%.o: $(LWIP_DIR)/src/core/ipv4/%.c
+	$(CC) $(LWIP_FLAGS) -c -o $@ $<
+
+lwip_%.o: $(LWIP_DIR)/src/netif/%.c
+	$(CC) $(LWIP_FLAGS) -c -o $@ $<
+
+lwip_%.o: $(LWIP_PORT)/%.c
+	$(CC) $(LWIP_FLAGS) -c -o $@ $<
+
+# Ethernet low-level objects (shared by test_eth and lwip_demo)
+ETH_OBJS = mdio.o eth.o
+
+mdio.o: src/mdio.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+eth.o: src/eth.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# eth_test: imported Phase 5 test (standalone — no lwIP, no eth.c dependency)
+eth_test.o: programs/eth_test.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+eth_test.elf: eth_test.o $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,eth_test.o)
+
+# test_eth: raw hardware bring-up test (no lwIP)
+test_eth.o: programs/test_eth.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+test_eth.elf: test_eth.o $(ETH_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,$(ETH_OBJS) test_eth.o)
+
+# lwip_demo: full TCP/IP stack (DHCP + ping + TCP echo)
+lwip_demo.o: programs/lwip_demo.c
+	$(CC) $(LWIP_FLAGS) -c -o $@ $<
+
+lwip_demo.elf: lwip_demo.o $(ETH_OBJS) $(LWIP_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,$(ETH_OBJS) $(LWIP_OBJS) lwip_demo.o)
+
 # ── Phony aliases ─────────────────────────────────────────────────────────────
 
 hello:       hello.elf
@@ -206,6 +269,9 @@ fs_demo:           fs_demo.elf
 test_fatfs_printf: test_fatfs_printf.elf
 test_sd:           test_sd.elf
 test_big:          test_big.elf
+test_eth:          test_eth.elf
+eth_test:          eth_test.elf
+lwip_demo:         lwip_demo.elf
 
 test_cache.elf: test_cache.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,test_cache.o)
@@ -243,7 +309,7 @@ test_sync: test_sync.elf
 	$(BUILD_DIR)/bin/llvm-objdump -d --no-show-raw-insn $< | head -60
 
 clean:
-	rm -f *.o crt-*.o *.elf "adventure 2.elf" "adventure 2.o" \
+	rm -f *.o crt-*.o lwip_*.o *.elf "adventure 2.elf" "adventure 2.o" \
 	      "bst 2.elf" "bst 2.o" "crypto 2.elf" "crypto 2.o" \
 	      "expr 2.elf" "expr 2.o" "hello 2.elf" "hello 2.o" \
 	      "queens 2.elf" "queens 2.o" "test_64bit 2.elf" "test_64bit 2.o" \
@@ -259,4 +325,5 @@ clean:
 	      "crt-negdf2 2.o" "crt-negsf2 2.o" "crt-subdf3 2.o" "crt-subsf3 2.o" \
 	      "crt-truncdfsf2 2.o" "crt-udivdi3 2.o" "crt-udivmoddi4 2.o" \
 	      "crt-udivsi3 2.o" "crt-umoddi3 2.o" "crt0 2.o" "fp_mode_stub 2.o" \
-	      "io_stubs 2.o" "syscalls 2.o" "uart_stubs 2.o" 2>/dev/null; true
+		  "eth_test 2.elf" "eth_test 2.o" \
+	      "io_stubs 2.o" "syscalls 2.o" "uart_stubs 2.o" 2>/dev/null; true 
