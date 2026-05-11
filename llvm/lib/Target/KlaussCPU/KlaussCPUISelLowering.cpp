@@ -566,8 +566,15 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
   // ---- Analyze outgoing arguments ----------------------------------------
   SmallVector<CCValAssign, 16> ArgLocs;
   CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
-  // Pre-reserve [SP+0..SP+31] for return address + ABI reserved area.
-  CCInfo.AllocateStack(32, Align(8));
+  // CALL pre-decrements SP by 8 (stores return address at [SP-8], SP -= 8).
+  // So incoming_SP = CallerSP - 8.  From the caller's GETSP_R perspective:
+  //   [GETSP+0..7]   = return address slot  (== incoming_SP - 8..+7 )
+  //   [GETSP+0..23]  = reserved area for R1-R3 saves (incoming_SP +8..+31)
+  //   [GETSP+24..]   = stack args (incoming_SP +32 onwards)
+  // The callee pre-reserves 32 bytes from incoming_SP.  The caller's GETSP
+  // value is incoming_SP + 8, so pre-reserve only 24 bytes here so the first
+  // stack arg offset (24) maps to incoming_SP + 32 on the callee side.
+  CCInfo.AllocateStack(24, Align(8));
   CCInfo.AnalyzeCallOperands(CLI.Outs, CC_KlaussCPU);
 
   unsigned StackSize = CCInfo.getStackSize(); // ≥ 32

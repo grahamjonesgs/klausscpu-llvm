@@ -39,24 +39,37 @@ LLVM trunk (v23).  Use the **RISC-V backend** as the style reference, not X86 or
 | Role | Register |
 |---|---|
 | Arg 0–3 | R0–R3 (A–D), caller-saved |
-| Args 4+ | stack: `[CallerSP + 32 + n×8]` |
+| Args 4+ | stack: `[CallerSP + 24 + n×8]` = `[incoming_SP + 32 + n×8]` |
 | Return | R12 (M), caller-saved |
 | Callee-saved | R4–R7 (E–H) + R15 (P, frame pointer) |
 | Temporaries | R8–R11, R13–R14 (I–L, N–O) caller-saved |
 
 ### Frame layout
 
+**CALL pre-decrements SP by 8** (stores return address at [SP-8], SP -= 8).
+So `incoming_SP = CallerSP - 8`.  From the **caller's** `GETSP_R` value (= CallerSP):
+
 ```
-  CallerSP ─────┐  (before CALL)
-  Stack args     │  [CallerSP+32 .. CallerSP+32+N×8]
-                 │  [CallerSP+8 .. CallerSP+31]  reserved
-                 │  [CallerSP+0 .. CallerSP+7]   return address (saved by CALL)
-  CalleeSP ─────┘
+  CallerSP ─────┐  (GETSP_R reads this; SP before CALL pre-decrements)
+  Stack args     │  [CallerSP+24 .. CallerSP+24+N×8]  = [incoming_SP+32 ..]
+                 │  [CallerSP+0 .. CallerSP+23]  R1-R3 vararg save area
+                 │  [CallerSP-8 .. CallerSP-1]   return address (CALL writes here)
+  incoming_SP ──┘  ← CallerSP - 8  (SP after CALL pre-decrement; callee entry SP)
   Saved R15      │  ← PUSH R15
-  R15 ──────────┘  ← GETSP R15  (frame pointer)
+  R15 ──────────┘  ← GETSP R15  (frame pointer = incoming_SP - 8)
   Locals         │  [R15 - framesize .. R15 - 8]
   SP ────────────┘  ← ADDSP -N
 ```
+
+From the **callee's** `incoming_SP` perspective (what `LowerFormalArguments` uses):
+- `[incoming_SP+0..7]`   return address
+- `[incoming_SP+8..31]`  reserved (R1–R3 vararg save slots)
+- `[incoming_SP+32..]`   stack arguments
+
+`LowerCall` pre-reserves **24** bytes (`AllocateStack(24)`) so that the first
+stack-arg offset of 24 maps to `CallerSP+24 = incoming_SP+32` on the callee side.
+`LowerFormalArguments` pre-reserves **32** bytes (`AllocateStack(32)`) from
+`incoming_SP`, matching the callee-side layout above.
 
 **Prologue:** `PUSH R15 ; GETSP R15 ; ADDSP -N`  (ADDSP omitted if N=0)
 **Epilogue:** `SETSP R15 ; POP R15`  (RET emitted by `KlaussCPURetGlue` pattern)
