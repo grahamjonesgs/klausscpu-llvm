@@ -56,9 +56,9 @@ uint16_t mdio_read(uint8_t phy_addr, uint8_t reg) {
     for (int i = 4; i >= 0; i--) mdio_write_bit((phy_addr >> i) & 1);
     // REGAD (5 bits, MSB first)
     for (int i = 4; i >= 0; i--) mdio_write_bit((reg >> i) & 1);
-    // Turnaround: Z cycle then PHY drives '0'
-    mdio_read_bit();   // Z — bus released by both
-    mdio_read_bit();   // '0' driven by PHY
+    // Turnaround: ONE cycle only — LAN8720A starts driving D15 on the very
+    // next rising edge; a second TA cycle loses the MSB of every read.
+    mdio_read_bit();
     // DATA: 16 bits MSB first (PHY drives, we sample)
     uint16_t data = 0;
     for (int i = 15; i >= 0; i--) {

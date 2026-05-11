@@ -4,10 +4,11 @@
 //
 // ELF: ELFCLASS32 / ELFDATA2LSB / EM_KLAUSSCPU (0x4B43)
 //
-// One relocation type:
-//   R_KLAUSSCPU_ABS32 (1) — 32-bit absolute address, big-endian, written
-//   into bytes [loc+0..loc+3].  Used for branch/call targets (word 1 of
-//   an 8-byte Vcall/Vbr instruction).
+// Relocation types:
+//   R_KLAUSSCPU_ABS32 (1) — 32-bit absolute, LE — instruction word-1 slot
+//                            (branch/call target) or 4-byte data reference.
+//   R_KLAUSSCPU_ABS64 (2) — 64-bit absolute, LE — 8-byte pointer field in
+//                            .rodata/.data (struct members, pointer arrays).
 //
 //===----------------------------------------------------------------------===//
 
@@ -45,6 +46,7 @@ RelExpr KlaussCPU::getRelExpr(RelType type, const Symbol &s,
   case R_KLAUSSCPU_NONE:
     return R_NONE;
   case R_KLAUSSCPU_ABS32:
+  case R_KLAUSSCPU_ABS64:
     return R_ABS;
   default:
     Err(ctx) << getErrorLoc(ctx, loc) << "unrecognized relocation " << type;
@@ -56,9 +58,13 @@ void KlaussCPU::relocate(uint8_t *loc, const Relocation &rel,
                           uint64_t val) const {
   switch (rel.type) {
   case R_KLAUSSCPU_ABS32:
-    // 32-bit absolute address, little-endian (LE physical memory).
     checkUInt(ctx, loc, val, 32, rel);
     write32le(loc, static_cast<uint32_t>(val));
+    break;
+  case R_KLAUSSCPU_ABS64:
+    // 8-byte pointer field in .rodata/.data — all addresses fit in 32 bits,
+    // upper 32 bits are always zero.
+    write64le(loc, val);
     break;
   default:
     llvm_unreachable("unrecognized KlaussCPU relocation");

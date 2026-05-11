@@ -43,6 +43,8 @@ public:
 
   unsigned getRelocType(const MCFixup &Fixup, const MCValue &Target,
                         bool IsPCRel) const override {
+    if (Fixup.getKind() == FK_Data_8)
+      return ELF::R_KLAUSSCPU_ABS64;
     return ELF::R_KLAUSSCPU_ABS32;
   }
 };
@@ -75,9 +77,17 @@ public:
                   const MCValue &Target, uint8_t *Data,
                   uint64_t Value, bool IsResolved) override {
     MCFixupKind Kind = Fixup.getKind();
-    // Our instruction fixup (CALL/SETR word-1 slot) and standard 4-byte data
-    // references (.long symbol, used for EK_Custom32 jump table entries) both
-    // encode a 32-bit LE absolute address at the fixup location.
+    // FK_Data_8: 8-byte pointer field in .rodata/.data (memp_pools[], struct
+    // initializers with pointer members, etc.).  Stored little-endian — the
+    // data bus is LE.  All KlaussCPU addresses fit in 32 bits; upper 32 = 0.
+    if (Kind == FK_Data_8) {
+      for (int i = 0; i < 8; ++i)
+        Data[i] = (Value >> (8 * i)) & 0xFF;
+      maybeAddReloc(F, Fixup, Target, Value, IsResolved);
+      return;
+    }
+    // FK_KlaussCPU_ABS32 / FK_Data_4: 32-bit LE address — instruction word-1
+    // slot (CALL/SETR) or 4-byte data reference (EK_Custom32 jump tables).
     if (Kind != KlaussCPU::FK_KlaussCPU_ABS32 && Kind != FK_Data_4)
       return;
     uint32_t Addr = static_cast<uint32_t>(Value);

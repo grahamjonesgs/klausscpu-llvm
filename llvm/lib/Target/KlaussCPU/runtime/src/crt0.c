@@ -62,7 +62,7 @@ void _start(void) {
 
     __stdio_init();
 
-    _CRT_LEDS = 0x5555;   /* checkpoint E: stdio init done, calling main */
+    _CRT_LEDS = 0x0000;   /* checkpoint E: stdio init done, calling main */
 
     main(0, (char **)0);
 

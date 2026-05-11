@@ -303,68 +303,144 @@ got_rx: {
  * ------------------------------------------------------------------------ */
 
 static void test_external_tx(void) {
+  /* PHY soft-reset + restart AN */
+ mdio_write(MDIO_PHY_ADDR, 0x00, 0x8000);    /* soft-reset */
+delay_ms(50);
+mdio_write(MDIO_PHY_ADDR, 0x00, 0x3300);    /* AN enabled, 100M default, restart AN */
+
+/* Poll for link */
+uint16_t bmsr = 0;
+for (int i = 0; i < 50; i++) {
+    delay_ms(100);
+    bmsr = mdio_read(MDIO_PHY_ADDR, 0x01);
+    if ((bmsr & 0x0024u) == 0x0024u) break;   /* link up AND AN done */
+}
+printf("  link state: BMSR=0x%04lx\n", (unsigned long)bmsr);
+printf("  PSCSR: 0x%04lx (bits 4:2 should be 110 = 100M FD)\n",
+       (unsigned long)mdio_read(MDIO_PHY_ADDR, 31));
+
+
+  /* Critical: confirm loopback is OFF */
+  uint16_t bmcr = mdio_read(MDIO_PHY_ADDR, 0x00);
+  printf("  BMCR: 0x%04lx (bit 14 should be 0)\n", (unsigned long)bmcr);
+
+  /* Build a 60-byte ARP request (broadcast).  Same as before. */
   static const uint8_t our_mac[6] = {ETH_DEFAULT_MAC_0, ETH_DEFAULT_MAC_1,
                                      ETH_DEFAULT_MAC_2, ETH_DEFAULT_MAC_3,
                                      ETH_DEFAULT_MAC_4, ETH_DEFAULT_MAC_5};
-  mdio_write(MDIO_PHY_ADDR, 0x00,
-             0x3000); /* AN enabled, 100M default — no loopback */
-  delay_ms(150);      /* let auto-negotiation complete */
-  uint16_t bmsr = mdio_read(MDIO_PHY_ADDR, 0x01);
-  printf("  BMSR after AN: 0x%04lx (bit 5 = AN done, bit 2 = link up)\n",
-         (unsigned long)bmsr);
-
-  uint8_t f[64] = {0};
-
-  /* Ethernet header — broadcast destination */
+  uint8_t f[60] = {0};
   for (int i = 0; i < 6; i++)
-    f[i] = 0xFF;
+    f[i] = 0xFF; /* dst */
   for (int i = 0; i < 6; i++)
-    f[6 + i] = our_mac[i];
+    f[6 + i] = our_mac[i]; /* src */
   f[12] = 0x08;
-  f[13] = 0x06; /* etype = ARP */
-
-  /* ARP payload (network byte order) */
+  f[13] = 0x06; /* ARP */
   f[14] = 0x00;
-  f[15] = 0x01; /* HTYPE = Ethernet */
+  f[15] = 0x01;
   f[16] = 0x08;
-  f[17] = 0x00; /* PTYPE = IPv4 */
+  f[17] = 0x00;
   f[18] = 6;
-  f[19] = 4; /* HLEN, PLEN */
+  f[19] = 4;
   f[20] = 0x00;
-  f[21] = 0x01; /* OPER = request */
+  f[21] = 0x01;
   for (int i = 0; i < 6; i++)
-    f[22 + i] = our_mac[i]; /* SHA */
+    f[22 + i] = our_mac[i];
   f[28] = 192;
   f[29] = 168;
   f[30] = 1;
-  f[31] = 50; /* SPA = 192.168.1.50 */
-  /* THA already zero */
+  f[31] = 99; /* SPA: our IP on .1.x */
   f[38] = 192;
   f[39] = 168;
   f[40] = 1;
-  f[41] = 1; /* TPA = 192.168.1.1 */
+  f[41] = 1; /* TPA: 192.168.1.1 */
 
-  printf("  src MAC: %02lx:%02lx:%02lx:%02lx:%02lx:%02lx\n",
-         (unsigned long)our_mac[0], (unsigned long)our_mac[1],
-         (unsigned long)our_mac[2], (unsigned long)our_mac[3],
-         (unsigned long)our_mac[4], (unsigned long)our_mac[5]);
-  printf("  sending ARP request: 192.168.1.50 who-has 192.168.1.1\n");
+  /* Send 10 frames over ~2s to give the Pi a fat target to spot. */
+  for (int rep = 0; rep < 10; rep++) {
+    while (!REG_ETH_TX_READY) {
+    }
+    volatile uint8_t *tx = ETH_TX_SLOT(0); /* use slot 0 */
+    for (uint32_t i = 0; i < 60u; i++)
+      tx[i] = f[i];
+    REG_ETH_TX_SLOT = 0;
+    REG_ETH_TX_LENGTH = 60;
 
-  while (!REG_ETH_TX_READY) {
+    /* Confirm the registers stuck */
+    uint32_t slot_rb = REG_ETH_TX_SLOT;
+    uint32_t len_rb = REG_ETH_TX_LENGTH;
+
+    REG_ETH_TX_EV_PENDING = 1; /* clear pending */
+    /* Write a known pattern + read back to confirm SRAM writes landed */
+    volatile uint8_t *tx1 = ETH_TX_SLOT(0);
+    tx1[0] = 0xAA;
+    tx1[1] = 0x55;
+    tx1[2] = 0xC3;
+    tx1[3] = 0x3C;
+    uint32_t rb = (uint32_t)tx1[0] << 24 | (uint32_t)tx1[1] << 16 |
+                  (uint32_t)tx1[2] << 8 | (uint32_t)tx1[3];
+    printf("  slot0 readback first 4 bytes: 0x%08lx (expect 0xAA55C33C)\n",
+           (unsigned long)rb);
+
+    /* Now write the real frame */
+    for (uint32_t i = 0; i < 60u; i++)
+      tx1[i] = f[i];
+
+    /* And read back a known frame byte to confirm */
+    printf("  slot0[12..13] readback: %02lx %02lx (expect 08 06)\n",
+           (unsigned long)tx1[12], (unsigned long)tx1[13]);
+
+    REG_ETH_TX_START = 1;
+    /* Wait for done */
+    uint32_t t;
+    for (t = 0; t < 100000u; t++) {
+      if (REG_ETH_TX_EV_PENDING & 1u)
+        break;
+      delay_loops(50);
+    }
+    REG_ETH_TX_EV_PENDING = 1;
+
+    printf("  rep %d: slot=%lu len=%lu  TX_EV=%s  errors=0x%08lx\n", rep,
+           (unsigned long)slot_rb, (unsigned long)len_rb,
+           (t < 100000u) ? "ok" : "TIMEOUT",
+           (unsigned long)REG_ETH_CTRL_BUS_ERRORS);
+    delay_ms(200);
   }
-  volatile uint8_t *tx =
-      ETH_TX_SLOT(1); /* use slot 1; keep slot 0 for loopback */
-  for (uint32_t i = 0; i < 60u; i++)
-    tx[i] = f[i];
-  REG_ETH_TX_SLOT = 1;
-  REG_ETH_TX_LENGTH = 60;
-  REG_ETH_TX_START = 1;
+}
 
-  /* Wait for TX completion */
-  while (!(REG_ETH_TX_EV_PENDING & 1u)) {
-  }
-  REG_ETH_TX_EV_PENDING = 1;
-  printf("  TX complete — check host with: tcpdump -i ethX -e arp -nn\n");
+static void new_test(void) {
+  /* Loopback at 10M, FD, no AN */
+mdio_write(MDIO_PHY_ADDR, 0x00, 0x4100);   /* bit 14=loopback, bit 8=FD, 10M */
+delay_ms(50);
+
+REG_ETH_RX_EV_PENDING = 1;
+REG_ETH_TX_EV_PENDING = 1;
+uint32_t rx_err_before = REG_ETH_RX_ERRORS;
+
+/* ARP frame already in slot 0 from before — just kick it */
+REG_ETH_TX_SLOT   = 0;
+REG_ETH_TX_LENGTH = 60;
+REG_ETH_TX_START  = 1;
+
+/* Wait briefly */
+for (uint32_t i = 0; i < 100000; i++) {
+    if (REG_ETH_RX_EV_PENDING & 1u) break;
+    delay_loops(50);
+}
+
+printf("  10M loopback result:\n");
+printf("    RX_EV_PENDING = %lu  (1 = got valid frame)\n",
+       (unsigned long)(REG_ETH_RX_EV_PENDING & 1u));
+printf("    RX_LENGTH     = %lu  (expect 60)\n",
+       (unsigned long)REG_ETH_RX_LENGTH);
+printf("    RX_ERRORS     = %lu  (delta=%lu)\n",
+       (unsigned long)REG_ETH_RX_ERRORS,
+       (unsigned long)(REG_ETH_RX_ERRORS - rx_err_before));
+
+/* Dump first 16 bytes of received slot — does it match what we sent? */
+volatile uint8_t *rx = ETH_RX_SLOT(REG_ETH_RX_SLOT);
+printf("    RX slot dump: ");
+for (int i = 0; i < 16; i++) printf("%02x ", rx[i]);
+printf("\n");
+
 }
 
 /* ---------------------------------------------------------------------------
@@ -377,29 +453,30 @@ static void test_external_tx(void) {
  * ------------------------------------------------------------------------ */
 
 static void test_passive_rx(void) {
-    uint32_t frame_count = 0;
-    printf("  listening — press reset to stop\n");
-    while (1) {
-        if (REG_ETH_RX_EV_PENDING & 1u) {
-            uint32_t slot = REG_ETH_RX_SLOT;
-            uint32_t len  = REG_ETH_RX_LENGTH;
-            volatile uint8_t *rx = ETH_RX_SLOT(slot);
+  uint32_t frame_count = 0;
+  printf("  listening — press reset to stop\n");
+  while (1) {
+    if (REG_ETH_RX_EV_PENDING & 1u) {
+      uint32_t slot = REG_ETH_RX_SLOT;
+      uint32_t len = REG_ETH_RX_LENGTH;
+      volatile uint8_t *rx = ETH_RX_SLOT(slot);
 
-            /* Raw hex dump of the first 24 bytes — covers dst MAC, src MAC,
-               etype, and the first 4 bytes of payload.  Spaces mark the
-               Ethernet II field boundaries. */
-            printf("  #%lu len=%lu raw=",
-                   (unsigned long)++frame_count, (unsigned long)len);
-            for (int i = 0; i < 24 && i < (int)len; i++) {
-                if (i == 6 || i == 12 || i == 14) printf("| ");
-                printf("%02x ", (uint8_t)rx[i]);
-            }
-            printf("\n");
+      /* Raw hex dump of the first 24 bytes — covers dst MAC, src MAC,
+         etype, and the first 4 bytes of payload.  Spaces mark the
+         Ethernet II field boundaries. */
+      printf("  #%lu len=%lu raw=", (unsigned long)++frame_count,
+             (unsigned long)len);
+      for (int i = 0; i < 24 && i < (int)len; i++) {
+        if (i == 6 || i == 12 || i == 14)
+          printf("| ");
+        printf("%02x ", (uint8_t)rx[i]);
+      }
+      printf("\n");
 
-            REG_ETH_RX_EV_PENDING = 1;
-            show((frame_count << 16) | (len & 0xFFFFu));
-        }
+      REG_ETH_RX_EV_PENDING = 1;
+      show((frame_count << 16) | (len & 0xFFFFu));
     }
+  }
 }
 
 /* ---------------------------------------------------------------------------
@@ -410,9 +487,10 @@ int main(void) {
   printf("\n=== KlaussCPU LiteEth Phase 5 bring-up ===\n\n");
   show(0xEEEE0002u);
   delay_ms(1000);
+  //leds(0x0003);
 
   /* T1: scratchpad */
-  printf("T1: MMIO scratchpad\n");
+  /*printf("T1: MMIO scratchpad\n");ƒ
   show(0x00500000u);
   delay_ms(300);
   if (test_scratchpad() != 0) {
@@ -422,10 +500,10 @@ int main(void) {
     }
   }
   show(0x00500001u);
-  delay_ms(1000);
+  delay_ms(1000);*/
 
   /* T2: MDIO PHY ID */
-  printf("\nT2: MDIO PHY identity\n");
+  /*printf("\nT2: MDIO PHY identity\n");
   show(0x00510000u);
   delay_ms(300);
   if (test_mdio_phy_id() != 0) {
@@ -434,16 +512,18 @@ int main(void) {
     while (1) {
     }
   }
-  delay_ms(2000);
+  delay_ms(2000);*/
 
   /* T3: PHY internal loopback (best-effort — known flaky on some LAN8720A) */
-  printf("\nT3: PHY internal loopback (advisory; LAN8720A may misbehave)\n");
+  /*printf("\nT3: PHY internal loopback (advisory; LAN8720A may misbehave)\n");
   show(0x00520000u);
   delay_ms(300);
   if (test_phy_loopback() != 0) {
     printf("  T3 failed; this is non-fatal — continuing to T4/T5\n");
   }
-  delay_ms(1000);
+  delay_ms(1000);*/
+
+  new_test();
 
   /* T4: external TX (ARP broadcast) */
   printf("\nT4: external TX — ARP broadcast\n");

@@ -81,7 +81,7 @@ FATFS_OBJS  = ff.o ffunicode.o ffsystem.o sd.o diskio.o
 PROGRAMS = hello adventure test_64bit expr bst crypto queens \
            test_switch test_fp test_asm test_printf fs_demo \
            test_fatfs_printf test_big test_cache test_rtos test_sd test_sync \
-           test_eth eth_test lwip_demo
+           test_eth eth_test lwip_demo ping_demo
 
 .PHONY: all clean $(PROGRAMS)
 
@@ -209,18 +209,23 @@ LWIP_PORT_NAMES  = sys_arch ethernetif
 LWIP_OBJS = $(patsubst %, lwip_%.o, \
     $(LWIP_CORE_NAMES) $(LWIP_IPV4_NAMES) $(LWIP_NETIF_NAMES) $(LWIP_PORT_NAMES))
 
-# Pattern rules — make uses whichever prerequisite file actually exists
+# Pattern rules — make uses whichever prerequisite file actually exists.
+# -MMD -MP generates lwip_*.d dependency files so that changes to lwipopts.h
+# (or any other header) automatically trigger recompilation of affected objects.
 lwip_%.o: $(LWIP_DIR)/src/core/%.c
-	$(CC) $(LWIP_FLAGS) -c -o $@ $<
+	$(CC) $(LWIP_FLAGS) -MMD -MP -c -o $@ $<
 
 lwip_%.o: $(LWIP_DIR)/src/core/ipv4/%.c
-	$(CC) $(LWIP_FLAGS) -c -o $@ $<
+	$(CC) $(LWIP_FLAGS) -MMD -MP -c -o $@ $<
 
 lwip_%.o: $(LWIP_DIR)/src/netif/%.c
-	$(CC) $(LWIP_FLAGS) -c -o $@ $<
+	$(CC) $(LWIP_FLAGS) -MMD -MP -c -o $@ $<
 
 lwip_%.o: $(LWIP_PORT)/%.c
-	$(CC) $(LWIP_FLAGS) -c -o $@ $<
+	$(CC) $(LWIP_FLAGS) -MMD -MP -c -o $@ $<
+
+# Include generated dependency files (silently ignore if not yet built)
+-include $(wildcard lwip_*.d)
 
 # Ethernet low-level objects (shared by test_eth and lwip_demo)
 ETH_OBJS = mdio.o eth.o
@@ -252,6 +257,12 @@ lwip_demo.o: programs/lwip_demo.c
 lwip_demo.elf: lwip_demo.o $(ETH_OBJS) $(LWIP_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,$(ETH_OBJS) $(LWIP_OBJS) lwip_demo.o)
 
+ping_demo.o: programs/ping_demo.c
+	$(CC) $(LWIP_FLAGS) -c -o $@ $<
+
+ping_demo.elf: ping_demo.o $(ETH_OBJS) $(LWIP_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,$(ETH_OBJS) $(LWIP_OBJS) ping_demo.o)
+
 # ── Phony aliases ─────────────────────────────────────────────────────────────
 
 hello:       hello.elf
@@ -272,6 +283,7 @@ test_big:          test_big.elf
 test_eth:          test_eth.elf
 eth_test:          eth_test.elf
 lwip_demo:         lwip_demo.elf
+ping_demo:         ping_demo.elf
 
 test_cache.elf: test_cache.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,test_cache.o)
@@ -309,7 +321,7 @@ test_sync: test_sync.elf
 	$(BUILD_DIR)/bin/llvm-objdump -d --no-show-raw-insn $< | head -60
 
 clean:
-	rm -f *.o crt-*.o lwip_*.o *.elf "adventure 2.elf" "adventure 2.o" \
+	rm -f *.o crt-*.o lwip_*.o lwip_*.d *.elf "adventure 2.elf" "adventure 2.o" \
 	      "bst 2.elf" "bst 2.o" "crypto 2.elf" "crypto 2.o" \
 	      "expr 2.elf" "expr 2.o" "hello 2.elf" "hello 2.o" \
 	      "queens 2.elf" "queens 2.o" "test_64bit 2.elf" "test_64bit 2.o" \

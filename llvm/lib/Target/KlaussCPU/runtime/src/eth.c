@@ -27,22 +27,45 @@ static void sram_write(volatile uint8_t *dst, const void *src, uint32_t n) {
 // ── PHY initialisation ────────────────────────────────────────────────────
 
 void eth_init(void) {
-    // 1. Hold PHY in reset (LAN8720A needs ≥ 25 ms low), then release.
+    // 0. Soft-reset the LiteEth core (persists across CPU_RESETN).
+    REG_ETH_CTRL_RESET = 1;
+    delay_ms(10);
+    REG_ETH_CTRL_RESET = 0;
+
+    // 1. Assert PHY hardware reset (LAN8720A needs ≥ 25 ms).
     REG_ETH_PHY_RESET = 1;
     delay_ms(30);
     REG_ETH_PHY_RESET = 0;
-    delay_ms(120);   // auto-negotiation window
+    delay_ms(50);    // PLL lock
 
-    // 2. Verify PHY is alive via MDIO ID read.
+    // 2. Verify PHY identity.
     uint16_t id1 = mdio_read(ETH_PHY_ADDR, PHY_REG_ID1);
     printf("PHY ID1 = 0x%04lx (expect 0x%04lx)\n",
            (unsigned long)id1, (unsigned long)LAN8720A_ID1);
 
-    // 3. Enable RX/TX event propagation (polled until IRQ wired in Phase 6).
+    // 4. Enable AN, advertise 100M FD, restart AN.
+    //    BMCR = 0x3300: AN-enable | 100M | restart-AN | full-duplex.
+    //    Forced speed without AN causes RMII rate mismatch in LiteEth.
+    mdio_write(ETH_PHY_ADDR, PHY_REG_BMCR, 0x3300u);
+
+    // 5. Poll for AN-complete + link-up (up to 3 s).
+    printf("Waiting for link...\n");
+    for (int i = 0; i < 30; i++) {
+        delay_ms(100);
+        uint16_t bmsr = mdio_read(ETH_PHY_ADDR, PHY_REG_BMSR);
+        if (bmsr != 0xFFFFu &&
+            (bmsr & (PHY_BMSR_AN_COMPLETE | PHY_BMSR_LINK_UP)) ==
+                    (PHY_BMSR_AN_COMPLETE | PHY_BMSR_LINK_UP)) {
+            printf("Link up (BMSR=0x%04lx)\n", (unsigned long)bmsr);
+            break;
+        }
+        if (i == 29)
+            printf("Link timeout (BMSR=0x%04lx)\n", (unsigned long)bmsr);
+    }
+
+    // 6. Enable RX/TX events; drain stale flags from boot transients.
     REG_ETH_RX_EV_ENABLE = 1;
     REG_ETH_TX_EV_ENABLE = 1;
-
-    // 4. Clear any stale event flags from power-on.
     REG_ETH_RX_EV_PENDING = 1;
     REG_ETH_TX_EV_PENDING = 1;
 }
