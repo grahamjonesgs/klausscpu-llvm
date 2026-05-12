@@ -21,8 +21,10 @@
 #include "../src/eth.h"   // g_eth_mac, sram helpers via eth.h declarations
 #include <string.h>
 
-// Next TX slot (alternate 0/1 for double-buffered TX).
-static uint8_t s_tx_slot = 0;
+// Always transmit from slot 0.  Slot 1 is reserved for a future DMA path.
+// TX_READY means "room in the 2-entry TX FIFO", not "wire idle", so we wait
+// for TX_LEVEL==0 (FIFO empty) before each send to prevent back-to-back
+// double-transmission of the same frame.
 
 // ── Volatile SRAM copy helpers ────────────────────────────────────────────
 // Standard memcpy rejects volatile pointers; use explicit byte loops.
@@ -65,14 +67,12 @@ static err_t low_level_output(struct netif *netif, struct pbuf *p) {
         return ERR_BUF;
     }
 
-    while (!REG_ETH_TX_READY) {}   // wait for MAC idle
+    while (!REG_ETH_TX_READY) {}   // wait if TX FIFO full
 
-    pbuf_to_sram(ETH_TX_SLOT_PTR(s_tx_slot), p);
-    REG_ETH_TX_SLOT   = s_tx_slot;
+    pbuf_to_sram(ETH_TX_SLOT_PTR(0), p);
+    REG_ETH_TX_SLOT   = 0;
     REG_ETH_TX_LENGTH = p->tot_len;
     REG_ETH_TX_START  = 1;
-
-    s_tx_slot ^= 1u;
 
     LINK_STATS_INC(link.xmit);
     return ERR_OK;

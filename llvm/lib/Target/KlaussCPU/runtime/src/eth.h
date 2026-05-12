@@ -31,7 +31,7 @@ int eth_send_arp_request(const uint8_t our_mac[6], uint32_t our_ip,
 // Ethernet frame maximum payload size (no jumbo frames).
 #define ETH_MAX_FRAME  1514u   // 14-byte header + 1500-byte payload
 
-// Default MAC address (locally-administered; override per-board).
+// Default MAC address (globally-administered unicast; override per-board).
 extern const uint8_t g_eth_mac[6];
 
 #endif // ETH_H

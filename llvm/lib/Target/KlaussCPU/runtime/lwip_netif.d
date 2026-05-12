@@ -20,7 +20,9 @@ lwip_netif.o: lwip/src/core/netif.c lwip/src/include/lwip/opt.h \
   lwip/src/include/lwip/igmp.h lwip/src/include/lwip/etharp.h \
   lwip/src/include/lwip/prot/ethernet.h \
   lwip/src/include/lwip/prot/ieee.h lwip/src/include/lwip/prot/etharp.h \
-  lwip/src/include/lwip/sys.h lwip/src/include/netif/ethernet.h
+  lwip/src/include/lwip/sys.h lwip/src/include/netif/ethernet.h \
+  lwip/src/include/lwip/dhcp.h lwip/src/include/lwip/acd.h \
+  lwip/src/include/lwip/prot/acd.h
 lwip/src/include/lwip/opt.h:
 lwip_port/lwipopts.h:
 lwip/src/include/lwip/debug.h:
@@ -62,3 +64,6 @@ lwip/src/include/lwip/prot/ieee.h:
 lwip/src/include/lwip/prot/etharp.h:
 lwip/src/include/lwip/sys.h:
 lwip/src/include/netif/ethernet.h:
+lwip/src/include/lwip/dhcp.h:
+lwip/src/include/lwip/acd.h:
+lwip/src/include/lwip/prot/acd.h:

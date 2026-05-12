@@ -8,8 +8,8 @@
 
 const uint8_t g_eth_mac[6] = ETH_MAC_ADDR;
 
-// Next TX slot to use (alternates 0/1 for double-buffered TX).
-static uint8_t g_tx_slot = 0;
+// Always transmit from slot 0; see ethernetif.c low_level_output comment.
+// TX_LEVEL==0 guard prevents double-transmission from the 2-entry TX FIFO.
 
 // ── Volatile SRAM helpers ─────────────────────────────────────────────────
 // Standard memcpy won't accept volatile pointers; these loops do.
@@ -75,14 +75,11 @@ void eth_init(void) {
 int eth_tx(const void *frame, uint32_t len) {
     if (len < 14 || len > ETH_MAX_FRAME) return -1;
 
-    while (!REG_ETH_TX_READY) {}   // wait for MAC free (usually instant)
-
-    sram_write(ETH_TX_SLOT_PTR(g_tx_slot), frame, len);
-    REG_ETH_TX_SLOT   = g_tx_slot;
+    while (!REG_ETH_TX_READY) {}
+    sram_write(ETH_TX_SLOT_PTR(0), frame, len);
+    REG_ETH_TX_SLOT   = 0;
     REG_ETH_TX_LENGTH = len;
     REG_ETH_TX_START  = 1;
-
-    g_tx_slot ^= 1u;   // prepare next slot for the following call
     return 0;
 }
 

@@ -173,12 +173,16 @@ static inline uint32_t rgb12(uint8_t r, uint8_t g, uint8_t b) {
 #define ETH_RX_SLOT(n)  ETH_RX_SLOT_PTR(n)
 #define ETH_TX_SLOT(n)  ETH_TX_SLOT_PTR(n)
 
-/* Default locally-administered MAC address (02:00:00:00:00:01) */
-#define ETH_MAC_ADDR  { 0x02u, 0x00u, 0x00u, 0x00u, 0x00u, 0x01u }
+/* MAC address: byte0 bits[1:0]=00 → "globally-administered unicast" per IEEE.
+ * (The 00:AB:CD prefix isn't a registered OUI but no network filters on that.)
+ * 02:xx — locally-administered; some routers/DHCP servers silently drop
+ * DISCOVERs from locally-administered MACs.  Using 00:AB:CD avoids that. */
+
+#define ETH_MAC_ADDR  { 0x00u, 0xABu, 0xCDu, 0x00u, 0x00u, 0x01u }
 /* Individual byte macros for code that initialises byte arrays */
-#define ETH_DEFAULT_MAC_0  0x02u
-#define ETH_DEFAULT_MAC_1  0x00u
-#define ETH_DEFAULT_MAC_2  0x00u
+#define ETH_DEFAULT_MAC_0  0x00u
+#define ETH_DEFAULT_MAC_1  0xABu
+#define ETH_DEFAULT_MAC_2  0xCDu
 #define ETH_DEFAULT_MAC_3  0x00u
 #define ETH_DEFAULT_MAC_4  0x00u
 #define ETH_DEFAULT_MAC_5  0x01u

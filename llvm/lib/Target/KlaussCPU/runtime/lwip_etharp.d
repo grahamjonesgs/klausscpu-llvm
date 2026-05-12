@@ -12,7 +12,10 @@ lwip_etharp.o: lwip/src/core/ipv4/etharp.c lwip/src/include/lwip/opt.h \
   lwip/src/include/lwip/prot/ip4.h lwip/src/include/lwip/prot/ethernet.h \
   lwip/src/include/lwip/prot/ieee.h lwip/src/include/lwip/prot/etharp.h \
   lwip/src/include/lwip/snmp.h lwip/src/include/lwip/dhcp.h \
-  lwip/src/include/lwip/autoip.h lwip/src/include/lwip/acd.h \
+  lwip/src/include/lwip/udp.h lwip/src/include/lwip/ip.h \
+  lwip/src/include/lwip/ip6.h lwip/src/include/lwip/prot/ip.h \
+  lwip/src/include/lwip/prot/udp.h lwip/src/include/lwip/acd.h \
+  lwip/src/include/lwip/prot/acd.h lwip/src/include/lwip/autoip.h \
   lwip/src/include/lwip/prot/iana.h lwip/src/include/netif/ethernet.h
 lwip/src/include/lwip/opt.h:
 lwip_port/lwipopts.h:
@@ -40,7 +43,13 @@ lwip/src/include/lwip/prot/ieee.h:
 lwip/src/include/lwip/prot/etharp.h:
 lwip/src/include/lwip/snmp.h:
 lwip/src/include/lwip/dhcp.h:
-lwip/src/include/lwip/autoip.h:
+lwip/src/include/lwip/udp.h:
+lwip/src/include/lwip/ip.h:
+lwip/src/include/lwip/ip6.h:
+lwip/src/include/lwip/prot/ip.h:
+lwip/src/include/lwip/prot/udp.h:
 lwip/src/include/lwip/acd.h:
+lwip/src/include/lwip/prot/acd.h:
+lwip/src/include/lwip/autoip.h:
 lwip/src/include/lwip/prot/iana.h:
 lwip/src/include/netif/ethernet.h:

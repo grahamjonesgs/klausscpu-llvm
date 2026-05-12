@@ -31,7 +31,7 @@
 #define LWIP_RAW                    1
 #define LWIP_UDP                    1
 #define LWIP_TCP                    1
-#define LWIP_DHCP                   0   // static IP; enable when FK_Data_8 fixed
+#define LWIP_DHCP                   1
 #define LWIP_AUTOIP                 0
 #define LWIP_IGMP                   0
 #define LWIP_DNS                    0
@@ -60,6 +60,14 @@
 #define LWIP_NETIF_LOOPBACK         0
 #define LWIP_NETIF_STATUS_CALLBACK  1
 #define LWIP_NETIF_LINK_CALLBACK    1
+
+// ── Checksum algorithm ────────────────────────────────────────────────────
+// Algorithm 2 (default) uses u16_t* reads (LDIDX16) which on KlaussCPU
+// read bytes in big-endian order, accumulating SBE instead of SLE.  The
+// resulting stored checksum is byte-swapped.  Algorithm 1 uses explicit
+// LDIDX8 byte reads (known-correct) and applies lwip_htons(), which gives
+// the right result on KlaussCPU regardless of LDIDX16 byte order.
+#define LWIP_CHKSUM_ALGORITHM       1
 
 // ── Checksums: software only ──────────────────────────────────────────────
 #define CHECKSUM_GEN_IP             1
