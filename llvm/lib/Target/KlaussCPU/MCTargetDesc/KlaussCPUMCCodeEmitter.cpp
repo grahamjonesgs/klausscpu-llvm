@@ -151,8 +151,8 @@ private:
   }
 
   // Vbr / Vcall: ((op32<<32) | target32).
-  // target is always an MCExpr (basic-block or global symbol); adds a fixup
-  // at byte offset 4 within the 8-byte instruction (word 1).
+  // target is always an MCExpr (basic-block or global symbol); adds an ABS32
+  // fixup at byte offset 4 within the 8-byte instruction (word 1).
   uint64_t fmtVbr(uint64_t op32, const MCInst &MI,
                    SmallVectorImpl<MCFixup> &Fixups) const {
     const MCOperand &MO = MI.getOperand(0);
@@ -163,6 +163,23 @@ private:
       assert(MO.isExpr() && "branch/call target must be imm or expr");
       Fixups.push_back(MCFixup::create(
           4, MO.getExpr(), MCFixupKind(KlaussCPU::FK_KlaussCPU_ABS32)));
+    }
+    return (op32 << 32) | Target;
+  }
+
+  // PC-relative Vbr / Vcall / RV-ld: same layout but emits a PCREL32 fixup.
+  // Used by JMPREL, JMPxxREL, CALLREL, and LEAPC.
+  // applyFixup adds 4 to (target − (instr+4)) to give (target − instr).
+  uint64_t fmtVbrRel(uint64_t op32, const MCInst &MI,
+                      SmallVectorImpl<MCFixup> &Fixups) const {
+    const MCOperand &MO = MI.getOperand(0);
+    uint32_t Target = 0;
+    if (MO.isImm()) {
+      Target = static_cast<uint32_t>(MO.getImm());
+    } else {
+      assert(MO.isExpr() && "PC-relative target must be imm or expr");
+      Fixups.push_back(MCFixup::create(
+          4, MO.getExpr(), MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL32)));
     }
     return (op32 << 32) | Target;
   }
@@ -313,6 +330,21 @@ uint64_t KlaussCPUMCCodeEmitter::encode64(
     return W0;
   }
 
+  // LEAPC: rd = PC_of_instruction + sign_ext(imm32).
+  // Same RV_ld slot layout as SETR but emits a PCREL32 fixup.
+  // Opcode 0x0000099: word0 = (0x099 << 4) | rd (using op28 field encoding).
+  case KlaussCPU::LEAPC: {
+    uint64_t W0 = (static_cast<uint64_t>(0x0000099u) << 36)
+                | (static_cast<uint64_t>(getReg(MI, 0)) << 32);
+    const MCOperand &MO = MI.getOperand(1);
+    if (MO.isImm())
+      return W0 | static_cast<uint32_t>(MO.getImm());
+    assert(MO.isExpr() && "LEAPC: operand 1 must be imm or expr");
+    Fixups.push_back(MCFixup::create(
+        4, MO.getExpr(), MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL32)));
+    return W0;
+  }
+
   // ── RV_2addr (rd=rs tied, imm32 at operand 2) ────────────────────────────
   case KlaussCPU::ADDV:    return fmtRV_2addr(0x0000081, MI);
   case KlaussCPU::MINUSV:  return fmtRV_2addr(0x0000082, MI);
@@ -368,7 +400,29 @@ uint64_t KlaussCPUMCCodeEmitter::encode64(
   case KlaussCPU::JMPUGE:  return fmtVbr(0x0000101C, MI, Fixups);
 
   // ── Vcall ─────────────────────────────────────────────────────────────────
-  case KlaussCPU::CALL_I:  return fmtVbr(0x00001009, MI, Fixups);
+  case KlaussCPU::CALL_I:   return fmtVbr   (0x00001009, MI, Fixups);
+  case KlaussCPU::CALLREL:  return fmtVbrRel(0x00001041, MI, Fixups);
+
+  // ── PC-relative unconditional branch ─────────────────────────────────────
+  case KlaussCPU::JMPREL:    return fmtVbrRel(0x00001030, MI, Fixups);
+
+  // ── PC-relative conditional branches ─────────────────────────────────────
+  case KlaussCPU::JMPZREL:   return fmtVbrRel(0x00001031, MI, Fixups);
+  case KlaussCPU::JMPNZREL:  return fmtVbrRel(0x00001032, MI, Fixups);
+  case KlaussCPU::JMPEREL:   return fmtVbrRel(0x00001033, MI, Fixups);
+  case KlaussCPU::JMPNEREL:  return fmtVbrRel(0x00001034, MI, Fixups);
+  case KlaussCPU::JMPCREL:   return fmtVbrRel(0x00001035, MI, Fixups);
+  case KlaussCPU::JMPNCREL:  return fmtVbrRel(0x00001036, MI, Fixups);
+  case KlaussCPU::JMPSREL:   return fmtVbrRel(0x00001037, MI, Fixups);
+  case KlaussCPU::JMPNSREL:  return fmtVbrRel(0x00001038, MI, Fixups);
+  case KlaussCPU::JMPLTREL:  return fmtVbrRel(0x00001039, MI, Fixups);
+  case KlaussCPU::JMPLEREL:  return fmtVbrRel(0x0000103A, MI, Fixups);
+  case KlaussCPU::JMPGTREL:  return fmtVbrRel(0x0000103B, MI, Fixups);
+  case KlaussCPU::JMPGEREL:  return fmtVbrRel(0x0000103C, MI, Fixups);
+  case KlaussCPU::JMPULTREL: return fmtVbrRel(0x0000103D, MI, Fixups);
+  case KlaussCPU::JMPULEREL: return fmtVbrRel(0x0000103E, MI, Fixups);
+  case KlaussCPU::JMPUGTREL: return fmtVbrRel(0x0000103F, MI, Fixups);
+  case KlaussCPU::JMPUGEREL: return fmtVbrRel(0x00001040, MI, Fixups);
 
   // ── Vsp (ADDSP / DELAYV: fixed op32, signed imm32 at operand 0) ──────────
   case KlaussCPU::ADDSP_I:  return fmtVimm(0x00004050, MI);

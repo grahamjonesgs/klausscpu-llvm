@@ -21,8 +21,13 @@ KlaussCPUSubtarget::KlaussCPUSubtarget(const Triple &TT, StringRef CPU,
       II(*this, RI),  // RI is initialized before II (declaration order)
       FL(*this),
       TLI(TM, *this),
-      TSI() {
+      TSI(),
+      TM(TM) {
   // Parse any subtarget features.
   std::string CPUName = CPU.empty() ? "generic" : CPU.str();
   ParseSubtargetFeatures(CPUName, CPUName, FS);
+}
+
+bool KlaussCPUSubtarget::isPositionIndependent() const {
+  return TM.isPositionIndependent();
 }

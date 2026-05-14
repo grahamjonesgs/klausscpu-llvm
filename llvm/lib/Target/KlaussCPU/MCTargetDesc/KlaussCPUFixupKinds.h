@@ -1,8 +1,11 @@
 //===-- KlaussCPUFixupKinds.h - KlaussCPU fixup entry definitions ----------===//
 //
-// One fixup kind: FK_KlaussCPU_ABS32
-//   32-bit absolute address placed in word 1 (bytes [4:7]) of an 8-byte
-//   branch or call instruction.  Written big-endian (MSB first).
+// FK_KlaussCPU_ABS32   — 32-bit absolute address, word 1 (bytes [4:7]) of an
+//                         8-byte branch/call/SETR instruction. LE byte order.
+// FK_KlaussCPU_PCREL32 — 32-bit signed PC-relative offset, word 1 of an 8-byte
+//                         JMPREL/JMPxxREL/CALLREL/LEAPC instruction.
+//                         field_value = target - PC_of_instruction.
+//                         (PC_of_instruction = instr_addr, NOT instr_addr+4.)
 //
 //===----------------------------------------------------------------------===//
 
@@ -16,7 +19,8 @@ namespace KlaussCPU {
 
 enum Fixups {
   FK_KlaussCPU_ABS32 = FirstTargetFixupKind,
-  NumTargetFixupKinds = FK_KlaussCPU_ABS32 + 1 - FirstTargetFixupKind,
+  FK_KlaussCPU_PCREL32,
+  NumTargetFixupKinds = FK_KlaussCPU_PCREL32 + 1 - FirstTargetFixupKind,
 };
 
 } // namespace KlaussCPU

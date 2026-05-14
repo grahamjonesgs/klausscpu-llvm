@@ -8,6 +8,11 @@
 // Prevents lwIP from doing 'typedef int ssize_t' which conflicts with picolibc.
 #define LWIP_NO_UNISTD_H            1
 
+// ── Random number source (required by dns.c for transaction IDs) ─────────
+// Forward-declare picolibc's rand() without pulling in <stdlib.h> here.
+int rand(void);
+#define LWIP_RAND() ((u32_t)rand())
+
 // ── Core mode ─────────────────────────────────────────────────────────────
 #define NO_SYS                      1
 #define SYS_LIGHTWEIGHT_PROT        0   // safe: timer ISR never calls lwIP
@@ -34,14 +39,14 @@
 #define LWIP_DHCP                   1
 #define LWIP_AUTOIP                 0
 #define LWIP_IGMP                   0
-#define LWIP_DNS                    0
+#define LWIP_DNS                    1
 
 // ── Pool counts (used by memp_sizes[] even with MEMP_MEM_MALLOC=1) ────────
 #define MEMP_NUM_PBUF               8
 #define MEMP_NUM_TCP_PCB            4
 #define MEMP_NUM_TCP_PCB_LISTEN     2
 #define MEMP_NUM_TCP_SEG            16
-#define MEMP_NUM_SYS_TIMEOUT        16
+#define MEMP_NUM_SYS_TIMEOUT        24   /* DNS retries + NTP + TCP + DHCP */
 #define PBUF_POOL_SIZE              8
 #define PBUF_POOL_BUFSIZE           1600
 
@@ -76,6 +81,17 @@
 #define CHECKSUM_CHECK_IP           1
 #define CHECKSUM_CHECK_UDP          1
 #define CHECKSUM_CHECK_TCP          1
+
+// ── SNTP app ──────────────────────────────────────────────────────────────
+// SNTP_SERVER_DNS=1: sntp_setservername() accepts a hostname string.
+// SNTP_UPDATE_DELAY: re-sync interval in ms (minimum 60000 per RFC).
+// SNTP_SET_SYSTEM_TIME: called by the SNTP module on each successful sync.
+// Forward-declare with unsigned int (= u32_t on KlaussCPU) to avoid
+// pulling in lwIP type headers before they are defined.
+#define SNTP_SERVER_DNS             1
+#define SNTP_UPDATE_DELAY           60000
+void app_sntp_set_time(unsigned int sec);
+#define SNTP_SET_SYSTEM_TIME(sec)   app_sntp_set_time(sec)
 
 // ── Stats / debug ─────────────────────────────────────────────────────────
 #define LWIP_STATS                  0

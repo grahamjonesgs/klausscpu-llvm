@@ -111,11 +111,11 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::STACKRESTORE,       MVT::Other, Custom);
 
   // ---- Global addresses / symbols ----
-  // All symbols are 32-bit addresses (128 MiB RAM); lowered to TargetGlobalAddress
-  // which the isel pattern maps to SETR (sign-extends; bit 31 is always 0 for
-  // valid addresses, so sign-ext == zero-ext).
+  // Non-PIC: GlobalAddress → ADDR → SETR (absolute 32-bit address).
+  // PIC:     GlobalAddress → LEAPC → LEAPC insn (PC-relative, PCREL32 fixup).
   setOperationAction(ISD::GlobalAddress,  MVT::i64, Custom);
   setOperationAction(ISD::ExternalSymbol, MVT::i64, Custom);
+  setOperationAction(ISD::BlockAddress,   MVT::i64, Custom);
   setOperationAction(ISD::JumpTable,      MVT::i64, Custom);
 
   // ---- Branch/control ----
@@ -187,6 +187,7 @@ SDValue KlaussCPUTargetLowering::LowerOperation(SDValue Op,
   switch (Op.getOpcode()) {
   case ISD::GlobalAddress:  return LowerGlobalAddress(Op, DAG);
   case ISD::ExternalSymbol: return LowerExternalSymbol(Op, DAG);
+  case ISD::BlockAddress:   return LowerBlockAddress(Op, DAG);
   case ISD::JumpTable:      return LowerJumpTable(Op, DAG);
   case ISD::BR_JT:          return LowerBR_JT(Op, DAG);
   case ISD::SELECT:         return LowerSELECT(Op, DAG);
@@ -282,19 +283,31 @@ SDValue KlaussCPUTargetLowering::LowerShiftRightParts(SDValue Op,
 SDValue KlaussCPUTargetLowering::LowerGlobalAddress(SDValue Op,
                                                       SelectionDAG &DAG) const {
   auto *N = cast<GlobalAddressSDNode>(Op);
-  // Wrap the TargetGlobalAddress in a KlaussCPUISD::ADDR node so that
-  // KlaussCPUDAGToDAGISel::Select() can safely emit SETR without hitting
-  // the CSE-induced self-reference issue (see KlaussCPUISelLowering.h).
   SDValue TGA = DAG.getTargetGlobalAddress(N->getGlobal(), SDLoc(N), MVT::i64,
                                             N->getOffset());
-  return DAG.getNode(KlaussCPUISD::ADDR, SDLoc(N), MVT::i64, TGA);
+  // PIC: wrap in LEAPC → emits LEAPC with PCREL32 fixup.
+  // Non-PIC: wrap in ADDR → emits SETR with ABS32 fixup.
+  unsigned WrapOp = getTargetMachine().isPositionIndependent()
+                        ? KlaussCPUISD::LEAPC : KlaussCPUISD::ADDR;
+  return DAG.getNode(WrapOp, SDLoc(N), MVT::i64, TGA);
 }
 
 SDValue KlaussCPUTargetLowering::LowerExternalSymbol(SDValue Op,
                                                        SelectionDAG &DAG) const {
   auto *N = cast<ExternalSymbolSDNode>(Op);
   SDValue TES = DAG.getTargetExternalSymbol(N->getSymbol(), MVT::i64);
-  return DAG.getNode(KlaussCPUISD::ADDR, SDLoc(N), MVT::i64, TES);
+  unsigned WrapOp = getTargetMachine().isPositionIndependent()
+                        ? KlaussCPUISD::LEAPC : KlaussCPUISD::ADDR;
+  return DAG.getNode(WrapOp, SDLoc(N), MVT::i64, TES);
+}
+
+SDValue KlaussCPUTargetLowering::LowerBlockAddress(SDValue Op,
+                                                     SelectionDAG &DAG) const {
+  auto *N = cast<BlockAddressSDNode>(Op);
+  SDValue TBA = DAG.getTargetBlockAddress(N->getBlockAddress(), MVT::i64);
+  unsigned WrapOp = getTargetMachine().isPositionIndependent()
+                        ? KlaussCPUISD::LEAPC : KlaussCPUISD::ADDR;
+  return DAG.getNode(WrapOp, SDLoc(N), MVT::i64, TBA);
 }
 
 SDValue KlaussCPUTargetLowering::LowerJumpTable(SDValue Op,
@@ -406,6 +419,7 @@ KlaussCPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case KlaussCPUISD::RET_GLUE: return "KlaussCPUISD::RET_GLUE";
   case KlaussCPUISD::CALL:     return "KlaussCPUISD::CALL";
   case KlaussCPUISD::ADDR:     return "KlaussCPUISD::ADDR";
+  case KlaussCPUISD::LEAPC:    return "KlaussCPUISD::LEAPC";
   case KlaussCPUISD::SELECT:   return "KlaussCPUISD::SELECT";
   default: return nullptr;
   }

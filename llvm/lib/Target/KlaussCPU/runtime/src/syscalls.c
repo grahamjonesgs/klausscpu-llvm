@@ -3,6 +3,7 @@
 // Provides:
 //  - UART callbacks (_uart_put / _uart_get) used by stdio_handles.c
 //  - _sbrk for heap growth (malloc)
+//  - gettimeofday() so time()/gmtime()/strftime() work after clock_set_epoch()
 //  - POSIX stubs (_write/_read/_exit/etc.) as fallback
 //
 // Build: compiled as part of every program, same flags as the program itself.
@@ -12,9 +13,11 @@
 
 #include <stdio.h>
 #include <sys/types.h>
+#include <sys/time.h>
 #include <sys/stat.h>
 #include <errno.h>
 #include <stddef.h>
+#include "../mmio.h"
 
 // ── UART primitives from uart_stubs.c ────────────────────────────────────────
 extern void               uart_putc(char c);
@@ -24,14 +27,35 @@ extern unsigned long long uart_getc_blocking(void);
 
 int _uart_put(char c, FILE *f) {
     (void)f;
-    if (c == '\n') uart_putc('\r');  // CR+LF for serial terminals
-    uart_putc(c);
+    uart_putc(c);   /* uart_putc already converts '\n' to CR+LF */
     return 0;
 }
 
 int _uart_get(FILE *f) {
     (void)f;
     return (int)(unsigned char)uart_getc_blocking();
+}
+
+// ── Wall-clock (set by SNTP / any time source) ───────────────────────────────
+// clock_set_epoch(sec): call once with the Unix timestamp.  After that,
+// gettimeofday() / time() / gmtime() / strftime() all work correctly.
+
+static long long   g_epoch_sec = 0;
+static long long   g_epoch_ms  = 0;   /* REG_CLOCK_MS at epoch set */
+
+void clock_set_epoch(long long unix_sec) {
+    g_epoch_sec = unix_sec;
+    g_epoch_ms  = (long long)REG_CLOCK_MS;
+}
+
+int gettimeofday(struct timeval *tv, void *tz) {
+    (void)tz;
+    if (!tv) return 0;
+    if (!g_epoch_sec) { errno = ENOSYS; return -1; }
+    long long elapsed_ms = (long long)REG_CLOCK_MS - g_epoch_ms;
+    tv->tv_sec  = (time_t)(g_epoch_sec + elapsed_ms / 1000LL);
+    tv->tv_usec = (suseconds_t)((elapsed_ms % 1000LL) * 1000LL);
+    return 0;
 }
 
 // ── Heap growth ───────────────────────────────────────────────────────────────

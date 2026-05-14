@@ -766,6 +766,45 @@ let Uses = [SP],
 def CALL_I  : Vcall<0x00001009, "call\t$target">;
 
 //===----------------------------------------------------------------------===//
+// PC-relative flow control (opcodes 0x1030–0x1041, 0x099)
+// target = PC_of_this_instruction + sign_ext(imm32)   (option-B convention)
+// Used in PIC mode (-fPIC / -relocation-model=pic).
+// The encoder emits FK_KlaussCPU_PCREL32 so the assembler/linker fills in
+// (symbol_addr − instr_addr).
+//===----------------------------------------------------------------------===//
+
+// PC-relative unconditional branch
+def JMPREL   : Vbr_uncond<0x00001030, "jmprel\t$target">;
+
+// PC-relative conditional branches — flag sources same as absolute counterparts
+def JMPZREL   : Vbr_cond<0x00001031, "jmpzrel\t$target">;   // zero_flag
+def JMPNZREL  : Vbr_cond<0x00001032, "jmpnzrel\t$target">;  // !zero_flag
+def JMPEREL   : Vbr_cond<0x00001033, "jmperel\t$target">;   // equal_flag
+def JMPNEREL  : Vbr_cond<0x00001034, "jmpnerel\t$target">;  // !equal_flag
+def JMPCREL   : Vbr_cond<0x00001035, "jmpcrel\t$target">;   // carry_flag
+def JMPNCREL  : Vbr_cond<0x00001036, "jmpncrel\t$target">;  // !carry_flag
+def JMPSREL   : Vbr_cond<0x00001037, "jmpsrel\t$target">;   // sign_flag
+def JMPNSREL  : Vbr_cond<0x00001038, "jmpnsrel\t$target">;  // !sign_flag
+def JMPLTREL  : Vbr_cond<0x00001039, "jmpltrel\t$target">;  // less_flag
+def JMPLEREL  : Vbr_cond<0x0000103A, "jmplerel\t$target">;  // less|equal
+def JMPGTREL  : Vbr_cond<0x0000103B, "jmpgtrel\t$target">;  // !less&!equal
+def JMPGEREL  : Vbr_cond<0x0000103C, "jmpgerel\t$target">;  // !less_flag
+def JMPULTREL : Vbr_cond<0x0000103D, "jmpultrel\t$target">; // ult_flag
+def JMPULEREL : Vbr_cond<0x0000103E, "jmpulerel\t$target">; // ult|equal
+def JMPUGTREL : Vbr_cond<0x0000103F, "jmpugtrel\t$target">; // !ult&!equal
+def JMPUGEREL : Vbr_cond<0x00001040, "jmpugerel\t$target">; // !ult_flag
+
+// PC-relative direct call: push PC+8 (return addr), PC += sign_ext(imm32)
+let Uses = [SP],
+    Defs = [R0, R1, R2, R3, R8, R9, R10, R11, R12, R13, R14] in
+def CALLREL : Vcall<0x00001041, "callrel\t$target">;
+
+// LEAPC: rd = PC_of_instruction + sign_ext(imm32)  (address materialisation)
+// Opcode 0x0000099 in RV_ld slot: word0 = (0x099 << 4) | rd, word1 = simm32.
+// The encoder emits FK_KlaussCPU_PCREL32 for symbol references.
+def LEAPC   : RV_ld<0x0000099, "leapc\t$rd, $imm">;
+
+//===----------------------------------------------------------------------===//
 // Special / system
 //===----------------------------------------------------------------------===//
 
@@ -812,7 +851,9 @@ let hasSideEffects = 1 in {
 // Call patterns — matched from KlaussCPUISD::CALL nodes emitted by LowerCall.
 //===----------------------------------------------------------------------===//
 
-// Direct call to a global address or external symbol.
+// Direct call to a global address or external symbol (non-PIC mode).
+// PIC direct calls (CALLREL) are intercepted in KlaussCPUDAGToDAGISel::Select()
+// before SelectCode() reaches these patterns.
 // Callee is i64 (global address zero-extended into a GPR; encoder takes [31:0]).
 def : Pat<(KlaussCPUCallNode (i64 tglobaladdr:$func)),
           (CALL_I tglobaladdr:$func)>;

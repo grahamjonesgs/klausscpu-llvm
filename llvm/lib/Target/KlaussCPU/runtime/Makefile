@@ -45,6 +45,15 @@ CFLAGS = -target $(TRIPLE) -O1 \
          -D__IEEE_LITTLE_ENDIAN \
          -D_LDBL_EQ_DBL
 
+# PIC flags — used for loadable programs compiled with -fPIC.
+# Position-independent code: branches→JMPREL, calls→CALLREL, globals→LEAPC.
+PIC_FLAGS = $(CFLAGS) -fPIC
+
+PIC_LD_SCRIPT = $(dir $(lastword $(MAKEFILE_LIST)))klausscpu_pic.ld
+
+# crt0 for loadable PIC programs (returns to caller instead of halting)
+CRT0_LOADABLE = crt0_loadable.o
+
 # ── compiler-rt builtins (soft-FP + integer division) ────────────────────────
 BUILTINS    = $(shell git rev-parse --show-toplevel)/compiler-rt/lib/builtins
 CRT_FLAGS   = -target $(TRIPLE) -O1 -nostdlibinc \
@@ -81,11 +90,16 @@ FATFS_OBJS  = ff.o ffunicode.o ffsystem.o sd.o diskio.o
 PROGRAMS = hello adventure test_64bit expr bst crypto queens \
            test_switch test_fp test_asm test_printf fs_demo \
            test_fatfs_printf test_big test_cache test_rtos test_sd test_sync \
-           test_eth eth_test lwip_demo ping_demo
+           test_eth eth_test lwip_demo ping_demo tcp_echo http_server net_client \
+           loader
 
-.PHONY: all clean $(PROGRAMS)
+# PIC loadable programs (compiled with -fPIC, linked with klausscpu_pic.ld)
+PIC_PROGRAMS = test_pic
+
+.PHONY: all clean pic $(PROGRAMS) $(PIC_PROGRAMS)
 
 all: $(addsuffix .elf, $(PROGRAMS))
+pic: $(addsuffix .pic, $(PIC_PROGRAMS))
 
 # ── Compile rules ─────────────────────────────────────────────────────────────
 
@@ -94,6 +108,10 @@ all: $(addsuffix .elf, $(PROGRAMS))
 
 %.o: %.S
 	$(CC) $(CFLAGS) -c -o $@ $<
+
+# crt0_loadable: PIC startup (returns to loader, lives in src/)
+crt0_loadable.o: src/crt0_loadable.c
+	$(CC) $(PIC_FLAGS) -c -o $@ $<
 
 # compiler-rt builtins compiled from in-tree source
 crt-%.o: $(BUILTINS)/%.c
@@ -224,6 +242,12 @@ lwip_%.o: $(LWIP_DIR)/src/netif/%.c
 lwip_%.o: $(LWIP_PORT)/%.c
 	$(CC) $(LWIP_FLAGS) -MMD -MP -c -o $@ $<
 
+lwip_%.o: $(LWIP_DIR)/src/apps/sntp/%.c
+	$(CC) $(LWIP_FLAGS) -MMD -MP -c -o $@ $<
+
+lwip_%.o: $(LWIP_DIR)/src/apps/http/%.c
+	$(CC) $(LWIP_FLAGS) -MMD -MP -c -o $@ $<
+
 # Include generated dependency files (silently ignore if not yet built)
 -include $(wildcard lwip_*.d)
 
@@ -263,8 +287,66 @@ ping_demo.o: programs/ping_demo.c
 ping_demo.elf: ping_demo.o $(ETH_OBJS) $(LWIP_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,$(ETH_OBJS) $(LWIP_OBJS) ping_demo.o)
 
+tcp_echo.o: programs/tcp_echo.c
+	$(CC) $(LWIP_FLAGS) -c -o $@ $<
+
+tcp_echo.elf: tcp_echo.o $(ETH_OBJS) $(LWIP_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,$(ETH_OBJS) $(LWIP_OBJS) tcp_echo.o)
+
+http_server.o: programs/http_server.c
+	$(CC) $(LWIP_FLAGS) -c -o $@ $<
+
+http_server.elf: http_server.o $(ETH_OBJS) $(LWIP_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,$(ETH_OBJS) $(LWIP_OBJS) http_server.o)
+
+net_client.o: programs/net_client.c
+	$(CC) $(LWIP_FLAGS) -c -o $@ $<
+
+LWIP_APPS_OBJS = lwip_sntp.o lwip_http_client.o
+
+net_client.elf: net_client.o $(ETH_OBJS) $(LWIP_OBJS) $(LWIP_APPS_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,$(ETH_OBJS) $(LWIP_OBJS) $(LWIP_APPS_OBJS) net_client.o)
+
+# ── Loader: reads .pic binary from SD card and runs it ───────────────────────
+# loader.c needs FatFs for SD card access.
+loader.o: programs/loader.c
+	$(CC) $(FATFS_FLAGS) -c -o $@ $<
+
+loader.elf: loader.o $(FATFS_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,$(FATFS_OBJS) loader.o)
+
+# ── PIC loadable programs ─────────────────────────────────────────────────────
+# Build with -fPIC; link with klausscpu_pic.ld; flatten to .pic for SD card.
+#
+# Compile rule: any program can be built PIC — just add _pic suffix.
+%_pic.o: programs/%.c
+	$(CC) $(PIC_FLAGS) -c -o $@ $<
+
+# PIC link: crt0_loadable replaces crt0; uart_stubs.o provides uart_putc for
+# syscalls.c; klausscpu_pic.ld sets the load base.
+PIC_LIBC_OBJS = uart_stubs.o $(LIBC_OBJS)
+
+define pic_link
+	$(LLD) -T $(PIC_LD_SCRIPT) --gc-sections -o $1 \
+	    $(CRT0_LOADABLE) $(PIC_LIBC_OBJS) $2 $(LIBC_LINK)
+	@echo "==> $1 built (PIC)"
+	@file $1
+endef
+
+# Flatten PIC ELF to raw binary for SD card (%.pic ← %_pic.elf)
+%.pic: %_pic.elf
+	$(BUILD_DIR)/bin/llvm-objcopy -O binary $< $@
+	@ls -la $@
+
+# test_pic: simple self-contained PIC program for loader smoke-testing
+test_pic_pic.elf: test_pic_pic.o $(PIC_LIBC_OBJS) $(CRT0_LOADABLE)
+	$(call pic_link,$@,test_pic_pic.o)
+
+test_pic: test_pic.pic
+
 # ── Phony aliases ─────────────────────────────────────────────────────────────
 
+loader:      loader.elf
 hello:       hello.elf
 adventure:   adventure.elf
 test_64bit:  test_64bit.elf
@@ -284,6 +366,9 @@ test_eth:          test_eth.elf
 eth_test:          eth_test.elf
 lwip_demo:         lwip_demo.elf
 ping_demo:         ping_demo.elf
+tcp_echo:          tcp_echo.elf
+http_server:       http_server.elf
+net_client:        net_client.elf
 
 test_cache.elf: test_cache.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,test_cache.o)

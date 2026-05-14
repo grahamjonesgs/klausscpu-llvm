@@ -5,10 +5,15 @@
 // ELF: ELFCLASS32 / ELFDATA2LSB / EM_KLAUSSCPU (0x4B43)
 //
 // Relocation types:
-//   R_KLAUSSCPU_ABS32 (1) — 32-bit absolute, LE — instruction word-1 slot
-//                            (branch/call target) or 4-byte data reference.
-//   R_KLAUSSCPU_ABS64 (2) — 64-bit absolute, LE — 8-byte pointer field in
-//                            .rodata/.data (struct members, pointer arrays).
+//   R_KLAUSSCPU_ABS32  (1) — 32-bit absolute, LE — instruction word-1 slot
+//                             (branch/call target) or 4-byte data reference.
+//   R_KLAUSSCPU_ABS64  (2) — 64-bit absolute, LE — 8-byte pointer field in
+//                             .rodata/.data (struct members, pointer arrays).
+//   R_KLAUSSCPU_PCREL32(3) — 32-bit signed PC-relative, LE — word-1 slot of
+//                             JMPREL/JMPxxREL/CALLREL/LEAPC instructions.
+//                             field_value = S + A − instr_addr.
+//                             lld computes S + A − (instr_addr+4) (R_PC) and
+//                             we add 4 in relocate() for the hardware convention.
 //
 //===----------------------------------------------------------------------===//
 
@@ -48,6 +53,8 @@ RelExpr KlaussCPU::getRelExpr(RelType type, const Symbol &s,
   case R_KLAUSSCPU_ABS32:
   case R_KLAUSSCPU_ABS64:
     return R_ABS;
+  case R_KLAUSSCPU_PCREL32:
+    return R_PC;
   default:
     Err(ctx) << getErrorLoc(ctx, loc) << "unrecognized relocation " << type;
     return R_NONE;
@@ -65,6 +72,12 @@ void KlaussCPU::relocate(uint8_t *loc, const Relocation &rel,
     // 8-byte pointer field in .rodata/.data — all addresses fit in 32 bits,
     // upper 32 bits are always zero.
     write64le(loc, val);
+    break;
+  case R_KLAUSSCPU_PCREL32:
+    // val = S + A − (instr_addr+4) from lld's R_PC computation.
+    // Hardware uses instr_addr as PC origin, so field = val + 4.
+    checkInt(ctx, loc, static_cast<int64_t>(val) + 4, 32, rel);
+    write32le(loc, static_cast<uint32_t>(val + 4));
     break;
   default:
     llvm_unreachable("unrecognized KlaussCPU relocation");

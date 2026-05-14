@@ -29,6 +29,7 @@ class KlaussCPUSubtarget : public KlaussCPUGenSubtargetInfo {
   KlaussCPUFrameLowering    FL;
   KlaussCPUTargetLowering   TLI;
   SelectionDAGTargetInfo    TSI;
+  const TargetMachine      &TM;
 
 public:
   KlaussCPUSubtarget(const Triple &TT, StringRef CPU, StringRef FS,
@@ -41,6 +42,9 @@ public:
   const TargetFrameLowering    *getFrameLowering()  const override { return &FL;  }
   const KlaussCPUTargetLowering*getTargetLowering() const override { return &TLI; }
   const SelectionDAGTargetInfo *getSelectionDAGInfo()const override { return &TSI; }
+
+  // True when -fPIC / -relocation-model=pic is active.
+  bool isPositionIndependent() const;
 };
 
 } // namespace llvm

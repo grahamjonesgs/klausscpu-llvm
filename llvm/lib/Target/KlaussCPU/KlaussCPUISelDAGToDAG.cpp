@@ -105,31 +105,24 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
   if (N->getOpcode() == ISD::TargetFrameIndex)
     return;
 
-  // ---- KlaussCPUISD::ADDR → SETR -------------------------------------------
-  // LowerGlobalAddress / LowerExternalSymbol wrap the TargetGlobalAddress in
-  // a KlaussCPUISD::ADDR node (see KlaussCPUISelLowering.h for the reason).
-  //
-  // Here we peel off the wrapper and emit SETR with the enclosed symbol.
-  //
-  // Why not handle bare TargetGlobalAddress here instead?  Two reasons:
-  //   1. SelectionDAG CSE-deduplicates TargetGlobalAddress nodes, so
-  //      creating a "fresh" copy returns the original node.  Passing it as
-  //      getMachineNode's operand and then calling ReplaceNode on it causes
-  //      ReplaceAllUsesWith to rewrite SETR's own operand reference → self-
-  //      referential machine instruction ("%0 = SETR %0").
-  //   2. Call-site callee addresses bypass LowerOperation (LowerCall calls
-  //      DAG.getTargetGlobalAddress directly) and are handled by the
-  //      CALL_I tablegen pattern — they must NOT be converted to SETR.
+  // ---- KlaussCPUISD::ADDR → SETR (non-PIC global address) -------------------
+  // LowerGlobalAddress wraps TGA in ADDR (non-PIC) or LEAPC (PIC).
+  // Here we peel off ADDR and emit SETR with the enclosed symbol (ABS32 fixup).
   if (N->getOpcode() == KlaussCPUISD::ADDR) {
-    // N = KlaussCPUISD::ADDR(TGA_or_TES)
-    // Operand 0 is the TargetGlobalAddress or TargetExternalSymbol leaf.
     SDValue Sym = N->getOperand(0);
     SDLoc DL(N);
-    // getMachineNode with Sym (TGA/TES) as operand → MO_GlobalAddress in the
-    // resulting MachineInstr.  ReplaceNode replaces ADDR (N), not Sym, so
-    // SETR's reference to Sym is not rewritten → no self-reference.
-    SDNode *Res =
-        CurDAG->getMachineNode(KlaussCPU::SETR, DL, MVT::i64, Sym);
+    SDNode *Res = CurDAG->getMachineNode(KlaussCPU::SETR, DL, MVT::i64, Sym);
+    ReplaceNode(N, Res);
+    return;
+  }
+
+  // ---- KlaussCPUISD::LEAPC → LEAPC (PIC global address) --------------------
+  // LowerGlobalAddress uses LEAPC in PIC mode.  Emit LEAPC machine instruction
+  // with the enclosed symbol — encoder emits FK_KlaussCPU_PCREL32 fixup.
+  if (N->getOpcode() == KlaussCPUISD::LEAPC) {
+    SDValue Sym = N->getOperand(0);
+    SDLoc DL(N);
+    SDNode *Res = CurDAG->getMachineNode(KlaussCPU::LEAPC, DL, MVT::i64, Sym);
     ReplaceNode(N, Res);
     return;
   }
@@ -335,14 +328,15 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
     // simm32 constants: fall through to SelectCode (matched by SETR pattern).
   }
 
-  // ---- ISD::BR → JMP (unconditional branch) --------------------------------
+  // ---- ISD::BR → JMP / JMPREL (unconditional branch) ----------------------
   // ISD::BR: (chain, dest_bb)
   if (N->getOpcode() == ISD::BR) {
     SDValue Chain = N->getOperand(0);
     SDValue Dest  = N->getOperand(1);
     SDLoc DL(N);
+    unsigned Opc = TM.isPositionIndependent() ? KlaussCPU::JMPREL : KlaussCPU::JMP;
     SDValue Ops[] = {Dest, Chain};
-    SDNode *Res = CurDAG->getMachineNode(KlaussCPU::JMP, DL, MVT::Other, Ops);
+    SDNode *Res = CurDAG->getMachineNode(Opc, DL, MVT::Other, Ops);
     ReplaceNode(N, Res);
     return;
   }
@@ -395,18 +389,20 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
 
     // Map ISD::CondCode to the KlaussCPU conditional jump opcode.
     // CMPRR/CMPRV set: equal / less (signed) / ult (unsigned) / sign.
+    // PIC mode uses the PC-relative REL variants; non-PIC uses absolute.
+    bool PIC = TM.isPositionIndependent();
     unsigned JmpOpc;
     switch (CC) {
-    case ISD::SETEQ:   JmpOpc = KlaussCPU::JMPE;    break;
-    case ISD::SETNE:   JmpOpc = KlaussCPU::JMPNE;   break;
-    case ISD::SETLT:   JmpOpc = KlaussCPU::JMPLT;   break;
-    case ISD::SETLE:   JmpOpc = KlaussCPU::JMPLE;   break;
-    case ISD::SETGT:   JmpOpc = KlaussCPU::JMPGT;   break;
-    case ISD::SETGE:   JmpOpc = KlaussCPU::JMPGE;   break;
-    case ISD::SETULT:  JmpOpc = KlaussCPU::JMPULT;  break;
-    case ISD::SETULE:  JmpOpc = KlaussCPU::JMPULE;  break;
-    case ISD::SETUGT:  JmpOpc = KlaussCPU::JMPUGT;  break;
-    case ISD::SETUGE:  JmpOpc = KlaussCPU::JMPUGE;  break;
+    case ISD::SETEQ:   JmpOpc = PIC ? KlaussCPU::JMPEREL    : KlaussCPU::JMPE;    break;
+    case ISD::SETNE:   JmpOpc = PIC ? KlaussCPU::JMPNEREL   : KlaussCPU::JMPNE;   break;
+    case ISD::SETLT:   JmpOpc = PIC ? KlaussCPU::JMPLTREL   : KlaussCPU::JMPLT;   break;
+    case ISD::SETLE:   JmpOpc = PIC ? KlaussCPU::JMPLEREL   : KlaussCPU::JMPLE;   break;
+    case ISD::SETGT:   JmpOpc = PIC ? KlaussCPU::JMPGTREL   : KlaussCPU::JMPGT;   break;
+    case ISD::SETGE:   JmpOpc = PIC ? KlaussCPU::JMPGEREL   : KlaussCPU::JMPGE;   break;
+    case ISD::SETULT:  JmpOpc = PIC ? KlaussCPU::JMPULTREL  : KlaussCPU::JMPULT;  break;
+    case ISD::SETULE:  JmpOpc = PIC ? KlaussCPU::JMPULEREL  : KlaussCPU::JMPULE;  break;
+    case ISD::SETUGT:  JmpOpc = PIC ? KlaussCPU::JMPUGTREL  : KlaussCPU::JMPUGT;  break;
+    case ISD::SETUGE:  JmpOpc = PIC ? KlaussCPU::JMPUGEREL  : KlaussCPU::JMPUGE;  break;
     default:
       llvm_unreachable("KlaussCPU BR_CC: unhandled CondCode");
     }
@@ -415,6 +411,40 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
     SDNode *JmpNode = CurDAG->getMachineNode(JmpOpc, DL, MVT::Other, JmpOps);
     ReplaceNode(N, JmpNode);
     return;
+  }
+
+  // ---- KlaussCPUISD::CALL → CALLREL in PIC mode ----------------------------
+  // In non-PIC mode, direct calls fall through to SelectCode() which matches
+  // the CALL_I tablegen patterns (tglobaladdr / texternalsym).
+  // In PIC mode we intercept here and emit CALLREL (PC-relative, PCREL32 fixup).
+  // Indirect calls (GPR callee → CALLR_R) always fall through to SelectCode().
+  if (N->getOpcode() == KlaussCPUISD::CALL && TM.isPositionIndependent()) {
+    SDValue Callee = N->getOperand(1);
+    if (Callee.getOpcode() == ISD::TargetGlobalAddress ||
+        Callee.getOpcode() == ISD::TargetExternalSymbol) {
+      SDLoc DL(N);
+      SDValue Chain = N->getOperand(0);
+      SDValue LastOp = N->getOperand(N->getNumOperands() - 1);
+      bool HasGlue = (LastOp.getValueType() == MVT::Glue);
+      // Build operands: callee first, then any register-read operands
+      // (R0/R1/SP from LowerCall's RegsToPass), then chain, then glue.
+      // The register operands are SDValues of type != Other/Glue between
+      // position 2 and the end of the operand list; they become implicit-use
+      // entries in the MachineInstr so regalloc knows CALLREL reads them.
+      SmallVector<SDValue, 8> Ops = {Callee};
+      for (unsigned i = 2, e = N->getNumOperands(); i != e; ++i) {
+        SDValue Op = N->getOperand(i);
+        if (Op.getValueType() == MVT::Glue) break;
+        Ops.push_back(Op);
+      }
+      Ops.push_back(Chain);
+      if (HasGlue) Ops.push_back(LastOp);
+      SDNode *Res = CurDAG->getMachineNode(KlaussCPU::CALLREL, DL,
+                                            N->getVTList(), Ops);
+      ReplaceNode(N, Res);
+      return;
+    }
+    // Indirect call: fall through to SelectCode() → CALLR_R pattern.
   }
 
   // ---- KlaussCPUISD::SELECT → SELECT_PSEUDO (custom inserter) -------------

@@ -18,14 +18,16 @@ namespace KlaussCPUISD {
 enum NodeType : unsigned {
   FIRST_NUMBER = ISD::BUILTIN_OP_END,
   RET_GLUE, // function return with optional return-value glue
-  CALL,     // direct call (step 8)
-  ADDR,     // materialise a global/external-symbol address into a GPR
+  CALL,     // direct/indirect call
+  ADDR,     // materialise a global address via SETR (non-PIC)
             //   (i64) = ADDR (TargetGlobalAddress/TargetExternalSymbol)
-            // Lowered to SETR by Select().  Wrapping is necessary because
-            // TargetGlobalAddress CSEs, so we cannot pass it as an operand
-            // to getMachineNode() and then call ReplaceNode() on it — that
-            // would cause ReplaceAllUsesWith to create a self-referential
+            // Lowered to SETR by Select().  ADDR wrapper is necessary because
+            // TargetGlobalAddress CSEs — passing it directly to getMachineNode
+            // and then calling ReplaceNode on it would cause a self-referential
             // SETR instruction ("%0 = SETR %0").
+  LEAPC,    // materialise a global address via LEAPC (PIC mode)
+            //   (i64) = LEAPC (TargetGlobalAddress/TargetExternalSymbol)
+            // Lowered to LEAPC by Select().  Same CSE-safe wrapper as ADDR.
   SELECT,   // (cond:i64, trueV:i64, falseV:i64) -> i64
             // Custom ISD node: lowered by Select() to SELECT_PSEUDO, then
             // expanded to branches by EmitInstrWithCustomInserter.
@@ -58,6 +60,7 @@ public:
 private:
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerExternalSymbol(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerJumpTable(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBR_JT(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSTACKSAVE(SDValue Op, SelectionDAG &DAG) const;

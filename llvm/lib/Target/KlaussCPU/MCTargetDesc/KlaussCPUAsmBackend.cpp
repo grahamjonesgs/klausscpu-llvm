@@ -2,15 +2,17 @@
 //
 // Implements MCAsmBackend for KlaussCPU:
 //
-//   Fixup kind
-//     FK_KlaussCPU_ABS32 — 32-bit absolute address, big-endian, placed at
-//     byte offset 4–7 of an 8-byte branch/call instruction (word 1).
+//   FK_KlaussCPU_ABS32   — 32-bit absolute, LE, placed at byte offset 4–7 of
+//     an 8-byte branch/call/SETR instruction (word 1).
 //
-//   ELF output
-//     ELFCLASS32, ELFDATA2LSB (data bus is little-endian), EM_NONE.
-//     Instruction bytes in .text are already big-endian from the emitter.
+//   FK_KlaussCPU_PCREL32 — 32-bit signed PC-relative offset, LE, same word-1
+//     slot.  field_value = target − PC_of_instruction (option B convention).
+//     LLVM's FKF_IsPCRel causes it to subtract the fixup address (instr+4);
+//     we add 4 back in applyFixup / lld relocate to correct for the hardware
+//     convention where PC origin is instr_addr (not instr_addr+4).
 //
-//   No instruction relaxation (all branch targets are fixed 32-bit absolutes).
+//   ELF output: ELFCLASS32, ELFDATA2LSB, EM_KLAUSSCPU.
+//   No instruction relaxation.
 //
 //===----------------------------------------------------------------------===//
 
@@ -45,6 +47,8 @@ public:
                         bool IsPCRel) const override {
     if (Fixup.getKind() == FK_Data_8)
       return ELF::R_KLAUSSCPU_ABS64;
+    if (Fixup.getKind() == MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL32))
+      return ELF::R_KLAUSSCPU_PCREL32;
     return ELF::R_KLAUSSCPU_ABS32;
   }
 };
@@ -60,8 +64,9 @@ public:
 
   MCFixupKindInfo getFixupKindInfo(MCFixupKind Kind) const override {
     static const MCFixupKindInfo Infos[] = {
-        // Name                  BitOffset  BitSize  Flags
-        {"FK_KlaussCPU_ABS32",   0,         32,      0},
+        // Name                    BitOffset  BitSize  Flags
+        {"FK_KlaussCPU_ABS32",     0,         32,      0},
+        {"FK_KlaussCPU_PCREL32",   0,         32,      0},
     };
     if (Kind >= FirstTargetFixupKind &&
         Kind < FirstTargetFixupKind + KlaussCPU::NumTargetFixupKinds)
@@ -83,6 +88,17 @@ public:
     if (Kind == FK_Data_8) {
       for (int i = 0; i < 8; ++i)
         Data[i] = (Value >> (8 * i)) & 0xFF;
+      maybeAddReloc(F, Fixup, Target, Value, IsResolved);
+      return;
+    }
+    // FK_KlaussCPU_PCREL32: signed PC-relative offset in word-1 slot.
+    // LLVM 23 has no FKF_IsPCRel, so the assembler passes raw target_addr as
+    // Value without subtracting the PC.  We always defer to the linker which
+    // computes the correct field_value = S + A − instr_addr (with +4 adjust
+    // in KlaussCPU.cpp relocate() for the hardware PC convention).
+    // Write 0 as placeholder; R_KLAUSSCPU_PCREL32 reloc carries the symbol.
+    if (Kind == MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL32)) {
+      Data[0] = Data[1] = Data[2] = Data[3] = 0;
       maybeAddReloc(F, Fixup, Target, Value, IsResolved);
       return;
     }
