@@ -139,17 +139,32 @@ RUNTIME_OBJS := \
     $(RUNTIME)/src/mdio.o \
     $(RUNTIME)/src/eth.o
 
+# ── FatFs + SD card (console_demo only) ──────────────────────────────────────
+
+FATFS_DIR := $(RUNTIME)/fatfs
+
+FATFS_OBJS := \
+    $(FATFS_DIR)/ff.o \
+    $(FATFS_DIR)/ffsystem.o
+
+SD_OBJS := \
+    $(RUNTIME)/src/sd.o \
+    $(RUNTIME)/src/diskio.o
+
 # ── Rules ─────────────────────────────────────────────────────────────────────
 
-.PHONY: all demo net_demo clean check-kernel
+.PHONY: all demo net_demo console_demo clean check-kernel
 
-all: demo net_demo
+all: demo net_demo console_demo
 
 demo: demo.elf demo.bin
 	@echo "==> demo.elf built"
 
 net_demo: net_demo.elf net_demo.bin
 	@echo "==> net_demo.elf built"
+
+console_demo: console_demo.elf console_demo.bin
+	@echo "==> console_demo.elf built"
 
 check-kernel:
 	@test -d $(KERNEL) || { \
@@ -174,6 +189,15 @@ demo/demo.o: demo/demo.c | check-kernel
 # Network demo objects — compiled with NET_CFLAGS
 demo/net_demo.o: demo/net_demo.c | check-kernel
 	$(CC) $(NET_CFLAGS) -c -o $@ $<
+
+demo/console_demo.o: demo/console_demo.c | check-kernel
+	$(CC) $(NET_CFLAGS) -Itelnet -c -o $@ $<
+
+telnet/telnet.o: telnet/telnet.c | check-kernel
+	$(CC) $(NET_CFLAGS) -Itelnet -c -o $@ $<
+
+telnet/pic_loader.o: telnet/pic_loader.c | check-kernel
+	$(CC) $(NET_CFLAGS) -Itelnet -I$(FATFS_DIR) -c -o $@ $<
 
 # lwIP sources — use .lo extension to distinguish from CFLAGS-compiled .o
 %.lo: %.c | check-kernel
@@ -207,6 +231,20 @@ $(RUNTIME)/src/mdio.o: $(RUNTIME)/src/mdio.c
 $(RUNTIME)/src/eth.o: $(RUNTIME)/src/eth.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+# FatFs objects (no lwIP needed; FF_FS_REENTRANT=0 so no OS calls)
+$(FATFS_DIR)/ff.o: $(FATFS_DIR)/ff.c
+	$(CC) $(CFLAGS) -I$(FATFS_DIR) -c -o $@ $<
+
+$(FATFS_DIR)/ffsystem.o: $(FATFS_DIR)/ffsystem.c
+	$(CC) $(CFLAGS) -I$(FATFS_DIR) -c -o $@ $<
+
+# SD card driver
+$(RUNTIME)/src/sd.o: $(RUNTIME)/src/sd.c
+	$(CC) $(CFLAGS) -I$(FATFS_DIR) -c -o $@ $<
+
+$(RUNTIME)/src/diskio.o: $(RUNTIME)/src/diskio.c
+	$(CC) $(CFLAGS) -I$(FATFS_DIR) -c -o $@ $<
+
 # Link
 demo.elf: $(KERNEL_OBJS) $(PORT_OBJS) demo/demo.o $(RUNTIME_OBJS)
 	$(LD) $(LDFLAGS) -o $@ $^ $(PICOLIBC)/lib/libc.a
@@ -223,13 +261,26 @@ net_demo.elf: $(KERNEL_OBJS) $(PORT_OBJS) $(LWIP_OBJS) $(LWIP_PORT_OBJS) \
 net_demo.bin: net_demo.elf
 	$(OBJCOPY) -O binary $< $@
 
+console_demo.elf: $(KERNEL_OBJS) $(PORT_OBJS) $(LWIP_OBJS) $(LWIP_PORT_OBJS) \
+                  $(FATFS_OBJS) $(SD_OBJS) \
+                  telnet/telnet.o telnet/pic_loader.o \
+                  demo/console_demo.o $(RUNTIME_OBJS)
+	$(LD) $(LDFLAGS) -o $@ $^ $(PICOLIBC)/lib/libc.a
+	@file $@
+
+console_demo.bin: console_demo.elf
+	$(OBJCOPY) -O binary $< $@
+
 clean:
 	rm -f $(KERNEL_OBJS) $(PORT_OBJS) \
 	      $(LWIP_OBJS) $(LWIP_PORT_OBJS) \
-	      demo/demo.o demo/net_demo.o \
+	      $(FATFS_OBJS) $(SD_OBJS) \
+	      demo/demo.o demo/net_demo.o demo/console_demo.o \
+	      telnet/telnet.o telnet/pic_loader.o \
 	      sys_arch.lo \
 	      $(RUNTIME)/crt0.o $(RUNTIME)/uart_stubs.o \
 	      $(RUNTIME)/src/syscalls.o $(RUNTIME)/stdio_handles.o \
 	      $(RUNTIME)/src/setjmp.o \
 	      $(RUNTIME)/src/mdio.o $(RUNTIME)/src/eth.o \
-	      demo.elf demo.bin net_demo.elf net_demo.bin
+	      demo.elf demo.bin net_demo.elf net_demo.bin \
+	      console_demo.elf console_demo.bin

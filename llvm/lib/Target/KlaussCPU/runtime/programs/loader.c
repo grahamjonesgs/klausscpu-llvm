@@ -37,7 +37,8 @@
 #  define PIC_FILENAME  "PROG.ELF"
 #endif
 
-typedef int (*pic_entry_fn)(void);
+/* mirror_fn arg matches crt0_loadable.c; pass NULL for UART-only output. */
+typedef int (*pic_entry_fn)(void (*mirror_fn)(char));
 
 /* ── Minimal ELF32 types (no <elf.h> in freestanding environment) ──────── */
 
@@ -258,7 +259,7 @@ static int load_and_run(const char *path) {
     REG_LEDS |= 0x0004u;
     printf("loader: calling entry 0x%08lX\n", (unsigned long)(u32)entry);
 
-    rc = entry();
+    rc = entry(NULL);   /* NULL = UART output only, no mirror */
 
     REG_LEDS |= 0x0008u;
     printf("\nloader: program returned %d\n", rc);

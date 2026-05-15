@@ -95,7 +95,7 @@ PROGRAMS = hello adventure test_64bit expr bst crypto queens \
            loader
 
 # PIC loadable programs (compiled with -fPIC, linked with klausscpu_pic.ld)
-PIC_PROGRAMS = test_pic
+PIC_PROGRAMS = test_pic hello_pic
 
 .PHONY: all clean pic $(PROGRAMS) $(PIC_PROGRAMS) net_time
 
@@ -109,6 +109,14 @@ pic: $(addsuffix .pic, $(PIC_PROGRAMS))
 
 %.o: %.S
 	$(CC) $(CFLAGS) -c -o $@ $<
+
+# Explicit rules for src/ objects to avoid VPATH finding stale copies
+# (e.g. src/setjmp.o left by the freertos build) and confusing make.
+setjmp.o:      src/setjmp.S      ; $(CC) $(CFLAGS) -c -o $@ $<
+syscalls.o:    src/syscalls.c    ; $(CC) $(CFLAGS) -c -o $@ $<
+stdio_handles.o: src/stdio_handles.c ; $(CC) $(CFLAGS) -c -o $@ $<
+uart_stubs.o:  src/uart_stubs.c  ; $(CC) $(CFLAGS) -c -o $@ $<
+crt0.o:        src/crt0.c        ; $(CC) $(CFLAGS) -c -o $@ $<
 
 # crt0_loadable: PIC startup (returns to loader, lives in src/)
 crt0_loadable.o: src/crt0_loadable.c
@@ -352,6 +360,13 @@ test_pic_pic.elf: test_pic_pic.o $(PIC_LIBC_OBJS) $(CRT0_LOADABLE)
 
 test_pic: test_pic.pic
 
+# hello_pic: PIC loadable hello-world for the telnet 'load' command.
+# Produces hello_pic.elf (with relocs) and hello.sd.elf (stripped for SD card).
+hello_pic.elf: hello_pic.o $(PIC_LIBC_OBJS) $(CRT0_LOADABLE)
+	$(call pic_link,$@,hello_pic.o)
+
+hello_pic: hello.sd.elf
+
 # ── net_time: PIC program — DHCP + SNTP → print UTC time ─────────────────────
 # Includes the full Ethernet + lwIP stack compiled with -fPIC (via global CFLAGS).
 # Ships as a stripped ELF on the SD card (net_time.sd.elf → PROG.ELF).
@@ -374,6 +389,7 @@ net_time: net_time_pic_pic.elf
 
 loader:      loader.elf
 hello:       hello.elf
+hello_pic:   hello.sd.elf
 adventure:   adventure.elf
 test_64bit:  test_64bit.elf
 expr:        expr.elf
@@ -449,4 +465,9 @@ clean:
 	      "crt-truncdfsf2 2.o" "crt-udivdi3 2.o" "crt-udivmoddi4 2.o" \
 	      "crt-udivsi3 2.o" "crt-umoddi3 2.o" "crt0 2.o" "fp_mode_stub 2.o" \
 		  "eth_test 2.elf" "eth_test 2.o" \
-	      "io_stubs 2.o" "syscalls 2.o" "uart_stubs 2.o" 2>/dev/null; true 
+	      "io_stubs 2.o" "syscalls 2.o" "uart_stubs 2.o" 2>/dev/null; true
+	# Remove src/ and fatfs/ stale objects left by the freertos build so VPATH
+	# doesn't confuse make into thinking targets are already up to date.
+	rm -f src/setjmp.o src/syscalls.o src/stdio_handles.o src/uart_stubs.o \
+	      src/crt0.o src/eth.o src/mdio.o src/diskio.o src/sd.o \
+	      fatfs/ff.o fatfs/ffsystem.o fatfs/ffunicode.o 2>/dev/null; true

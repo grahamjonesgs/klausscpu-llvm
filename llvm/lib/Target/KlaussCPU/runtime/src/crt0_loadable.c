@@ -18,8 +18,13 @@ extern void __stdio_init(void);   /* from stdio_handles.c — wires UART to stdo
 /* __attribute__((section)) ensures this function's code is emitted first
  * in the .text.entry section, so it appears at the binary's start address.
  * The PIC linker script places .text.entry before .text. */
+/* Mirror function installed in g_console_mirror_fn when non-NULL.
+ * Callers that want stdout mirrored (e.g. telnet loader) pass a function
+ * pointer; bare callers pass NULL. */
+extern void (*g_console_mirror_fn)(char c);
+
 __attribute__((section(".text.entry"), noinline))
-int _start_loadable(void) {
+int _start_loadable(void (*mirror_fn)(char)) {
     /* Clear BSS within the loaded image. */
     extern char __bss_start[], __bss_end[];
     for (char *p = __bss_start; p < __bss_end; ++p)
@@ -27,6 +32,9 @@ int _start_loadable(void) {
 
     /* Initialise stdio — must happen after BSS clear (FILE objects are in BSS). */
     __stdio_init();
+
+    /* Install the caller's mirror hook (NULL = UART only). */
+    g_console_mirror_fn = mirror_fn;
 
     return main();
 }

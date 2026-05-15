@@ -25,9 +25,15 @@ extern unsigned long long uart_getc_blocking(void);
 
 // ── UART callbacks — non-static so stdio_handles.c can reference them ────────
 
+// Optional mirror: when non-NULL every character written to stdout is also
+// passed to this function.  Used by the telnet shell's 'load' command to
+// stream PIC program output back to the telnet client.  Set/clear by the
+// telnet layer; kept NULL the rest of the time.
+void (*g_console_mirror_fn)(char c) = NULL;
+
 int _uart_put(char c, FILE *f) {
     (void)f;
-    uart_putc(c);   /* uart_putc already converts '\n' to CR+LF */
+    uart_putc(c);   /* CR+LF conversion and mirror handled inside uart_putc */
     return 0;
 }
 

@@ -11,6 +11,10 @@
 
 typedef unsigned long long uint64_t;
 
+/* Defined in syscalls.c — set by crt0_loadable before main() to mirror every
+ * transmitted character to an active telnet session. */
+extern void (*g_console_mirror_fn)(char c);
+
 // ---------------------------------------------------------------------------
 // Transmit: send 64-bit register value as 16 hex digits over UART.
 // ---------------------------------------------------------------------------
@@ -38,6 +42,10 @@ static void _uart_raw(char c) {
 void uart_putc(char c) {
     if (c == '\n') _uart_raw('\r');
     _uart_raw(c);
+    /* Mirror to telnet when a PIC program is running under the loader.
+     * The mirror function does its own \n→\r\n expansion, so pass c unchanged. */
+    if (g_console_mirror_fn)
+        g_console_mirror_fn(c);
 }
 
 // ---------------------------------------------------------------------------
@@ -51,7 +59,7 @@ void uart_puts(const char *s) {
 // Transmit: CR+LF.
 // ---------------------------------------------------------------------------
 void uart_newline(void) {
-    __builtin_klausscpu_newline();
+    uart_putc('\n');   /* CR+LF to UART + mirror if active */
 }
 
 // ---------------------------------------------------------------------------
@@ -77,5 +85,5 @@ uint64_t uart_getc_nonblocking(void) {
 // ---------------------------------------------------------------------------
 void uart_println(const char *s) {
     uart_puts(s);
-    __builtin_klausscpu_newline();
+    uart_putc('\n');
 }
