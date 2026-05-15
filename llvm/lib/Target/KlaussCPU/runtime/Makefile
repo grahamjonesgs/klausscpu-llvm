@@ -42,12 +42,13 @@ CFLAGS = -target $(TRIPLE) -O1 \
          -isystem $(PICOLIBC)/include \
          -nostdlib \
          -ffunction-sections -fdata-sections \
+         -fPIC \
          -D__IEEE_LITTLE_ENDIAN \
          -D_LDBL_EQ_DBL
 
-# PIC flags — used for loadable programs compiled with -fPIC.
-# Position-independent code: branches→JMPREL, calls→CALLREL, globals→LEAPC.
-PIC_FLAGS = $(CFLAGS) -fPIC
+# PIC flags — inherits -fPIC from CFLAGS (which is now global).
+# All objects are compiled PIC; no separate flag needed.
+PIC_FLAGS = $(CFLAGS)
 
 PIC_LD_SCRIPT = $(dir $(lastword $(MAKEFILE_LIST)))klausscpu_pic.ld
 
@@ -96,7 +97,7 @@ PROGRAMS = hello adventure test_64bit expr bst crypto queens \
 # PIC loadable programs (compiled with -fPIC, linked with klausscpu_pic.ld)
 PIC_PROGRAMS = test_pic
 
-.PHONY: all clean pic $(PROGRAMS) $(PIC_PROGRAMS)
+.PHONY: all clean pic $(PROGRAMS) $(PIC_PROGRAMS) net_time
 
 all: $(addsuffix .elf, $(PROGRAMS))
 pic: $(addsuffix .pic, $(PIC_PROGRAMS))
@@ -327,22 +328,47 @@ loader.elf: loader.o $(FATFS_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
 PIC_LIBC_OBJS = uart_stubs.o $(LIBC_OBJS)
 
 define pic_link
-	$(LLD) -T $(PIC_LD_SCRIPT) --gc-sections -o $1 \
+	$(LLD) -T $(PIC_LD_SCRIPT) --gc-sections --emit-relocs -o $1 \
 	    $(CRT0_LOADABLE) $(PIC_LIBC_OBJS) $2 $(LIBC_LINK)
-	@echo "==> $1 built (PIC)"
+	@echo "==> $1 built (PIC ELF with relocs)"
 	@file $1
 endef
 
-# Flatten PIC ELF to raw binary for SD card (%.pic ← %_pic.elf)
+# Flatten PIC ELF to raw binary for SD card — kept for backward compat.
+# New programs use the ELF directly (loader detects ELF vs flat binary by magic).
 %.pic: %_pic.elf
 	$(BUILD_DIR)/bin/llvm-objcopy -O binary $< $@
 	@ls -la $@
 
-# test_pic: simple self-contained PIC program for loader smoke-testing
+# Strip a PIC ELF of debug info for a smaller SD-card image.
+# The RELA sections (needed by the loader's runtime patcher) are preserved.
+%.sd.elf: %_pic.elf
+	$(BUILD_DIR)/bin/llvm-strip --strip-debug -o $@ $<
+	@ls -la $@
+
+# test_pic: simple self-contained PIC smoke test
 test_pic_pic.elf: test_pic_pic.o $(PIC_LIBC_OBJS) $(CRT0_LOADABLE)
 	$(call pic_link,$@,test_pic_pic.o)
 
 test_pic: test_pic.pic
+
+# ── net_time: PIC program — DHCP + SNTP → print UTC time ─────────────────────
+# Includes the full Ethernet + lwIP stack compiled with -fPIC (via global CFLAGS).
+# Ships as a stripped ELF on the SD card (net_time.sd.elf → PROG.ELF).
+
+net_time_pic.o: programs/net_time_pic.c
+	$(CC) $(LWIP_FLAGS) -c -o $@ $<
+
+LWIP_SNTP_OBJ = lwip_sntp.o
+
+net_time_pic_pic.o: programs/net_time_pic.c
+	$(CC) $(LWIP_FLAGS) -c -o $@ $<
+
+net_time_pic_pic.elf: net_time_pic_pic.o $(ETH_OBJS) $(LWIP_OBJS) \
+                       $(LWIP_SNTP_OBJ) $(PIC_LIBC_OBJS) $(CRT0_LOADABLE)
+	$(call pic_link,$@,$(ETH_OBJS) $(LWIP_OBJS) $(LWIP_SNTP_OBJ) net_time_pic_pic.o)
+
+net_time: net_time_pic_pic.elf
 
 # ── Phony aliases ─────────────────────────────────────────────────────────────
 

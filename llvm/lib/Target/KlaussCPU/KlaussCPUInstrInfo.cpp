@@ -16,11 +16,12 @@
 
 using namespace llvm;
 
-KlaussCPUInstrInfo::KlaussCPUInstrInfo(const KlaussCPUSubtarget &STI,
+KlaussCPUInstrInfo::KlaussCPUInstrInfo(const KlaussCPUSubtarget &STI_,
                                         const KlaussCPURegisterInfo &RI)
-    : KlaussCPUGenInstrInfo(STI, RI,
+    : KlaussCPUGenInstrInfo(STI_, RI,
                             KlaussCPU::ADJCALLSTACKDOWN,
-                            KlaussCPU::ADJCALLSTACKUP) {}
+                            KlaussCPU::ADJCALLSTACKUP),
+      STI(STI_) {}
 
 void KlaussCPUInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
                                               MachineBasicBlock::iterator I,
@@ -67,15 +68,29 @@ void KlaussCPUInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
       .setMIFlag(Flags);
 }
 
-// Return true if MI is any branch instruction (unconditional or conditional).
+// Return true for any unconditional branch (absolute or PC-relative).
+static bool isUncondBranchOpc(unsigned Opc) {
+  return Opc == KlaussCPU::JMP || Opc == KlaussCPU::JMPREL;
+}
+
+// Return true if MI is any branch instruction (unconditional or conditional),
+// covering both the non-PIC absolute variants and the PIC PC-relative variants.
 static bool isBranchOpcode(unsigned Opc) {
   switch (Opc) {
-  case KlaussCPU::JMP:
-  case KlaussCPU::JMPE:  case KlaussCPU::JMPNE:
-  case KlaussCPU::JMPLT: case KlaussCPU::JMPLE:
-  case KlaussCPU::JMPGT: case KlaussCPU::JMPGE:
-  case KlaussCPU::JMPULT: case KlaussCPU::JMPULE:
-  case KlaussCPU::JMPUGT: case KlaussCPU::JMPUGE:
+  // Unconditional
+  case KlaussCPU::JMP:     case KlaussCPU::JMPREL:
+  // Conditional — absolute
+  case KlaussCPU::JMPE:    case KlaussCPU::JMPNE:
+  case KlaussCPU::JMPLT:   case KlaussCPU::JMPLE:
+  case KlaussCPU::JMPGT:   case KlaussCPU::JMPGE:
+  case KlaussCPU::JMPULT:  case KlaussCPU::JMPULE:
+  case KlaussCPU::JMPUGT:  case KlaussCPU::JMPUGE:
+  // Conditional — PC-relative (PIC)
+  case KlaussCPU::JMPEREL:  case KlaussCPU::JMPNEREL:
+  case KlaussCPU::JMPLTREL: case KlaussCPU::JMPLEREL:
+  case KlaussCPU::JMPGTREL: case KlaussCPU::JMPGEREL:
+  case KlaussCPU::JMPULTREL: case KlaussCPU::JMPULEREL:
+  case KlaussCPU::JMPUGTREL: case KlaussCPU::JMPUGEREL:
     return true;
   default:
     return false;
@@ -87,38 +102,55 @@ bool KlaussCPUInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
                                         MachineBasicBlock *&FBB,
                                         SmallVectorImpl<MachineOperand> &Cond,
                                         bool AllowModify) const {
-  // BranchFolder uses AllowModify=true.  Our conditional branches are
-  // CMPRR/V + JMPxx pairs; insertBranch only supports unconditional JMP, so
-  // we refuse analysis when modification is requested.
+  // We never support in-place modification (BranchFolding AllowModify=true)
+  // because our compare+branch sequences are two instructions and we can't
+  // remove/reinsert the compare from here.
   if (AllowModify)
     return true;
 
-  // Read-only analysis (MachineBlockPlacement, canFallThrough, …).
-  // Scan backward to identify the last branch(es).
+  // Read-only analysis for MachineBlockPlacement, canFallThrough, etc.
+  //
+  // A block may end with:
+  //   uncond                        → TBB=dest,  Cond={}
+  //   cond                          → TBB=cond,  Cond={opc}
+  //   cond + uncond (explicit FBB)  → TBB=cond,  FBB=uncond, Cond={opc}
+  //   multiple redundant unconds + cond (PHI-elim / insertBranch artefacts)
+  //
+  // We handle any mixture of JMP/JMPREL (unconditional) and JMPxx/JMPxxREL
+  // (conditional) at the block tail.  Redundant unconditional branches to the
+  // same target are skipped transparently.
+
+  auto skipDebug = [&](MachineBasicBlock::reverse_iterator &It) {
+    while (It != MBB.rend() && It->isDebugInstr())
+      ++It;
+  };
+
   MachineBasicBlock::reverse_iterator I = MBB.rbegin();
-  while (I != MBB.rend() && I->isDebugInstr())
-    ++I;
+  skipDebug(I);
 
   if (I == MBB.rend() || !isBranchOpcode(I->getOpcode()))
-    return false; // no branches
+    return false; // no terminal branches
 
-  if (I->getOpcode() == KlaussCPU::JMP) {
-    // Unconditional branch — may be preceded by a conditional one.
-    TBB = I->getOperand(0).getMBB();
+  // Scan past consecutive unconditional branches (collect the first target).
+  MachineBasicBlock *UncondTarget = nullptr;
+  while (I != MBB.rend() && isBranchOpcode(I->getOpcode()) &&
+         isUncondBranchOpc(I->getOpcode())) {
+    if (!UncondTarget)
+      UncondTarget = I->getOperand(0).getMBB();
     ++I;
-    while (I != MBB.rend() && I->isDebugInstr())
-      ++I;
-    if (I != MBB.rend() && isBranchOpcode(I->getOpcode()) &&
-        I->getOpcode() != KlaussCPU::JMP) {
-      // Conditional branch followed by unconditional: TBB = cond target, FBB = uncond.
-      FBB = TBB;
-      TBB = I->getOperand(0).getMBB();
-      Cond.push_back(MachineOperand::CreateImm(I->getOpcode()));
-    }
-  } else {
-    // Conditional branch with fallthrough.
+    skipDebug(I);
+  }
+
+  // Check whether a conditional branch precedes the unconditional(s).
+  if (I != MBB.rend() && isBranchOpcode(I->getOpcode()) &&
+      !isUncondBranchOpc(I->getOpcode())) {
+    // Conditional branch: it is TBB; the unconditional is FBB (explicit fallthrough).
     TBB = I->getOperand(0).getMBB();
     Cond.push_back(MachineOperand::CreateImm(I->getOpcode()));
+    FBB = UncondTarget; // may be null if there was no explicit unconditional
+  } else {
+    // Only unconditional branch(es) — no conditional.
+    TBB = UncondTarget;
   }
   return false;
 }
@@ -149,17 +181,22 @@ unsigned KlaussCPUInstrInfo::insertBranch(MachineBasicBlock &MBB,
                                            const DebugLoc &DL,
                                            int *BytesAdded) const {
   assert(TBB && "insertBranch must not be called with null TBB");
+
+  // Use JMPREL (PC-relative) for unconditional branches in PIC mode so the
+  // binary can be relocated correctly when loaded at a non-zero delta.
+  unsigned UncondOpc = STI.isPositionIndependent() ? KlaussCPU::JMPREL
+                                                    : KlaussCPU::JMP;
   unsigned Count = 0;
   int Bytes = 0;
 
   if (Cond.empty()) {
     // Unconditional branch.
     assert(!FBB && "Unexpected FBB with unconditional branch");
-    BuildMI(&MBB, DL, get(KlaussCPU::JMP)).addMBB(TBB);
+    BuildMI(&MBB, DL, get(UncondOpc)).addMBB(TBB);
     Count = 1;
     Bytes = 8;
   } else {
-    // Conditional branch: Cond[0] holds the JMPxx opcode.
+    // Conditional branch: Cond[0] holds the JMPxx / JMPxxREL opcode.
     // The preceding CMPRR/CMPRV is already in the block (removeBranch only
     // removes branch instructions, not compares) so we just emit the jump.
     assert(Cond.size() == 1 && "Expected exactly one Cond operand");
@@ -168,7 +205,7 @@ unsigned KlaussCPUInstrInfo::insertBranch(MachineBasicBlock &MBB,
     Count = 1;
     Bytes = 8;
     if (FBB) {
-      BuildMI(&MBB, DL, get(KlaussCPU::JMP)).addMBB(FBB);
+      BuildMI(&MBB, DL, get(UncondOpc)).addMBB(FBB);
       Count++;
       Bytes += 8;
     }

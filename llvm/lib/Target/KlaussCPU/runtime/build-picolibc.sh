@@ -39,7 +39,7 @@ nm      = '$LLVM_BIN/llvm-nm'
 objcopy = '$LLVM_BIN/llvm-objcopy'
 
 [built-in options]
-c_args      = ['-target', 'klausscpu-unknown-elf', '-O2', '-ffreestanding', '-fno-common', '-ffunction-sections', '-fdata-sections', '-D__IEEE_LITTLE_ENDIAN']
+c_args      = ['-target', 'klausscpu-unknown-elf', '-O2', '-fPIC', '-ffreestanding', '-fno-common', '-ffunction-sections', '-fdata-sections', '-D__IEEE_LITTLE_ENDIAN']
 c_link_args = ['-target', 'klausscpu-unknown-elf', '-nostdlib']
 
 [host_machine]

@@ -22,6 +22,8 @@ class KlaussCPURegisterInfo;
 class KlaussCPUSubtarget;
 
 class KlaussCPUInstrInfo : public KlaussCPUGenInstrInfo {
+  const KlaussCPUSubtarget &STI;
+
 public:
   explicit KlaussCPUInstrInfo(const KlaussCPUSubtarget &STI,
                                const KlaussCPURegisterInfo &RI);
