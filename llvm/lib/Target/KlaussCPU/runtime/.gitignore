@@ -14,3 +14,6 @@ picolibc-src/
 picolibc-build/
 picolibc-install/
 picolibc-cross-abs.ini
+
+# lwIP — cloned externally, not part of this repo
+lwip/

@@ -1,0 +1,8 @@
+# FreeRTOS kernel — cloned externally by get-freertos.sh, not part of this repo
+FreeRTOS-Kernel/
+
+# Build artifacts
+*.o
+*.lo
+*.elf
+*.bin
