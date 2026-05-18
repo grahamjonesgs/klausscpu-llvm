@@ -4,7 +4,7 @@
 //
 //   Arg 0–3   → R0–R3 (i64), caller-saved
 //   Args 4+   → stack, 8 bytes each, at [SP+32], [SP+40], … from callee view
-//   Return    → R12 (M, i64), caller-saved
+//   Return    → R12 (M, i64) for scalar; R12+R11 for i128, caller-saved
 //   Callee-saved: R4–R7 (E–H)
 //   R15 (P, frame pointer) is saved/restored explicitly by prologue/epilogue.
 //
@@ -26,8 +26,10 @@ def CC_KlaussCPU : CallingConv<[
 def RetCC_KlaussCPU : CallingConv<[
   // Promote sub-word return values to i64 first.
   CCIfType<[i8, i16, i32], CCPromoteToType<i64>>,
-  // Single i64 return value goes in R12 (M register).
-  CCIfType<[i64], CCAssignToReg<[R12]>>
+  // i64 return values: first in R12 (M), second in R11 (L).
+  // i128 is split into two i64s by the type legalizer; R12 holds bits[63:0]
+  // and R11 holds bits[127:64].
+  CCIfType<[i64], CCAssignToReg<[R12, R11]>>
 ]>;
 
 // Callee-saved registers: E–H (R4–R7).

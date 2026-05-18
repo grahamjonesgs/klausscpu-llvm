@@ -43,6 +43,7 @@ CFLAGS = -target $(TRIPLE) -O1 \
          -nostdlib \
          -ffunction-sections -fdata-sections \
          -fPIC \
+         -MMD -MP \
          -D__IEEE_LITTLE_ENDIAN \
          -D_LDBL_EQ_DBL
 
@@ -79,6 +80,11 @@ FATFS_DIR = $(dir $(lastword $(MAKEFILE_LIST)))fatfs
 # Objects linked into every program.
 RUNTIME_OBJS = crt0.o uart_stubs.o
 LIBC_OBJS    = syscalls.o stdio_handles.o setjmp.o
+
+# Hardware crypto driver (MMIO wrappers for all 5 crypto blocks).
+CRYPTO_HW_OBJ = crypto_hw.o
+crypto_hw.o: src/crypto_hw.c
+	$(CC) $(CFLAGS) -c -o $@ $<
 LIBC_LINK    = $(PICOLIBC)/lib/libc.a
 
 # FatFs objects (compiled with -I fatfs/ so ffconf.h / diskio.h are found).
@@ -92,7 +98,7 @@ PROGRAMS = hello adventure test_64bit expr bst crypto queens \
            test_switch test_fp test_asm test_printf fs_demo \
            test_fatfs_printf test_big test_cache test_rtos test_sd test_sync \
            test_eth eth_test lwip_demo ping_demo tcp_echo http_server net_client \
-           loader
+           loader crypto_selftest crypto_test
 
 # PIC loadable programs (compiled with -fPIC, linked with klausscpu_pic.ld)
 PIC_PROGRAMS = test_pic hello_pic
@@ -258,7 +264,7 @@ lwip_%.o: $(LWIP_DIR)/src/apps/http/%.c
 	$(CC) $(LWIP_FLAGS) -MMD -MP -c -o $@ $<
 
 # Include generated dependency files (silently ignore if not yet built)
--include $(wildcard lwip_*.d)
+-include $(wildcard *.d lwip_*.d)
 
 # Ethernet low-level objects (shared by test_eth and lwip_demo)
 ETH_OBJS = mdio.o eth.o
@@ -315,6 +321,23 @@ LWIP_APPS_OBJS = lwip_sntp.o lwip_http_client.o
 
 net_client.elf: net_client.o $(ETH_OBJS) $(LWIP_OBJS) $(LWIP_APPS_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,$(ETH_OBJS) $(LWIP_OBJS) $(LWIP_APPS_OBJS) net_client.o)
+
+# crypto_selftest: NIST/RFC known-answer tests for all 5 hardware crypto blocks.
+crypto_selftest.o: programs/crypto_selftest.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+crypto_selftest.elf: crypto_selftest.o $(CRYPTO_HW_OBJ) $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,$(CRYPTO_HW_OBJ) crypto_selftest.o)
+
+crypto_selftest: crypto_selftest.elf
+
+crypto_test.o: programs/crypto_test.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+crypto_test.elf: crypto_test.o $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,crypto_test.o)
+
+crypto_test: crypto_test.elf
 
 # ── Loader: reads .pic binary from SD card and runs it ───────────────────────
 # loader.c needs FatFs for SD card access.
@@ -448,7 +471,7 @@ test_sync: test_sync.elf
 	$(BUILD_DIR)/bin/llvm-objdump -d --no-show-raw-insn $< | head -60
 
 clean:
-	rm -f *.o crt-*.o lwip_*.o lwip_*.d *.elf "adventure 2.elf" "adventure 2.o" \
+	rm -f *.o crt-*.o lwip_*.o *.d lwip_*.d *.elf "adventure 2.elf" "adventure 2.o" \
 	      "bst 2.elf" "bst 2.o" "crypto 2.elf" "crypto 2.o" \
 	      "expr 2.elf" "expr 2.o" "hello 2.elf" "hello 2.o" \
 	      "queens 2.elf" "queens 2.o" "test_64bit 2.elf" "test_64bit 2.o" \

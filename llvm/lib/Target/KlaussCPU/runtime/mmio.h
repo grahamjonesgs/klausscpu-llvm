@@ -208,6 +208,120 @@ static inline uint32_t htonl(uint32_t v) {
 #endif
 #endif
 
+/* ── Hardware crypto — 0xF00A_xxxx / 0xF00B_xxxx / 0xF00C_xxxx ──────────── */
+/* Register layout matches MMIO_MAP.md exactly.                               */
+
+/* AES-128 core: 0xF00A_0000 */
+#define AES_BASE   (MMIO_BASE + 0x000A0000u)
+
+#define REG_AES_CTRL    (*(volatile uint32_t *)(AES_BASE + 0x000u))
+#define REG_AES_STATUS  (*(volatile uint32_t *)(AES_BASE + 0x008u))
+#define REG_AES_KEY0    (*(volatile uint64_t *)(AES_BASE + 0x010u))
+#define REG_AES_KEY1    (*(volatile uint64_t *)(AES_BASE + 0x018u))
+#define REG_AES_IN0     (*(volatile uint64_t *)(AES_BASE + 0x040u))
+#define REG_AES_IN1     (*(volatile uint64_t *)(AES_BASE + 0x048u))
+#define REG_AES_OUT0    (*(volatile uint64_t *)(AES_BASE + 0x050u))
+#define REG_AES_OUT1    (*(volatile uint64_t *)(AES_BASE + 0x058u))
+
+#define AES_CTRL_GO       (1u << 0)   /* kick encrypt/decrypt; sampled with ENC */
+#define AES_CTRL_ENC      (1u << 1)   /* 1=encrypt, 0=decrypt */
+#define AES_CTRL_KEY_LOAD (1u << 2)   /* expand key schedule */
+#define AES_CTRL_KEY_ZERO (1u << 3)   /* wipe key registers */
+#define AES_STATUS_BUSY   (1u << 0)
+#define AES_STATUS_DONE   (1u << 1)   /* sticky; cleared by next GO/KEY_LOAD */
+
+/* AES-GCM / GHASH: 0xF00A_0080
+ * Raw GHASH interface: tag = (tag XOR X) * H in GF(2^128).
+ * Software sequences AES-CTR + these GHASH steps to build full AES-GCM. */
+#define REG_GCM_CTRL    (*(volatile uint32_t *)(AES_BASE + 0x080u))
+#define REG_GCM_STATUS  (*(volatile uint32_t *)(AES_BASE + 0x088u))
+#define REG_GCM_H0      (*(volatile uint64_t *)(AES_BASE + 0x090u))  /* H bytes 0..7   */
+#define REG_GCM_H1      (*(volatile uint64_t *)(AES_BASE + 0x098u))  /* H bytes 8..15  */
+#define REG_GCM_X0      (*(volatile uint64_t *)(AES_BASE + 0x0A0u))  /* X bytes 0..7   */
+#define REG_GCM_X1      (*(volatile uint64_t *)(AES_BASE + 0x0A8u))  /* X bytes 8..15  */
+#define REG_GCM_TAG0    (*(volatile uint64_t *)(AES_BASE + 0x0B0u))  /* tag bytes 0..7  (RO) */
+#define REG_GCM_TAG1    (*(volatile uint64_t *)(AES_BASE + 0x0B8u))  /* tag bytes 8..15 (RO) */
+
+#define GCM_CTRL_GO     (1u << 0)  /* tag = (tag XOR X) * H; self-clearing */
+#define GCM_CTRL_RESET  (1u << 1)  /* tag = 0; self-clearing */
+#define GCM_STATUS_BUSY (1u << 0)
+#define GCM_STATUS_DONE (1u << 1)
+
+/* SHA-256 core: 0xF00B_0000
+ * Software must do all SHA-256 padding; hardware compresses one block per START.
+ * Hardware byteswaps each 32-bit half of BLOCK/DIGEST so software uses natural
+ * memory order: ((uint64_t*)BLOCK)[i] = ((uint64_t*)msg)[i]. */
+#define SHA_BASE   (MMIO_BASE + 0x000B0000u)
+
+#define REG_SHA_CTRL     (*(volatile uint32_t *)(SHA_BASE + 0x000u))
+#define REG_SHA_STATUS   (*(volatile uint32_t *)(SHA_BASE + 0x008u))
+#define SHA_BLOCK_PTR    ((volatile uint64_t *)(SHA_BASE + 0x010u))   /* 8 × 64-bit slots */
+#define SHA_DIGEST_PTR   ((volatile uint64_t *)(SHA_BASE + 0x050u))   /* 4 × 64-bit slots */
+/* Indexed access (equivalent to SHA_BLOCK_PTR[n] / SHA_DIGEST_PTR[n]). */
+#define REG_SHA_BLOCK(n)  (*(volatile uint64_t *)(SHA_BASE + 0x010u + (n)*8u))
+#define REG_SHA_DIGEST(n) (*(volatile uint64_t *)(SHA_BASE + 0x050u + (n)*8u))
+
+#define SHA_CTRL_INIT    (1u << 0)   /* reset H to FIPS-180-4 IV */
+#define SHA_CTRL_START   (1u << 1)   /* compress block in BLOCK regs */
+/* Note: no SHA_CTRL_LAST or SHA_BITLEN register — software writes the length
+ * bytes into the block data and calls SHA_CTRL_START for every block. */
+#define SHA_STATUS_BUSY  (1u << 0)
+#define SHA_STATUS_DONE  (1u << 1)
+
+/* HMAC wrapper: 0xF00B_0080
+ * START/FINAL are single-cycle H-load pulses; KEY_LOAD is ~135 cycles. */
+#define REG_HMAC_CTRL    (*(volatile uint32_t *)(SHA_BASE + 0x080u))
+#define REG_HMAC_STATUS  (*(volatile uint32_t *)(SHA_BASE + 0x088u))
+#define REG_HMAC_KEY0    (*(volatile uint64_t *)(SHA_BASE + 0x090u))
+#define REG_HMAC_KEY1    (*(volatile uint64_t *)(SHA_BASE + 0x098u))
+#define REG_HMAC_KEY2    (*(volatile uint64_t *)(SHA_BASE + 0x0A0u))
+#define REG_HMAC_KEY3    (*(volatile uint64_t *)(SHA_BASE + 0x0A8u))
+/* Indexed alias for loops. */
+#define REG_HMAC_KEY(n)  (*(volatile uint64_t *)(SHA_BASE + 0x090u + (n)*8u))
+
+#define HMAC_CTRL_KEY_LOAD (1u << 0)  /* recompute inner/outer midstates */
+#define HMAC_CTRL_START    (1u << 1)  /* H ← inner_state (single cycle) */
+#define HMAC_CTRL_FINAL    (1u << 2)  /* H ← outer_state (single cycle) */
+#define HMAC_CTRL_KEY_ZERO (1u << 3)  /* wipe key + midstates */
+#define HMAC_STATUS_BUSY      (1u << 0)
+#define HMAC_STATUS_KEY_VALID (1u << 1)  /* midstates valid; cleared by KEY_ZERO */
+
+/* TRNG: 0xF00C_0000 */
+#define TRNG_BASE  (MMIO_BASE + 0x000C0000u)
+
+#define REG_TRNG_CTRL    (*(volatile uint32_t *)(TRNG_BASE + 0x000u))
+#define REG_TRNG_STATUS  (*(volatile uint32_t *)(TRNG_BASE + 0x008u))
+#define REG_TRNG_DATA    (*(volatile uint64_t *)(TRNG_BASE + 0x010u))  /* read pops FIFO */
+
+#define TRNG_CTRL_ENABLE  (1u << 0)
+#define TRNG_CTRL_RESEED  (1u << 1)   /* self-clearing */
+#define TRNG_STATUS_READY     (1u << 0)
+#define TRNG_STATUS_HEALTH_OK (1u << 1)
+
+/* ── Crypto wait helpers ─────────────────────────────────────────────────── */
+
+static inline void aes_wait_done(void)     { while (REG_AES_STATUS & AES_STATUS_BUSY) {} }
+static inline void sha_wait_done(void)     { while (!(REG_SHA_STATUS & SHA_STATUS_DONE)) {} }
+static inline void gcm_wait_done(void)     { while (REG_GCM_STATUS & GCM_STATUS_BUSY) {} }
+static inline void hmac_wait_keyload(void) { while (REG_HMAC_STATUS & HMAC_STATUS_BUSY) {} }
+
+/* Accumulate one 128-bit block (lo=bytes 0..7, hi=bytes 8..15) into GHASH tag. */
+static inline void gcm_ghash_block(uint64_t lo, uint64_t hi) {
+    REG_GCM_X0 = lo;
+    REG_GCM_X1 = hi;
+    REG_GCM_CTRL = GCM_CTRL_GO;
+    gcm_wait_done();
+}
+
+/* Non-blocking TRNG read: returns 1 if a word was available, 0 otherwise.
+ * Returns 0 (and does not read) if the health monitor has tripped. */
+static inline int trng_read64(uint64_t *out) {
+    if (!(REG_TRNG_STATUS & TRNG_STATUS_READY)) return 0;
+    if (!(REG_TRNG_STATUS & TRNG_STATUS_HEALTH_OK)) return 0;
+    *out = REG_TRNG_DATA;
+    return 1;
+}
+
 /* ── Convenience wrappers ────────────────────────────────────────────────── */
 /* These match the old io_stubs.c calling convention so existing programs    */
 /* need only add #include "mmio.h" and remove the extern declarations.       */

@@ -31,6 +31,7 @@ BASE_CFLAGS := \
     -fdata-sections \
     -fPIC \
     -ffreestanding \
+    -MMD -MP \
     -D__IEEE_LITTLE_ENDIAN \
     -D_LDBL_EQ_DBL \
     -isystem $(PICOLIBC)/include \
@@ -53,6 +54,19 @@ NET_CFLAGS := $(BASE_CFLAGS) \
 
 ASFLAGS    := $(BASE_CFLAGS) -I.
 LDFLAGS    := -T $(RUNTIME)/klausscpu.ld --gc-sections -L$(PICOLIBC)/lib
+
+# ── wolfSSL + wolfSSH paths ─────────────────────────────────────────────────
+WOLFSSL_DIR    := wolfssl/wolfssl-install
+WOLFSSH_DIR    := wolfssl/wolfssh-install
+WOLFSSL_LIB    := $(WOLFSSL_DIR)/lib/libwolfssl.a
+WOLFSSH_LIB    := $(WOLFSSH_DIR)/lib/libwolfssh.a
+
+# SSH / wolfSSL compiler flags (extra includes + user_settings.h).
+SSH_CFLAGS := $(NET_CFLAGS) \
+    -DWOLFSSL_USER_SETTINGS \
+    -Iwolfssl \
+    -I$(WOLFSSL_DIR)/include \
+    -I$(WOLFSSH_DIR)/include
 
 # ── FreeRTOS kernel objects (shared by all targets) ─────────────────────────
 
@@ -151,6 +165,17 @@ SD_OBJS := \
     $(RUNTIME)/src/sd.o \
     $(RUNTIME)/src/diskio.o
 
+# ── Hardware crypto driver ────────────────────────────────────────────────────
+
+CRYPTO_HW_OBJ := $(RUNTIME)/src/crypto_hw.o
+
+# ── SSH server objects ────────────────────────────────────────────────────────
+
+SSH_OBJS := \
+    wolfssl_hw.o \
+    ssh/ssh_server.o \
+    ssh/sshkeys.o
+
 # ── Rules ─────────────────────────────────────────────────────────────────────
 
 .PHONY: all demo net_demo console_demo clean check-kernel
@@ -191,7 +216,7 @@ demo/net_demo.o: demo/net_demo.c | check-kernel
 	$(CC) $(NET_CFLAGS) -c -o $@ $<
 
 demo/console_demo.o: demo/console_demo.c | check-kernel
-	$(CC) $(NET_CFLAGS) -Itelnet -c -o $@ $<
+	$(CC) $(SSH_CFLAGS) -Itelnet -I$(FATFS_DIR) -c -o $@ $<
 
 telnet/telnet.o: telnet/telnet.c | check-kernel
 	$(CC) $(NET_CFLAGS) -Itelnet -c -o $@ $<
@@ -231,6 +256,19 @@ $(RUNTIME)/src/mdio.o: $(RUNTIME)/src/mdio.c
 $(RUNTIME)/src/eth.o: $(RUNTIME)/src/eth.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+$(RUNTIME)/src/crypto_hw.o: $(RUNTIME)/src/crypto_hw.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# SSH / wolfSSL objects (compiled with SSH_CFLAGS = NET_CFLAGS + wolfSSL includes)
+wolfssl_hw.o: wolfssl_hw.c
+	$(CC) $(SSH_CFLAGS) -c -o $@ $<
+
+ssh/ssh_server.o: ssh/ssh_server.c
+	$(CC) $(SSH_CFLAGS) -Itelnet -I$(FATFS_DIR) -c -o $@ $<
+
+ssh/sshkeys.o: ssh/sshkeys.c
+	$(CC) $(SSH_CFLAGS) -I$(FATFS_DIR) -c -o $@ $<
+
 # FatFs objects (no lwIP needed; FF_FS_REENTRANT=0 so no OS calls)
 $(FATFS_DIR)/ff.o: $(FATFS_DIR)/ff.c
 	$(CC) $(CFLAGS) -I$(FATFS_DIR) -c -o $@ $<
@@ -264,12 +302,25 @@ net_demo.bin: net_demo.elf
 console_demo.elf: $(KERNEL_OBJS) $(PORT_OBJS) $(LWIP_OBJS) $(LWIP_PORT_OBJS) \
                   $(FATFS_OBJS) $(SD_OBJS) \
                   telnet/telnet.o telnet/pic_loader.o \
+                  $(SSH_OBJS) $(CRYPTO_HW_OBJ) \
                   demo/console_demo.o $(RUNTIME_OBJS)
-	$(LD) $(LDFLAGS) -o $@ $^ $(PICOLIBC)/lib/libc.a
+	$(LD) $(LDFLAGS) -o $@ $^ \
+	    $(WOLFSSH_LIB) $(WOLFSSL_LIB) $(PICOLIBC)/lib/libc.a
 	@file $@
 
 console_demo.bin: console_demo.elf
 	$(OBJCOPY) -O binary $< $@
+
+# Include compiler-generated header dependency files.
+# -MMD -MP in BASE_CFLAGS writes a .d next to each .o/.lo.
+# The wildcards cover every subdirectory that receives output files.
+-include $(wildcard \
+    *.d \
+    ssh/*.d telnet/*.d demo/*.d \
+    portable/KlaussCPU/*.d \
+    $(RUNTIME)/src/*.d \
+    $(RUNTIME)/lwip_port/*.d \
+    $(KERNEL)/*.d $(KERNEL)/portable/MemMang/*.d)
 
 clean:
 	rm -f $(KERNEL_OBJS) $(PORT_OBJS) \
@@ -277,10 +328,16 @@ clean:
 	      $(FATFS_OBJS) $(SD_OBJS) \
 	      demo/demo.o demo/net_demo.o demo/console_demo.o \
 	      telnet/telnet.o telnet/pic_loader.o \
+	      wolfssl_hw.o ssh/ssh_server.o ssh/sshkeys.o \
+	      $(CRYPTO_HW_OBJ) \
 	      sys_arch.lo \
 	      $(RUNTIME)/crt0.o $(RUNTIME)/uart_stubs.o \
 	      $(RUNTIME)/src/syscalls.o $(RUNTIME)/stdio_handles.o \
 	      $(RUNTIME)/src/setjmp.o \
 	      $(RUNTIME)/src/mdio.o $(RUNTIME)/src/eth.o \
 	      demo.elf demo.bin net_demo.elf net_demo.bin \
-	      console_demo.elf console_demo.bin
+	      console_demo.elf console_demo.bin \
+	      *.d ssh/*.d telnet/*.d demo/*.d \
+	      portable/KlaussCPU/*.d \
+	      $(RUNTIME)/src/*.d \
+	      $(KERNEL)/*.d $(KERNEL)/portable/MemMang/*.d

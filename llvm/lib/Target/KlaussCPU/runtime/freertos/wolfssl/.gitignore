@@ -1,0 +1,16 @@
+# wolfSSL / wolfSSH — cloned source trees (run build-wolfssl.sh / build-wolfssh.sh)
+wolfssl-src/
+wolfssh-src/
+wolfSSH
+wolfSSH/
+
+# CMake and autoconf build directories
+wolfssl-build/
+wolfssh-build/
+
+# Install trees (headers + libraries)
+wolfssl-install/
+wolfssh-install/
+
+# Dependency files
+*.d

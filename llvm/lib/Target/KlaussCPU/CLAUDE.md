@@ -40,7 +40,7 @@ LLVM trunk (v23).  Use the **RISC-V backend** as the style reference, not X86 or
 |---|---|
 | Arg 0–3 | R0–R3 (A–D), caller-saved |
 | Args 4+ | stack: `[CallerSP + 24 + n×8]` = `[incoming_SP + 32 + n×8]` |
-| Return | R12 (M), caller-saved |
+| Return | R12 (M) for i64; R12+R11 (M+L) for i128, caller-saved |
 | Callee-saved | R4–R7 (E–H) + R15 (P, frame pointer) |
 | Temporaries | R8–R11, R13–R14 (I–L, N–O) caller-saved |
 
@@ -800,6 +800,17 @@ All five FPGA hardware fixes have shipped in silicon (see
 (`BR_JT` → `MEMGET32` of `EK_Custom32` table → `JMPR_R`), function-pointer
 calls (`CALLR_R`), one-instruction frame address materialisation (`ADDI`),
 and one-instruction signed sub-word loads (`LDIDX8_S`/`LDIDX16_S`).
+
+### Step 29b ✅ i128 return register — R11 as second return register
+- **`KlaussCPUCallingConv.td`**: `RetCC_KlaussCPU` changed from
+  `CCAssignToReg<[R12]>` to `CCAssignToReg<[R12, R11]>`.
+- i128 is split into two i64s by the type legalizer; R12 holds bits[63:0],
+  R11 holds bits[127:64]. CALL_I/CALLR_R/CALLREL already had R11 in Defs.
+- `LowerReturn` and `LowerCall` iterate over all `RVLocs` — no code changes
+  needed beyond the CC table entry.
+- Smoke test: `make128`, `get_lo`, `get_hi`, `add128` (with carry) all
+  produce correct assembly. wolfSSL `SP_WORD_SIZE 32` workaround can now
+  be removed to allow 64-bit bignum digits.
 
 ### Step 30 — Hardware test: run all .bin programs on board
 - hello.bin / adventure.bin / test_64bit.bin

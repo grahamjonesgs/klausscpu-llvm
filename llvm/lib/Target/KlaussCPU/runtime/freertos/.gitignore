@@ -6,3 +6,6 @@ FreeRTOS-Kernel/
 *.lo
 *.elf
 *.bin
+
+# Compiler-generated header dependency files (-MMD -MP)
+*.d

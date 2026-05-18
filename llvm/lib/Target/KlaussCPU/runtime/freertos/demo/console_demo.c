@@ -1,15 +1,15 @@
 /*
- * console_demo.c — KlaussCPU FreeRTOS remote console via telnet.
+ * console_demo.c — KlaussCPU FreeRTOS remote console via telnet and SSH.
  *
- * Starts lwIP with DHCP, an NTP sync task, and a telnet server on port 23.
+ * Starts lwIP with DHCP, an NTP sync task, a telnet server on port 23,
+ * and an SSH server on port 22 (wolfSSH + hardware AES/TRNG acceleration).
  * Once DHCP completes the IP address is printed on the UART; connect with:
  *
- *   telnet <ip>
+ *   telnet <ip>          — unencrypted shell
+ *   ssh admin@<ip>       — encrypted shell (password: klausscpu)
  *
- * The shell provides:
- *   help  info  time  heap  tick  leds  seg  exit
- *
- * NTP keeps a running UTC clock that the 'time' shell command reads.
+ * Shell commands: help  info  time  heap  tick  leds  seg  load  exit
+ * NTP keeps a running UTC clock that the 'time' command reads.
  */
 
 #include <stdio.h>
@@ -31,6 +31,9 @@
 #include "../src/eth.h"
 #include "../telnet/telnet.h"
 #include "../telnet/pic_loader.h"
+#include "../ssh/ssh_server.h"
+#include "../ssh/sshkeys.h"
+#include "../wolfssl_hw.h"
 #include "../mmio.h"
 
 /* ── Shared state ───────────────────────────────────────────────────────── */
@@ -38,7 +41,7 @@
 #define NET_READY_BIT   (1u << 0)
 
 static EventGroupHandle_t  g_net_events;
-static volatile time_t     g_unix_time;   /* updated by NTP callback */
+volatile time_t            g_unix_time;   /* updated by NTP callback; extern in ssh_server.c */
 static struct netif         g_netif;
 
 /* ── SNTP callback ──────────────────────────────────────────────────────── */
@@ -142,11 +145,23 @@ int main(void) {
 
     pic_loader_init();   /* create PIC loader mutex before scheduler starts */
 
+    /* Initialize hardware crypto + SSH host key before starting tasks. */
+    if (wolfssl_hw_init() != 0)
+        printf("console: WARNING: wolfssl_hw_init failed\n");
+
+    /* Generate/load SSH host key (save to SD so it's persistent across boots). */
+    if (sshkeys_init(/*save_to_sd=*/1) != 0)
+        printf("console: WARNING: SSH key init failed\n");
+
     xTaskCreate(netinit_task, "NETINIT", 512, NULL, 3, NULL);
     xTaskCreate(ntp_task,     "NTP",     512, NULL, 2, NULL);
 
     /* Start the telnet server — it will listen once the network is up. */
     telnet_start(&g_unix_time);
+
+    /* Start the SSH server — also waits for network (listener retries in task). */
+    if (ssh_server_start() != 0)
+        printf("console: WARNING: SSH server failed to start\n");
 
     vTaskStartScheduler();
     return 1;

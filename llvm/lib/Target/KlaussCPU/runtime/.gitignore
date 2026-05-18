@@ -2,8 +2,12 @@
 *.o
 crt-*.o
 *.elf
+*.bin
 *.s
 !src/*.S
+
+# Compiler-generated header dependency files (-MMD -MP)
+*.d
 
 # FPGA loader output
 *.code
