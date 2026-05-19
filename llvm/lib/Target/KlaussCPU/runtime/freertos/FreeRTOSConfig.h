@@ -43,9 +43,16 @@
 /*
  * heap_4.c is recommended: it coalesces freed blocks and handles arbitrary
  * alloc/free patterns without fragmentation for typical embedded use.
- * 256 KB is comfortable for ~8 tasks with 4 KB stacks + queue overhead.
+ *
+ * wolfSSH needs substantial heap per connection:
+ *   WOLFSSH struct           ~5 KB  (incl. 1633-byte k[] from MAX_KEX_KEY_SZ)
+ *   HandshakeInfo            ~5 KB  (incl. 2×1633-byte e[]/x[] KEX bufs)
+ *   RNG context, ECC state   ~4 KB  (WOLFSSL_SMALL_STACK heap-allocates these)
+ *   Per-channel buffers      ~2 KB  (grown on demand)
+ * Plus ECC key-gen during sshkeys_init() leaves fragmentation in the pool.
+ * KlaussCPU has 128 MB of RAM — use 4 MB to give wolfSSH + tasks plenty of room.
  */
-#define configTOTAL_HEAP_SIZE                   ((size_t)(256 * 1024))
+#define configTOTAL_HEAP_SIZE                   ((size_t)(4 * 1024 * 1024))
 
 /* ── Queues / synchronisation ───────────────────────────────────────────── */
 

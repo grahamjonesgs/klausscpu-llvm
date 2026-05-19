@@ -32,8 +32,6 @@
 #include "../telnet/telnet.h"
 #include "../telnet/pic_loader.h"
 #include "../ssh/ssh_server.h"
-#include "../ssh/sshkeys.h"
-#include "../wolfssl_hw.h"
 #include "../mmio.h"
 
 /* ── Shared state ───────────────────────────────────────────────────────── */
@@ -144,14 +142,6 @@ int main(void) {
     tcpip_init(NULL, NULL);
 
     pic_loader_init();   /* create PIC loader mutex before scheduler starts */
-
-    /* Initialize hardware crypto + SSH host key before starting tasks. */
-    if (wolfssl_hw_init() != 0)
-        printf("console: WARNING: wolfssl_hw_init failed\n");
-
-    /* Generate/load SSH host key (save to SD so it's persistent across boots). */
-    if (sshkeys_init(/*save_to_sd=*/1) != 0)
-        printf("console: WARNING: SSH key init failed\n");
 
     xTaskCreate(netinit_task, "NETINIT", 512, NULL, 3, NULL);
     xTaskCreate(ntp_task,     "NTP",     512, NULL, 2, NULL);

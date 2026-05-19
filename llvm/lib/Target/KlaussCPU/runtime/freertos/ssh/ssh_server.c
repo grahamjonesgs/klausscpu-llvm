@@ -6,6 +6,11 @@
  *   Shell: same commands as telnet/telnet.c (help/info/time/heap/tick/leds/seg).
  *
  * I/O: lwIP sockets API (blocking, per-task).
+ *
+ * Initialization order (critical):
+ *   1. wolfSSH_Init()     — initializes wolfCrypt (required before any wc_* calls)
+ *   2. wolfssl_hw_init()  — registers hardware AES callback with wolfCrypt
+ *   3. sshkeys_init()     — generates/loads ECDSA P-256 host key using wolfCrypt
  */
 
 #define WOLFSSL_USER_SETTINGS
@@ -21,20 +26,18 @@
 #include "task.h"
 #include "semphr.h"
 
-/* lwIP socket API. */
 #include "lwip/sockets.h"
 #include "lwip/inet.h"
 
-/* wolfSSH. */
 #include <wolfssh/ssh.h>
-#include <wolfssh/log.h>
+#include <wolfssl/wolfcrypt/error-crypt.h>
 
 #include "ssh_server.h"
 #include "sshkeys.h"
 #include "../wolfssl_hw.h"
 #include "../../mmio.h"
 
-extern volatile time_t g_unix_time; /* set by NTP — declared in console_demo.c */
+extern volatile time_t g_unix_time;
 
 /* ── Authentication ──────────────────────────────────────────────────────── */
 
@@ -43,7 +46,6 @@ static ssh_auth_cb_t s_auth_cb;
 static int default_auth_cb(const char *user, const char *password,
                            const uint8_t *pubkey, size_t pubkey_len) {
     (void)pubkey; (void)pubkey_len;
-    /* Simple password auth: admin / klausscpu */
     if (strcmp(user, "admin") == 0 && strcmp(password, "klausscpu") == 0)
         return 0;
     return -1;
@@ -51,22 +53,36 @@ static int default_auth_cb(const char *user, const char *password,
 
 void ssh_server_set_auth_cb(ssh_auth_cb_t cb) { s_auth_cb = cb; }
 
-/* wolfSSH authentication callback. */
+/* wolfSSH authentication callback.
+ * auth->username and password are SSH length-prefixed strings — NOT
+ * null-terminated.  Build NUL-terminated copies before comparing. */
 static int wolfssh_auth_cb(uint8_t type, WS_UserAuthData *auth, void *ctx) {
     (void)ctx;
     ssh_auth_cb_t cb = s_auth_cb ? s_auth_cb : default_auth_cb;
-    const char *user = (const char *)auth->username;
+
+    char user[64];
+    word32 usrsz = auth->usernameSz < sizeof(user) - 1
+                   ? auth->usernameSz : (word32)(sizeof(user) - 1);
+    memcpy(user, auth->username, usrsz);
+    user[usrsz] = '\0';
 
     if (type == WOLFSSH_USERAUTH_PASSWORD) {
-        const char *pw = (const char *)auth->sf.password.password;
-        return (cb(user, pw, NULL, 0) == 0) ? WOLFSSH_USERAUTH_SUCCESS
-                                             : WOLFSSH_USERAUTH_FAILURE;
+        char pw[128];
+        word32 pwsz = auth->sf.password.passwordSz < sizeof(pw) - 1
+                      ? auth->sf.password.passwordSz : (word32)(sizeof(pw) - 1);
+        memcpy(pw, auth->sf.password.password, pwsz);
+        pw[pwsz] = '\0';
+
+        int ok = (cb(user, pw, NULL, 0) == 0);
+        printf("ssh: auth user='%s' password: %s\n", user, ok ? "OK" : "FAIL");
+        return ok ? WOLFSSH_USERAUTH_SUCCESS : WOLFSSH_USERAUTH_FAILURE;
     }
     if (type == WOLFSSH_USERAUTH_PUBLICKEY) {
         const uint8_t *pk = auth->sf.publicKey.publicKey;
         word32 pk_len     = auth->sf.publicKey.publicKeySz;
-        return (cb(user, NULL, pk, pk_len) == 0) ? WOLFSSH_USERAUTH_SUCCESS
-                                                  : WOLFSSH_USERAUTH_FAILURE;
+        int ok = (cb(user, NULL, pk, pk_len) == 0);
+        printf("ssh: auth user='%s' pubkey: %s\n", user, ok ? "OK" : "FAIL");
+        return ok ? WOLFSSH_USERAUTH_SUCCESS : WOLFSSH_USERAUTH_FAILURE;
     }
     return WOLFSSH_USERAUTH_FAILURE;
 }
@@ -88,7 +104,7 @@ static int ssh_send(WOLFSSH *ssh, void *buf, word32 sz, void *ctx) {
     return n;
 }
 
-/* ── Interactive shell (mirrors telnet/telnet.c shell) ───────────────────── */
+/* ── Interactive shell ───────────────────────────────────────────────────── */
 
 #define SSH_BANNER   "\r\nKlaussCPU SSH shell — type 'help'\r\n\r\n"
 #define SSH_PROMPT   "$ "
@@ -117,15 +133,13 @@ static void run_shell(WOLFSSH *ssh) {
     uint8_t ch;
     while (1) {
         int n = wolfSSH_stream_read(ssh, &ch, 1);
-        if (n <= 0) break; /* connection closed or error */
+        if (n <= 0) break;
 
         if (ch == '\r' || ch == '\n') {
             ssh_send_str(ssh, "\r\n");
             line[line_len] = '\0';
 
-            /* Dispatch command. */
             if (line_len == 0) {
-                /* empty line */
             } else if (strcmp(line, "help") == 0) {
                 ssh_send_str(ssh,
                     "Commands: help  info  time  heap  tick  leds  seg  exit\r\n");
@@ -168,14 +182,13 @@ static void run_shell(WOLFSSH *ssh) {
             line_len = 0;
             ssh_send_str(ssh, SSH_PROMPT);
         } else if (ch == 127 || ch == 8) {
-            /* Backspace. */
             if (line_len > 0) {
                 line_len--;
                 ssh_send_str(ssh, "\b \b");
             }
         } else if (ch >= 0x20 && line_len < SSH_LINE_MAX - 1) {
             line[line_len++] = (char)ch;
-            wolfSSH_stream_send(ssh, &ch, 1); /* echo */
+            wolfSSH_stream_send(ssh, &ch, 1);
         }
     }
 }
@@ -198,7 +211,9 @@ static void ssh_conn_task(void *arg) {
 
     int rc = wolfSSH_accept(ssh);
     if (rc != WS_SUCCESS) {
-        printf("ssh: accept failed (%d)\n", rc);
+        int err = wolfSSH_get_error(ssh);
+        printf("ssh: accept failed rc=%d err=%d (%s)\n",
+               rc, err, wc_GetErrorString(err));
         goto cleanup;
     }
 
@@ -217,6 +232,9 @@ static WOLFSSH_CTX *s_ctx;
 static void ssh_listener_task(void *arg) {
     (void)arg;
 
+    /* Save the host key to SD if it was freshly generated. */
+    sshkeys_persist();
+
     int listen_sock = lwip_socket(AF_INET, SOCK_STREAM, 0);
     if (listen_sock < 0) {
         printf("ssh: socket() failed\n");
@@ -232,12 +250,12 @@ static void ssh_listener_task(void *arg) {
     addr.sin_port        = htons(SSH_PORT);
     addr.sin_addr.s_addr = INADDR_ANY;
 
-    if (lwip_bind(listen_sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        printf("ssh: bind() failed\n");
+    if (lwip_bind(listen_sock, (struct sockaddr *)&addr, sizeof(addr)) < 0 ||
+        lwip_listen(listen_sock, SSH_MAX_CONNS) < 0) {
+        printf("ssh: bind/listen failed\n");
         lwip_close(listen_sock);
         vTaskDelete(NULL);
     }
-    lwip_listen(listen_sock, SSH_MAX_CONNS);
     printf("ssh: listening on port %d\n", SSH_PORT);
 
     while (1) {
@@ -247,8 +265,7 @@ static void ssh_listener_task(void *arg) {
                                  (struct sockaddr *)&client_addr, &addr_len);
         if (client < 0) continue;
 
-        printf("ssh: new connection from %s\n",
-               inet_ntoa(client_addr.sin_addr));
+        printf("ssh: connection from %s\n", inet_ntoa(client_addr.sin_addr));
 
         WOLFSSH *ssh = wolfSSH_new(s_ctx);
         if (!ssh) {
@@ -257,9 +274,6 @@ static void ssh_listener_task(void *arg) {
             continue;
         }
 
-        /* Set hardware crypto device for this session. */
-        /* Hardware AES is registered globally via wc_CryptoCb_RegisterDevice;
-         * no per-session devId setter is needed in wolfSSH 1.4.x. */
         conn_args_t *ca = pvPortMalloc(sizeof(*ca));
         if (!ca) {
             wolfSSH_free(ssh);
@@ -281,9 +295,16 @@ static void ssh_listener_task(void *arg) {
 /* ── Public API ──────────────────────────────────────────────────────────── */
 
 int ssh_server_start(void) {
-    /* Initialize wolfSSH global state. */
     if (wolfSSH_Init() != WS_SUCCESS) {
         printf("ssh: wolfSSH_Init failed\n");
+        return -1;
+    }
+
+    if (wolfssl_hw_init() != 0)
+        printf("ssh: WARNING: hw crypto init failed — using software\n");
+
+    if (sshkeys_init() != 0) {
+        printf("ssh: host key init failed\n");
         return -1;
     }
 
@@ -293,26 +314,25 @@ int ssh_server_start(void) {
         return -1;
     }
 
-    /* I/O callbacks (wolfSSH 1.4.x API). */
     wolfSSH_SetIORecv(s_ctx, ssh_recv);
     wolfSSH_SetIOSend(s_ctx, ssh_send);
-
-    /* Authentication callback. */
     wolfSSH_SetUserAuth(s_ctx, wolfssh_auth_cb);
 
-    /* Load Ed25519 host key. */
-    const uint8_t *priv = sshkeys_get_private();
+    const uint8_t *priv     = sshkeys_get_private();
     size_t         priv_len = sshkeys_get_private_len();
     if (wolfSSH_CTX_UsePrivateKey_buffer(s_ctx, priv, (word32)priv_len,
-                                         WOLFSSH_FORMAT_RAW) != WS_SUCCESS) {
+                                         WOLFSSH_FORMAT_ASN1) != WS_SUCCESS) {
         printf("ssh: UsePrivateKey failed\n");
+        wolfSSH_CTX_free(s_ctx);
+        s_ctx = NULL;
         return -1;
     }
 
-    /* Spawn listener. */
     if (xTaskCreate(ssh_listener_task, "SSHL", SSH_TASK_STACK, NULL,
                     SSH_TASK_PRIO, NULL) != pdPASS) {
         printf("ssh: xTaskCreate failed\n");
+        wolfSSH_CTX_free(s_ctx);
+        s_ctx = NULL;
         return -1;
     }
     return 0;

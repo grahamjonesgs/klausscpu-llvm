@@ -73,6 +73,16 @@ int klausscpu_trng_seed(unsigned char *output, unsigned int sz);
 #define WOLF_CRYPTO_CB
 #define KLAUSSCPU_CRYPTO_DEV_ID  1
 
+/* ── ASN.1 parser ────────────────────────────────────────────────────────── */
+
+/* Force the old-style (non-template) ASN.1 decoder.
+ * wolfSSL 5.7.2 settings.h auto-enables WOLFSSL_ASN_TEMPLATE which routes
+ * through a template engine whose GetASN_Items / ToTraditionalInline_ex path
+ * fails with ASN_PARSE_E on all ECC key formats (SEC1 and PKCS#8) on KlaussCPU.
+ * The old decoder (wc_EccPrivateKeyDecode #ifndef WOLFSSL_ASN_TEMPLATE branch)
+ * works correctly.  WOLFSSL_ASN_ORIGINAL suppresses the auto-define. */
+#define WOLFSSL_ASN_ORIGINAL
+
 /* ── Disabled features ───────────────────────────────────────────────────── */
 
 #define NO_RSA
@@ -89,6 +99,13 @@ int klausscpu_trng_seed(unsigned char *output, unsigned int sz);
 
 #define WOLFSSL_SMALL_STACK
 #define WOLFSSL_SMALL_STACK_CACHE
+
+/* Force 32-bit SP math limbs.
+ * wolfSSL's 64-bit SP math path uses __uint128_t for intermediate products and
+ * allocates much larger per-operation buffers during ECC key generation.  This
+ * causes heap corruption on KlaussCPU (buffer overrun in sp_256 scalar mult).
+ * 32-bit limbs produce correct results and were the verified working config. */
+#define SP_WORD_SIZE 32
 /* Note: CURVED25519_SMALL and ED25519_SMALL removed — they redirect to
  * ge_low_mem.c which cmake may not compile, leaving ge_ and fe_ symbols undefined. */
 

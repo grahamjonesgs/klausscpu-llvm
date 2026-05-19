@@ -656,10 +656,30 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
   Chain = DAG.getCALLSEQ_END(Chain, StackSize, 0, Glue, DL);
   Glue  = Chain.getValue(1);
 
-  // ---- Copy return values from R12 ---------------------------------------
+  // ---- Copy return values from R12/R11 ------------------------------------
+  // LowerCallTo only splits i128 into {i64, i64} in CLI.Ins when
+  // IsPostTypeLegalization=true.  When makeLibCall is called from the type
+  // legalizer (e.g. ExpandIntRes_UDIV for __udivti3), that flag is false, so
+  // CLI.Ins contains one raw i128 entry.  RetCC_KlaussCPU has no i128 rule
+  // and AnalyzeCallResult would hit llvm_unreachable.
+  // Fix: split every i128 entry into two i64 entries here, so the CC sees
+  // what it expects.  LowerCallTo's getCopyFromParts() then reassembles the
+  // i128 from the two i64 values in InVals.
+  SmallVector<ISD::InputArg, 8> AdjIns;
+  for (const auto &In : CLI.Ins) {
+    if (In.VT == MVT::i128) {
+      ISD::InputArg Half = In;
+      Half.VT = MVT::i64;
+      AdjIns.push_back(Half); // Lo → R12
+      AdjIns.push_back(Half); // Hi → R11
+    } else {
+      AdjIns.push_back(In);
+    }
+  }
+
   SmallVector<CCValAssign, 4> RVLocs;
   CCState RetCCInfo(CallConv, IsVarArg, MF, RVLocs, *DAG.getContext());
-  RetCCInfo.AnalyzeCallResult(CLI.Ins, RetCC_KlaussCPU);
+  RetCCInfo.AnalyzeCallResult(AdjIns, RetCC_KlaussCPU);
 
   for (const CCValAssign &VA : RVLocs) {
     assert(VA.isRegLoc() && "KlaussCPU: only register returns supported");

@@ -24,13 +24,12 @@
 
 #define FF_CODE_PAGE    437     /* US English; ~3 KB code-page table */
 
-/* LFN disabled: removes ffunicode.c codepage tables (~20 KB) and the ff.c
-   LFN path, keeping the binary under the 64 KB kbt-loader limit.
-   8.3 filenames (hello.txt, klcpu.txt, pattern.bin) are fully supported. */
-#define FF_USE_LFN          0
-#define FF_MAX_LFN          12
+/* LFN enabled (stack-based buffer, no ffunicode.c needed for FF_CODE_PAGE=437).
+   FF_MAX_LFN=64 → 130 bytes of stack per file op, negligible on 32 KB stacks. */
+#define FF_USE_LFN          1
+#define FF_MAX_LFN          64
 #define FF_LFN_UNICODE      0
-#define FF_LFN_BUF          12
+#define FF_LFN_BUF          64
 #define FF_SFN_BUF          12
 #define FF_FS_RPATH         0   /* no relative-path support */
 

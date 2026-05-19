@@ -15,7 +15,7 @@
  *   Cipher: aes128-gcm@openssh.com  (hardware AES-GCM)
  *           aes128-ctr              (hardware AES-CTR fallback)
  *   MAC:    hmac-sha2-256           (wolfCrypt software)
- *   HostKey: ssh-ed25519
+ *   HostKey: ecdsa-sha2-nistp256  (wolfSSH does not support ssh-ed25519 yet)
  */
 #ifndef SSH_SERVER_H
 #define SSH_SERVER_H

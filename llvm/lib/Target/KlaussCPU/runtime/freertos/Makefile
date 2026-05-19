@@ -64,6 +64,9 @@ WOLFSSH_LIB    := $(WOLFSSH_DIR)/lib/libwolfssh.a
 # SSH / wolfSSL compiler flags (extra includes + user_settings.h).
 SSH_CFLAGS := $(NET_CFLAGS) \
     -DWOLFSSL_USER_SETTINGS \
+    -DWOLFSSH_NO_SFTP \
+    -DWOLFSSH_NO_SCP \
+    -DWOLFSSH_USER_IO \
     -Iwolfssl \
     -I$(WOLFSSL_DIR)/include \
     -I$(WOLFSSH_DIR)/include
@@ -159,7 +162,8 @@ FATFS_DIR := $(RUNTIME)/fatfs
 
 FATFS_OBJS := \
     $(FATFS_DIR)/ff.o \
-    $(FATFS_DIR)/ffsystem.o
+    $(FATFS_DIR)/ffsystem.o \
+    $(FATFS_DIR)/ffunicode.o
 
 SD_OBJS := \
     $(RUNTIME)/src/sd.o \
@@ -168,6 +172,18 @@ SD_OBJS := \
 # ── Hardware crypto driver ────────────────────────────────────────────────────
 
 CRYPTO_HW_OBJ := $(RUNTIME)/src/crypto_hw.o
+
+# ── compiler-rt runtime support objects ──────────────────────────────────────
+# picolibc pulls in float/double conversion symbols even when %f is not used.
+# wolfSSL with 64-bit SP math uses __udivti3/__umodti3/__multi3 (i128 arithmetic).
+CRT_CONV_OBJS := \
+    $(RUNTIME)/crt-extendsfdf2.o \
+    $(RUNTIME)/crt-truncdfsf2.o \
+    $(RUNTIME)/fp_mode_stub.o \
+    $(RUNTIME)/crt-udivti3.o \
+    $(RUNTIME)/crt-umodti3.o \
+    $(RUNTIME)/crt-udivmodti4.o \
+    $(RUNTIME)/crt-multi3.o
 
 # ── SSH server objects ────────────────────────────────────────────────────────
 
@@ -303,7 +319,7 @@ console_demo.elf: $(KERNEL_OBJS) $(PORT_OBJS) $(LWIP_OBJS) $(LWIP_PORT_OBJS) \
                   $(FATFS_OBJS) $(SD_OBJS) \
                   telnet/telnet.o telnet/pic_loader.o \
                   $(SSH_OBJS) $(CRYPTO_HW_OBJ) \
-                  demo/console_demo.o $(RUNTIME_OBJS)
+                  demo/console_demo.o $(RUNTIME_OBJS) $(CRT_CONV_OBJS)
 	$(LD) $(LDFLAGS) -o $@ $^ \
 	    $(WOLFSSH_LIB) $(WOLFSSL_LIB) $(PICOLIBC)/lib/libc.a
 	@file $@

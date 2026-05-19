@@ -68,7 +68,8 @@ CRT_DF_NAMES = adddf3 subdf3 muldf3 divdf3 negdf2 comparedf2 \
                floatsidf floatunsidf fixdfsi fixdfdi fixunsdfsi fixunsdfdi \
                extendsfdf2 truncdfsf2
 
-CRT_INT_NAMES = udivsi3 divsi3 udivdi3 divdi3 umoddi3 moddi3 udivmoddi4
+CRT_INT_NAMES = udivsi3 divsi3 udivdi3 divdi3 umoddi3 moddi3 udivmoddi4 \
+                udivti3 umodti3 udivmodti4 multi3
 
 CRT_FP_NAMES = $(CRT_SF_NAMES) $(CRT_DF_NAMES) $(CRT_INT_NAMES)
 CRT_FP_OBJS  = $(patsubst %, crt-%.o, $(CRT_FP_NAMES)) fp_mode_stub.o

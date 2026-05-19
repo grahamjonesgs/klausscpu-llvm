@@ -1,29 +1,33 @@
 /* sshkeys.h — SSH host key management for KlaussCPU.
  *
- * Generates an Ed25519 host key pair using wolfCrypt + TRNG on first call,
- * and caches it in RAM.  Optionally stores/loads from SD card for persistent
- * host identity (avoids "host key changed" warnings across reboots).
+ * Generates an ECDSA P-256 host key pair on first call (wolfSSH does not
+ * support Ed25519 host keys in this version).  Key is stored in SEC1 DER
+ * format.  Optionally loads/saves from SD card for host identity persistence.
  */
 #ifndef SSHKEYS_H
 #define SSHKEYS_H
 
 #include <stdint.h>
+#include <stddef.h>
 
-#define SSH_KEY_PATH "0:ssh_host_key.bin"  /* FatFs path: SD card, partition 0 */
+#define SSH_KEY_PATH "0:ssh_host_key.bin"
 
 /* Initialize SSH host key.
- * If SD card is mounted and SSH_KEY_PATH exists, load the stored key.
- * Otherwise generate a new Ed25519 key pair from TRNG and (optionally) save it.
+ * Tries to load an existing key from SD card; if unavailable (SD not mounted
+ * pre-scheduler), generates a new ECDSA P-256 key pair from TRNG.
  * Returns 0 on success, negative on failure. */
-int sshkeys_init(int save_to_sd);
+int sshkeys_init(void);
 
-/* Return the DER-encoded Ed25519 private key (64 bytes: priv‖pub).
+/* Persist a freshly-generated key to SD card.  No-op if the key was loaded
+ * from SD.  Must be called from a task context after FatFs is ready.
+ * Returns 0 on success or if no persistence is needed. */
+int sshkeys_persist(void);
+
+/* Return the SEC1 DER-encoded ECDSA P-256 private key (≈121 bytes).
  * Valid after sshkeys_init(). */
 const uint8_t *sshkeys_get_private(void);
 size_t         sshkeys_get_private_len(void);
 
-/* Return the DER-encoded Ed25519 public key (32 bytes).
- * Valid after sshkeys_init(). */
 const uint8_t *sshkeys_get_public(void);
 size_t         sshkeys_get_public_len(void);
 
