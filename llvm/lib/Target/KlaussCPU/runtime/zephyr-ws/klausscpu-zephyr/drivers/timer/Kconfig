@@ -1,0 +1,6 @@
+config KLAUSSCPU_TIMER
+	bool "KlaussCPU system timer"
+	default n
+	select TICKLESS_CAPABLE
+	help
+	  System tick timer for the KlaussCPU MMIO interrupt controller.

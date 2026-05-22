@@ -65,12 +65,12 @@ protected:
 namespace tools {
 namespace klausscpu {
 
-// lld-based linker for KlaussCPU ELF output.
+// Bare-metal lld linker for KlaussCPU.
 class LLVM_LIBRARY_VISIBILITY Linker final : public Tool {
 public:
   Linker(const ToolChain &TC) : Tool("klausscpu::Linker", "linker", TC) {}
-  bool isLinkJob()       const override { return true; }
-  bool hasIntegratedCPP()const override { return false; }
+  bool isLinkJob()        const override { return true; }
+  bool hasIntegratedCPP() const override { return false; }
   void ConstructJob(Compilation &C, const JobAction &JA,
                     const InputInfo &Output, const InputInfoList &Inputs,
                     const llvm::opt::ArgList &TCArgs,

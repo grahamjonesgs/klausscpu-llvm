@@ -1,0 +1,14 @@
+# west workspace state — populated by `west init`/`west update`
+.west/
+
+# Zephyr upstream tree — fetched by `west update`, not part of our repo.
+zephyr/
+
+# Hardcoded build directories (any prefix variant)
+build/
+build_*/
+
+# Editor / OS detritus
+.DS_Store
+*.swp
+*~

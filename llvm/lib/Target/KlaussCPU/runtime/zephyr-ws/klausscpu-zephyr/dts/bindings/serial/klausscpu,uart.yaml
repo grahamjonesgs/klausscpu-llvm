@@ -1,0 +1,11 @@
+description: KlaussCPU UART (single MMIO TX/RX register)
+
+compatible: "klausscpu,uart"
+
+include: [uart-controller.yaml]
+
+properties:
+  reg:
+    required: true
+  current-speed:
+    required: false

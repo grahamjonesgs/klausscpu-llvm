@@ -1,0 +1,2 @@
+config BOARD_NEXYS_A7
+	bool "KlaussCPU on Digilent Nexys A7 FPGA"

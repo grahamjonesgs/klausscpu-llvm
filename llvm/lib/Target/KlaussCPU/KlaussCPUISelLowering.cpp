@@ -106,7 +106,7 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setMaxAtomicSizeInBitsSupported(0);
 
   // ---- Stack operations ----
-  setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i64, Expand);
+  setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i64, Custom);
   setOperationAction(ISD::STACKSAVE,          MVT::Other, Custom);
   setOperationAction(ISD::STACKRESTORE,       MVT::Other, Custom);
 
@@ -191,8 +191,9 @@ SDValue KlaussCPUTargetLowering::LowerOperation(SDValue Op,
   case ISD::JumpTable:      return LowerJumpTable(Op, DAG);
   case ISD::BR_JT:          return LowerBR_JT(Op, DAG);
   case ISD::SELECT:         return LowerSELECT(Op, DAG);
-  case ISD::STACKSAVE:      return LowerSTACKSAVE(Op, DAG);
-  case ISD::STACKRESTORE:   return LowerSTACKRESTORE(Op, DAG);
+  case ISD::STACKSAVE:           return LowerSTACKSAVE(Op, DAG);
+  case ISD::STACKRESTORE:        return LowerSTACKRESTORE(Op, DAG);
+  case ISD::DYNAMIC_STACKALLOC: return LowerDYNAMIC_STACKALLOC(Op, DAG);
   case ISD::VASTART:        return LowerVASTART(Op, DAG);
   case ISD::SHL_PARTS:      return LowerShiftLeftParts(Op, DAG);
   case ISD::SRL_PARTS:      return LowerShiftRightParts(Op, DAG, /*IsSRA=*/false);
@@ -395,6 +396,43 @@ SDValue KlaussCPUTargetLowering::LowerSTACKRESTORE(SDValue Op,
   SDNode *SetSP = DAG.getMachineNode(KlaussCPU::SETSP_R, DL, MVT::Other,
                                       {NewSP64, Chain});
   return SDValue(SetSP, 0);
+}
+
+// Dynamic stack allocation (VLAs).
+// LLVM's default expansion of DYNAMIC_STACKALLOC uses getCopyFromReg(SP) which
+// asserts because SP has no register class.  Implement directly with GETSP_R /
+// SETSP_R so we never touch SP as a physical-register operand.
+// Stack grows downward; the frame pointer in R15 will restore SP on exit.
+SDValue KlaussCPUTargetLowering::LowerDYNAMIC_STACKALLOC(SDValue Op,
+                                                           SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  SDValue Chain  = Op.getOperand(0);
+  SDValue Size   = Op.getOperand(1); // byte count (may be non-constant)
+  SDValue AlignV = Op.getOperand(2); // alignment constant
+
+  EVT VT = Op.getValueType(); // i64 (pointer type, result 0)
+
+  // Read current SP via GETSP_R (no chain needed: it's a side-effect-free read).
+  SDValue OldSP = SDValue(DAG.getMachineNode(KlaussCPU::GETSP_R, DL, MVT::i64), 0);
+
+  // NewSP = OldSP - Size  (stack grows downward)
+  SDValue NewSP = DAG.getNode(ISD::SUB, DL, VT, OldSP, Size);
+
+  // Align NewSP DOWN to the requested alignment.
+  if (auto *AC = dyn_cast<ConstantSDNode>(AlignV)) {
+    uint64_t Align = AC->getZExtValue();
+    if (Align > 1) {
+      SDValue Mask = DAG.getConstant(~(Align - 1), DL, VT);
+      NewSP = DAG.getNode(ISD::AND, DL, VT, NewSP, Mask);
+    }
+  }
+
+  // Write new SP via SETSP_R.
+  SDNode *SetSP = DAG.getMachineNode(KlaussCPU::SETSP_R, DL, MVT::Other,
+                                      {NewSP, Chain});
+
+  // Result: (allocated_address = NewSP, new_chain)
+  return DAG.getMergeValues({NewSP, SDValue(SetSP, 0)}, DL);
 }
 
 // va_start(ap, last_named) — store the address of the first variadic argument

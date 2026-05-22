@@ -1,0 +1,8 @@
+config UART_KLAUSSCPU
+	bool "KlaussCPU UART driver"
+	default n
+	depends on SERIAL
+	select SERIAL_HAS_DRIVER
+	help
+	  Polled UART driver for the KlaussCPU hardware UART.
+	  Uses the klausscpu_txcharmemr / klausscpu_rxrb builtins.

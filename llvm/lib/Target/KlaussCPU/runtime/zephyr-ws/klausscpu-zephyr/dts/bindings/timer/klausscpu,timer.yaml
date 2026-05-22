@@ -1,0 +1,9 @@
+description: KlaussCPU timer and interrupt controller
+
+compatible: "klausscpu,timer"
+
+include: [base.yaml]
+
+properties:
+  reg:
+    required: true

@@ -1,0 +1,2 @@
+zephyr_library()
+zephyr_library_sources_ifdef(CONFIG_KLAUSSCPU_TIMER klausscpu_timer.c)
