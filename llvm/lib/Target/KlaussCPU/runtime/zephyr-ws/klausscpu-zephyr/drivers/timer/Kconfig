@@ -1,6 +1,8 @@
 config KLAUSSCPU_TIMER
 	bool "KlaussCPU system timer"
 	default n
-	select TICKLESS_CAPABLE
 	help
 	  System tick timer for the KlaussCPU MMIO interrupt controller.
+	  Fixed-rate (10 kHz @ 100 MHz CPU); does NOT support tickless —
+	  sys_clock_set_timeout() is a no-op and sys_clock_elapsed() returns 0.
+	  Do NOT select TICKLESS_CAPABLE here, or k_msleep / timeouts won't fire.

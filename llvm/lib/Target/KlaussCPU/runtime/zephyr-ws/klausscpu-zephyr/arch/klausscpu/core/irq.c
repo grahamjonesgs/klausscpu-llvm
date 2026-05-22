@@ -36,6 +36,11 @@ volatile uint32_t _klausscpu_in_isr;
 static uint64_t _kernel_stack[KERNEL_STACK_WORDS];
 uint32_t _klausscpu_kernel_sp; /* read from swap.S */
 
+/* ISR-exit scratch: holds the interrupted thread's switch_handle (saved SP)
+ * across the kernel-stack switch in z_klausscpu_timer_isr, so we can pass
+ * it to z_get_next_switch_handle() after sys_clock_isr() returns. */
+uint64_t _klausscpu_isr_handle;
+
 void arch_irq_enable(unsigned int irq)
 {
     _irq_enabled_mask |= (1u << irq);

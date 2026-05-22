@@ -2,7 +2,9 @@
 .west/
 
 # Zephyr upstream tree — fetched by `west update`, not part of our repo.
-zephyr/
+# Leading slash anchors at this dir only, so it does NOT match the
+# klausscpu-zephyr/include/zephyr/ arch include namespace.
+/zephyr/
 
 # Hardcoded build directories (any prefix variant)
 build/

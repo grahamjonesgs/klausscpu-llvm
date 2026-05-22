@@ -4,7 +4,9 @@ crt-*.o
 *.elf
 *.bin
 *.s
-!src/*.S
+# Hand-written assembly *.S — note macOS APFS/HFS+ is case-insensitive, so
+# `*.s` above would otherwise drop `.S` files too. Negate the rule here.
+!*.S
 
 # Compiler-generated header dependency files (-MMD -MP)
 *.d
