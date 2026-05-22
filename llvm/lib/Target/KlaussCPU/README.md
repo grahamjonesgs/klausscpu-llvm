@@ -26,18 +26,32 @@ llvm/lib/Target/KlaussCPU/
 │   │   ├── compat.c               old print_str/newline API → uart_putc
 │   │   ├── setjmp.S               setjmp/longjmp (assembly)
 │   │   └── fp_mode_stub.c         compiler-rt FP mode stub
-│   └── programs/                  test and demo programs
-│       ├── hello.c                UART smoke test
-│       ├── adventure.c            text adventure game
-│       ├── test_64bit.c           integer/memory/heap test suite
-│       ├── expr.c                 recursive expression evaluator
-│       ├── bst.c                  binary search tree + heap stress
-│       ├── crypto.c               CRC32 / SHA-256 / Base64
-│       ├── queens.c               N-queens backtracker
-│       ├── test_switch.c          switch → BR_JT → JMPR_R
-│       ├── test_fp.c              soft-FP smoke test
-│       ├── test_asm.c             inline assembly test
-│       └── test_printf.c          varargs / printf test
+│   ├── programs/                  test and demo programs
+│   │   ├── hello.c                UART smoke test
+│   │   ├── adventure.c            text adventure game
+│   │   ├── test_64bit.c           integer/memory/heap test suite
+│   │   ├── expr.c                 recursive expression evaluator
+│   │   ├── bst.c                  binary search tree + heap stress
+│   │   ├── crypto.c               CRC32 / SHA-256 / Base64
+│   │   ├── queens.c               N-queens backtracker
+│   │   ├── test_switch.c          switch → BR_JT → JMPR_R
+│   │   ├── test_fp.c              soft-FP smoke test
+│   │   ├── test_asm.c             inline assembly test
+│   │   └── test_printf.c          varargs / printf test
+│   ├── freertos/                  FreeRTOS port (see Step 4)
+│   │   ├── portable/KlaussCPU/    arch port (port.c, port.S, portmacro.h)
+│   │   ├── FreeRTOSConfig.h       kernel configuration
+│   │   ├── get-freertos.sh        clones FreeRTOS-Kernel/ from upstream
+│   │   ├── demo/                  rtos smoke test (4 tasks, 7-seg display)
+│   │   ├── telnet/ , ssh/         net demos (lwIP + wolfSSL/wolfSSH)
+│   │   └── Makefile               builds demo.elf, console_demo.elf, net_demo.elf
+│   └── zephyr-ws/                 Zephyr 3.7 LTS port (see Step 5)
+│       └── klausscpu-zephyr/      out-of-tree module
+│           ├── arch/klausscpu/    __start, context switch, timer ISR
+│           ├── soc/klausscpu/     SoC + linker script
+│           ├── boards/klausscpu/  Nexys A7 board files
+│           ├── drivers/           polled UART + sys_clock
+│           └── README.md          detailed build/load instructions
 ├── CLAUDE.md                      architecture reference + build notes
 ├── FPGA_FIXES_HISTORY.md          hardware errata log
 └── RTOS_NOTES.md                  RTOS/interrupt notes (future work)
@@ -148,6 +162,79 @@ make test_64bit.elf
 
 ---
 
+## Step 4 — FreeRTOS port (optional)
+
+A FreeRTOS V11.1.0 port runs on KlaussCPU using the existing timer interrupt
+and MMIO interrupt mask — no new hardware needed.
+
+```bash
+cd llvm/lib/Target/KlaussCPU/runtime/freertos
+
+# 1. Clone FreeRTOS-Kernel (once; shallow clone, ~2 MB).
+bash get-freertos.sh
+
+# 2. Build picolibc with -fPIC if you haven't already (see Step 2).
+
+# 3. Build the demo.
+make demo.elf            # 4-task smoke test, 7-seg shows CAFE
+make console_demo.elf    # picolibc + UART line shell + lwIP telnet + wolfSSH
+make net_demo.elf        # raw lwIP demo (no shell)
+```
+
+Output `.elf` files load through the same FPGA serial loader as the standalone
+programs in Step 3. See [runtime/freertos/README.md](runtime/freertos/README.md)
+for port internals (stack frame layout, `portYIELD` mechanics, kernel stack).
+
+> **Network demos** also need lwIP (in `runtime/lwip/`) and wolfSSL/wolfSSH —
+> run `bash wolfssl/build-wolfssl.sh && bash wolfssl/build-wolfssh.sh` first;
+> they clone and build the upstream sources into `wolfssl/wolfssl-{src,build,install}/`
+> and `wolfssh-{src,build,install}/`.
+
+---
+
+## Step 5 — Zephyr RTOS port (optional)
+
+An out-of-tree Zephyr 3.7 LTS module boots `hello_world` end-to-end on hardware
+(timer ISR, `printk` and `printf` via UART, main thread dispatch).
+
+```bash
+cd llvm/lib/Target/KlaussCPU/runtime/zephyr-ws
+
+# 1. One-time setup: install west and pull Zephyr 3.7.
+pip install --user west
+west init -l klausscpu-zephyr
+west update                          # clones zephyr/ into this directory
+
+# 2. Build hello_world (paths assume LLVM built in Step 1).
+LLVM_BIN=$PWD/../../../../../../build/bin
+MOD=$PWD/klausscpu-zephyr
+ZEPHYR=$PWD/zephyr
+
+west build -b nexys_a7 zephyr/samples/hello_world --build-dir build_hello -- \
+  -DZEPHYR_TOOLCHAIN_VARIANT=klausscpu-clang \
+  -DKLAUSSCPU_LLVM_BIN=$LLVM_BIN \
+  -DTOOLCHAIN_ROOT=$MOD \
+  -DEXTRA_ZEPHYR_MODULES=$MOD \
+  "-DARCH_ROOT=$MOD;$ZEPHYR" \
+  "-DSOC_ROOT=$MOD;$ZEPHYR" \
+  "-DBOARD_ROOT=$MOD;$ZEPHYR" \
+  "-DDTS_ROOT=$MOD;$ZEPHYR"
+
+# 3. Produce the loadable .kbt (the FPGA serial loader's input format).
+cd build_hello/zephyr
+klausscc -e zephyr.elf
+# → build_hello/zephyr/zephyr.kbt
+```
+
+> `klausscc` is the FPGA serial loader, built from the separate Rust repo at
+> `~/Documents/src/rust/klausscc/` (`cargo build --release` → `target/release/klausscc`).
+
+See [runtime/zephyr-ws/klausscpu-zephyr/README.md](runtime/zephyr-ws/klausscpu-zephyr/README.md)
+for the memory map, Kconfig constraints (`CONFIG_XIP=n`, no `-Os`, no debug
+info), and the chain of fixes that made the port work.
+
+---
+
 ## Quick smoke test (no FPGA needed)
 
 Verify the compiler generates correct assembly:
@@ -210,9 +297,12 @@ work via picolibc and go through the same UART path.
 | LLVM backend source (`*.td`, `*.cpp`, `*.h`) | ✅ yes | |
 | Runtime source (`src/`, `programs/`) | ✅ yes | |
 | `mmio.h`, `klausscpu.ld`, `Makefile` | ✅ yes | |
-| `build-picolibc.sh` | ✅ yes | run it to fetch picolibc |
+| `build-picolibc.sh`, `freertos/get-freertos.sh`, `freertos/wolfssl/build-wolfssl.sh`, `build-wolfssh.sh` | ✅ yes | run to fetch external sources |
 | `compiler-rt/lib/builtins/` | ✅ yes | part of the LLVM monorepo |
-| `picolibc-src/` | ❌ gitignored | cloned by `build-picolibc.sh` |
-| `picolibc-build/` | ❌ gitignored | meson build directory |
-| `picolibc-install/` | ❌ gitignored | installed library |
-| `*.elf`, `*.o` | ❌ gitignored | build outputs |
+| FreeRTOS port (`freertos/portable/`, `FreeRTOSConfig.h`, demos) | ✅ yes | |
+| Zephyr port (`zephyr-ws/klausscpu-zephyr/`) | ✅ yes | out-of-tree module |
+| `picolibc-src/`, `picolibc-build/`, `picolibc-install/` | ❌ gitignored | cloned/built by `build-picolibc.sh` |
+| `freertos/FreeRTOS-Kernel/` | ❌ gitignored | cloned by `get-freertos.sh` |
+| `freertos/wolfssl/{wolfssl,wolfssh}-{src,build,install}/` | ❌ gitignored | cloned/built by `build-wolfssl.sh`/`build-wolfssh.sh` |
+| `zephyr-ws/.west/`, `zephyr-ws/zephyr/`, `zephyr-ws/build*/` | ❌ gitignored | west workspace + Zephyr upstream + build outputs |
+| `*.elf`, `*.bin`, `*.o`, `*.kbt` | ❌ gitignored | build outputs |

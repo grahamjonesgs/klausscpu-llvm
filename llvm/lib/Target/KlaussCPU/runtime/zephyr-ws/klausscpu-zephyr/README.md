@@ -80,15 +80,17 @@ produced by `klausscc`). After the ELF is linked, run:
 
 ```sh
 cd build_hello/zephyr
-klausscc -e zephyr.elf -c /path/to/runtime/opcode_select_opcodes.json
+klausscc -e zephyr.elf
 # → zephyr.kbt
 ```
+
+`klausscc` is the FPGA serial loader / assembler, built from the separate Rust
+repo at `~/Documents/src/rust/klausscc/` (`cargo build --release` → `target/release/klausscc`).
 
 ## Loading and monitoring
 
 ```sh
-klausscc -e zephyr.elf -c .../opcode_select_opcodes.json \
-         --serial /dev/tty.usbserial-... --monitor
+klausscc -e zephyr.elf --serial /dev/tty.usbserial-... --monitor
 ```
 
 The `--monitor` flag tails the UART after the load finishes; expect:
@@ -118,7 +120,10 @@ origin to match.
   with `VirtAddr == PhysAddr`. XIP would put `.data` LMA in ROM with a different
   PhysAddr — the loader would skip it. With XIP=n the linker collapses LMA into
   VMA and `__start`'s copy loop becomes a no-op (src == dst).
-- **Optimisation**: `-O2` only. `-Os` and debug info both trip backend bugs.
+- **Optimisation / debug info**: defaults are `-O2` and `CONFIG_DEBUG_INFO=n`.
+  The backend handles `-g`, `-Os`, and `-Os -g` correctly; debug info is left
+  off only to keep `zephyr.elf` small (it roughly doubles in size). Pass
+  `-DCONFIG_DEBUG_INFO=y` to `west build` for source-level debugging.
 - **`CONFIG_CBPRINTF_FP_SUPPORT=n`**: pulling double-precision FP into cbprintf
   forces soft-FP imports the runtime doesn't currently provide.
 - **`arch_printk_char_out` is a strong override** in `arch/klausscpu/core/irq.c`,
