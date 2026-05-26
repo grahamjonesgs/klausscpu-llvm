@@ -46,4 +46,18 @@
 		reg = <0xF00F0000 0x50>;
 		status = "okay";
 	};
+
+	/* LiteEth MAC — CSRs at 0xF006_0000, slot SRAM at 0xF008_0000. */
+	eth0: ethernet@f0060000 {
+		compatible = "klausscpu,ethernet";
+		reg = <0xF0060000 0x2000>;
+		status = "okay";
+	};
+
+	/* SD card SPI controller at 0xF000_0000. */
+	sd0: sd@f0000000 {
+		compatible = "klausscpu,sd";
+		reg = <0xF0000000 0x1000>;
+		status = "okay";
+	};
 };

@@ -1,0 +1,18 @@
+config KLAUSSCPU_SSH_SERVER
+	bool "KlaussCPU SSH server"
+	default n
+	depends on NET_SOCKETS
+	depends on DISK_KLAUSSCPU_SD
+	help
+	  SSH server using wolfSSH over Zephyr sockets.
+	  Requires wolfSSL and wolfSSH libraries to be available.
+	  Provides an interactive shell with filesystem and hardware commands.
+
+config KLAUSSCPU_SHELL_CMDS
+	bool "KlaussCPU shell commands"
+	default y if SHELL
+	depends on SHELL
+	depends on FILE_SYSTEM
+	help
+	  Register filesystem and hardware commands with the Zephyr shell.
+	  Available on the UART console independently of the SSH server.

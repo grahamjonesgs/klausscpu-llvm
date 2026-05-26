@@ -1,0 +1,24 @@
+config DISK_KLAUSSCPU_SD
+	bool "KlaussCPU SD card disk driver"
+	default n
+	depends on DISK_ACCESS
+	help
+	  SD card driver for the KlaussCPU MMIO SPI SD controller.
+	  Registers as a Zephyr disk_access device for use with FatFS.
+
+if DISK_KLAUSSCPU_SD
+
+config DISK_KLAUSSCPU_SD_VOLUME_NAME
+	string "Disk volume name"
+	default "SD"
+
+config DISK_KLAUSSCPU_SD_INIT_PRIORITY
+	int "Init priority"
+	default 90
+
+config DISK_KLAUSSCPU_SD_LOG_LEVEL
+	int "Log level (0=OFF, 1=ERR, 2=WRN, 3=INF, 4=DBG)"
+	default 3
+	range 0 4
+
+endif # DISK_KLAUSSCPU_SD

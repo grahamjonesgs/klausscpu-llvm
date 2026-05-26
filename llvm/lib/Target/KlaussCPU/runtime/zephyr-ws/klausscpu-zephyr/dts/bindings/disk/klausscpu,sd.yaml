@@ -1,0 +1,7 @@
+description: KlaussCPU SD card SPI controller
+
+compatible: "klausscpu,sd"
+
+properties:
+  reg:
+    required: true

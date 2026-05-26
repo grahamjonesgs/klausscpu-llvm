@@ -1,4 +1,7 @@
 rsource "arch/klausscpu/Kconfig"
 rsource "drivers/serial/Kconfig"
 rsource "drivers/timer/Kconfig"
+rsource "drivers/ethernet/Kconfig"
+rsource "drivers/disk/Kconfig"
 rsource "soc/klausscpu/nexys_a7/Kconfig"
+rsource "ssh/Kconfig"

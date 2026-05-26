@@ -8,3 +8,6 @@ zephyr_include_directories(arch/klausscpu/include)
 # via arch_v1.cmake and soc_v1.cmake.  Only add drivers here.
 add_subdirectory(drivers/serial)
 add_subdirectory(drivers/timer)
+add_subdirectory_ifdef(CONFIG_NET_L2_ETHERNET drivers/ethernet)
+add_subdirectory_ifdef(CONFIG_DISK_ACCESS drivers/disk)
+add_subdirectory(ssh)
