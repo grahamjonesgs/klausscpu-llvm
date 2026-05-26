@@ -99,6 +99,14 @@
     .globl  __start
     .type   __start, @function
 __start:
+    /* Disable all interrupts immediately.  On a soft reset (FPGA reprogrammed
+       without a full power cycle) INT_MASK may already be 1 from the previous
+       run.  If a timer IRQ fires before _klausscpu_kernel_sp is initialized
+       the ISR does setsp(0) → crash.  Write 0 here unconditionally. */
+    setr    r0, INT_MASK_ADDR
+    setr    r1, 0
+    memset32 r1, r0
+
     /* Stack is set up by hardware reset (SP = end of RAM). */
 
     /* Startup delay (~150 ms at 100 MHz): the serial loader prints
@@ -278,64 +286,63 @@ arch_switch:
 
 /* ── z_klausscpu_timer_isr ──────────────────────────────────────────────── */
 /*
- * Switch-based ISR exit (CONFIG_USE_SWITCH=y).
+ * CONFIG_USE_SWITCH=y timer ISR.
  *
- * Hardware has already: decremented SP, written the IRET frame, cleared
- * INT_MASK[0].  We:
- *   1. Save R0–R15 onto the interrupted task's stack.
- *   2. Store SP both into current->switch_handle (kernel synchronization)
- *      AND into the global _klausscpu_isr_handle (so we can pass it as the
- *      argument to z_get_next_switch_handle after switching stacks).
- *   3. Switch to the dedicated kernel stack.
- *   4. Call sys_clock_isr() → announces tick + marks woken threads ready.
- *   5. Call z_get_next_switch_handle(interrupted) — kernel returns the
- *      switch handle of the thread to run next (may be the same one).
- *   6. SETSP to the returned handle, portRESTORE_CONTEXT, IRET into it.
+ * Hardware has already: decremented SP by 8, written the 8-byte IRET frame
+ * (PC + INT_MASK/flags), cleared INT_MASK[0].
  *
- * Note: sys_clock_announce() does NOT mutate _kernel.current — only
- * arch_switch does that, and we don't call arch_switch from here.
- * The kernel decides who runs next purely via z_get_next_switch_handle.
+ * Design: call sys_clock_isr() on the kernel stack.  If sys_clock_announce()
+ * decides a higher-priority thread is ready it calls z_reschedule() which
+ * calls arch_switch() — the ISR fast path in arch_switch restores the new
+ * thread and IRETs directly, never returning here.
+ *
+ * If sys_clock_isr() returns normally (no reschedule, or the interrupted
+ * thread is still highest priority), we simply restore the interrupted
+ * thread.  We do NOT call z_get_next_switch_handle() — that function reads
+ * _kernel.ready_q.cache which is NULL during early-boot PRE_KERNEL_2
+ * (threads not yet created), causing it to dereference address 0 and return
+ * garbage as the switch handle → instant crash.
  */
     .globl  z_klausscpu_timer_isr
     .type   z_klausscpu_timer_isr, @function
 z_klausscpu_timer_isr:
     portSAVE_CONTEXT
 
-    /* Record "in ISR" so arch_is_in_isr() returns true. */
+    /* Record "in ISR" so arch_is_in_isr() and arch_switch ISR fast path work. */
     setr    r0, _klausscpu_in_isr
     setr    r1, 1
     stidx32 r1, r0, 0
 
-    /* Save interrupted task SP → current->switch_handle (SMP sync) AND
-       into the global _klausscpu_isr_handle (survives the stack switch). */
+    /* Save interrupted task SP → current->switch_handle AND _klausscpu_isr_handle.
+       ___cpu_t_current_OFFSET          = 0x10  (within struct _cpu)
+       ___kernel_t_cpus_OFFSET          = 0x00
+       ___thread_t_switch_handle_OFFSET = 0x68 */
     getsp   r0
     setr    r1, _kernel
-    ldidx64 r1, r1, 0          /* r1 = _kernel.current (k_thread *) */
-    stidx64 r0, r1, 0          /* current->switch_handle = saved SP */
+    ldidx64 r1, r1, 0x10       /* r1 = _kernel.cpus[0].current (k_thread *) */
+    stidx64 r0, r1, 0x68       /* current->switch_handle = saved task SP */
     setr    r1, _klausscpu_isr_handle
-    stidx64 r0, r1, 0          /* _klausscpu_isr_handle = saved SP */
+    stidx64 r0, r1, 0          /* _klausscpu_isr_handle = saved task SP */
 
     /* Switch to dedicated kernel stack. */
     setr    r0, _klausscpu_kernel_sp
     ldidx32 r0, r0, 0
     setsp   r0
 
-    /* Announce the tick: marks expired-timeout threads as ready. */
+    /* Announce the tick.  If a context switch is needed, sys_clock_announce()
+       eventually calls arch_switch() which uses the ISR fast path — it clears
+       _klausscpu_in_isr, loads the new thread's SP, and IRETs directly.
+       In that case the call below never returns. */
     call    sys_clock_isr
 
-    /* Ask the kernel for the next thread's switch handle.
-       Arg (R0): interrupted thread's switch handle.
-       Returns (R12): switch handle of next thread to run. */
-    setr    r0, _klausscpu_isr_handle
-    ldidx64 r0, r0, 0
-    call    z_get_next_switch_handle
-
-    /* Clear "in ISR" flag. */
+    /* sys_clock_isr() returned: no switch was triggered.
+       Clear _klausscpu_in_isr and restore the interrupted thread. */
     setr    r0, _klausscpu_in_isr
     setr    r1, 0
     stidx32 r1, r0, 0
 
-    /* Restore the next thread's context from R12 (its saved SP). */
+    setr    r12, _klausscpu_isr_handle
+    ldidx64 r12, r12, 0        /* r12 = saved task SP */
     setsp   r12
 
     portRESTORE_CONTEXT

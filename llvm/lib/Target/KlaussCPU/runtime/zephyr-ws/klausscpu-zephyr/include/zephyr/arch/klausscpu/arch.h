@@ -18,11 +18,15 @@
 #define ARCH_STACK_PTR_ALIGN  8
 
 /*
- * Thread stack reservation: space for the arch_new_thread() frame.
- * 16 GPR slots (R0-R15) + 1 IRET frame slot = 17 × 8 = 136 bytes.
- * Round up to the next multiple of ARCH_STACK_PTR_ALIGN.
+ * Thread stack reservation: 0.
+ *
+ * arch_new_thread() receives stack_ptr = top (the full stack top) and builds
+ * the initial frame (16 GPRs + IRET = 136 bytes) downward from there.
+ * A non-zero reservation would cause Zephyr to pass stack_ptr = top-N, so
+ * arch_new_thread would write the frame to top-N-136 — overflowing below the
+ * stack for small stacks (e.g. the 256-byte idle stack would overflow by 16 B).
  */
-#define ARCH_THREAD_STACK_RESERVED  136
+#define ARCH_THREAD_STACK_RESERVED  0
 
 /*
  * arch_esf — exception stack frame saved by the timer ISR.

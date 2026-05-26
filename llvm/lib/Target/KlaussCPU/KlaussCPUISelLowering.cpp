@@ -119,10 +119,18 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::JumpTable,      MVT::i64, Custom);
 
   // ---- Branch/control ----
-  // JMPR is available.  Jump tables use EK_LabelDifference32 (4-byte entries
-  // storing target-base offsets) — safe for ELFCLASS32.  BR_JT is Custom:
-  // LowerBR_JT loads the 32-bit offset and adds the table base, then BRIND.
-  setOperationAction(ISD::BR_JT,  MVT::Other, Custom);
+  // LLVM's register allocator has a known limitation: when a basic block is
+  // reachable from both a jump-table indirect branch AND direct conditional
+  // branches, the RA does not insert the required register reloads on the
+  // indirect predecessor edge.  Concretely, in Zephyr cbprintf the format-
+  // character dispatch table sends %u/%x/%X/%o directly to the encode_uint
+  // call site; r4 (buf_end) is 0 on that path instead of the correct stack-
+  // relative pointer, causing encode_uint to write to address 0xFFFFFFFF.
+  // Disabling jump tables forces all switch statements to use binary-search
+  // comparison chains where the RA correctly inserts reloads on every direct
+  // predecessor edge.  Re-enable once the RA limitation is resolved.
+  setMinimumJumpTableEntries(INT_MAX);
+  setOperationAction(ISD::BR_JT,  MVT::Other, Expand);
   setOperationAction(ISD::BRIND,  MVT::Other, Legal);
   setOperationAction(ISD::BRCOND, MVT::Other, Expand); // expands to BR_CC
   // BR_CC with i64 operands is Legal — handled by KlaussCPUDAGToDAGISel::Select()
@@ -172,7 +180,7 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   // VASTART stores the address of the first variadic argument into the va_list.
   // VAARG/VACOPY/VAEND are handled inline by Clang for VoidPtrBuiltinVaList.
   setOperationAction(ISD::VASTART, MVT::Other, Custom);
-  setOperationAction(ISD::VAARG,   MVT::Other, Expand);
+  setOperationAction(ISD::VAARG,   MVT::Other, Custom);
   setOperationAction(ISD::VACOPY,  MVT::Other, Expand);
   setOperationAction(ISD::VAEND,   MVT::Other, Expand);
 
@@ -195,6 +203,7 @@ SDValue KlaussCPUTargetLowering::LowerOperation(SDValue Op,
   case ISD::STACKRESTORE:        return LowerSTACKRESTORE(Op, DAG);
   case ISD::DYNAMIC_STACKALLOC: return LowerDYNAMIC_STACKALLOC(Op, DAG);
   case ISD::VASTART:        return LowerVASTART(Op, DAG);
+  case ISD::VAARG:          return LowerVAARG(Op, DAG);
   case ISD::SHL_PARTS:      return LowerShiftLeftParts(Op, DAG);
   case ISD::SRL_PARTS:      return LowerShiftRightParts(Op, DAG, /*IsSRA=*/false);
   case ISD::SRA_PARTS:      return LowerShiftRightParts(Op, DAG, /*IsSRA=*/true);
@@ -449,6 +458,51 @@ SDValue KlaussCPUTargetLowering::LowerVASTART(SDValue Op,
   const Value *SV = cast<SrcValueSDNode>(Op.getOperand(2))->getValue();
   return DAG.getStore(Op.getOperand(0), DL, FIN, Op.getOperand(1),
                        MachinePointerInfo(SV));
+}
+
+// KlaussCPU va_arg lowering.
+//
+// The calling convention promotes every sub-word argument type (i8/i16/i32)
+// to i64, so every va_list slot is 8 bytes regardless of the C type.  The
+// generic VAARG expansion would read only sizeof(type) bytes for an i32
+// va_arg, leaving the upper 32 bits of the destination register undefined.
+// This custom lowering always reads a full 8-byte slot, then truncates the
+// result to the requested type — matching what the caller stored when it
+// promoted the argument.
+SDValue KlaussCPUTargetLowering::LowerVAARG(SDValue Op,
+                                              SelectionDAG &DAG) const {
+  SDNode *Node  = Op.getNode();
+  EVT VT        = Node->getValueType(0);
+  SDValue Chain = Node->getOperand(0);
+  SDValue VAPtr = Node->getOperand(1);  // pointer to the va_list object
+  const Value *SV = cast<SrcValueSDNode>(Node->getOperand(2))->getValue();
+  SDLoc DL(Node);
+
+  // Step 1: load the current argument pointer stored inside va_list.
+  SDValue APRaw = DAG.getLoad(MVT::i64, DL, Chain, VAPtr, MachinePointerInfo(SV));
+  Chain = APRaw.getValue(1);
+
+  // Step 2: align to 8 (all slots are i64-sized): ptr = (ptr + 7) & -8
+  SDValue AP = DAG.getNode(
+      ISD::AND, DL, MVT::i64,
+      DAG.getNode(ISD::ADD, DL, MVT::i64, APRaw,
+                  DAG.getConstant(7, DL, MVT::i64)),
+      DAG.getConstant(-8LL, DL, MVT::i64));
+
+  // Step 3: advance the va_list pointer by 8 and store it back.
+  SDValue Next = DAG.getNode(ISD::ADD, DL, MVT::i64, AP,
+                              DAG.getConstant(8, DL, MVT::i64));
+  Chain = DAG.getStore(Chain, DL, Next, VAPtr, MachinePointerInfo(SV));
+
+  // Step 4: load the full 8-byte slot.
+  SDValue Val = DAG.getLoad(MVT::i64, DL, Chain, AP, MachinePointerInfo());
+  Chain = Val.getValue(1);
+
+  // Step 5: truncate to the requested type if narrower than i64.
+  if (VT != MVT::i64)
+    Val = DAG.getNode(ISD::TRUNCATE, DL, VT, Val);
+
+  return DAG.getMergeValues({Val, Chain}, DL);
 }
 
 const char *

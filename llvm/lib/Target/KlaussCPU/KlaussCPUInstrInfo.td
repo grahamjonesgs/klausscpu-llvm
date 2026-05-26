@@ -594,6 +594,7 @@ def JMPR_R  : R_in<0x0000102, (ins GPR:$reg), "jmpr\t$reg"> {
   let isBranch         = 1;
   let isIndirectBranch = 1;
   let isTerminator     = 1;
+  let isBarrier        = 1;  // indirect branch never falls through
 }
 
 //===----------------------------------------------------------------------===//
