@@ -2,12 +2,11 @@
  * uart_klausscpu.c — Zephyr UART driver for KlaussCPU.
  *
  * TX: TXCHARMEMR builtin (reads byte from memory, transmits via UART).
- * RX: RXRB builtin (blocking receive) — run in a dedicated thread that
- *     fills a ring buffer; poll_in drains the ring buffer non-blockingly.
+ * RX: RXRNB (non-blocking receive) via inline asm with sentinel detection.
  *
- * The hardware has no RX FIFO status register accessible from C (RXRNB
- * sets the CPU zero flag but doesn't expose it to C code), so polling
- * via a background thread is the only viable approach.
+ * RXRNB sets the CPU zero flag when the FIFO is empty but does NOT write
+ * the destination register.  By pre-loading the register with 0x100 (not
+ * a valid byte), we can detect empty vs. data without reading the flags.
  */
 #define DT_DRV_COMPAT klausscpu_uart
 
@@ -15,48 +14,26 @@
 #include <zephyr/drivers/uart.h>
 #include <zephyr/device.h>
 
-/* TX buffer must be a non-stack global for TXCHARMEMR address resolution. */
 static volatile char _uart_tx_buf;
-
-/* ── RX ring buffer fed by a blocking-receive thread ─────────────────────── */
-
-#define RX_RING_SIZE 64
-
-static uint8_t  rx_ring[RX_RING_SIZE];
-static volatile uint32_t rx_head;   /* written by rx_thread */
-static volatile uint32_t rx_tail;   /* read by poll_in */
-
-#define RX_THREAD_STACK_SIZE 512
-static K_THREAD_STACK_DEFINE(rx_stack, RX_THREAD_STACK_SIZE);
-static struct k_thread rx_thread_data;
-
-static void uart_rx_thread(void *p1, void *p2, void *p3)
-{
-    ARG_UNUSED(p1);
-    ARG_UNUSED(p2);
-    ARG_UNUSED(p3);
-
-    while (1) {
-        uint64_t ch = __builtin_klausscpu_rxrb();
-        uint32_t next = (rx_head + 1) % RX_RING_SIZE;
-        if (next != rx_tail) {
-            rx_ring[rx_head] = (uint8_t)ch;
-            rx_head = next;
-        }
-    }
-}
-
-/* ── Driver API ──────────────────────────────────────────────────────────── */
 
 static int uart_klausscpu_poll_in(const struct device *dev, unsigned char *c)
 {
     ARG_UNUSED(dev);
 
-    if (rx_head == rx_tail) {
+    uint64_t val;
+
+    __asm__ volatile(
+        "setr   %0, 256\n\t"
+        "rxrnb  %0"
+        : "=&r"(val)
+        :
+        :
+    );
+
+    if (val > 0xFF) {
         return -1;
     }
-    *c = rx_ring[rx_tail];
-    rx_tail = (rx_tail + 1) % RX_RING_SIZE;
+    *c = (unsigned char)val;
     return 0;
 }
 
@@ -74,11 +51,6 @@ static void uart_klausscpu_poll_out(const struct device *dev, unsigned char c)
 static int uart_klausscpu_init(const struct device *dev)
 {
     ARG_UNUSED(dev);
-
-    k_thread_create(&rx_thread_data, rx_stack, RX_THREAD_STACK_SIZE,
-                    uart_rx_thread, NULL, NULL, NULL,
-                    K_PRIO_COOP(1), 0, K_NO_WAIT);
-    k_thread_name_set(&rx_thread_data, "uart_rx");
     return 0;
 }
 
