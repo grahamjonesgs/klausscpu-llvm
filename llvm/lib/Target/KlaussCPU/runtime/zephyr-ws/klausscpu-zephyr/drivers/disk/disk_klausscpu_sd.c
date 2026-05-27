@@ -344,13 +344,9 @@ static struct disk_info disk_klausscpu_info = {
 	.ops = &disk_klausscpu_ops,
 };
 
-static int disk_klausscpu_register(const struct device *dev)
+static int disk_klausscpu_register(void)
 {
-	int rc = disk_klausscpu_init(dev);
-
-	if (rc != 0) {
-		return rc;
-	}
+	k_mutex_init(&sd_mutex);
 	return disk_access_register(&disk_klausscpu_info);
 }
 

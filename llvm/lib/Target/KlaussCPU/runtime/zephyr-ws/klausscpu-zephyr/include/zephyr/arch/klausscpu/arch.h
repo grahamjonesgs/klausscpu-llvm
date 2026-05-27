@@ -87,6 +87,11 @@ static ALWAYS_INLINE uint64_t arch_k_cycle_get_64(void)
 
 /* arch_switch is in swap.S; declared via arch_interface.h */
 
+static ALWAYS_INLINE unsigned int arch_num_cpus(void)
+{
+	return 1;
+}
+
 #include <kernel_arch_func.h>
 
 #endif /* ZEPHYR_INCLUDE_ARCH_KLAUSSCPU_ARCH_H_ */

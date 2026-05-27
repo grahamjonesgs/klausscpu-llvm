@@ -10,6 +10,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/fs/fs.h>
+#include <stdlib.h>
 
 /* MMIO shortcuts */
 #define REG(a)        (*(volatile uint32_t *)(unsigned long)(a))

@@ -131,3 +131,25 @@ static int _klausscpu_stdout_install(void)
 }
 
 SYS_INIT(_klausscpu_stdout_install, PRE_KERNEL_1, 60);
+
+#include <zephyr/random/random.h>
+
+#define _TRNG_BASE    0xF00C0000u
+#define _TRNG_CTRL    (*(volatile uint32_t *)(unsigned long)(_TRNG_BASE + 0x000u))
+#define _TRNG_STATUS  (*(volatile uint32_t *)(unsigned long)(_TRNG_BASE + 0x008u))
+#define _TRNG_DATA    (*(volatile uint64_t *)(unsigned long)(_TRNG_BASE + 0x010u))
+
+void z_impl_sys_rand_get(void *dst, size_t len)
+{
+    _TRNG_CTRL = 1;
+    uint8_t *p = (uint8_t *)dst;
+    size_t done = 0;
+    while (done < len) {
+        while (!(_TRNG_STATUS & 1u)) {}
+        uint64_t w = _TRNG_DATA;
+        size_t chunk = len - done;
+        if (chunk > 8) chunk = 8;
+        __builtin_memcpy(p + done, &w, chunk);
+        done += chunk;
+    }
+}

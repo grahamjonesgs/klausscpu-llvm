@@ -2,6 +2,8 @@ description: KlaussCPU SD card SPI controller
 
 compatible: "klausscpu,sd"
 
+include: [base.yaml]
+
 properties:
   reg:
     required: true

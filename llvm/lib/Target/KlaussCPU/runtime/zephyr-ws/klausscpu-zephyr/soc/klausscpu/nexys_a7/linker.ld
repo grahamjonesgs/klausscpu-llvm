@@ -58,6 +58,8 @@ SECTIONS
     __text_region_end = .;
 
 #include <zephyr/linker/common-rom/common-rom-kernel-devices.ld>
+#include <zephyr/linker/common-rom/common-rom-logging.ld>
+#include <zephyr/linker/common-rom/common-rom-net.ld>
 #include <zephyr/linker/common-rom/common-rom-misc.ld>
 
     SECTION_PROLOGUE(_RODATA_SECTION_NAME,,)
