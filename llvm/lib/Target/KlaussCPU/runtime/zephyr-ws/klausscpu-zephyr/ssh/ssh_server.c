@@ -27,6 +27,7 @@
 #include <wolfssl/wolfcrypt/error-crypt.h>
 
 #include "ssh_server.h"
+#include "pic_loader.h"
 #include "sshkeys.h"
 #include "wolfssl_hw.h"
 
@@ -186,6 +187,7 @@ static void cmd_help(WOLFSSH *ssh)
 		"  rm <file>      remove file\r\n"
 		"  write <file> <text>  write text to file\r\n"
 		"  df             filesystem free space\r\n"
+		"  run [file]     load & run PIC program (default PROG.ELF)\r\n"
 		"  leds [hex]     read/write LED register\r\n"
 		"  seg <hex>      write 7-segment display\r\n"
 		"  reboot         reboot the system\r\n"
@@ -417,6 +419,69 @@ static void cmd_seg(WOLFSSH *ssh, const char *arg)
 	ssh_sendf(ssh, "7-seg = 0x%08lx\r\n", val);
 }
 
+static void cmd_run(WOLFSSH *ssh, const char *arg)
+{
+	const char *filename;
+	char pathbuf[128];
+
+	if (arg && *arg) {
+		if (arg[0] == '/') {
+			filename = arg;
+		} else {
+			snprintf(pathbuf, sizeof(pathbuf), "/SD:/%s", arg);
+			filename = pathbuf;
+		}
+	} else {
+		filename = "/SD:/PROG.ELF";
+	}
+
+	ssh_sendf(ssh, "Loading %s ...\r\n", filename);
+	int rc = pic_run_from_sd(filename, ssh);
+
+	if (rc < 0) {
+		ssh_sendf(ssh, "\r\nLoad/run failed (code %d)\r\n", rc);
+	} else {
+		ssh_sendf(ssh, "\r\nProgram exited: %d\r\n", rc);
+	}
+}
+
+struct thread_cb_ctx {
+	WOLFSSH *ssh;
+};
+
+#ifdef CONFIG_THREAD_MONITOR
+static void thread_print_cb(const struct k_thread *t, void *ctx)
+{
+	struct thread_cb_ctx *c = ctx;
+	const char *name = k_thread_name_get((k_tid_t)t);
+
+	if (!name) {
+		name = "(unnamed)";
+	}
+	ssh_sendf(c->ssh, "  %s  prio=%d\r\n", name,
+		  k_thread_priority_get((k_tid_t)t));
+}
+#endif
+
+static void cmd_threads(WOLFSSH *ssh)
+{
+	ssh_send_str(ssh, "Active threads:\r\n");
+#ifdef CONFIG_THREAD_MONITOR
+	struct thread_cb_ctx ctx = { .ssh = ssh };
+
+	k_thread_foreach(thread_print_cb, &ctx);
+#else
+	ssh_send_str(ssh, "  (enable CONFIG_THREAD_MONITOR)\r\n");
+#endif
+}
+
+static void cmd_reboot(WOLFSSH *ssh)
+{
+	ssh_send_str(ssh, "Rebooting...\r\n");
+	k_sleep(K_MSEC(100));
+	sys_reboot(SYS_REBOOT_COLD);
+}
+
 /* ── Command dispatcher ──────────────────────────────────────────────────── */
 
 static int dispatch_command(WOLFSSH *ssh, char *line)
@@ -484,10 +549,16 @@ static int dispatch_command(WOLFSSH *ssh, char *line)
 		cmd_write(ssh, arg, arg2);
 	} else if (strcmp(p, "df") == 0) {
 		cmd_df(ssh);
+	} else if (strcmp(p, "run") == 0) {
+		cmd_run(ssh, arg);
 	} else if (strcmp(p, "leds") == 0) {
 		cmd_leds(ssh, arg);
 	} else if (strcmp(p, "seg") == 0) {
 		cmd_seg(ssh, arg);
+	} else if (strcmp(p, "threads") == 0) {
+		cmd_threads(ssh);
+	} else if (strcmp(p, "reboot") == 0) {
+		cmd_reboot(ssh);
 	} else if (strcmp(p, "exit") == 0 || strcmp(p, "quit") == 0 ||
 		   strcmp(p, "logout") == 0) {
 		ssh_send_str(ssh, "Bye.\r\n");
@@ -706,6 +777,7 @@ static void ssh_listener_entry(void *p1, void *p2, void *p3)
 int ssh_server_start(void)
 {
 	k_mutex_init(&conn_mutex);
+	pic_loader_init();
 
 	if (wolfSSH_Init() != WS_SUCCESS) {
 		LOG_ERR("wolfSSH_Init failed");
