@@ -26,6 +26,8 @@
  *   [SP+128] IRET frame (8 bytes): flags/INT_MASK/PC
  */
 
+#include <zephyr/offsets.h>
+
 #define INT_MASK_ADDR   0xF00F0000
 
     .text
@@ -313,14 +315,11 @@ z_klausscpu_timer_isr:
     setr    r1, 1
     stidx32 r1, r0, 0
 
-    /* Save interrupted task SP → current->switch_handle AND _klausscpu_isr_handle.
-       ___cpu_t_current_OFFSET          = 0x10  (within struct _cpu)
-       ___kernel_t_cpus_OFFSET          = 0x00
-       ___thread_t_switch_handle_OFFSET = 0x68 */
+    /* Save interrupted task SP → current->switch_handle AND _klausscpu_isr_handle. */
     getsp   r0
     setr    r1, _kernel
-    ldidx64 r1, r1, 0x10       /* r1 = _kernel.cpus[0].current (k_thread *) */
-    stidx64 r0, r1, 0x68       /* current->switch_handle = saved task SP */
+    ldidx64 r1, r1, ___cpu_t_current_OFFSET
+    stidx64 r0, r1, ___thread_t_switch_handle_OFFSET
     setr    r1, _klausscpu_isr_handle
     stidx64 r0, r1, 0          /* _klausscpu_isr_handle = saved task SP */
 

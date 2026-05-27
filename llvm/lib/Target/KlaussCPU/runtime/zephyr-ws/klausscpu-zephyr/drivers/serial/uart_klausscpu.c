@@ -2,11 +2,9 @@
  * uart_klausscpu.c — Zephyr UART driver for KlaussCPU.
  *
  * TX: TXCHARMEMR builtin (reads byte from memory, transmits via UART).
- * RX: RXRNB (non-blocking receive) via inline asm with sentinel detection.
- *
- * RXRNB sets the CPU zero flag when the FIFO is empty but does NOT write
- * the destination register.  By pre-loading the register with 0x100 (not
- * a valid byte), we can detect empty vs. data without reading the flags.
+ * RX: RXRNB (non-blocking) via inline asm with sentinel detection for
+ *     poll_in.  RXRB (blocking) available for explicit use by
+ *     uart_klausscpu_start_rx_thread() if timer ISR can preempt it.
  */
 #define DT_DRV_COMPAT klausscpu_uart
 
@@ -15,6 +13,8 @@
 #include <zephyr/device.h>
 
 static volatile char _uart_tx_buf;
+
+/* ── poll_in: RXRNB with sentinel ────────────────────────────────────────── */
 
 static int uart_klausscpu_poll_in(const struct device *dev, unsigned char *c)
 {
@@ -61,9 +61,9 @@ static const struct uart_driver_api uart_klausscpu_api = {
 
 DEVICE_DT_INST_DEFINE(0,
     uart_klausscpu_init,
-    NULL,            /* pm_device */
-    NULL,            /* data */
-    NULL,            /* config */
+    NULL,
+    NULL,
+    NULL,
     PRE_KERNEL_1,
     55,
     &uart_klausscpu_api);

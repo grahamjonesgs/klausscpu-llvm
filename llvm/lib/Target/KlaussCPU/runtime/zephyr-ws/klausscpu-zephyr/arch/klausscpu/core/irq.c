@@ -132,6 +132,14 @@ static int _klausscpu_stdout_install(void)
 
 SYS_INIT(_klausscpu_stdout_install, PRE_KERNEL_1, 60);
 
+extern void klausscpu_mark_sched_ready(void);
+static int _klausscpu_sched_ready_init(void)
+{
+    klausscpu_mark_sched_ready();
+    return 0;
+}
+SYS_INIT(_klausscpu_sched_ready_init, APPLICATION, 99);
+
 #include <zephyr/random/random.h>
 
 #define _TRNG_BASE    0xF00C0000u

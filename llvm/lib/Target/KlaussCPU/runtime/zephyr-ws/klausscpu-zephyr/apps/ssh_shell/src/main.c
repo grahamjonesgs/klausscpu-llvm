@@ -1,19 +1,12 @@
 /*
  * main.c — KlaussCPU Zephyr SSH shell application.
  *
- * Boots Zephyr, initializes:
- *   1. SD card → FatFS mount at /SD:/
- *   2. Ethernet → DHCP → IPv4 address
- *   3. SSH server on port 22 (when enabled)
- *   4. Zephyr shell on UART console (always)
- *
- * The Zephyr shell provides filesystem commands (fs ls, fs cat, etc.)
- * and hardware commands (leds, seg, switches, uptime) on the serial
- * console.  The SSH server provides the same commands over an encrypted
- * remote connection.
+ * Boot sequence: SD card mount → DHCP → shell ready on UART.
  */
 
 #include <zephyr/kernel.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/uart.h>
 #include <zephyr/fs/fs.h>
 #include <zephyr/storage/disk_access.h>
 #include <ff.h>
@@ -22,18 +15,13 @@
 #include <zephyr/net/dhcpv4.h>
 #include <zephyr/logging/log.h>
 
-#ifdef CONFIG_KLAUSSCPU_SSH_SERVER
-#include "ssh_server.h"
-#endif
-
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
-/* MMIO shortcuts */
 #define REG(a)       (*(volatile uint32_t *)(unsigned long)(a))
 #define REG_LEDS     REG(0xF0040000u)
-#define REG_SEG_ALL  REG(0xF0030010u)
+#define REG_SEG7     REG(0xF0030010u)
 
-/* ── FatFS mount point ───────────────────────────────────────────────────── */
+/* ── FatFS mount ─────────────────────────────────────────────────────────── */
 
 static FATFS fat_fs;
 
@@ -60,7 +48,6 @@ static int mount_sd(void)
 
 	LOG_INF("SD card mounted at /SD:/");
 
-	/* List root directory */
 	struct fs_dir_t dir;
 	struct fs_dirent entry;
 
@@ -79,7 +66,7 @@ static int mount_sd(void)
 	return 0;
 }
 
-/* ── DHCP event handler ──────────────────────────────────────────────────── */
+/* ── DHCP ────────────────────────────────────────────────────────────────── */
 
 static struct net_mgmt_event_callback dhcp_cb;
 static struct k_sem dhcp_sem;
@@ -122,8 +109,7 @@ static int wait_for_dhcp(void)
 	net_dhcpv4_start(iface);
 	LOG_INF("DHCP started, waiting for address...");
 
-	/* Wait up to 30 seconds for DHCP */
-	if (k_sem_take(&dhcp_sem, K_SECONDS(30)) != 0) {
+	if (k_sem_take(&dhcp_sem, K_SECONDS(10)) != 0) {
 		LOG_WRN("DHCP timeout — continuing without IP");
 		return -1;
 	}
@@ -135,7 +121,7 @@ static int wait_for_dhcp(void)
 int main(void)
 {
 	REG_LEDS = 0x0001;
-	REG_SEG_ALL = 0x00000001;
+	REG_SEG7 = 0x0001;
 
 	LOG_INF("KlaussCPU Zephyr SSH Shell starting...");
 
@@ -144,7 +130,7 @@ int main(void)
 	int sd_ok = (mount_sd() == 0);
 
 	if (sd_ok) {
-		REG_SEG_ALL = 0x00000002;
+		REG_SEG7 = 0x0002;
 	}
 
 	/* 2. Wait for DHCP */
@@ -152,29 +138,13 @@ int main(void)
 	int net_ok = (wait_for_dhcp() == 0);
 
 	if (net_ok) {
-		REG_SEG_ALL = 0x00000003;
+		REG_SEG7 = 0x0003;
 	}
-
-#ifdef CONFIG_KLAUSSCPU_SSH_SERVER
-	/* 3. Start SSH server */
-	if (net_ok && sd_ok) {
-		REG_LEDS = 0x000F;
-		if (ssh_server_start() == 0) {
-			REG_SEG_ALL = 0x00000004;
-			LOG_INF("SSH server ready on port 22");
-		} else {
-			LOG_ERR("SSH server failed to start");
-		}
-	}
-#endif
 
 	REG_LEDS = 0x001F;
+	REG_SEG7 = 0x0004;
 	LOG_INF("System ready. Shell available on UART console.");
-	if (net_ok) {
-		LOG_INF("SSH available on port 22 (admin/klausscpu)");
-	}
 
-	/* Main thread idle — Zephyr shell runs on its own thread */
 	while (1) {
 		k_sleep(K_SECONDS(60));
 	}
