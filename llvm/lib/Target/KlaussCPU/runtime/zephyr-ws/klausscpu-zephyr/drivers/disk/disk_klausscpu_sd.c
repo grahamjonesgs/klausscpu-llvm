@@ -246,9 +246,6 @@ static int disk_klausscpu_access_status(struct disk_info *disk)
 	if (!s_ready) {
 		return DISK_STATUS_UNINIT;
 	}
-	if (!(REG_SD_STATUS & SD_STATUS_CARD)) {
-		return DISK_STATUS_NOMEDIA;
-	}
 	return DISK_STATUS_OK;
 }
 

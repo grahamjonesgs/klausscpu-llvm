@@ -10,6 +10,7 @@
 #include <zephyr/fs/fs.h>
 #include <zephyr/storage/disk_access.h>
 #include <ff.h>
+#include <diskio.h>
 #include <zephyr/net/net_if.h>
 #include <zephyr/net/net_mgmt.h>
 #include <zephyr/net/dhcpv4.h>
@@ -52,19 +53,65 @@ static int mount_sd(void)
 
 	LOG_INF("SD card mounted at /SD:/");
 
-	struct fs_dir_t dir;
-	struct fs_dirent entry;
+	/* Test FatFS directly — dump validate() fields */
+	{
+		static DIR dj;
+		static FILINFO fno;
+		FRESULT fr;
+		static volatile char tb;
+		const char *hex = "0123456789abcdef";
 
-	fs_dir_t_init(&dir);
-	if (fs_opendir(&dir, "/SD:/") == 0) {
-		int count = 0;
+		fr = f_opendir(&dj, "SD:/");
+		LOG_INF("f_opendir: %d", (int)fr);
 
-		while (fs_readdir(&dir, &entry) == 0 &&
-		       entry.name[0] != '\0') {
-			count++;
+		if (fr == FR_OK) {
+			/* Dump the validate() fields manually */
+			unsigned obj_id = dj.obj.id;
+			unsigned fs_id = dj.obj.fs ? dj.obj.fs->id : 0xDEAD;
+			unsigned fs_type = dj.obj.fs ? dj.obj.fs->fs_type : 0;
+
+			/* Print via direct UART: "obj.id=XXXX fs->id=XXXX fs_type=XX" */
+			#define TX(c) do { tb = (c); __builtin_klausscpu_txcharmemr((const void *)&tb); } while(0)
+			#define TXH(v) do { TX(hex[((v)>>4)&0xF]); TX(hex[(v)&0xF]); } while(0)
+
+			TX('o'); TX('i'); TX('d'); TX('=');
+			TXH(obj_id >> 8); TXH(obj_id);
+			TX(' '); TX('f'); TX('i'); TX('d'); TX('=');
+			TXH(fs_id >> 8); TXH(fs_id);
+			TX(' '); TX('f'); TX('t'); TX('=');
+			TXH(fs_type);
+			TX(' '); TX('f'); TX('s'); TX('=');
+			/* Print fs pointer low 16 bits */
+			unsigned long fsp = (unsigned long)dj.obj.fs;
+			TXH((fsp >> 8) & 0xFF); TXH(fsp & 0xFF);
+			TX('\r'); TX('\n');
+
+			/* Check disk_status before readdir */
+			{
+				extern DSTATUS disk_status(BYTE pdrv);
+				DSTATUS ds = disk_status(0);
+				TX('D'); TX('S'); TX('=');
+				TXH(ds);
+				TX('\r'); TX('\n');
+			}
+
+			fr = f_readdir(&dj, &fno);
+			LOG_INF("f_readdir: %d", (int)fr);
+
+			/* Dump again after readdir */
+			obj_id = dj.obj.id;
+			fs_id = dj.obj.fs ? dj.obj.fs->id : 0xDEAD;
+			TX('A'); TX('F'); TX(':');
+			TX('o'); TX('i'); TX('d'); TX('=');
+			TXH(obj_id >> 8); TXH(obj_id);
+			TX(' '); TX('f'); TX('i'); TX('d'); TX('=');
+			TXH(fs_id >> 8); TXH(fs_id);
+			TX('\r'); TX('\n');
+
+			f_closedir(&dj);
+			#undef TX
+			#undef TXH
 		}
-		fs_closedir(&dir);
-		LOG_INF("SD card: %d entries in root", count);
 	}
 
 	return 0;
@@ -128,6 +175,8 @@ int main(void)
 	REG_SEG7 = 0x0001;
 
 	LOG_INF("KlaussCPU Zephyr SSH Shell starting...");
+
+	/* 0. SD diagnostics — removed (data verified OK) */
 
 	/* 1. Mount SD card */
 	REG_LEDS = 0x0003;

@@ -535,7 +535,7 @@ struct conn_args {
 	int sock;
 };
 
-#define CONN_STACK_SIZE 8192
+#define CONN_STACK_SIZE 16384
 
 static K_THREAD_STACK_ARRAY_DEFINE(conn_stacks, SSH_MAX_CONNS, CONN_STACK_SIZE);
 static struct k_thread conn_threads[SSH_MAX_CONNS];
