@@ -151,6 +151,24 @@ static void ssh_sendf(WOLFSSH *ssh, const char *fmt, ...)
 	}
 }
 
+/* ── Path helper — prepend /SD:/ to relative paths ───────────────────────── */
+
+#define SD_ROOT "/SD:/"
+
+static char _pathbuf[128];
+
+static const char *resolve_path(const char *path)
+{
+	if (!path || !*path) {
+		return SD_ROOT;
+	}
+	if (path[0] == '/') {
+		return path;
+	}
+	snprintf(_pathbuf, sizeof(_pathbuf), SD_ROOT "%s", path);
+	return _pathbuf;
+}
+
 /* ── Shell commands ──────────────────────────────────────────────────────── */
 
 static void cmd_help(WOLFSSH *ssh)
@@ -200,9 +218,7 @@ static void cmd_ls(WOLFSSH *ssh, const char *path)
 	struct fs_dir_t dir;
 	struct fs_dirent entry;
 
-	if (!path || !*path) {
-		path = "/SD:/";
-	}
+	path = resolve_path(path);
 
 	fs_dir_t_init(&dir);
 
@@ -233,6 +249,7 @@ static void cmd_cat(WOLFSSH *ssh, const char *path)
 		ssh_send_str(ssh, "Usage: cat <file>\r\n");
 		return;
 	}
+	path = resolve_path(path);
 
 	fs_file_t_init(&f);
 
@@ -266,6 +283,7 @@ static void cmd_hexdump(WOLFSSH *ssh, const char *path)
 		ssh_send_str(ssh, "Usage: hexdump <file>\r\n");
 		return;
 	}
+	path = resolve_path(path);
 
 	fs_file_t_init(&f);
 
@@ -304,6 +322,7 @@ static void cmd_mkdir(WOLFSSH *ssh, const char *path)
 		ssh_send_str(ssh, "Usage: mkdir <path>\r\n");
 		return;
 	}
+	path = resolve_path(path);
 	if (fs_mkdir(path) != 0) {
 		ssh_sendf(ssh, "Failed to create: %s\r\n", path);
 	} else {
@@ -317,6 +336,7 @@ static void cmd_rm(WOLFSSH *ssh, const char *path)
 		ssh_send_str(ssh, "Usage: rm <file>\r\n");
 		return;
 	}
+	path = resolve_path(path);
 	if (fs_unlink(path) != 0) {
 		ssh_sendf(ssh, "Failed to remove: %s\r\n", path);
 	} else {
@@ -332,6 +352,7 @@ static void cmd_write(WOLFSSH *ssh, const char *path, const char *text)
 		ssh_send_str(ssh, "Usage: write <file> <text>\r\n");
 		return;
 	}
+	path = resolve_path(path);
 
 	fs_file_t_init(&f);
 
