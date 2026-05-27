@@ -8,10 +8,17 @@
 
 /* ── Target / OS ─────────────────────────────────────────────────────────── */
 
-#define WOLFSSL_ZEPHYR             /* Zephyr memory + time primitives */
+#define SINGLE_THREADED            /* no pthreads needed; single-core CPU */
 #define NO_FILESYSTEM              /* no fopen/fclose in wolfSSL core */
 #define WOLFSSL_NO_SOCK            /* don't compile default socket layer */
 #define WOLFSSL_USER_IO            /* suppress EmbedReceive/EmbedSend */
+
+/* Memory: use Zephyr's k_malloc/k_free */
+#include <zephyr/kernel.h>
+#define XMALLOC(s, h, t)     k_malloc(s)
+#define XFREE(p, h, t)       k_free(p)
+#define XREALLOC(p, n, h, t) k_realloc(p, n)
+#define XMALLOC_USER
 
 /* ── C type widths (KlaussCPU: long = 64 bits) ───────────────────────────── */
 

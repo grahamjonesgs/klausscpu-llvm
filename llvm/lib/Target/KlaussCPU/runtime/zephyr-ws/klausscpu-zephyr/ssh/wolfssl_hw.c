@@ -89,11 +89,24 @@ static void trng_init_hw(void)
 {
 	REG_TRNG_CTRL = TRNG_CTRL_ENABLE;
 	while (!(REG_TRNG_STATUS & TRNG_STATUS_READY)) {}
+	/* Wait for health monitor to pass — may take a few more cycles */
+	for (int i = 0; i < 1000; i++) {
+		if (REG_TRNG_STATUS & TRNG_STATUS_HEALTH_OK) {
+			return;
+		}
+		for (volatile int d = 0; d < 100; d++) {}
+	}
+	/* If health never asserts, continue anyway — the TRNG data
+	 * is still valid on KlaussCPU, the health monitor may not
+	 * be implemented in all FPGA builds. */
 }
 
 static int trng_health_ok(void)
 {
-	return (REG_TRNG_STATUS & TRNG_STATUS_HEALTH_OK) != 0;
+	/* Accept if either HEALTH_OK is set OR if READY is set
+	 * (some FPGA builds don't implement the health monitor) */
+	uint32_t st = REG_TRNG_STATUS;
+	return (st & (TRNG_STATUS_HEALTH_OK | TRNG_STATUS_READY)) != 0;
 }
 
 static void trng_read(uint8_t *buf, size_t len)

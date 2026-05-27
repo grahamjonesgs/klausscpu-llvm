@@ -11,8 +11,11 @@
 #include "user_settings.h"
 
 #include <zephyr/kernel.h>
+#include <zephyr/version.h>
 #include <zephyr/net/socket.h>
+#include <zephyr/net/net_ip.h>
 #include <zephyr/fs/fs.h>
+#include <zephyr/sys/reboot.h>
 #include <zephyr/logging/log.h>
 
 #include <stdio.h>
@@ -468,11 +471,6 @@ static int dispatch_command(WOLFSSH *ssh, char *line)
 		   strcmp(p, "logout") == 0) {
 		ssh_send_str(ssh, "Bye.\r\n");
 		return 1;
-	} else if (strcmp(p, "reboot") == 0) {
-		ssh_send_str(ssh, "Rebooting...\r\n");
-		k_sleep(K_MSEC(100));
-		sys_reboot(SYS_REBOOT_COLD);
-		return 1;
 	} else {
 		ssh_sendf(ssh, "Unknown command: %s  (type 'help')\r\n", p);
 	}
@@ -634,9 +632,7 @@ static void ssh_listener_entry(void *p1, void *p2, void *p3)
 			continue;
 		}
 
-		LOG_INF("SSH connection from %s",
-			net_sprint_ipv4_addr(
-				(struct in_addr *)&client_addr.sin_addr));
+		LOG_INF("SSH connection accepted");
 
 		/* Find a free connection slot */
 		int slot = -1;

@@ -15,6 +15,10 @@
 #include <zephyr/net/dhcpv4.h>
 #include <zephyr/logging/log.h>
 
+#ifdef CONFIG_KLAUSSCPU_SSH_SERVER
+#include "ssh_server.h"
+#endif
+
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
 #define REG(a)       (*(volatile uint32_t *)(unsigned long)(a))
@@ -141,9 +145,22 @@ int main(void)
 		REG_SEG7 = 0x0003;
 	}
 
+#ifdef CONFIG_KLAUSSCPU_SSH_SERVER
+	/* 3. Start SSH server */
+	if (net_ok && sd_ok) {
+		REG_LEDS = 0x000F;
+		if (ssh_server_start() == 0) {
+			REG_SEG7 = 0x0004;
+			LOG_INF("SSH server ready on port 22 (admin/klausscpu)");
+		} else {
+			LOG_ERR("SSH server failed to start");
+		}
+	}
+#endif
+
 	REG_LEDS = 0x001F;
-	REG_SEG7 = 0x0004;
-	LOG_INF("System ready. Shell available on UART console.");
+	REG_SEG7 = 0x0005;
+	LOG_INF("System ready. Shell on UART, SSH on port 22.");
 
 	while (1) {
 		k_sleep(K_SECONDS(60));
