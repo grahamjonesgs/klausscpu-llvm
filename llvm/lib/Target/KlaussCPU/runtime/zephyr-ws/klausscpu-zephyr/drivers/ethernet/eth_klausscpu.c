@@ -199,8 +199,7 @@ static void eth_hw_init(void)
 
 	mdio_write(PHY_ADDR, PHY_BMCR, 0x3300u);
 
-	LOG_INF("Waiting for link...");
-	for (int i = 0; i < 30; i++) {
+	for (int i = 0; i < 5; i++) {
 		k_busy_wait(100000);
 		uint16_t bmsr = mdio_read(PHY_ADDR, PHY_BMSR);
 
