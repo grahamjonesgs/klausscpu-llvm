@@ -61,15 +61,6 @@ CFLAGS = -target $(TRIPLE) -O1 \
          -D__IEEE_LITTLE_ENDIAN \
          -D_LDBL_EQ_DBL
 
-# PIC flags — inherits -fPIC from CFLAGS (which is now global).
-# All objects are compiled PIC; no separate flag needed.
-PIC_FLAGS = $(CFLAGS)
-
-PIC_LD_SCRIPT = $(dir $(lastword $(MAKEFILE_LIST)))klausscpu_pic.ld
-
-# crt0 for loadable PIC programs (returns to caller instead of halting)
-CRT0_LOADABLE = crt0_loadable.o
-
 # ── compiler-rt builtins (soft-FP + integer division) ────────────────────────
 BUILTINS    = $(shell git rev-parse --show-toplevel)/compiler-rt/lib/builtins
 CRT_FLAGS   = -target $(TRIPLE) -O1 -nostdlibinc \
@@ -115,13 +106,9 @@ PROGRAMS = hello adventure test_64bit expr bst crypto queens \
            test_eth eth_test lwip_demo ping_demo tcp_echo http_server net_client \
            loader crypto_selftest crypto_test
 
-# PIC loadable programs (compiled with -fPIC, linked with klausscpu_pic.ld)
-PIC_PROGRAMS = test_pic hello_pic
-
-.PHONY: all clean pic $(PROGRAMS) $(PIC_PROGRAMS) net_time
+.PHONY: all clean $(PROGRAMS)
 
 all: $(addsuffix .elf, $(PROGRAMS))
-pic: $(addsuffix .pic, $(PIC_PROGRAMS))
 
 # ── Compile rules ─────────────────────────────────────────────────────────────
 
@@ -139,9 +126,6 @@ stdio_handles.o: src/stdio_handles.c ; $(CC) $(CFLAGS) -c -o $@ $<
 uart_stubs.o:  src/uart_stubs.c  ; $(CC) $(CFLAGS) -c -o $@ $<
 crt0.o:        src/crt0.c        ; $(CC) $(CFLAGS) -c -o $@ $<
 
-# crt0_loadable: PIC startup (returns to loader, lives in src/)
-crt0_loadable.o: src/crt0_loadable.c
-	$(CC) $(PIC_FLAGS) -c -o $@ $<
 
 # compiler-rt builtins compiled from in-tree source
 crt-%.o: $(BUILTINS)/%.c
@@ -362,49 +346,6 @@ loader.o: programs/loader.c
 loader.elf: loader.o $(FATFS_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,$(FATFS_OBJS) loader.o)
 
-# ── PIC loadable programs ─────────────────────────────────────────────────────
-# Build with -fPIC; link with klausscpu_pic.ld; flatten to .pic for SD card.
-#
-# Compile rule: any program can be built PIC — just add _pic suffix.
-%_pic.o: programs/%.c
-	$(CC) $(PIC_FLAGS) -c -o $@ $<
-
-# PIC link: crt0_loadable replaces crt0; uart_stubs.o provides uart_putc for
-# syscalls.c; klausscpu_pic.ld sets the load base.
-PIC_LIBC_OBJS = uart_stubs.o $(LIBC_OBJS)
-
-define pic_link
-	$(LLD) -T $(PIC_LD_SCRIPT) --gc-sections --emit-relocs -o $1 \
-	    $(CRT0_LOADABLE) $(PIC_LIBC_OBJS) $2 $(LIBC_LINK)
-	@echo "==> $1 built (PIC ELF with relocs)"
-	@file $1
-endef
-
-# Generic PIC link rule for self-contained demos (libc-only dependencies).
-# Explicit rules below (test_pic, hello_pic, test_fp, net_time) override this.
-%_pic.elf: %_pic.o $(PIC_LIBC_OBJS) $(CRT0_LOADABLE)
-	$(call pic_link,$@,$<)
-
-# Self-contained demo programs buildable as loadable PIC ELFs for the SSH
-# 'run' command.  Networking/FatFs/RTOS programs need extra objects.
-PIC_DEMOS = hello adventure expr bst crypto queens test_64bit test_switch test_fp
-
-.PHONY: pic-demos
-pic-demos: $(addsuffix _pic.elf, $(PIC_DEMOS))
-	@echo "==> PIC demos built: $(addsuffix _pic.elf, $(PIC_DEMOS))"
-
-# Flatten PIC ELF to raw binary for SD card — kept for backward compat.
-# New programs use the ELF directly (loader detects ELF vs flat binary by magic).
-%.pic: %_pic.elf
-	$(BUILD_DIR)/bin/llvm-objcopy -O binary $< $@
-	@ls -la $@
-
-# Strip a PIC ELF of debug info for a smaller SD-card image.
-# The RELA sections (needed by the loader's runtime patcher) are preserved.
-%.sd.elf: %_pic.elf
-	$(BUILD_DIR)/bin/llvm-strip --strip-debug -o $@ $<
-	@ls -la $@
-
 # ── LLEXT loadable extensions (ELFCLASS32 ET_REL) ────────────────────────────
 # Supersedes the PIC loadable model.  An extension is a plain `-c` compile
 # against the extension-SDK headers in ext_include/ (declarations only); every
@@ -413,56 +354,35 @@ pic-demos: $(addsuffix _pic.elf, $(PIC_DEMOS))
 # card and load it with the SSH `run` command (e.g. `run adventure.llext`).
 EXT_CFLAGS = -target $(TARGET) -Os -nostdinc -ffreestanding -fno-builtin \
              -I$(dir $(lastword $(MAKEFILE_LIST)))ext_include
-EXT_DEMOS  = hello adventure expr bst crypto queens test_64bit
+EXT_DEMOS  = hello adventure expr bst crypto queens test_64bit test_switch
 
 %.llext: programs/%.c
 	$(CC) $(EXT_CFLAGS) -c -o $@ $<
 	@echo "==> $@ built (ELF32 ET_REL extension)"
 
+# test_fp uses single-precision soft-FP, whose builtins (conversions especially)
+# are not in the prebuilt libclang_rt.builtins.a.  Rather than bloat the kernel
+# ROM by exporting them, bundle them into the extension: partial-link (ld -r)
+# test_fp with the compiler-rt SF objects + the fp_mode stub, leaving only printf
+# to resolve against the kernel.
+EXT_FP_OBJS = crt-addsf3.o crt-subsf3.o crt-mulsf3.o crt-divsf3.o \
+              crt-comparesf2.o crt-fixsfdi.o fp_mode_stub.o
+
+test_fp_ext.o: programs/test_fp.c
+	$(CC) $(EXT_CFLAGS) -c -o $@ $<
+
+test_fp.llext: test_fp_ext.o $(EXT_FP_OBJS)
+	$(LLD) -r -o $@ $^
+	@echo "==> $@ built (ELF32 ET_REL extension, soft-FP bundled)"
+
 .PHONY: ext-demos
-ext-demos: $(addsuffix .llext, $(EXT_DEMOS))
-	@echo "==> extensions built: $(addsuffix .llext, $(EXT_DEMOS))"
-
-# test_fp needs the soft-FP compiler-rt builtins linked in.
-test_fp_pic.elf: test_fp_pic.o $(CRT_FP_OBJS) $(PIC_LIBC_OBJS) $(CRT0_LOADABLE)
-	$(call pic_link,$@,$(CRT_FP_OBJS) test_fp_pic.o)
-
-# test_pic: simple self-contained PIC smoke test
-test_pic_pic.elf: test_pic_pic.o $(PIC_LIBC_OBJS) $(CRT0_LOADABLE)
-	$(call pic_link,$@,test_pic_pic.o)
-
-test_pic: test_pic.pic
-
-# hello_pic: PIC loadable hello-world for the telnet 'load' command.
-# Produces hello_pic.elf (with relocs) and hello.sd.elf (stripped for SD card).
-hello_pic.elf: hello_pic.o $(PIC_LIBC_OBJS) $(CRT0_LOADABLE)
-	$(call pic_link,$@,hello_pic.o)
-
-hello_pic: hello.sd.elf
-
-# ── net_time: PIC program — DHCP + SNTP → print UTC time ─────────────────────
-# Includes the full Ethernet + lwIP stack compiled with -fPIC (via global CFLAGS).
-# Ships as a stripped ELF on the SD card (net_time.sd.elf → PROG.ELF).
-
-net_time_pic.o: programs/net_time_pic.c
-	$(CC) $(LWIP_FLAGS) -c -o $@ $<
-
-LWIP_SNTP_OBJ = lwip_sntp.o
-
-net_time_pic_pic.o: programs/net_time_pic.c
-	$(CC) $(LWIP_FLAGS) -c -o $@ $<
-
-net_time_pic_pic.elf: net_time_pic_pic.o $(ETH_OBJS) $(LWIP_OBJS) \
-                       $(LWIP_SNTP_OBJ) $(PIC_LIBC_OBJS) $(CRT0_LOADABLE)
-	$(call pic_link,$@,$(ETH_OBJS) $(LWIP_OBJS) $(LWIP_SNTP_OBJ) net_time_pic_pic.o)
-
-net_time: net_time_pic_pic.elf
+ext-demos: $(addsuffix .llext, $(EXT_DEMOS)) test_fp.llext
+	@echo "==> extensions built: $(addsuffix .llext, $(EXT_DEMOS)) test_fp.llext"
 
 # ── Phony aliases ─────────────────────────────────────────────────────────────
 
 loader:      loader.elf
 hello:       hello.elf
-hello_pic:   hello.sd.elf
 adventure:   adventure.elf
 test_64bit:  test_64bit.elf
 expr:        expr.elf
@@ -521,7 +441,8 @@ test_sync: test_sync.elf
 	$(BUILD_DIR)/bin/llvm-objdump -d --no-show-raw-insn $< | head -60
 
 clean:
-	rm -f *.o crt-*.o lwip_*.o *.d lwip_*.d *.elf "adventure 2.elf" "adventure 2.o" \
+	rm -f *.o crt-*.o lwip_*.o *.d lwip_*.d *.elf *.pic *.sd.elf *.llext \
+	      "adventure 2.elf" "adventure 2.o" \
 	      "bst 2.elf" "bst 2.o" "crypto 2.elf" "crypto 2.o" \
 	      "expr 2.elf" "expr 2.o" "hello 2.elf" "hello 2.o" \
 	      "queens 2.elf" "queens 2.o" "test_64bit 2.elf" "test_64bit 2.o" \
