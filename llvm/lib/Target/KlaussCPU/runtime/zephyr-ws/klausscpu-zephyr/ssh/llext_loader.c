@@ -194,7 +194,17 @@ int llext_run_from_sd(const char *filename, WOLFSSH *ssh)
 	/* Keep ext->sym_tab after load so we can resolve `main` by name. */
 	ldr_parm.keep_symtab = true;
 
-	int ret = llext_load(ldr, "run", &ext, &ldr_parm);
+	/* llext_load() deduplicates by name (a second load of the same name just
+	 * bumps a use count and returns the existing extension).  We always want a
+	 * fresh, independent instance — even of the same program in another session
+	 * — so give every load a unique name. */
+	static atomic_t ext_seq;
+	char ext_name[16];
+
+	snprintf(ext_name, sizeof(ext_name), "ext%u",
+		 (unsigned int)atomic_inc(&ext_seq));
+
+	int ret = llext_load(ldr, ext_name, &ext, &ldr_parm);
 
 	if (ret != 0) {
 		loader_printf(ssh, "llext_load failed: %d\r\n", ret);
