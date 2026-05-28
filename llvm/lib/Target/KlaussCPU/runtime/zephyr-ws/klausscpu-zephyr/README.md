@@ -132,3 +132,71 @@ origin to match.
   without these overrides `printk` and `printf` would silently discard output.
 - **`OUTPUT_FORMAT("elf32-klausscpu")`** entry has been added to lld's
   `ScriptParser.cpp` `StringSwitch` table (in the LLVM tree, not here).
+
+## Loadable extensions (LLEXT) — the SSH `run` command
+
+Status: **working on hardware.** The SSH shell's `run` command loads programs at
+runtime as Zephyr LLEXT extensions (ELFCLASS32 `ET_REL` objects), replacing the
+earlier custom PIC loader. Each program is a plain `.o` that calls the kernel's
+exported libc; the loader resolves those symbols, relocates the code into the
+llext heap, and runs the program's `main()` with stdio redirected to the SSH
+session.
+
+### Building an extension
+
+From `runtime/`:
+
+```sh
+make ext-demos      # builds hello/adventure/expr/bst/crypto/queens/test_64bit .llext
+```
+
+Extensions compile with `-c` against the SDK headers in `runtime/ext_include/`
+(plain externs — picolibc headers can't be used because they macro-define
+`putchar`/`getchar` over `FILE*`). To add a program, drop it in `runtime/programs/`
+and add its name to `EXT_DEMOS` in the Makefile. It may call any symbol exported
+in `ssh/llext_exports.c` (printf, puts, putchar, getchar, malloc/calloc/realloc/
+free, mem*/str*) plus the inline MMIO helpers in `mmio.h`.
+
+### Running it
+
+Copy the `.llext` to the SD card, then over SSH (`ssh admin@<ip>`, pw `klausscpu`):
+
+```
+run adventure.llext          # or: run /SD:/adventure.llext
+```
+
+The program's `printf`/`puts`/`putchar` output and `getchar` input flow over the
+SSH session; on exit the extension is unloaded.
+
+### How it works (key files)
+
+| File | Role |
+|---|---|
+| `ssh/llext_loader.c` | reads the `.llext` from SD, `llext_load`, resolves `main`, runs it on a thread, redirects I/O |
+| `ssh/llext_exports.c` | `EXPORT_SYMBOL` table (kernel libc) + `getchar()` (minimal libc has none) |
+| `arch/klausscpu/core/elf.c` | `arch_elf_relocate` — ABS32 / ABS64 / PCREL32, little-endian |
+| `arch/klausscpu/core/irq.c` | `arch_printk_char_out` console-output redirect hook |
+| `runtime/ext_include/` | extension SDK headers (stdio/string/stdlib/stdint/stddef) |
+
+### Build / config requirements
+
+- `apps/ssh_shell/prj.conf` enables `CONFIG_LLEXT`, `CONFIG_LLEXT_TYPE_ELF_OBJECT`,
+  a `CONFIG_LLEXT_HEAP_SIZE`, and **`CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE`** (minimal
+  libc defaults the malloc arena to 0, i.e. `malloc()` returns NULL). It also sets
+  `CONFIG_LLEXT_LOG_LEVEL_WRN` to silence the per-relocation load trace.
+- The `west build` for `ssh_shell` **must include the wolfSSL and wolfSSH modules**
+  or Kconfig aborts (`undefined symbol WOLFSSL`):
+  `-DEXTRA_ZEPHYR_MODULES="$MOD;$WOLFSSL;$WOLFSSH"` where `$WOLFSSL` /
+  `$WOLFSSH` point at `runtime/freertos/wolfssl/{wolfssl-src,wolfssh-src}`.
+- **Vendored Zephyr patches** (the `zephyr/` tree is git-ignored, fetched by west).
+  Captured in `zephyr-patches/llext-klausscpu.patch`; re-apply after `west update`:
+  ```sh
+  git -C zephyr apply ../klausscpu-zephyr/zephyr-patches/llext-klausscpu.patch
+  ```
+  The patch: `subsys/llext/Kconfig` adds `LLEXT_ELF_CLASS32`;
+  `include/zephyr/llext/elf.h` parses ELF32 under `CONFIG_64BIT` when that is set;
+  `subsys/llext/llext_link.c` accepts `SHT_RELA` on the generic path;
+  `subsys/llext/llext_load.c` recovers the merged LLVM string table, treats an
+  identical SHSTRTAB/STRTAB alias as non-overlapping, and honours a new
+  `keep_symtab` load-param flag (`include/zephyr/llext/llext.h`) so `main` can be
+  resolved by name after load.

@@ -16,6 +16,20 @@
 #   make all            — every .elf
 #   make clean
 
+# Every target here is built by an explicit rule.  Cancel make's built-in
+# "build an executable from X" implicit rules (empty-recipe pattern rules);
+# otherwise make tries to host-link/assemble stray files (e.g. crt0.o -> crt0,
+# setjmp.S -> setjmp) and fails with "library 'System' not found".  (Setting
+# --no-builtin-rules via MAKEFLAGS inside the makefile is too late under the
+# GNU Make 3.81 shipped on macOS, so cancel the specific rules explicitly.)
+%: %.o
+%: %.c
+%: %.cc
+%: %.cpp
+%: %.s
+%: %.S
+%.s: %.S
+
 BUILD_DIR ?= $(shell git rev-parse --show-toplevel)/build
 
 CC  = $(BUILD_DIR)/bin/clang
@@ -390,6 +404,24 @@ pic-demos: $(addsuffix _pic.elf, $(PIC_DEMOS))
 %.sd.elf: %_pic.elf
 	$(BUILD_DIR)/bin/llvm-strip --strip-debug -o $@ $<
 	@ls -la $@
+
+# ── LLEXT loadable extensions (ELFCLASS32 ET_REL) ────────────────────────────
+# Supersedes the PIC loadable model.  An extension is a plain `-c` compile
+# against the extension-SDK headers in ext_include/ (declarations only); every
+# libc symbol resolves at load time against the kernel's exported libc (see the
+# Zephyr SSH app's ssh/llext_exports.c).  Copy the resulting .llext to the SD
+# card and load it with the SSH `run` command (e.g. `run adventure.llext`).
+EXT_CFLAGS = -target $(TARGET) -Os -nostdinc -ffreestanding -fno-builtin \
+             -I$(dir $(lastword $(MAKEFILE_LIST)))ext_include
+EXT_DEMOS  = hello adventure expr bst crypto queens test_64bit
+
+%.llext: programs/%.c
+	$(CC) $(EXT_CFLAGS) -c -o $@ $<
+	@echo "==> $@ built (ELF32 ET_REL extension)"
+
+.PHONY: ext-demos
+ext-demos: $(addsuffix .llext, $(EXT_DEMOS))
+	@echo "==> extensions built: $(addsuffix .llext, $(EXT_DEMOS))"
 
 # test_fp needs the soft-FP compiler-rt builtins linked in.
 test_fp_pic.elf: test_fp_pic.o $(CRT_FP_OBJS) $(PIC_LIBC_OBJS) $(CRT0_LOADABLE)

@@ -27,7 +27,7 @@
 #include <wolfssl/wolfcrypt/error-crypt.h>
 
 #include "ssh_server.h"
-#include "pic_loader.h"
+#include "llext_loader.h"
 #include "sshkeys.h"
 #include "wolfssl_hw.h"
 
@@ -187,7 +187,7 @@ static void cmd_help(WOLFSSH *ssh)
 		"  rm <file>      remove file\r\n"
 		"  write <file> <text>  write text to file\r\n"
 		"  df             filesystem free space\r\n"
-		"  run [file]     load & run PIC program (default PROG.ELF)\r\n"
+		"  run [file]     load & run extension (default PROG.LLEXT)\r\n"
 		"  leds [hex]     read/write LED register\r\n"
 		"  seg <hex>      write 7-segment display\r\n"
 		"  exit           close SSH session\r\n");
@@ -431,11 +431,11 @@ static void cmd_run(WOLFSSH *ssh, const char *arg)
 			filename = pathbuf;
 		}
 	} else {
-		filename = "/SD:/PROG.ELF";
+		filename = "/SD:/PROG.LLEXT";
 	}
 
 	ssh_sendf(ssh, "Loading %s ...\r\n", filename);
-	int rc = pic_run_from_sd(filename, ssh);
+	int rc = llext_run_from_sd(filename, ssh);
 
 	if (rc < 0) {
 		ssh_sendf(ssh, "\r\nLoad/run failed (code %d)\r\n", rc);
@@ -767,7 +767,7 @@ static void ssh_listener_entry(void *p1, void *p2, void *p3)
 int ssh_server_start(void)
 {
 	k_mutex_init(&conn_mutex);
-	pic_loader_init();
+	llext_loader_init();
 
 	if (wolfSSH_Init() != WS_SUCCESS) {
 		LOG_ERR("wolfSSH_Init failed");

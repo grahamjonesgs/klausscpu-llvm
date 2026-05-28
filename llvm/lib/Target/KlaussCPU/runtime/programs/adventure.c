@@ -31,7 +31,6 @@ int read_cmd(void)
     int cmd;
 
     printf("> ");
-    fflush(stdout);
     cmd = getchar();
     putchar(cmd);
 

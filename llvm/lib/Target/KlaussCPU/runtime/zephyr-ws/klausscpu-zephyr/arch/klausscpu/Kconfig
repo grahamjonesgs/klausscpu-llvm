@@ -14,6 +14,9 @@ config CPU_KLAUSSCPU
 	select ATOMIC_OPERATIONS_C
 	select USE_SWITCH_SUPPORTED
 	select USE_SWITCH
+	# Toolchain emits ELFCLASS32 relocatable objects even though the C ABI
+	# uses 64-bit pointers (CONFIG_64BIT=y), so llext must parse 32-bit ELF.
+	select LLEXT_ELF_CLASS32 if LLEXT
 
 config ARCH_HAS_USERSPACE
 	bool
