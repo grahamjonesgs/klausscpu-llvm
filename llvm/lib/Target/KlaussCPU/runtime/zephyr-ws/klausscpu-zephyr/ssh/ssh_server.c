@@ -190,7 +190,6 @@ static void cmd_help(WOLFSSH *ssh)
 		"  run [file]     load & run PIC program (default PROG.ELF)\r\n"
 		"  leds [hex]     read/write LED register\r\n"
 		"  seg <hex>      write 7-segment display\r\n"
-		"  reboot         reboot the system\r\n"
 		"  exit           close SSH session\r\n");
 }
 
@@ -475,13 +474,6 @@ static void cmd_threads(WOLFSSH *ssh)
 #endif
 }
 
-static void cmd_reboot(WOLFSSH *ssh)
-{
-	ssh_send_str(ssh, "Rebooting...\r\n");
-	k_sleep(K_MSEC(100));
-	sys_reboot(SYS_REBOOT_COLD);
-}
-
 /* ── Command dispatcher ──────────────────────────────────────────────────── */
 
 static int dispatch_command(WOLFSSH *ssh, char *line)
@@ -557,8 +549,6 @@ static int dispatch_command(WOLFSSH *ssh, char *line)
 		cmd_seg(ssh, arg);
 	} else if (strcmp(p, "threads") == 0) {
 		cmd_threads(ssh);
-	} else if (strcmp(p, "reboot") == 0) {
-		cmd_reboot(ssh);
 	} else if (strcmp(p, "exit") == 0 || strcmp(p, "quit") == 0 ||
 		   strcmp(p, "logout") == 0) {
 		ssh_send_str(ssh, "Bye.\r\n");

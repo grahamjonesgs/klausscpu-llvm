@@ -366,6 +366,19 @@ define pic_link
 	@file $1
 endef
 
+# Generic PIC link rule for self-contained demos (libc-only dependencies).
+# Explicit rules below (test_pic, hello_pic, test_fp, net_time) override this.
+%_pic.elf: %_pic.o $(PIC_LIBC_OBJS) $(CRT0_LOADABLE)
+	$(call pic_link,$@,$<)
+
+# Self-contained demo programs buildable as loadable PIC ELFs for the SSH
+# 'run' command.  Networking/FatFs/RTOS programs need extra objects.
+PIC_DEMOS = hello adventure expr bst crypto queens test_64bit test_switch test_fp
+
+.PHONY: pic-demos
+pic-demos: $(addsuffix _pic.elf, $(PIC_DEMOS))
+	@echo "==> PIC demos built: $(addsuffix _pic.elf, $(PIC_DEMOS))"
+
 # Flatten PIC ELF to raw binary for SD card — kept for backward compat.
 # New programs use the ELF directly (loader detects ELF vs flat binary by magic).
 %.pic: %_pic.elf
@@ -377,6 +390,10 @@ endef
 %.sd.elf: %_pic.elf
 	$(BUILD_DIR)/bin/llvm-strip --strip-debug -o $@ $<
 	@ls -la $@
+
+# test_fp needs the soft-FP compiler-rt builtins linked in.
+test_fp_pic.elf: test_fp_pic.o $(CRT_FP_OBJS) $(PIC_LIBC_OBJS) $(CRT0_LOADABLE)
+	$(call pic_link,$@,$(CRT_FP_OBJS) test_fp_pic.o)
 
 # test_pic: simple self-contained PIC smoke test
 test_pic_pic.elf: test_pic_pic.o $(PIC_LIBC_OBJS) $(CRT0_LOADABLE)

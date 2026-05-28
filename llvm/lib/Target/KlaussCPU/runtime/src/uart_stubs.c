@@ -11,9 +11,10 @@
 
 typedef unsigned long long uint64_t;
 
-/* Defined in syscalls.c — set by crt0_loadable before main() to mirror every
- * transmitted character to an active telnet session. */
+/* Defined in syscalls.c — set by crt0_loadable before main() to redirect
+ * console I/O to an active SSH/telnet session when running under the loader. */
 extern void (*g_console_mirror_fn)(char c);
+extern int  (*g_console_input_fn)(void);
 
 // ---------------------------------------------------------------------------
 // Transmit: send 64-bit register value as 16 hex digits over UART.
@@ -40,12 +41,15 @@ static void _uart_raw(char c) {
 // '\n' is expanded to CR+LF so all output looks correct on a serial terminal.
 // ---------------------------------------------------------------------------
 void uart_putc(char c) {
+    /* When a remote loader (SSH/telnet) is driving this program, redirect
+     * output to that session only — not the physical UART.  The mirror
+     * function does its own \n→\r\n expansion, so pass c unchanged. */
+    if (g_console_mirror_fn) {
+        g_console_mirror_fn(c);
+        return;
+    }
     if (c == '\n') _uart_raw('\r');
     _uart_raw(c);
-    /* Mirror to telnet when a PIC program is running under the loader.
-     * The mirror function does its own \n→\r\n expansion, so pass c unchanged. */
-    if (g_console_mirror_fn)
-        g_console_mirror_fn(c);
 }
 
 // ---------------------------------------------------------------------------
@@ -66,6 +70,10 @@ void uart_newline(void) {
 // Receive: blocking — wait for UART byte, return it.
 // ---------------------------------------------------------------------------
 uint64_t uart_getc_blocking(void) {
+    /* When a remote loader (SSH/telnet) is driving this program, read input
+     * from that session instead of the physical UART RX FIFO. */
+    if (g_console_input_fn)
+        return (uint64_t)(unsigned char)g_console_input_fn();
     return __builtin_klausscpu_rxrb();
 }
 

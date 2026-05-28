@@ -66,7 +66,15 @@ SECTIONS {
     __bss_end = .;
 
     /* _end marks the start of the heap within the loaded image. */
+    . = ALIGN(16);
     _end = .;
+
+    /* Heap bounds for picolibc's __fallback_sbrk / malloc.
+     * The PIC load area is 0x04000000-0x07FFFFFF; the heap runs from just
+     * past the loaded image up to 0x07E00000, staying clear of the Zephyr
+     * boot/exception stack at 0x07F00000-0x07FFFFFF. */
+    __heap_start = .;
+    __heap_end   = 0x07E00000;
 
     /DISCARD/ : { *(.eh_frame) *(.comment) }
 }

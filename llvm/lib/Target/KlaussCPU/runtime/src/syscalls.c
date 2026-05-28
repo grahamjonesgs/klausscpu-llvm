@@ -25,11 +25,16 @@ extern unsigned long long uart_getc_blocking(void);
 
 // ── UART callbacks — non-static so stdio_handles.c can reference them ────────
 
-// Optional mirror: when non-NULL every character written to stdout is also
-// passed to this function.  Used by the telnet shell's 'load' command to
-// stream PIC program output back to the telnet client.  Set/clear by the
-// telnet layer; kept NULL the rest of the time.
+// Optional mirror: when non-NULL every character written to stdout is sent
+// to this function instead of the physical UART.  Used by the SSH/telnet
+// shell's load/run command to stream PIC program output back to the remote
+// client.  Set/clear by the loader layer; kept NULL the rest of the time.
 void (*g_console_mirror_fn)(char c) = NULL;
+
+// Optional input source: when non-NULL, characters are read from this
+// function instead of the physical UART RX.  Set by the loader so a PIC
+// program started over SSH/telnet reads its input from that session.
+int (*g_console_input_fn)(void) = NULL;
 
 int _uart_put(char c, FILE *f) {
     (void)f;
@@ -80,10 +85,8 @@ void *_sbrk(ptrdiff_t incr) {
 ssize_t _write(int fd, const void *buf, size_t len) {
     if (fd > 2) { errno = EBADF; return -1; }
     const char *p = (const char *)buf;
-    for (size_t i = 0; i < len; i++) {
-        if (p[i] == '\n') uart_putc('\r');
-        uart_putc(p[i]);
-    }
+    for (size_t i = 0; i < len; i++)
+        uart_putc(p[i]);   /* \n→\r\n + mirror routing handled inside */
     return (ssize_t)len;
 }
 

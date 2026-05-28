@@ -18,13 +18,18 @@ extern void __stdio_init(void);   /* from stdio_handles.c — wires UART to stdo
 /* __attribute__((section)) ensures this function's code is emitted first
  * in the .text.entry section, so it appears at the binary's start address.
  * The PIC linker script places .text.entry before .text. */
-/* Mirror function installed in g_console_mirror_fn when non-NULL.
- * Callers that want stdout mirrored (e.g. telnet loader) pass a function
- * pointer; bare callers pass NULL. */
+/* Console hooks installed when non-NULL.  A loader that wants to drive the
+ * program over SSH/telnet passes an output mirror and an input source; bare
+ * callers pass NULL for both (console I/O goes to the physical UART).
+ *
+ * ABI note: the loader calls this with two arguments.  Older single-argument
+ * binaries remain compatible (the extra register is simply ignored), but a
+ * binary built with this ABI must be run by a loader that supplies both. */
 extern void (*g_console_mirror_fn)(char c);
+extern int  (*g_console_input_fn)(void);
 
 __attribute__((section(".text.entry"), noinline))
-int _start_loadable(void (*mirror_fn)(char)) {
+int _start_loadable(void (*mirror_fn)(char), int (*input_fn)(void)) {
     /* Clear BSS within the loaded image. */
     extern char __bss_start[], __bss_end[];
     for (char *p = __bss_start; p < __bss_end; ++p)
@@ -33,8 +38,9 @@ int _start_loadable(void (*mirror_fn)(char)) {
     /* Initialise stdio — must happen after BSS clear (FILE objects are in BSS). */
     __stdio_init();
 
-    /* Install the caller's mirror hook (NULL = UART only). */
+    /* Install the caller's console hooks (NULL = physical UART). */
     g_console_mirror_fn = mirror_fn;
+    g_console_input_fn  = input_fn;
 
     return main();
 }

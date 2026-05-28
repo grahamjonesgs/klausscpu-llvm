@@ -85,15 +85,17 @@ typedef struct {
     s32 r_addend;
 } Elf32_Rela;
 
-typedef int (*pic_entry_fn)(void (*mirror_fn)(char));
+typedef int (*pic_entry_fn)(void (*mirror_fn)(char), int (*input_fn)(void));
 
 /* ── Module state ─────────────────────────────────────────────────────────── */
 
 static struct k_mutex g_pic_mutex;
 static WOLFSSH *g_mirror_ssh;
 
-/* ── Mirror function ─────────────────────────────────────────────────────── */
+/* ── Console hooks handed to the PIC program ──────────────────────────────── */
 
+/* Output: every character the program writes is sent to the SSH session.
+ * The program no longer writes to the physical UART when this is installed. */
 static void mirror_to_ssh(char c)
 {
 	WOLFSSH *ssh = g_mirror_ssh;
@@ -106,6 +108,27 @@ static void mirror_to_ssh(char c)
 		wolfSSH_stream_send(ssh, &cr, 1);
 	}
 	wolfSSH_stream_send(ssh, (uint8_t *)&c, 1);
+}
+
+/* Input: blocking read of one byte from the SSH session.  Called from the
+ * pic_run thread while the connection thread is parked in pic_run_from_sd,
+ * so there is no concurrent wolfSSH access on this session.  The program
+ * echoes its own input (e.g. adventure's putchar), so we do not echo here.
+ * Returns -1 on connection close/error. */
+static int input_from_ssh(void)
+{
+	WOLFSSH *ssh = g_mirror_ssh;
+	uint8_t ch;
+
+	if (!ssh) {
+		return -1;
+	}
+	int n = wolfSSH_stream_read(ssh, &ch, 1);
+
+	if (n <= 0) {
+		return -1;
+	}
+	return (int)ch;
 }
 
 /* ── Output helper — SSH or printk ────────────────────────────────────────── */
@@ -331,6 +354,7 @@ static int pic_load(const char *path, WOLFSSH *ssh, pic_entry_fn *entry_out)
 struct pic_run_args {
 	pic_entry_fn entry;
 	void (*mirror)(char);
+	int (*input)(void);
 	struct k_sem done;
 	int result;
 };
@@ -345,7 +369,7 @@ static void pic_run_entry(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
 
-	a->result = a->entry(a->mirror);
+	a->result = a->entry(a->mirror, a->input);
 	k_sem_give(&a->done);
 }
 
@@ -375,6 +399,7 @@ int pic_run_from_sd(const char *filename, WOLFSSH *ssh)
 
 	args.entry = entry;
 	args.mirror = ssh ? mirror_to_ssh : NULL;
+	args.input = ssh ? input_from_ssh : NULL;
 	args.result = -1;
 	k_sem_init(&args.done, 0, 1);
 
