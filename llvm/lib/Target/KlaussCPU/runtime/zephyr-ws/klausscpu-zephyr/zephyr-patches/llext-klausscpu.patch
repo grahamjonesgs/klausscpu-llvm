@@ -1,8 +1,17 @@
 diff --git a/include/zephyr/llext/elf.h b/include/zephyr/llext/elf.h
-index b0477416a43..d3f5730bc62 100644
+index b0477416a43..6d7323b9ed0 100644
 --- a/include/zephyr/llext/elf.h
 +++ b/include/zephyr/llext/elf.h
-@@ -497,7 +497,14 @@ struct elf64_dyn {
+@@ -211,6 +211,8 @@ struct elf64_shdr {
+ #define SHF_WRITE 0x1           /**< Section is writable */
+ #define SHF_ALLOC 0x2           /**< Section is present in memory */
+ #define SHF_EXECINSTR 0x4       /**< Section contains executable instructions */
++#define SHF_MERGE 0x10          /**< Section may be merged to eliminate duplication */
++#define SHF_STRINGS 0x20        /**< Section contains null-terminated strings */
+ 
+ /**
+  * @brief Symbol table entry(32-bit)
+@@ -497,7 +499,14 @@ struct elf64_dyn {
  };
  /** @endcond */
  
@@ -81,7 +90,7 @@ index dcbd441d0e1..349c7a0a152 100644
  				LOG_ERR("Invalid entry size %zd for SHT_RELA section %d",
  					(size_t)shdr->sh_entsize, i);
 diff --git a/subsys/llext/llext_load.c b/subsys/llext/llext_load.c
-index de3cdd6402b..298c7f566bf 100644
+index de3cdd6402b..4c203ab0802 100644
 --- a/subsys/llext/llext_load.c
 +++ b/subsys/llext/llext_load.c
 @@ -184,6 +184,24 @@ static int llext_find_tables(struct llext_loader *ldr)
@@ -109,7 +118,26 @@ index de3cdd6402b..298c7f566bf 100644
  	if (!ldr->sects[LLEXT_MEM_SHSTRTAB].sh_type ||
  	    !ldr->sects[LLEXT_MEM_STRTAB].sh_type ||
  	    !ldr->sects[LLEXT_MEM_SYMTAB].sh_type) {
-@@ -313,6 +331,17 @@ static int llext_map_sections(struct llext_loader *ldr, struct llext *ext)
+@@ -252,8 +270,16 @@ static int llext_map_sections(struct llext_loader *ldr, struct llext *ext)
+ 			 */
+ 			memcpy(region, shdr, sizeof(*region));
+ 		} else {
+-			/* Make sure this section is compatible with the region */
+-			if (shdr->sh_flags != region->sh_flags) {
++			/* Make sure this section is compatible with the region.
++			 * SHF_MERGE/SHF_STRINGS are link-time-only hints with no
++			 * runtime meaning, so ignore them: LLVM emits e.g. both
++			 * .rodata (A) and .rodata.str1.1 (AMS) / .rodata.cst32 (AM),
++			 * which all belong in the same read-only region.
++			 */
++			const elf_word flag_mask = ~(elf_word)(SHF_MERGE | SHF_STRINGS);
++
++			if ((shdr->sh_flags & flag_mask) !=
++			    (region->sh_flags & flag_mask)) {
+ 				LOG_ERR("Unsupported section flags for %s (region %d)",
+ 					name, mem_idx);
+ 				return -ENOEXEC;
+@@ -313,6 +339,17 @@ static int llext_map_sections(struct llext_loader *ldr, struct llext *ext)
  				continue;
  			}
  
@@ -127,7 +155,7 @@ index de3cdd6402b..298c7f566bf 100644
  			if (ldr->hdr.e_type == ET_DYN) {
  				/*
  				 * Test all merged VMA ranges for overlaps
-@@ -646,9 +675,13 @@ out:
+@@ -646,9 +683,13 @@ out:
  
  	/* Until proper inter-llext linking is implemented, the symbol table is
  	 * not useful outside of the loading process; keep it only if debugging
