@@ -105,11 +105,14 @@ void klausscpu_irq_init(void)
 static volatile char _printk_char_buf;
 
 /*
- * Optional console-output redirect.  When non-NULL, every character printk()
- * and minimal-libc printf() would send to the UART is instead handed to this
- * hook.  The llext run loader installs it so a loaded extension's stdout is
- * mirrored to the SSH session for the duration of the run; the hook is
- * responsible for any \n -> \r\n translation it needs.
+ * Optional console-output router.  When set, it is consulted for every
+ * character printk()/minimal-libc printf() would send to the UART.  It returns
+ * nonzero if it consumed the character (e.g. routed it to the SSH session of
+ * the currently running extension, keyed off the running thread) and zero to
+ * let it fall through to the UART.  This per-character, per-thread design lets
+ * several extensions run concurrently, each routing its own stdout to its own
+ * session, while kernel/log output on other threads still reaches the UART.
+ * The hook owns any \n -> \r\n translation it needs.
  */
 int (*klausscpu_console_out_hook)(int c);
 
@@ -117,8 +120,8 @@ int arch_printk_char_out(int c)
 {
     int (*hook)(int) = klausscpu_console_out_hook;
 
-    if (hook != NULL) {
-        return hook(c);
+    if (hook != NULL && hook(c) != 0) {
+        return c;
     }
 
     if (c == '\n') {

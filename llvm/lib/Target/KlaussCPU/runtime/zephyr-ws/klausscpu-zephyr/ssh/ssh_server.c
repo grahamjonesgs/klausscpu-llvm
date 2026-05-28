@@ -617,7 +617,9 @@ struct conn_args {
 	int sock;
 };
 
-#define CONN_STACK_SIZE 16384
+/* The connection thread also runs loaded extensions' main() in-place (see
+ * llext_loader.c), so it needs room for the shell frame plus the program. */
+#define CONN_STACK_SIZE 40960
 
 static K_THREAD_STACK_ARRAY_DEFINE(conn_stacks, SSH_MAX_CONNS, CONN_STACK_SIZE);
 static struct k_thread conn_threads[SSH_MAX_CONNS];

@@ -1,18 +1,17 @@
-/* llext_loader.c — Load and run an LLEXT extension from the SD card inside a
- *                  Zephyr thread, redirecting the extension's stdio to an SSH
- *                  session.
+/* llext_loader.c — Load and run an LLEXT extension from the SD card,
+ *                  redirecting the extension's stdio to an SSH session.
  *
  * Replaces the custom PIC loader (pic_loader.c).  Extensions are ELFCLASS32
  * ET_REL objects produced by the KlaussCPU clang with `-c`; they call the
  * kernel's exported libc (see llext_exports.c) rather than bundling their own.
  *
- * The whole file is read into a RAM buffer and handed to the llext buf loader,
- * which copies/relocates the sections into the llext heap.  We then resolve the
- * extension's `main`, install the console redirect hooks, and run main() on a
- * dedicated thread (so the connection thread can park without touching wolfSSH
- * concurrently).
- *
- * Only one extension runs at a time (g_ext_mutex serialises concurrent calls).
+ * Concurrency: the extension's `main` runs ON THE CALLING (per-connection) SSH
+ * thread, and stdio is routed by the *currently running thread* via thread
+ * custom data.  Because every SSH session already has its own connection thread
+ * (conn_threads[SSH_MAX_CONNS]), several extensions run concurrently, each with
+ * its stdout/stdin bound to its own session.  llext_load()/llext_unload() are
+ * internally serialised by the subsystem's llext_lock, so concurrent loads are
+ * safe; nothing here holds a global lock across a run.
  */
 
 #define WOLFSSL_USER_SETTINGS
@@ -34,28 +33,35 @@
 LOG_MODULE_REGISTER(llext_loader, LOG_LEVEL_INF);
 
 #define EXT_MAX_SIZE    (8UL * 1024 * 1024)
-#define EXT_STACK_SIZE  32768
-#define EXT_THREAD_PRIO 7
 
-/* Console redirect hooks (defined in arch/klausscpu/core/irq.c and
- * ssh/llext_exports.c).  NULL = physical UART / no input. */
+/* Console redirect hooks (declared in arch/klausscpu/core/irq.c and
+ * ssh/llext_exports.c).  Set once in llext_loader_init(); each callback then
+ * keys off the running thread, so they need no per-run mutation. */
 extern int (*klausscpu_console_out_hook)(int c);
 extern int (*klausscpu_console_in_hook)(void);
 
 typedef int (*ext_entry_fn)(int argc, char **argv);
 
-static struct k_mutex g_ext_mutex;
-static WOLFSSH *g_session;
+/* Per-run I/O context, pointed to by the running thread's custom data while its
+ * main() executes.  Lives on that thread's stack for the duration of the run. */
+struct ext_ctx {
+	WOLFSSH *ssh;
+};
 
-/* ── Console redirect callbacks (run on the ext thread) ───────────────────── */
+/* ── Console routing (run on the extension's own thread) ──────────────────── */
 
-static int mirror_out(int c)
+/* Output router for arch_printk_char_out(): returns 1 if it sent the char to
+ * the current thread's SSH session, 0 to let it fall through to the UART. */
+static int route_out(int c)
 {
-	WOLFSSH *ssh = g_session;
+	struct ext_ctx *ctx = k_thread_custom_data_get();
 
-	if (ssh == NULL) {
-		return c;
+	if (ctx == NULL || ctx->ssh == NULL) {
+		return 0;
 	}
+
+	WOLFSSH *ssh = ctx->ssh;
+
 	if (c == '\n') {
 		uint8_t cr = '\r';
 
@@ -65,19 +71,21 @@ static int mirror_out(int c)
 	uint8_t ch = (uint8_t)c;
 
 	wolfSSH_stream_send(ssh, &ch, 1);
-	return c;
+	return 1;
 }
 
-static int input_in(void)
+/* Input source for the exported getchar(): reads one byte from the current
+ * thread's SSH session, or -1 (EOF) if this thread is not running an extension. */
+static int route_in(void)
 {
-	WOLFSSH *ssh = g_session;
-	uint8_t ch;
+	struct ext_ctx *ctx = k_thread_custom_data_get();
 
-	if (ssh == NULL) {
+	if (ctx == NULL || ctx->ssh == NULL) {
 		return -1;
 	}
 
-	int n = wolfSSH_stream_read(ssh, &ch, 1);
+	uint8_t ch;
+	int n = wolfSSH_stream_read(ctx->ssh, &ch, 1);
 
 	if (n <= 0) {
 		return -1;
@@ -157,45 +165,22 @@ static int read_file(const char *path, WOLFSSH *ssh, uint8_t **buf_out,
 	return 0;
 }
 
-/* ── Zephyr run thread ────────────────────────────────────────────────────── */
-
-struct ext_run_args {
-	ext_entry_fn entry;
-	struct k_sem done;
-	int result;
-};
-
-static K_THREAD_STACK_DEFINE(ext_stack, EXT_STACK_SIZE);
-static struct k_thread ext_thread;
-
-static void ext_run_entry(void *p1, void *p2, void *p3)
-{
-	struct ext_run_args *a = p1;
-
-	ARG_UNUSED(p2);
-	ARG_UNUSED(p3);
-
-	a->result = a->entry(0, NULL);
-	k_sem_give(&a->done);
-}
-
 /* ── Public API ───────────────────────────────────────────────────────────── */
 
 void llext_loader_init(void)
 {
-	k_mutex_init(&g_ext_mutex);
+	/* Install the per-thread console routers once; they are no-ops on
+	 * threads that are not currently running an extension. */
+	klausscpu_console_out_hook = route_out;
+	klausscpu_console_in_hook = route_in;
 }
 
 int llext_run_from_sd(const char *filename, WOLFSSH *ssh)
 {
-	k_mutex_lock(&g_ext_mutex, K_FOREVER);
-
 	uint8_t *buf = NULL;
 	size_t size = 0;
-	int rc = read_file(filename, ssh, &buf, &size);
 
-	if (rc != 0) {
-		k_mutex_unlock(&g_ext_mutex);
+	if (read_file(filename, ssh, &buf, &size) != 0) {
 		return -1;
 	}
 
@@ -214,7 +199,6 @@ int llext_run_from_sd(const char *filename, WOLFSSH *ssh)
 	if (ret != 0) {
 		loader_printf(ssh, "llext_load failed: %d\r\n", ret);
 		k_free(buf);
-		k_mutex_unlock(&g_ext_mutex);
 		return -2;
 	}
 
@@ -225,37 +209,24 @@ int llext_run_from_sd(const char *filename, WOLFSSH *ssh)
 		loader_printf(ssh, "No 'main' symbol in extension\r\n");
 		llext_unload(&ext);
 		k_free(buf);
-		k_mutex_unlock(&g_ext_mutex);
 		return -3;
 	}
 
 	loader_printf(ssh, "Running main @ %p ...\r\n", (void *)entry);
 
-	struct ext_run_args args;
+	/* Route this thread's stdout/stdin to the SSH session while main() runs,
+	 * then restore.  Running on the connection thread (rather than a shared
+	 * worker) is what lets multiple sessions run extensions concurrently. */
+	struct ext_ctx ctx = { .ssh = ssh };
+	void *prev = k_thread_custom_data_get();
 
-	args.entry = entry;
-	args.result = -1;
-	k_sem_init(&args.done, 0, 1);
+	k_thread_custom_data_set(&ctx);
+	int result = entry(0, NULL);
 
-	/* Install console redirect for the duration of the run. */
-	g_session = ssh;
-	klausscpu_console_out_hook = ssh ? mirror_out : NULL;
-	klausscpu_console_in_hook = ssh ? input_in : NULL;
-
-	k_thread_create(&ext_thread, ext_stack, EXT_STACK_SIZE,
-			ext_run_entry, &args, NULL, NULL,
-			EXT_THREAD_PRIO, 0, K_NO_WAIT);
-	k_thread_name_set(&ext_thread, "ext_run");
-
-	k_sem_take(&args.done, K_FOREVER);
-
-	klausscpu_console_out_hook = NULL;
-	klausscpu_console_in_hook = NULL;
-	g_session = NULL;
+	k_thread_custom_data_set(prev);
 
 	llext_unload(&ext);
 	k_free(buf);
-	k_mutex_unlock(&g_ext_mutex);
 
-	return args.result;
+	return result;
 }

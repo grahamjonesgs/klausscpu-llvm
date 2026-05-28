@@ -168,14 +168,21 @@ run adventure.llext          # or: run /SD:/adventure.llext
 The program's `printf`/`puts`/`putchar` output and `getchar` input flow over the
 SSH session; on exit the extension is unloaded.
 
+**Concurrency:** each SSH session has its own connection thread, and a loaded
+program's `main()` runs *on that thread* with its stdio routed by the running
+thread (via thread custom data).  So up to `SSH_MAX_CONNS` extensions run at once
+— e.g. a long-running `adventure` in one session does not block a `run hello` in
+another.  `llext_load`/`llext_unload` are serialised internally by the subsystem,
+so concurrent loads are safe.
+
 ### How it works (key files)
 
 | File | Role |
 |---|---|
-| `ssh/llext_loader.c` | reads the `.llext` from SD, `llext_load`, resolves `main`, runs it on a thread, redirects I/O |
+| `ssh/llext_loader.c` | reads the `.llext` from SD, `llext_load`, resolves `main`, runs it on the connection thread, routes stdio per-thread |
 | `ssh/llext_exports.c` | `EXPORT_SYMBOL` table (kernel libc) + `getchar()` (minimal libc has none) |
 | `arch/klausscpu/core/elf.c` | `arch_elf_relocate` — ABS32 / ABS64 / PCREL32, little-endian |
-| `arch/klausscpu/core/irq.c` | `arch_printk_char_out` console-output redirect hook |
+| `arch/klausscpu/core/irq.c` | `arch_printk_char_out` per-thread console-output router |
 | `runtime/ext_include/` | extension SDK headers (stdio/string/stdlib/stdint/stddef) |
 
 ### Build / config requirements
