@@ -57,3 +57,46 @@ CSV,muldiv,151,15150709,750021,20200,0,0
 The per-kernel `(mix sum vs instr)` self-check is off by a constant **+29** every
 run — a harness artifact (the counter-read loads retire between the non-atomic
 INSTR and mix-counter snapshots), not a hardware counter bug. Benign (0.0004%).
+
+---
+
+## Progress log
+
+### 2026-05-29 — fetch-function optimization (not pipelining)
+
+Change to the fetch path (pre-pipeline). Instruction counts unchanged from the
+baseline (deterministic workload → apples-to-apples), so the cycle deltas are
+pure CPI improvement.
+
+```
+CSV,alu,525,52501613,6500025,8077,0,0
+CSV,mem_stream,271,27081087,1966143,13773,769,4999
+CSV,ptr_chase,316,31574145,2400022,13155,783,0
+CSV,branchy,1148,114840928,12687118,9051,0,5627
+CSV,calls_fib,1723,172271342,16455338,10469,0,4999
+CSV,muldiv,129,12900671,750021,17200,0,0
+```
+
+| kernel | CPI base→now | cycles base→now | speedup |
+|---|---|---|---|
+| alu | 11.15→8.08 | 72.5M→52.5M | **1.38×** |
+| branchy | 11.87→9.05 | 150.6M→114.8M | **1.31×** |
+| calls_fib | 12.81→10.47 | 210.8M→172.3M | 1.22× |
+| ptr_chase | 15.99→13.16 | 38.4M→31.6M | 1.22× |
+| muldiv | 20.20→17.20 | 15.2M→12.9M | 1.17× |
+| mem_stream | 16.04→13.77 | 31.5M→27.1M | 1.16× |
+
+**~1.24× geomean.** The entire saving is in fetch: for `alu`, exec cycles are
+flat (14.5M → 14.5M) while fetch dropped 58.0M → 38.0M (−34%, ~8.92 → ~5.85
+fetch cyc/instr). Mechanism: i-fetch cache accesses halved (alu 8.0M → 4.0M for
+the same 6.5M instrs) — redundant fetch bus traffic removed. Fetch-bound kernels
+gained most; `muldiv` (divide-bound, div now 50% of cycles) and `mem_stream`/
+`ptr_chase` (memory-stall floor unchanged at 8.6M/9.3M cyc) gained least.
+
+Note: cache miss-RATE rose (mem_stream 5.00%→7.69%, ptr_chase 4.78%→7.83%) but
+miss COUNTS are identical (rdM 131163 / 172316 both runs) — the rate rose only
+because fewer i-fetch hits pad the denominator. Not a regression.
+
+Remaining: fetch is still the top bucket on compute code (~72%). Exec-only floor
+for `alu` is CPI ≈ 2.23 (vs 8.08 now), so full fetch/execute overlap (pipelining)
+still has ~3.6× left.
