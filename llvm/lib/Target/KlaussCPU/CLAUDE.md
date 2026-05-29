@@ -818,15 +818,62 @@ and one-instruction signed sub-word loads (`LDIDX8_S`/`LDIDX16_S`).
 - test_switch.bin (BR_JT → JMPR_R end-to-end, post Fix 2)
 - test_fp.bin (links softfp.o)
 
-### Step 31 — Inline assembly support (KlaussCPUAsmParser)
-- enables `asm volatile (...)` and `__asm__` blocks in C
-- prerequisite for hand-written critical sections (e.g. UART driver primitives,
-  context save/restore in a future RTOS port)
+### Step 31 ✅ Inline assembly support (KlaussCPUAsmParser)
+- `AsmParser/KlaussCPUAsmParser.cpp` built (`add_subdirectory(AsmParser)` in
+  `CMakeLists.txt`, `-gen-asm-matcher` tablegen). `asm volatile (...)` / `__asm__`
+  blocks compile; used by hand-written critical sections and the RTOS/Zephyr ports.
 
-### Step 32 — Vendor compiler-rt builtins for full soft-FP conformance
-- replace hand-written `softfp.c` with compiler-rt's `addsf3.c` / `mulsf3.c` /
-  etc., either by file-vendoring (Option A in the conversation history) or
-  full compiler-rt build integration (Option B)
-- enables correct subnormal / Inf / NaN handling
-- adds double-precision (`__adddf3` etc.) and integer-divide builtins
-  (`__udivdi3`, `__umoddi3`) if needed for larger programs
+### Step 32 ✅ compiler-rt builtins (full soft-FP + integer-divide)
+- The prebuilt `libclang_rt.builtins.a` and individually-compiled `crt-*.o`
+  objects (`__adddf3`, `__divsf3`, `__udivdi3`, `__multi3`, etc., from the
+  monorepo `compiler-rt/lib/builtins/`) are linked by the Makefile. The
+  hand-written `softfp.c` is no longer the FP runtime. Single- and double-
+  precision soft-FP and 64/128-bit integer divide all work.
+
+---
+
+## Systems built on this backend (current stable state, 2026-05)
+
+The backend is feature-complete and hardware-confirmed; ongoing work is in the
+runtime/OS layers under `runtime/`. See their own READMEs for build/run detail:
+
+- **Bare-metal programs** (`runtime/programs/`, `make all`) — load `.elf`/`.bin`
+  via the FPGA serial loader.
+- **FreeRTOS V11.1.0 port** (`runtime/freertos/`) — demo, console shell, lwIP
+  net demos, telnet, wolfSSL/wolfSSH.
+- **lwIP 2.2.0** (`runtime/lwip_port/`, fetched by `runtime/get-lwip.sh`) —
+  Ethernet (LiteEth) + DHCP; ping/UDP/TCP/HTTP demos. Checksum fix:
+  `LWIP_CHKSUM_ALGORITHM=1` in `lwipopts.h`.
+- **Zephyr 3.7 LTS port** (`runtime/zephyr-ws/klausscpu-zephyr/`) — `hello_world`
+  through to the `ssh_shell` app (SSH login + `run` command).
+- **LLEXT loadable programs** — the SSH `run` command loads ELFCLASS32 `ET_REL`
+  programs at runtime against the kernel's exported libc; concurrent runs across
+  SSH sessions are supported. Needs the vendored Zephyr patch
+  (`zephyr-patches/llext-klausscpu.patch`).
+
+---
+
+## Known issues
+
+- **Zephyr *packaged* logging (`cbprintf_package`) mis-renders mixed 32/64-bit
+  conversions.** A `LOG_*` call that interleaves `%d` (32-bit) and
+  `%zd`/`%zx`/`%lx`/`%lu` (64-bit) can print garbage (e.g. `size 8589934601` =
+  `0x2_00000009`). **The compiler's `va_arg` path is NOT the cause** — see below.
+  - **Verified correct (2026-05):** `KlaussCPUTargetLowering::LowerVAARG` reads a
+    full 8-byte va_list slot and advances by 8 for every argument, matching the
+    promote-everything-to-i64 calling convention. Confirmed by codegen inspection
+    at -O0 and -O1/-Os for single / multiple-straight-line / mixed-width / loop
+    consumption (the "spurious +8 advance" seen in optimized output is the
+    compiler legitimately taking the first arg from its still-live incoming
+    register and only bumping the pointer — not an off-by-one). Regression test:
+    `runtime/programs/test_varargs.c` (`make test_varargs.elf`).
+  - **Consequence:** bare-metal picolibc `printf` and Zephyr's *direct* `cbvprintf`
+    are correct. Only the *packaged* path (`lib/os/cbprintf_packaged.c`, used by
+    deferred/immediate `LOG_*`) is affected — it packs each arg by its C-type size
+    (`sizeof(int)`=4 for `%d`) and `VA_STACK_ALIGN`, which does not match
+    KlaussCPU's uniform 8-byte vararg slots.
+  - **Status:** cosmetic and **already silenced** in the production `ssh_shell`
+    (`CONFIG_LLEXT_LOG_LEVEL_WRN`). A real fix would live in Zephyr's cbprintf
+    packaging (likely a KlaussCPU `VA_STACK_ALIGN`/arg-size definition), not the
+    LLVM backend. See the printf-format memory note (`%lu` not `%llu`, since
+    `long` is 64-bit and picolibc lacks the `ll` modifier) for related context.

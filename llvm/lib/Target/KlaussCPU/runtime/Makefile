@@ -101,7 +101,7 @@ FATFS_OBJS  = ff.o ffunicode.o ffsystem.o sd.o diskio.o
 # ── Default target ────────────────────────────────────────────────────────────
 
 PROGRAMS = hello adventure test_64bit expr bst crypto queens \
-           test_switch test_fp test_asm test_printf fs_demo \
+           test_switch test_fp test_asm test_printf test_varargs fs_demo \
            test_fatfs_printf test_big test_cache test_rtos test_sd test_sync \
            test_eth eth_test lwip_demo ping_demo tcp_echo http_server net_client \
            loader crypto_selftest crypto_test
@@ -202,6 +202,9 @@ test_asm.elf: test_asm.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 
 test_printf.elf: test_printf.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,test_printf.o)
+
+test_varargs.elf: test_varargs.o $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,test_varargs.o)
 
 fs_demo.elf: fs_demo.o $(FATFS_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,$(FATFS_OBJS) fs_demo.o)
@@ -393,6 +396,7 @@ test_switch: test_switch.elf
 test_fp:     test_fp.elf
 test_asm:    test_asm.elf
 test_printf:       test_printf.elf
+test_varargs:      test_varargs.elf
 fs_demo:           fs_demo.elf
 test_fatfs_printf: test_fatfs_printf.elf
 test_sd:           test_sd.elf

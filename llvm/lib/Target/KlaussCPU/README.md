@@ -185,10 +185,18 @@ Output `.elf` files load through the same FPGA serial loader as the standalone
 programs in Step 3. See [runtime/freertos/README.md](runtime/freertos/README.md)
 for port internals (stack frame layout, `portYIELD` mechanics, kernel stack).
 
-> **Network demos** also need lwIP (in `runtime/lwip/`) and wolfSSL/wolfSSH —
-> run `bash wolfssl/build-wolfssl.sh && bash wolfssl/build-wolfssh.sh` first;
-> they clone and build the upstream sources into `wolfssl/wolfssl-{src,build,install}/`
-> and `wolfssh-{src,build,install}/`.
+> **Network demos** also need lwIP and wolfSSL/wolfSSH. Fetch them first:
+>
+> ```bash
+> bash ../get-lwip.sh                 # clones lwIP 2.2.0 into runtime/lwip/
+> bash wolfssl/build-wolfssl.sh       # clones + builds wolfssl/wolfssl-{src,build,install}/
+> bash wolfssl/build-wolfssh.sh       # clones + builds wolfssl/wolfssh-{src,build,install}/
+> ```
+>
+> Our lwIP port (`sys_arch`, `ethernetif`, `cc.h`, `lwipopts.h`) lives in
+> `lwip_port/` and `freertos/` and is in git; only the upstream lwIP core is
+> fetched. `LWIP_CHKSUM_ALGORITHM=1` is set in `lwipopts.h` (the KlaussCPU
+> byte-order checksum fix).
 
 ---
 
@@ -232,6 +240,40 @@ klausscc -e zephyr.elf
 See [runtime/zephyr-ws/klausscpu-zephyr/README.md](runtime/zephyr-ws/klausscpu-zephyr/README.md)
 for the memory map, Kconfig constraints (`CONFIG_XIP=n`, no `-Os`, no debug
 info), and the chain of fixes that made the port work.
+
+### SSH shell + loadable programs (LLEXT) — `ssh_shell` app
+
+Beyond `hello_world`, the `apps/ssh_shell` Zephyr app is the current top-level
+system: it brings up Ethernet + lwIP + DHCP, serves an SSH login (wolfSSL/
+wolfSSH), and exposes a `run` command that loads programs at runtime as Zephyr
+LLEXT extensions (ELFCLASS32 `ET_REL` objects), each calling the kernel's
+exported libc. This replaces the earlier custom PIC loader and is
+hardware-confirmed, including concurrent `run` from multiple SSH sessions.
+
+```bash
+# Build the loadable extensions (from runtime/):
+make ext-demos                       # hello/adventure/expr/bst/crypto/queens/test_64bit .llext
+# copy the .llext files onto the SD card, then over SSH (pw: klausscpu):
+#   ssh admin@<ip>
+#   run adventure.llext
+
+# Build the ssh_shell image (MUST include the wolfSSL + wolfSSH modules, or
+# Kconfig aborts with "undefined symbol WOLFSSL"):
+cd zephyr-ws
+WOLFSSL=$PWD/klausscpu-zephyr/../../freertos/wolfssl/wolfssl-src
+WOLFSSH=$PWD/klausscpu-zephyr/../../freertos/wolfssl/wolfssh-src
+west build -b nexys_a7 klausscpu-zephyr/apps/ssh_shell --build-dir build_ssh -- \
+  -DZEPHYR_TOOLCHAIN_VARIANT=klausscpu-clang -DKLAUSSCPU_LLVM_BIN=$LLVM_BIN \
+  -DTOOLCHAIN_ROOT=$MOD -DEXTRA_ZEPHYR_MODULES="$MOD;$WOLFSSL;$WOLFSSH" \
+  "-DARCH_ROOT=$MOD;$ZEPHYR" "-DSOC_ROOT=$MOD;$ZEPHYR" \
+  "-DBOARD_ROOT=$MOD;$ZEPHYR" "-DDTS_ROOT=$MOD;$ZEPHYR"
+```
+
+The `zephyr/` upstream tree is fetched by `west update` and needs the vendored
+LLEXT patch re-applied (`git -C zephyr apply
+../klausscpu-zephyr/zephyr-patches/llext-klausscpu.patch`). The Zephyr README's
+"Loadable extensions (LLEXT)" section documents the full mechanism, the patch
+contents, and the build/config requirements.
 
 ---
 
@@ -297,12 +339,14 @@ work via picolibc and go through the same UART path.
 | LLVM backend source (`*.td`, `*.cpp`, `*.h`) | ✅ yes | |
 | Runtime source (`src/`, `programs/`) | ✅ yes | |
 | `mmio.h`, `klausscpu.ld`, `Makefile` | ✅ yes | |
-| `build-picolibc.sh`, `freertos/get-freertos.sh`, `freertos/wolfssl/build-wolfssl.sh`, `build-wolfssh.sh` | ✅ yes | run to fetch external sources |
+| `build-picolibc.sh`, `get-lwip.sh`, `freertos/get-freertos.sh`, `freertos/wolfssl/build-wolfssl.sh`, `build-wolfssh.sh` | ✅ yes | run to fetch external sources |
 | `compiler-rt/lib/builtins/` | ✅ yes | part of the LLVM monorepo |
 | FreeRTOS port (`freertos/portable/`, `FreeRTOSConfig.h`, demos) | ✅ yes | |
-| Zephyr port (`zephyr-ws/klausscpu-zephyr/`) | ✅ yes | out-of-tree module |
+| lwIP port (`lwip_port/`, `freertos/lwipopts.h`) | ✅ yes | upstream core fetched by `get-lwip.sh` |
+| Zephyr port (`zephyr-ws/klausscpu-zephyr/`) + SSH/LLEXT app | ✅ yes | out-of-tree module |
 | `picolibc-src/`, `picolibc-build/`, `picolibc-install/` | ❌ gitignored | cloned/built by `build-picolibc.sh` |
 | `freertos/FreeRTOS-Kernel/` | ❌ gitignored | cloned by `get-freertos.sh` |
 | `freertos/wolfssl/{wolfssl,wolfssh}-{src,build,install}/` | ❌ gitignored | cloned/built by `build-wolfssl.sh`/`build-wolfssh.sh` |
+| `runtime/lwip/` (upstream lwIP 2.2.0 core) | ❌ gitignored | cloned by `get-lwip.sh` |
 | `zephyr-ws/.west/`, `zephyr-ws/zephyr/`, `zephyr-ws/build*/` | ❌ gitignored | west workspace + Zephyr upstream + build outputs |
 | `*.elf`, `*.bin`, `*.o`, `*.kbt` | ❌ gitignored | build outputs |
