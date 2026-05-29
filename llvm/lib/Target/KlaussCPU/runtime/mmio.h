@@ -100,6 +100,40 @@ static inline uint32_t rgb12(uint8_t r, uint8_t g, uint8_t b) {
 #define CACHE_INFO_LINE_BYTES(v)  ((uint32_t)(((v) >> 24) & 0xFFu))
 #define CACHE_INFO_TOTAL_BYTES(v) ((uint32_t)( (v) >> 32))
 
+/* ── CPU performance counters — 0xF00D_xxxx ─────────────────────────────── */
+/* All 64-bit, free-running, read-only.  Clear every counter with             */
+/* PERF_CTRL_CLEAR (write-1-auto-clear).  Profile a region: clear, run, read. */
+
+#define PERF_BASE                  (MMIO_BASE + 0x000D0000u)
+
+#define REG_PERF_CTRL              (*(volatile uint32_t *)(PERF_BASE + 0x0000u))
+/* Tier 0 — denominators */
+#define REG_PERF_CYCLES            (*(volatile uint64_t *)(PERF_BASE + 0x0008u))
+#define REG_PERF_INSTR             (*(volatile uint64_t *)(PERF_BASE + 0x0010u))
+/* Tier 1 — cycle accounting (mutually exclusive buckets) */
+#define REG_PERF_FETCH_CYCLES      (*(volatile uint64_t *)(PERF_BASE + 0x0018u))
+#define REG_PERF_EXEC_CYCLES       (*(volatile uint64_t *)(PERF_BASE + 0x0020u))
+#define REG_PERF_MUL_CYCLES        (*(volatile uint64_t *)(PERF_BASE + 0x0028u))
+#define REG_PERF_DIV_CYCLES        (*(volatile uint64_t *)(PERF_BASE + 0x0030u))
+#define REG_PERF_INT_CYCLES        (*(volatile uint64_t *)(PERF_BASE + 0x0038u))
+#define REG_PERF_IDLE_CYCLES       (*(volatile uint64_t *)(PERF_BASE + 0x0040u))
+#define REG_PERF_MUL_OPS           (*(volatile uint64_t *)(PERF_BASE + 0x0048u))
+#define REG_PERF_DIV_OPS           (*(volatile uint64_t *)(PERF_BASE + 0x0050u))
+#define REG_PERF_INT_OPS           (*(volatile uint64_t *)(PERF_BASE + 0x0058u))
+/* Tier 2 — instruction mix (ALU+LOAD+STORE+BRANCH+JUMP+CALL+INDIRECT+OTHER==INSTR) */
+#define REG_PERF_CNT_ALU           (*(volatile uint64_t *)(PERF_BASE + 0x0060u))
+#define REG_PERF_CNT_LOAD          (*(volatile uint64_t *)(PERF_BASE + 0x0068u))
+#define REG_PERF_CNT_STORE         (*(volatile uint64_t *)(PERF_BASE + 0x0070u))
+#define REG_PERF_CNT_BRANCH        (*(volatile uint64_t *)(PERF_BASE + 0x0078u))
+#define REG_PERF_CNT_BRANCH_TAKEN  (*(volatile uint64_t *)(PERF_BASE + 0x0080u))
+#define REG_PERF_CNT_JUMP          (*(volatile uint64_t *)(PERF_BASE + 0x0088u))
+#define REG_PERF_CNT_CALL          (*(volatile uint64_t *)(PERF_BASE + 0x0090u))
+#define REG_PERF_CNT_INDIRECT      (*(volatile uint64_t *)(PERF_BASE + 0x0098u))
+#define REG_PERF_CNT_OTHER         (*(volatile uint64_t *)(PERF_BASE + 0x00A0u))
+
+/* PERF_CTRL: bit 0 is write-1-auto-clear; zeroes every counter next cycle. */
+#define PERF_CTRL_CLEAR            (1u << 0)
+
 /* ── Interrupt controller / timer — 0xF00F_xxxx ─────────────────────────── */
 
 #define INTC_BASE       (MMIO_BASE + 0x000F0000u)
