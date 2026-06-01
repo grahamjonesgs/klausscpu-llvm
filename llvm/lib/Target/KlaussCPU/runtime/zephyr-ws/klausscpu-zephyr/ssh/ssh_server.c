@@ -130,7 +130,9 @@ static int ssh_send(WOLFSSH *ssh, void *buf, word32 sz, void *ctx)
 
 /* ── Shell output helpers ────────────────────────────────────────────────── */
 
-#define SSH_BANNER   "\r\nKlaussCPU Zephyr SSH shell — type 'help'\r\n\r\n"
+#define SSH_VERSION  "1.1"
+#define SSH_BANNER   "\r\nKlaussCPU Zephyr SSH shell v" SSH_VERSION \
+		     " (built " __DATE__ " " __TIME__ ") — type 'help'\r\n\r\n"
 #define SSH_PROMPT   "$ "
 #define SSH_LINE_MAX 256
 
@@ -190,6 +192,7 @@ static void cmd_help(WOLFSSH *ssh)
 		"  run [file]     load & run extension (default PROG.LLEXT)\r\n"
 		"  leds [hex]     read/write LED register\r\n"
 		"  seg <hex>      write 7-segment display\r\n"
+		"  perf [ms]      profile live CPU/cache (default 1000ms window)\r\n"
 		"  exit           close SSH session\r\n");
 }
 
@@ -200,6 +203,122 @@ static void cmd_info(WOLFSSH *ssh)
 		  (unsigned long long)k_uptime_get());
 	ssh_sendf(ssh, "Clock  : %u Hz\r\n",
 		  CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC);
+}
+
+/* ── Live performance counters — `perf [ms]` ─────────────────────────────── */
+/* Delta-samples the MMIO perf (0xF00D) + cache (0xF005) counters over a window
+ * (non-destructive: read, sleep, read, subtract) and reports what the live
+ * system did — CPI, busy/idle, cycle accounting, instruction mix, cache. */
+
+struct perfsnap {
+	uint64_t cycles, instr, fetch, exec, mul, div, intc, idle;
+	uint64_t mul_ops, div_ops, int_ops;
+	uint64_t alu, load, store, branch, taken, jump, call, ind, other;
+	uint64_t rh, rm, wh, wm, wb, stall;
+};
+
+static void perf_read(struct perfsnap *s)
+{
+	s->cycles  = REG64(0xF00D0008u); s->instr = REG64(0xF00D0010u);
+	s->fetch   = REG64(0xF00D0018u); s->exec  = REG64(0xF00D0020u);
+	s->mul     = REG64(0xF00D0028u); s->div   = REG64(0xF00D0030u);
+	s->intc    = REG64(0xF00D0038u); s->idle  = REG64(0xF00D0040u);
+	s->mul_ops = REG64(0xF00D0048u); s->div_ops = REG64(0xF00D0050u);
+	s->int_ops = REG64(0xF00D0058u);
+	s->alu     = REG64(0xF00D0060u); s->load  = REG64(0xF00D0068u);
+	s->store   = REG64(0xF00D0070u); s->branch = REG64(0xF00D0078u);
+	s->taken   = REG64(0xF00D0080u); s->jump  = REG64(0xF00D0088u);
+	s->call    = REG64(0xF00D0090u); s->ind   = REG64(0xF00D0098u);
+	s->other   = REG64(0xF00D00A0u);
+	s->rh = REG64(0xF0050040u); s->rm = REG64(0xF0050048u);
+	s->wh = REG64(0xF0050050u); s->wm = REG64(0xF0050058u);
+	s->wb = REG64(0xF0050060u); s->stall = REG64(0xF0050068u);
+}
+
+static void ssh_pct(WOLFSSH *ssh, const char *label, uint64_t num, uint64_t den)
+{
+	uint64_t p = den ? (num * 10000ull) / den : 0;   /* hundredths of % */
+
+	ssh_sendf(ssh, "%s%llu.%02llu%% ", label,
+		  (unsigned long long)(p / 100), (unsigned long long)(p % 100));
+}
+
+static void cmd_perf(WOLFSSH *ssh, const char *arg)
+{
+	uint32_t ms = arg ? (uint32_t)strtoul(arg, NULL, 10) : 1000u;
+
+	if (ms < 10u)    ms = 10u;
+	if (ms > 60000u) ms = 60000u;
+
+	struct perfsnap a, b;
+
+	perf_read(&a);
+	k_msleep((int32_t)ms);
+	perf_read(&b);
+
+#define DLT(f) ((uint64_t)(b.f - a.f))
+	uint64_t cyc = DLT(cycles), ins = DLT(instr), idle = DLT(idle);
+	uint64_t misses = DLT(rm) + DLT(wm);
+	uint64_t acc = DLT(rh) + DLT(rm) + DLT(wh) + DLT(wm);
+
+	ssh_sendf(ssh, "perf window=%llums  cycles=%llu  instr=%llu\r\n",
+		  (unsigned long long)ms, (unsigned long long)cyc,
+		  (unsigned long long)ins);
+	if (ins) {
+		uint64_t cpi = (cyc * 1000ull) / ins;
+
+		ssh_sendf(ssh, "CPI=%llu.%03llu\r\n",
+			  (unsigned long long)(cpi / 1000),
+			  (unsigned long long)(cpi % 1000));
+	} else {
+		ssh_send_str(ssh, "CPI=n/a (idle)\r\n");
+	}
+
+	ssh_send_str(ssh, "util: busy=");
+	ssh_pct(ssh, "", cyc - idle, cyc);
+	ssh_pct(ssh, "idle=", idle, cyc);
+	ssh_send_str(ssh, "\r\n");
+
+	ssh_send_str(ssh, "cyc:  ");
+	ssh_pct(ssh, "fetch=", DLT(fetch), cyc);
+	ssh_pct(ssh, "exec=",  DLT(exec),  cyc);
+	ssh_pct(ssh, "mul=",   DLT(mul),   cyc);
+	ssh_pct(ssh, "div=",   DLT(div),   cyc);
+	ssh_pct(ssh, "int=",   DLT(intc),  cyc);
+	ssh_pct(ssh, "idle=",  idle,       cyc);
+	ssh_send_str(ssh, "\r\n");
+
+	ssh_send_str(ssh, "mix:  ");
+	ssh_pct(ssh, "ALU=",  DLT(alu),    ins);
+	ssh_pct(ssh, "LD=",   DLT(load),   ins);
+	ssh_pct(ssh, "ST=",   DLT(store),  ins);
+	ssh_pct(ssh, "BR=",   DLT(branch), ins);
+	ssh_pct(ssh, "JMP=",  DLT(jump),   ins);
+	ssh_pct(ssh, "CALL=", DLT(call),   ins);
+	ssh_pct(ssh, "IND=",  DLT(ind),    ins);
+	ssh_pct(ssh, "OTH=",  DLT(other),  ins);
+	ssh_send_str(ssh, "\r\n");
+
+	uint64_t br = DLT(branch), tk = DLT(taken);
+
+	ssh_sendf(ssh, "branch: n=%llu taken=%llu rate=",
+		  (unsigned long long)br, (unsigned long long)tk);
+	ssh_pct(ssh, "", tk, br);
+	ssh_send_str(ssh, "\r\n");
+
+	ssh_sendf(ssh, "cache: acc=%llu miss=", (unsigned long long)acc);
+	ssh_pct(ssh, "", misses, acc);
+	ssh_sendf(ssh, "wb=%llu stall=%llu",
+		  (unsigned long long)DLT(wb), (unsigned long long)DLT(stall));
+	if (misses) {
+		uint64_t pen = (DLT(stall) * 100ull) / misses;
+
+		ssh_sendf(ssh, " avgpen=%llu.%02lluc",
+			  (unsigned long long)(pen / 100),
+			  (unsigned long long)(pen % 100));
+	}
+	ssh_send_str(ssh, "\r\n");
+#undef DLT
 }
 
 static void cmd_uptime(WOLFSSH *ssh)
@@ -547,6 +666,8 @@ static int dispatch_command(WOLFSSH *ssh, char *line)
 		cmd_leds(ssh, arg);
 	} else if (strcmp(p, "seg") == 0) {
 		cmd_seg(ssh, arg);
+	} else if (strcmp(p, "perf") == 0) {
+		cmd_perf(ssh, arg);
 	} else if (strcmp(p, "threads") == 0) {
 		cmd_threads(ssh);
 	} else if (strcmp(p, "exit") == 0 || strcmp(p, "quit") == 0 ||
