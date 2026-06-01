@@ -77,18 +77,20 @@ void arch_new_thread(struct k_thread *thread, k_thread_stack_t *stack,
 
 /*
  * arch_cpu_idle — called by the idle thread when there is no work.
- * KlaussCPU has no WFI instruction; spin with interrupts enabled.
+ * Enable interrupts, then WAIT: the core suspends until an unmasked, vectored
+ * interrupt (timer tick, etc.) becomes pending, the ISR is taken via the normal
+ * dispatch path, and IRET resumes at the instruction after WAIT.  The WAIT wake
+ * is level-sensitive, so the enable-then-WAIT sequence has no lost-wakeup race.
  */
 void arch_cpu_idle(void)
 {
-    /* Re-enable interrupts (may have been off in the scheduler). */
     __asm__ volatile(
-        "setr   r0, 0xF00F0000\n\t"
+        "setr   r0, 0xF00F0000\n\t"  /* INT_MASK */
         "setr   r1, 1\n\t"
-        "memset32 r1, r0\n\t"
+        "memset32 r1, r0\n\t"        /* unmask the timer source */
+        "wait\n\t"                   /* suspend until an interrupt wakes us */
         : : : "r0", "r1", "memory"
     );
-    /* Spin; timer ISR will preempt and reschedule. */
 }
 
 void arch_cpu_atomic_idle(unsigned int key)

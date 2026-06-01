@@ -130,7 +130,7 @@ static int ssh_send(WOLFSSH *ssh, void *buf, word32 sz, void *ctx)
 
 /* ── Shell output helpers ────────────────────────────────────────────────── */
 
-#define SSH_VERSION  "1.1"
+#define SSH_VERSION  "1.2"   /* 1.2: idle thread uses WAIT (interruptible halt) */
 #define SSH_BANNER   "\r\nKlaussCPU Zephyr SSH shell v" SSH_VERSION \
 		     " (built " __DATE__ " " __TIME__ ") — type 'help'\r\n\r\n"
 #define SSH_PROMPT   "$ "
