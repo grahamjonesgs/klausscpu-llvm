@@ -300,6 +300,7 @@ uint32_t KlaussCPUMCCodeEmitter::encode32(const MCInst &MI) const {
   case KlaussCPU::NOP_I:     return 0x0000F010;
   case KlaussCPU::HALT_I:    return 0x0000F011;
   case KlaussCPU::IRET_I:    return 0x00006011;
+  case KlaussCPU::WAIT_I:    return 0x00006012;
 
   default:
     llvm_unreachable("unhandled 4-byte KlaussCPU instruction in encode32");

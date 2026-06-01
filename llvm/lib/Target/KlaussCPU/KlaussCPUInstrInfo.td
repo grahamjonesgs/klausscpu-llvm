@@ -815,6 +815,13 @@ def NOP_I   : I0<0x0000F010, (outs), (ins), "nop">;
 def HALT_I  : I0<0x0000F011, (outs), (ins), "halt">;
 def IRET_I  : I0<0x00006011, (outs), (ins), "iret">;
 
+// WAIT — interruptible core-suspend: stop fetching/executing and resume when an
+// unmasked, vectored interrupt becomes pending (timer tick, future wired source).
+// No register/flag side effects; IRET resumes at PC+4.  Distinct from HALT (which
+// stops permanently).  hasSideEffects keeps it from being reordered/eliminated.
+let hasSideEffects = 1 in
+def WAIT_I  : I0<0x00006012, (outs), (ins), "wait">;
+
 //===----------------------------------------------------------------------===//
 // UART / I-O instructions (hasSideEffects prevents reordering/elimination)
 //===----------------------------------------------------------------------===//
