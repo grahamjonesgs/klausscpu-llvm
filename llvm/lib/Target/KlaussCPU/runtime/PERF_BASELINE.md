@@ -4,6 +4,22 @@ Reference numbers from [programs/perf_baseline.c](programs/perf_baseline.c) for
 tracking CPU/cache improvements over time. Re-run `perf_baseline` after a change
 and diff the `CSV,` lines against the table below.
 
+## Two ways to read the counters
+
+- **Synthetic baseline** — `perf_baseline` (this doc). Fixed micro-kernels; for
+  comparing the CPU/compiler against itself over time.
+- **Live profiler** — the `perf [ms]` SSH shell command
+  ([ssh/shell_cmds.c](zephyr-ws/klausscpu-zephyr/ssh/shell_cmds.c)). Delta-samples
+  the counters over a window (default 1000 ms, non-destructive — no clear) and
+  reports CPI / busy-idle / cycle accounting / mix / cache for **whatever the live
+  system did** during that window (wolfSSH crypto, lwIP, idle). To profile a real
+  workload, generate load during the window (e.g. `cat` a large file over SSH, or
+  `run` a program from another session). `idle%` shows headroom; `int%` shows ISR
+  overhead. Useful for confirming that synthetic gains translate to the real
+  production workload.
+
+---
+
 **Comparability:** numbers are only apples-to-apples when the `#define` tunables
 in `perf_baseline.c` (`ALU_ITERS`, `MEM_WORDS`, `MEM_REPS`, `CHASE_STEPS`,
 `BR_ITERS`, `FIB_N`, `MD_ITERS`) and the build flags are unchanged. The counters
