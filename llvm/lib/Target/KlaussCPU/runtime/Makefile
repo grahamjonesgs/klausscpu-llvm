@@ -42,7 +42,15 @@ TRIPLE  = $(TARGET)
 # ── Source search paths ───────────────────────────────────────────────────────
 # Runtime library sources live in src/, program sources in programs/,
 # FatFs vendor sources in fatfs/.
-VPATH = src:programs:fatfs
+#
+# Use per-extension `vpath` for SOURCES only — never a blanket `VPATH`.  A blanket
+# VPATH also searches these dirs for object files, so a stale src/foo.o left by the
+# freertos build (which compiles src/ sources in place) gets found and shadows the
+# root build, breaking the link with "cannot open foo.o".  Restricting to source
+# extensions means objects are always built/linked from the root.
+vpath %.c src:programs:fatfs
+vpath %.S src
+vpath %.s src
 
 # ── picolibc install path ─────────────────────────────────────────────────────
 # Run ./build-picolibc.sh once to populate this directory.
@@ -104,7 +112,7 @@ PROGRAMS = hello adventure test_64bit expr bst crypto queens \
            test_switch test_fp test_asm test_printf test_varargs perf_baseline fs_demo \
            test_fatfs_printf test_big test_cache test_rtos test_sd test_sync \
            test_eth eth_test lwip_demo ping_demo tcp_echo http_server net_client \
-           loader crypto_selftest crypto_test
+           netboot loader crypto_selftest crypto_test
 
 .PHONY: all clean $(PROGRAMS)
 
@@ -313,6 +321,12 @@ tcp_echo.o: programs/tcp_echo.c
 tcp_echo.elf: tcp_echo.o $(ETH_OBJS) $(LWIP_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,$(ETH_OBJS) $(LWIP_OBJS) tcp_echo.o)
 
+netboot.o: programs/netboot.c
+	$(CC) $(LWIP_FLAGS) -c -o $@ $<
+
+netboot.elf: netboot.o $(ETH_OBJS) $(LWIP_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,$(ETH_OBJS) $(LWIP_OBJS) netboot.o)
+
 http_server.o: programs/http_server.c
 	$(CC) $(LWIP_FLAGS) -c -o $@ $<
 
@@ -410,6 +424,7 @@ eth_test:          eth_test.elf
 lwip_demo:         lwip_demo.elf
 ping_demo:         ping_demo.elf
 tcp_echo:          tcp_echo.elf
+netboot:           netboot.elf
 http_server:       http_server.elf
 net_client:        net_client.elf
 

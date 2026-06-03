@@ -130,11 +130,13 @@ static int ssh_send(WOLFSSH *ssh, void *buf, word32 sz, void *ctx)
 
 /* ── Shell output helpers ────────────────────────────────────────────────── */
 
-#define SSH_VERSION  "1.2"   /* 1.2: idle thread uses WAIT (interruptible halt) */
+#define SSH_VERSION  "1.3"   /* 1.3: command history (up/down arrows) */
 #define SSH_BANNER   "\r\nKlaussCPU Zephyr SSH shell v" SSH_VERSION \
 		     " (built " __DATE__ " " __TIME__ ") — type 'help'\r\n\r\n"
 #define SSH_PROMPT   "$ "
 #define SSH_LINE_MAX 256
+#define SSH_HIST_SIZE 8       /* command-history ring depth (per session) */
+#define SSH_HIST_LINE 128     /* max stored command length */
 
 static void ssh_send_str(WOLFSSH *ssh, const char *s)
 {
@@ -682,10 +684,27 @@ static int dispatch_command(WOLFSSH *ssh, char *line)
 
 /* ── Interactive shell loop ──────────────────────────────────────────────── */
 
+/* Replace the on-screen line with `line` (used for history recall). */
+static void shell_redraw(WOLFSSH *ssh, const char *line, int len)
+{
+	ssh_send_str(ssh, "\r\x1b[K");          /* CR + erase to end of line */
+	ssh_send_str(ssh, SSH_PROMPT);
+	if (len > 0) {
+		wolfSSH_stream_send(ssh, (uint8_t *)line, (word32)len);
+	}
+}
+
 static void run_shell(WOLFSSH *ssh)
 {
 	char line[SSH_LINE_MAX];
 	int line_len = 0;
+
+	/* Per-session command history (ring). */
+	char hist[SSH_HIST_SIZE][SSH_HIST_LINE];
+	int hist_head = 0;   /* next slot to write                    */
+	int hist_n = 0;      /* entries stored (<= SSH_HIST_SIZE)      */
+	int browse = -1;     /* -1 = new line; 0 = newest, up = older  */
+	int esc = 0;         /* 0 none, 1 saw ESC, 2 saw ESC[          */
 
 	ssh_send_str(ssh, SSH_BANNER);
 	ssh_send_str(ssh, SSH_PROMPT);
@@ -699,9 +718,63 @@ static void run_shell(WOLFSSH *ssh)
 			break;
 		}
 
+		/* ── arrow-key / escape-sequence handling (ESC '[' 'A'/'B') ── */
+		if (esc == 1) {
+			esc = (ch == '[') ? 2 : 0;
+			continue;
+		}
+		if (esc == 2) {
+			esc = 0;
+			if (ch == 'A' && browse + 1 < hist_n) {
+				browse++;            /* older */
+			} else if (ch == 'B' && browse > 0) {
+				browse--;            /* newer */
+			} else if (ch == 'B' && browse == 0) {
+				browse = -1;         /* back to a fresh empty line */
+				line_len = 0;
+				shell_redraw(ssh, line, 0);
+				continue;
+			} else {
+				continue;            /* at end of history, or C/D */
+			}
+			/* load history entry `browse` (0 = newest) into `line` */
+			int idx = (hist_head - 1 - browse + 2 * SSH_HIST_SIZE) % SSH_HIST_SIZE;
+			size_t hl = strlen(hist[idx]);
+
+			if (hl > SSH_LINE_MAX - 1) {
+				hl = SSH_LINE_MAX - 1;
+			}
+			memcpy(line, hist[idx], hl);
+			line_len = (int)hl;
+			line[line_len] = '\0';
+			shell_redraw(ssh, line, line_len);
+			continue;
+		}
+		if (ch == 0x1B) {
+			esc = 1;
+			continue;
+		}
+
+		/* ── normal line editing ── */
 		if (ch == '\r' || ch == '\n') {
 			ssh_send_str(ssh, "\r\n");
 			line[line_len] = '\0';
+
+			/* store non-empty command in history */
+			if (line_len > 0) {
+				size_t cl = (size_t)line_len;
+
+				if (cl > SSH_HIST_LINE - 1) {
+					cl = SSH_HIST_LINE - 1;
+				}
+				memcpy(hist[hist_head], line, cl);
+				hist[hist_head][cl] = '\0';
+				hist_head = (hist_head + 1) % SSH_HIST_SIZE;
+				if (hist_n < SSH_HIST_SIZE) {
+					hist_n++;
+				}
+			}
+			browse = -1;
 
 			if (dispatch_command(ssh, line) != 0) {
 				break;
@@ -720,6 +793,7 @@ static void run_shell(WOLFSSH *ssh)
 				ssh_send_str(ssh, "\b \b");
 				line_len--;
 			}
+			browse = -1;
 		} else if (ch == 4) {
 			/* Ctrl-D: disconnect */
 			ssh_send_str(ssh, "\r\nBye.\r\n");

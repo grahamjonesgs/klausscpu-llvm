@@ -29,11 +29,40 @@
 // ── Volatile SRAM copy helpers ────────────────────────────────────────────
 // Standard memcpy rejects volatile pointers; use explicit byte loops.
 
+// Word-wide SRAM copies.  On this fetch-bound core the per-byte loop overhead
+// dominates packet processing, so move 32 bits per iteration (LDIDX32/STIDX32)
+// when both ends are 4-aligned, with a byte tail / unaligned fallback.  This is
+// a raw word copy (read u32 → write the same u32), so the byte layout — and
+// therefore the on-wire byte order — is preserved regardless of endianness.
+
+static inline void sram_copy_from(uint8_t *dst, volatile const uint8_t *src, uint32_t n) {
+    if ((((uintptr_t)dst | (uintptr_t)src) & 3u) == 0u) {
+        volatile const uint32_t *s = (volatile const uint32_t *)(const void *)src;
+        uint32_t *d = (uint32_t *)(void *)dst;
+        uint32_t w = n >> 2;
+        for (uint32_t i = 0; i < w; i++) d[i] = s[i];
+        for (uint32_t i = w << 2; i < n; i++) dst[i] = src[i];
+    } else {
+        for (uint32_t i = 0; i < n; i++) dst[i] = src[i];
+    }
+}
+
+static inline void sram_copy_to(volatile uint8_t *dst, const uint8_t *src, uint32_t n) {
+    if ((((uintptr_t)dst | (uintptr_t)src) & 3u) == 0u) {
+        volatile uint32_t *d = (volatile uint32_t *)(void *)dst;
+        const uint32_t *s = (const uint32_t *)(const void *)src;
+        uint32_t w = n >> 2;
+        for (uint32_t i = 0; i < w; i++) d[i] = s[i];
+        for (uint32_t i = w << 2; i < n; i++) dst[i] = src[i];
+    } else {
+        for (uint32_t i = 0; i < n; i++) dst[i] = src[i];
+    }
+}
+
 static void sram_to_pbuf(struct pbuf *p, volatile const uint8_t *src) {
     uint32_t offset = 0;
     for (struct pbuf *q = p; q != NULL; q = q->next) {
-        uint8_t *dst = (uint8_t *)q->payload;
-        for (uint16_t i = 0; i < q->len; i++) dst[i] = src[offset + i];
+        sram_copy_from((uint8_t *)q->payload, src + offset, q->len);
         offset += q->len;
     }
 }
@@ -41,8 +70,7 @@ static void sram_to_pbuf(struct pbuf *p, volatile const uint8_t *src) {
 static void pbuf_to_sram(volatile uint8_t *dst, struct pbuf *p) {
     uint32_t offset = 0;
     for (struct pbuf *q = p; q != NULL; q = q->next) {
-        const uint8_t *src = (const uint8_t *)q->payload;
-        for (uint16_t i = 0; i < q->len; i++) dst[offset + i] = src[i];
+        sram_copy_to(dst + offset, (const uint8_t *)q->payload, q->len);
         offset += q->len;
     }
 }
@@ -110,17 +138,24 @@ static struct pbuf *low_level_input(struct netif *netif) {
 }
 
 // ── ethernetif_input — called from polling loop ───────────────────────────
-// Drains one pending RX frame and passes it up to the lwIP IP layer.
+// Drains ALL pending RX frames and passes each up to the lwIP IP layer.
+//
+// Draining the whole LiteEth RX ring per call (rather than one frame) keeps
+// the MAC's slot ring from overflowing under bursty bulk transfers — the
+// dominant throughput limiter when polled from a NO_SYS main loop.  Each
+// low_level_input() re-reads RX_EV_PENDING/RX_SLOT/RX_LENGTH and W1C-releases
+// its slot, so the MAC advances to the next pending frame on every iteration.
 
 void ethernetif_input(struct netif *netif) {
-    struct pbuf *p = low_level_input(netif);
-    if (p == NULL) return;
+    struct pbuf *p;
 
-    err_t err = netif->input(p, netif);
-    if (err != ERR_OK) {
-        LWIP_DEBUGF(NETIF_DEBUG, ("ethernetif_input: IP layer dropped frame %d\n",
-                                  (int)err));
-        pbuf_free(p);
+    while ((p = low_level_input(netif)) != NULL) {
+        err_t err = netif->input(p, netif);
+        if (err != ERR_OK) {
+            LWIP_DEBUGF(NETIF_DEBUG, ("ethernetif_input: IP layer dropped frame %d\n",
+                                      (int)err));
+            pbuf_free(p);
+        }
     }
 }
 
