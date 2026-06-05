@@ -1,45 +1,42 @@
 /* ssh_server.c — wolfSSH server for KlaussCPU Zephyr.
  *
  * Adapted from freertos/ssh/ssh_server.c.  Uses Zephyr k_thread, k_malloc,
- * and BSD socket API (CONFIG_NET_SOCKETS) instead of FreeRTOS + lwIP.
+ * and the BSD socket API (CONFIG_NET_SOCKETS) instead of FreeRTOS + lwIP.
  *
- * The shell provides filesystem commands (ls, cat, mkdir, rm) plus the
- * same hardware-info commands as the FreeRTOS telnet shell.
+ * This file is now only the SSH transport plumbing: authentication, the
+ * wolfSSH socket I/O callbacks, the listener, and the per-connection threads.
+ * The interactive shell itself is a Zephyr shell backend (ssh_shell_transport.c)
+ * driving the single set of SHELL_CMD_REGISTER commands (shell_cmds.c) shared
+ * with the serial console — there is no longer a hand-rolled command
+ * interpreter here.
+ *
+ * Each connection thread is the SOLE reader of its socket: it runs
+ * wolfSSH_accept(), then pumps decrypted bytes into its slot's shell RX ring
+ * (ssh_shell_feed) until the peer closes.  The shell core thread is the sole
+ * writer (see ssh_shell_transport.c for the threading rationale).
  */
 
 #define WOLFSSL_USER_SETTINGS
 #include "user_settings.h"
 
 #include <zephyr/kernel.h>
-#include <zephyr/version.h>
 #include <zephyr/net/socket.h>
 #include <zephyr/net/net_ip.h>
-#include <zephyr/fs/fs.h>
-#include <zephyr/sys/reboot.h>
 #include <zephyr/logging/log.h>
 
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h>
-#include <stdarg.h>
 
 #include <wolfssh/ssh.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>
 
 #include "ssh_server.h"
+#include "ssh_shell_transport.h"
 #include "llext_loader.h"
 #include "sshkeys.h"
 #include "wolfssl_hw.h"
 
 LOG_MODULE_REGISTER(ssh_server, LOG_LEVEL_INF);
-
-/* ── MMIO shortcuts for hardware info commands ───────────────────────────── */
-
-#define REG(a)        (*(volatile uint32_t *)(unsigned long)(a))
-#define REG64(a)      (*(volatile uint64_t *)(unsigned long)(a))
-#define REG_LEDS      REG(0xF0040000u)
-#define REG_SEG_ALL   REG(0xF0030010u)
-#define REG_CLOCK_MS  REG64(0xF00F0040u)
 
 /* ── Authentication ──────────────────────────────────────────────────────── */
 
@@ -101,7 +98,7 @@ static int wolfssh_auth_cb(uint8_t type, WS_UserAuthData *auth, void *ctx)
 	return WOLFSSH_USERAUTH_FAILURE;
 }
 
-/* ── Socket I/O callbacks for wolfSSH ────────────────────────────────────── */
+/* ── Socket I/O callbacks for wolfSSH ─────────────────────────────────────── */
 
 static int ssh_recv(WOLFSSH *ssh, void *buf, word32 sz, void *ctx)
 {
@@ -128,693 +125,23 @@ static int ssh_send(WOLFSSH *ssh, void *buf, word32 sz, void *ctx)
 	return n;
 }
 
-/* ── Shell output helpers ────────────────────────────────────────────────── */
+/* ── Banner ──────────────────────────────────────────────────────────────── */
 
-#define SSH_VERSION  "1.3"   /* 1.3: command history (up/down arrows) */
-#define SSH_BANNER   "\r\nKlaussCPU Zephyr SSH shell v" SSH_VERSION \
-		     " (built " __DATE__ " " __TIME__ ") — type 'help'\r\n\r\n"
-#define SSH_PROMPT   "$ "
-#define SSH_LINE_MAX 256
-#define SSH_HIST_SIZE 8       /* command-history ring depth (per session) */
-#define SSH_HIST_LINE 128     /* max stored command length */
+#define SSH_VERSION "2.0"   /* 2.0: SSH is now a Zephyr shell backend */
+#define SSH_BANNER  "\r\nKlaussCPU Zephyr SSH shell v" SSH_VERSION       \
+		    " (built " __DATE__ " " __TIME__ ") — type 'help'\r\n"
 
-static void ssh_send_str(WOLFSSH *ssh, const char *s)
-{
-	wolfSSH_stream_send(ssh, (uint8_t *)s, (word32)strlen(s));
-}
-
-static void ssh_sendf(WOLFSSH *ssh, const char *fmt, ...)
-{
-	char buf[512];
-	va_list ap;
-
-	va_start(ap, fmt);
-	int n = vsnprintf(buf, sizeof(buf), fmt, ap);
-	va_end(ap);
-	if (n > 0) {
-		wolfSSH_stream_send(ssh, (uint8_t *)buf, (word32)n);
-	}
-}
-
-/* ── Path helper — prepend /SD:/ to relative paths ───────────────────────── */
-
-#define SD_ROOT "/SD:/"
-
-static char _pathbuf[128];
-
-static const char *resolve_path(const char *path)
-{
-	if (!path || !*path) {
-		return SD_ROOT;
-	}
-	if (path[0] == '/') {
-		return path;
-	}
-	snprintf(_pathbuf, sizeof(_pathbuf), SD_ROOT "%s", path);
-	return _pathbuf;
-}
-
-/* ── Shell commands ──────────────────────────────────────────────────────── */
-
-static void cmd_help(WOLFSSH *ssh)
-{
-	ssh_send_str(ssh,
-		"Commands:\r\n"
-		"  help           this message\r\n"
-		"  info           system information\r\n"
-		"  uptime         system uptime\r\n"
-		"  threads        list kernel threads\r\n"
-		"  ls [path]      list directory (default /SD:/)\r\n"
-		"  cat <file>     display file contents\r\n"
-		"  hexdump <file> hex dump of file\r\n"
-		"  mkdir <path>   create directory\r\n"
-		"  rm <file>      remove file\r\n"
-		"  write <file> <text>  write text to file\r\n"
-		"  df             filesystem free space\r\n"
-		"  run [file]     load & run extension (default PROG.LLEXT)\r\n"
-		"  leds [hex]     read/write LED register\r\n"
-		"  seg <hex>      write 7-segment display\r\n"
-		"  perf [ms]      profile live CPU/cache (default 1000ms window)\r\n"
-		"  exit           close SSH session\r\n");
-}
-
-static void cmd_info(WOLFSSH *ssh)
-{
-	ssh_sendf(ssh, "KlaussCPU Zephyr %s\r\n", KERNEL_VERSION_STRING);
-	ssh_sendf(ssh, "Uptime : %llu ms\r\n",
-		  (unsigned long long)k_uptime_get());
-	ssh_sendf(ssh, "Clock  : %u Hz\r\n",
-		  CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC);
-}
-
-/* ── Live performance counters — `perf [ms]` ─────────────────────────────── */
-/* Delta-samples the MMIO perf (0xF00D) + cache (0xF005) counters over a window
- * (non-destructive: read, sleep, read, subtract) and reports what the live
- * system did — CPI, busy/idle, cycle accounting, instruction mix, cache. */
-
-struct perfsnap {
-	uint64_t cycles, instr, fetch, exec, mul, div, intc, idle;
-	uint64_t mul_ops, div_ops, int_ops;
-	uint64_t alu, load, store, branch, taken, jump, call, ind, other;
-	uint64_t rh, rm, wh, wm, wb, stall;
-};
-
-static void perf_read(struct perfsnap *s)
-{
-	s->cycles  = REG64(0xF00D0008u); s->instr = REG64(0xF00D0010u);
-	s->fetch   = REG64(0xF00D0018u); s->exec  = REG64(0xF00D0020u);
-	s->mul     = REG64(0xF00D0028u); s->div   = REG64(0xF00D0030u);
-	s->intc    = REG64(0xF00D0038u); s->idle  = REG64(0xF00D0040u);
-	s->mul_ops = REG64(0xF00D0048u); s->div_ops = REG64(0xF00D0050u);
-	s->int_ops = REG64(0xF00D0058u);
-	s->alu     = REG64(0xF00D0060u); s->load  = REG64(0xF00D0068u);
-	s->store   = REG64(0xF00D0070u); s->branch = REG64(0xF00D0078u);
-	s->taken   = REG64(0xF00D0080u); s->jump  = REG64(0xF00D0088u);
-	s->call    = REG64(0xF00D0090u); s->ind   = REG64(0xF00D0098u);
-	s->other   = REG64(0xF00D00A0u);
-	s->rh = REG64(0xF0050040u); s->rm = REG64(0xF0050048u);
-	s->wh = REG64(0xF0050050u); s->wm = REG64(0xF0050058u);
-	s->wb = REG64(0xF0050060u); s->stall = REG64(0xF0050068u);
-}
-
-static void ssh_pct(WOLFSSH *ssh, const char *label, uint64_t num, uint64_t den)
-{
-	uint64_t p = den ? (num * 10000ull) / den : 0;   /* hundredths of % */
-
-	ssh_sendf(ssh, "%s%llu.%02llu%% ", label,
-		  (unsigned long long)(p / 100), (unsigned long long)(p % 100));
-}
-
-static void cmd_perf(WOLFSSH *ssh, const char *arg)
-{
-	uint32_t ms = arg ? (uint32_t)strtoul(arg, NULL, 10) : 1000u;
-
-	if (ms < 10u)    ms = 10u;
-	if (ms > 60000u) ms = 60000u;
-
-	struct perfsnap a, b;
-
-	perf_read(&a);
-	k_msleep((int32_t)ms);
-	perf_read(&b);
-
-#define DLT(f) ((uint64_t)(b.f - a.f))
-	uint64_t cyc = DLT(cycles), ins = DLT(instr), idle = DLT(idle);
-	uint64_t misses = DLT(rm) + DLT(wm);
-	uint64_t acc = DLT(rh) + DLT(rm) + DLT(wh) + DLT(wm);
-
-	ssh_sendf(ssh, "perf window=%llums  cycles=%llu  instr=%llu\r\n",
-		  (unsigned long long)ms, (unsigned long long)cyc,
-		  (unsigned long long)ins);
-	if (ins) {
-		uint64_t cpi = (cyc * 1000ull) / ins;
-
-		ssh_sendf(ssh, "CPI=%llu.%03llu\r\n",
-			  (unsigned long long)(cpi / 1000),
-			  (unsigned long long)(cpi % 1000));
-	} else {
-		ssh_send_str(ssh, "CPI=n/a (idle)\r\n");
-	}
-
-	ssh_send_str(ssh, "util: busy=");
-	ssh_pct(ssh, "", cyc - idle, cyc);
-	ssh_pct(ssh, "idle=", idle, cyc);
-	ssh_send_str(ssh, "\r\n");
-
-	ssh_send_str(ssh, "cyc:  ");
-	ssh_pct(ssh, "fetch=", DLT(fetch), cyc);
-	ssh_pct(ssh, "exec=",  DLT(exec),  cyc);
-	ssh_pct(ssh, "mul=",   DLT(mul),   cyc);
-	ssh_pct(ssh, "div=",   DLT(div),   cyc);
-	ssh_pct(ssh, "int=",   DLT(intc),  cyc);
-	ssh_pct(ssh, "idle=",  idle,       cyc);
-	ssh_send_str(ssh, "\r\n");
-
-	ssh_send_str(ssh, "mix:  ");
-	ssh_pct(ssh, "ALU=",  DLT(alu),    ins);
-	ssh_pct(ssh, "LD=",   DLT(load),   ins);
-	ssh_pct(ssh, "ST=",   DLT(store),  ins);
-	ssh_pct(ssh, "BR=",   DLT(branch), ins);
-	ssh_pct(ssh, "JMP=",  DLT(jump),   ins);
-	ssh_pct(ssh, "CALL=", DLT(call),   ins);
-	ssh_pct(ssh, "IND=",  DLT(ind),    ins);
-	ssh_pct(ssh, "OTH=",  DLT(other),  ins);
-	ssh_send_str(ssh, "\r\n");
-
-	uint64_t br = DLT(branch), tk = DLT(taken);
-
-	ssh_sendf(ssh, "branch: n=%llu taken=%llu rate=",
-		  (unsigned long long)br, (unsigned long long)tk);
-	ssh_pct(ssh, "", tk, br);
-	ssh_send_str(ssh, "\r\n");
-
-	ssh_sendf(ssh, "cache: acc=%llu miss=", (unsigned long long)acc);
-	ssh_pct(ssh, "", misses, acc);
-	ssh_sendf(ssh, "wb=%llu stall=%llu",
-		  (unsigned long long)DLT(wb), (unsigned long long)DLT(stall));
-	if (misses) {
-		uint64_t pen = (DLT(stall) * 100ull) / misses;
-
-		ssh_sendf(ssh, " avgpen=%llu.%02lluc",
-			  (unsigned long long)(pen / 100),
-			  (unsigned long long)(pen % 100));
-	}
-	ssh_send_str(ssh, "\r\n");
-#undef DLT
-}
-
-static void cmd_uptime(WOLFSSH *ssh)
-{
-	int64_t ms = k_uptime_get();
-	int64_t sec = ms / 1000;
-	int64_t min = sec / 60;
-	int64_t hr = min / 60;
-
-	ssh_sendf(ssh, "%02lld:%02lld:%02lld.%03lld\r\n",
-		  (long long)hr, (long long)(min % 60),
-		  (long long)(sec % 60), (long long)(ms % 1000));
-}
-
-static void cmd_ls(WOLFSSH *ssh, const char *path)
-{
-	struct fs_dir_t dir;
-	struct fs_dirent entry;
-
-	path = resolve_path(path);
-
-	fs_dir_t_init(&dir);
-
-	if (fs_opendir(&dir, path) != 0) {
-		ssh_sendf(ssh, "Cannot open directory: %s\r\n", path);
-		return;
-	}
-
-	ssh_sendf(ssh, "Directory: %s\r\n", path);
-
-	while (fs_readdir(&dir, &entry) == 0 && entry.name[0] != '\0') {
-		if (entry.type == FS_DIR_ENTRY_DIR) {
-			ssh_sendf(ssh, "  [DIR]  %s\r\n", entry.name);
-		} else {
-			ssh_sendf(ssh, "  %6u  %s\r\n",
-				  (unsigned)entry.size, entry.name);
-		}
-	}
-	fs_closedir(&dir);
-}
-
-static void cmd_cat(WOLFSSH *ssh, const char *path)
-{
-	struct fs_file_t f;
-	uint8_t buf[256];
-
-	if (!path || !*path) {
-		ssh_send_str(ssh, "Usage: cat <file>\r\n");
-		return;
-	}
-	path = resolve_path(path);
-
-	fs_file_t_init(&f);
-
-	if (fs_open(&f, path, FS_O_READ) != 0) {
-		ssh_sendf(ssh, "Cannot open: %s\r\n", path);
-		return;
-	}
-
-	ssize_t n;
-
-	while ((n = fs_read(&f, buf, sizeof(buf))) > 0) {
-		/* Convert \n to \r\n for terminal display */
-		for (ssize_t i = 0; i < n; i++) {
-			if (buf[i] == '\n') {
-				ssh_send_str(ssh, "\r\n");
-			} else {
-				wolfSSH_stream_send(ssh, &buf[i], 1);
-			}
-		}
-	}
-	fs_close(&f);
-	ssh_send_str(ssh, "\r\n");
-}
-
-static void cmd_hexdump(WOLFSSH *ssh, const char *path)
-{
-	struct fs_file_t f;
-	uint8_t buf[16];
-
-	if (!path || !*path) {
-		ssh_send_str(ssh, "Usage: hexdump <file>\r\n");
-		return;
-	}
-	path = resolve_path(path);
-
-	fs_file_t_init(&f);
-
-	if (fs_open(&f, path, FS_O_READ) != 0) {
-		ssh_sendf(ssh, "Cannot open: %s\r\n", path);
-		return;
-	}
-
-	uint32_t offset = 0;
-	ssize_t n;
-
-	while ((n = fs_read(&f, buf, sizeof(buf))) > 0) {
-		ssh_sendf(ssh, "%08x  ", offset);
-		for (ssize_t i = 0; i < n; i++) {
-			ssh_sendf(ssh, "%02x ", buf[i]);
-		}
-		for (ssize_t i = n; i < 16; i++) {
-			ssh_send_str(ssh, "   ");
-		}
-		ssh_send_str(ssh, " |");
-		for (ssize_t i = 0; i < n; i++) {
-			char c = (buf[i] >= 0x20 && buf[i] < 0x7f) ? (char)buf[i]
-								    : '.';
-			wolfSSH_stream_send(ssh, (uint8_t *)&c, 1);
-		}
-		ssh_send_str(ssh, "|\r\n");
-		offset += (uint32_t)n;
-	}
-	fs_close(&f);
-	ssh_sendf(ssh, "%08x  (%u bytes)\r\n", offset, offset);
-}
-
-static void cmd_mkdir(WOLFSSH *ssh, const char *path)
-{
-	if (!path || !*path) {
-		ssh_send_str(ssh, "Usage: mkdir <path>\r\n");
-		return;
-	}
-	path = resolve_path(path);
-	if (fs_mkdir(path) != 0) {
-		ssh_sendf(ssh, "Failed to create: %s\r\n", path);
-	} else {
-		ssh_sendf(ssh, "Created: %s\r\n", path);
-	}
-}
-
-static void cmd_rm(WOLFSSH *ssh, const char *path)
-{
-	if (!path || !*path) {
-		ssh_send_str(ssh, "Usage: rm <file>\r\n");
-		return;
-	}
-	path = resolve_path(path);
-	if (fs_unlink(path) != 0) {
-		ssh_sendf(ssh, "Failed to remove: %s\r\n", path);
-	} else {
-		ssh_sendf(ssh, "Removed: %s\r\n", path);
-	}
-}
-
-static void cmd_write(WOLFSSH *ssh, const char *path, const char *text)
-{
-	struct fs_file_t f;
-
-	if (!path || !*path || !text) {
-		ssh_send_str(ssh, "Usage: write <file> <text>\r\n");
-		return;
-	}
-	path = resolve_path(path);
-
-	fs_file_t_init(&f);
-
-	if (fs_open(&f, path, FS_O_WRITE | FS_O_CREATE) != 0) {
-		ssh_sendf(ssh, "Cannot open: %s\r\n", path);
-		return;
-	}
-
-	ssize_t bw = fs_write(&f, text, strlen(text));
-
-	fs_close(&f);
-
-	if (bw >= 0) {
-		ssh_sendf(ssh, "Wrote %d bytes to %s\r\n", (int)bw, path);
-	} else {
-		ssh_sendf(ssh, "Write failed: %d\r\n", (int)bw);
-	}
-}
-
-static void cmd_df(WOLFSSH *ssh)
-{
-	struct fs_statvfs stat;
-
-	if (fs_statvfs("/SD:/", &stat) != 0) {
-		ssh_send_str(ssh, "Cannot stat filesystem\r\n");
-		return;
-	}
-
-	uint64_t total = (uint64_t)stat.f_bsize * stat.f_blocks;
-	uint64_t free_bytes = (uint64_t)stat.f_bsize * stat.f_bfree;
-
-	ssh_sendf(ssh, "Filesystem: /SD:/\r\n");
-	ssh_sendf(ssh, "  Block size : %lu\r\n", (unsigned long)stat.f_bsize);
-	ssh_sendf(ssh, "  Total      : %llu bytes\r\n",
-		  (unsigned long long)total);
-	ssh_sendf(ssh, "  Free       : %llu bytes\r\n",
-		  (unsigned long long)free_bytes);
-}
-
-static void cmd_leds(WOLFSSH *ssh, const char *arg)
-{
-	if (arg && *arg) {
-		unsigned long val = strtoul(arg, NULL, 16);
-
-		REG_LEDS = (uint32_t)val;
-		ssh_sendf(ssh, "LEDs = 0x%04lx\r\n", val & 0xFFFF);
-	} else {
-		ssh_sendf(ssh, "LEDs = 0x%04lx\r\n",
-			  (unsigned long)(REG_LEDS & 0xFFFF));
-	}
-}
-
-static void cmd_seg(WOLFSSH *ssh, const char *arg)
-{
-	if (!arg || !*arg) {
-		ssh_send_str(ssh, "Usage: seg <hex32>\r\n");
-		return;
-	}
-	unsigned long val = strtoul(arg, NULL, 16);
-
-	REG_SEG_ALL = (uint32_t)val;
-	ssh_sendf(ssh, "7-seg = 0x%08lx\r\n", val);
-}
-
-static void cmd_run(WOLFSSH *ssh, const char *arg)
-{
-	const char *filename;
-	char pathbuf[128];
-
-	if (arg && *arg) {
-		if (arg[0] == '/') {
-			filename = arg;
-		} else {
-			snprintf(pathbuf, sizeof(pathbuf), "/SD:/%s", arg);
-			filename = pathbuf;
-		}
-	} else {
-		filename = "/SD:/PROG.LLEXT";
-	}
-
-	ssh_sendf(ssh, "Loading %s ...\r\n", filename);
-	int rc = llext_run_from_sd(filename, ssh);
-
-	if (rc < 0) {
-		ssh_sendf(ssh, "\r\nLoad/run failed (code %d)\r\n", rc);
-	} else {
-		ssh_sendf(ssh, "\r\nProgram exited: %d\r\n", rc);
-	}
-}
-
-struct thread_cb_ctx {
-	WOLFSSH *ssh;
-};
-
-#ifdef CONFIG_THREAD_MONITOR
-static void thread_print_cb(const struct k_thread *t, void *ctx)
-{
-	struct thread_cb_ctx *c = ctx;
-	const char *name = k_thread_name_get((k_tid_t)t);
-
-	if (!name) {
-		name = "(unnamed)";
-	}
-	ssh_sendf(c->ssh, "  %s  prio=%d\r\n", name,
-		  k_thread_priority_get((k_tid_t)t));
-}
-#endif
-
-static void cmd_threads(WOLFSSH *ssh)
-{
-	ssh_send_str(ssh, "Active threads:\r\n");
-#ifdef CONFIG_THREAD_MONITOR
-	struct thread_cb_ctx ctx = { .ssh = ssh };
-
-	k_thread_foreach(thread_print_cb, &ctx);
-#else
-	ssh_send_str(ssh, "  (enable CONFIG_THREAD_MONITOR)\r\n");
-#endif
-}
-
-/* ── Command dispatcher ──────────────────────────────────────────────────── */
-
-static int dispatch_command(WOLFSSH *ssh, char *line)
-{
-	char *p = line;
-
-	while (*p == ' ') {
-		p++;
-	}
-	if (*p == '\0') {
-		return 0;
-	}
-
-	char *arg = p;
-
-	while (*arg && *arg != ' ') {
-		arg++;
-	}
-	if (*arg == ' ') {
-		*arg++ = '\0';
-		while (*arg == ' ') {
-			arg++;
-		}
-	}
-	if (!*arg) {
-		arg = NULL;
-	}
-
-	/* For 'write' command, get second argument (text after filename) */
-	char *arg2 = NULL;
-
-	if (arg && strcmp(p, "write") == 0) {
-		arg2 = arg;
-		while (*arg2 && *arg2 != ' ') {
-			arg2++;
-		}
-		if (*arg2 == ' ') {
-			*arg2++ = '\0';
-			while (*arg2 == ' ') {
-				arg2++;
-			}
-		}
-		if (!*arg2) {
-			arg2 = NULL;
-		}
-	}
-
-	if (strcmp(p, "help") == 0) {
-		cmd_help(ssh);
-	} else if (strcmp(p, "info") == 0) {
-		cmd_info(ssh);
-	} else if (strcmp(p, "uptime") == 0) {
-		cmd_uptime(ssh);
-	} else if (strcmp(p, "ls") == 0) {
-		cmd_ls(ssh, arg);
-	} else if (strcmp(p, "cat") == 0) {
-		cmd_cat(ssh, arg);
-	} else if (strcmp(p, "hexdump") == 0) {
-		cmd_hexdump(ssh, arg);
-	} else if (strcmp(p, "mkdir") == 0) {
-		cmd_mkdir(ssh, arg);
-	} else if (strcmp(p, "rm") == 0) {
-		cmd_rm(ssh, arg);
-	} else if (strcmp(p, "write") == 0) {
-		cmd_write(ssh, arg, arg2);
-	} else if (strcmp(p, "df") == 0) {
-		cmd_df(ssh);
-	} else if (strcmp(p, "run") == 0) {
-		cmd_run(ssh, arg);
-	} else if (strcmp(p, "leds") == 0) {
-		cmd_leds(ssh, arg);
-	} else if (strcmp(p, "seg") == 0) {
-		cmd_seg(ssh, arg);
-	} else if (strcmp(p, "perf") == 0) {
-		cmd_perf(ssh, arg);
-	} else if (strcmp(p, "threads") == 0) {
-		cmd_threads(ssh);
-	} else if (strcmp(p, "exit") == 0 || strcmp(p, "quit") == 0 ||
-		   strcmp(p, "logout") == 0) {
-		ssh_send_str(ssh, "Bye.\r\n");
-		return 1;
-	} else {
-		ssh_sendf(ssh, "Unknown command: %s  (type 'help')\r\n", p);
-	}
-	return 0;
-}
-
-/* ── Interactive shell loop ──────────────────────────────────────────────── */
-
-/* Replace the on-screen line with `line` (used for history recall). */
-static void shell_redraw(WOLFSSH *ssh, const char *line, int len)
-{
-	ssh_send_str(ssh, "\r\x1b[K");          /* CR + erase to end of line */
-	ssh_send_str(ssh, SSH_PROMPT);
-	if (len > 0) {
-		wolfSSH_stream_send(ssh, (uint8_t *)line, (word32)len);
-	}
-}
-
-static void run_shell(WOLFSSH *ssh)
-{
-	char line[SSH_LINE_MAX];
-	int line_len = 0;
-
-	/* Per-session command history (ring). */
-	char hist[SSH_HIST_SIZE][SSH_HIST_LINE];
-	int hist_head = 0;   /* next slot to write                    */
-	int hist_n = 0;      /* entries stored (<= SSH_HIST_SIZE)      */
-	int browse = -1;     /* -1 = new line; 0 = newest, up = older  */
-	int esc = 0;         /* 0 none, 1 saw ESC, 2 saw ESC[          */
-
-	ssh_send_str(ssh, SSH_BANNER);
-	ssh_send_str(ssh, SSH_PROMPT);
-
-	uint8_t ch;
-
-	while (1) {
-		int n = wolfSSH_stream_read(ssh, &ch, 1);
-
-		if (n <= 0) {
-			break;
-		}
-
-		/* ── arrow-key / escape-sequence handling (ESC '[' 'A'/'B') ── */
-		if (esc == 1) {
-			esc = (ch == '[') ? 2 : 0;
-			continue;
-		}
-		if (esc == 2) {
-			esc = 0;
-			if (ch == 'A' && browse + 1 < hist_n) {
-				browse++;            /* older */
-			} else if (ch == 'B' && browse > 0) {
-				browse--;            /* newer */
-			} else if (ch == 'B' && browse == 0) {
-				browse = -1;         /* back to a fresh empty line */
-				line_len = 0;
-				shell_redraw(ssh, line, 0);
-				continue;
-			} else {
-				continue;            /* at end of history, or C/D */
-			}
-			/* load history entry `browse` (0 = newest) into `line` */
-			int idx = (hist_head - 1 - browse + 2 * SSH_HIST_SIZE) % SSH_HIST_SIZE;
-			size_t hl = strlen(hist[idx]);
-
-			if (hl > SSH_LINE_MAX - 1) {
-				hl = SSH_LINE_MAX - 1;
-			}
-			memcpy(line, hist[idx], hl);
-			line_len = (int)hl;
-			line[line_len] = '\0';
-			shell_redraw(ssh, line, line_len);
-			continue;
-		}
-		if (ch == 0x1B) {
-			esc = 1;
-			continue;
-		}
-
-		/* ── normal line editing ── */
-		if (ch == '\r' || ch == '\n') {
-			ssh_send_str(ssh, "\r\n");
-			line[line_len] = '\0';
-
-			/* store non-empty command in history */
-			if (line_len > 0) {
-				size_t cl = (size_t)line_len;
-
-				if (cl > SSH_HIST_LINE - 1) {
-					cl = SSH_HIST_LINE - 1;
-				}
-				memcpy(hist[hist_head], line, cl);
-				hist[hist_head][cl] = '\0';
-				hist_head = (hist_head + 1) % SSH_HIST_SIZE;
-				if (hist_n < SSH_HIST_SIZE) {
-					hist_n++;
-				}
-			}
-			browse = -1;
-
-			if (dispatch_command(ssh, line) != 0) {
-				break;
-			}
-
-			line_len = 0;
-			ssh_send_str(ssh, SSH_PROMPT);
-		} else if (ch == 127 || ch == 8) {
-			if (line_len > 0) {
-				line_len--;
-				ssh_send_str(ssh, "\b \b");
-			}
-		} else if (ch == 3) {
-			/* Ctrl-C: clear line */
-			while (line_len > 0) {
-				ssh_send_str(ssh, "\b \b");
-				line_len--;
-			}
-			browse = -1;
-		} else if (ch == 4) {
-			/* Ctrl-D: disconnect */
-			ssh_send_str(ssh, "\r\nBye.\r\n");
-			break;
-		} else if (ch >= 0x20 && line_len < SSH_LINE_MAX - 1) {
-			line[line_len++] = (char)ch;
-			wolfSSH_stream_send(ssh, &ch, 1);
-		}
-	}
-}
-
-/* ── Connection handler thread ───────────────────────────────────────────── */
+/* ── Connection handler thread ────────────────────────────────────────────── */
 
 struct conn_args {
 	WOLFSSH *ssh;
 	int sock;
 };
 
-/* The connection thread also runs loaded extensions' main() in-place (see
- * llext_loader.c), so it needs room for the shell frame plus the program. */
-#define CONN_STACK_SIZE 40960
+/* The connection thread only runs wolfSSH_accept() + the RX pump now; loaded
+ * extensions execute on the *shell* thread (CONFIG_SHELL_STACK_SIZE), so this
+ * stack no longer needs room for a program. */
+#define CONN_STACK_SIZE 8192
 
 static K_THREAD_STACK_ARRAY_DEFINE(conn_stacks, SSH_MAX_CONNS, CONN_STACK_SIZE);
 static struct k_thread conn_threads[SSH_MAX_CONNS];
@@ -830,34 +157,73 @@ static void ssh_conn_entry(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p3);
 
 	WOLFSSH *ssh = ca->ssh;
-	int sock = ca->sock;
+	bool safe = true;   /* safe to free the session + reuse the slot? */
 
-	wolfSSH_SetIOReadCtx(ssh, &sock);
-	wolfSSH_SetIOWriteCtx(ssh, &sock);
+	/* The wolfSSH I/O context must point at storage that outlives this
+	 * thread: the shell-core thread may still send (e.g. a `run` extension)
+	 * after we return.  ca is &conn_args_pool[slot] (static), so &ca->sock
+	 * is stable; a stack copy would dangle. */
+	wolfSSH_SetIOReadCtx(ssh, &ca->sock);
+	wolfSSH_SetIOWriteCtx(ssh, &ca->sock);
 
 	int rc = wolfSSH_accept(ssh);
 
 	if (rc != WS_SUCCESS) {
-		int err = wolfSSH_get_error(ssh);
-
-		LOG_ERR("accept failed rc=%d err=%d", rc, err);
+		LOG_ERR("accept failed rc=%d err=%d", rc,
+			wolfSSH_get_error(ssh));
 		goto cleanup;
 	}
 
-	LOG_INF("SSH session established");
-	run_shell(ssh);
+	LOG_INF("SSH session established (slot %d)", slot);
+
+	/* Greet while this thread is still the only writer, then hand the
+	 * session to its shell instance (the shell core thread takes over all
+	 * output from here). */
+	wolfSSH_stream_send(ssh, (uint8_t *)SSH_BANNER,
+			    (word32)strlen(SSH_BANNER));
+	(void)ssh_shell_claim(slot, ssh);
+
+	/* Sole reader: drain decrypted bytes into the shell's RX ring until the
+	 * peer closes or errors. */
+	uint8_t buf[64];
+	int n;
+
+	while ((n = wolfSSH_stream_read(ssh, buf, sizeof(buf))) > 0) {
+		ssh_shell_feed(slot, buf, (size_t)n);
+	}
+
+	safe = ssh_shell_release(slot);
 
 cleanup:
-	wolfSSH_free(ssh);
-	zsock_close(sock);
-	LOG_INF("SSH session ended");
+	LOG_INF("SSH session ended (slot %d)", slot);
 
-	k_mutex_lock(&conn_mutex, K_FOREVER);
-	conn_busy[slot] = false;
-	k_mutex_unlock(&conn_mutex);
+	if (safe) {
+		wolfSSH_free(ssh);
+		zsock_close(ca->sock);
+		k_mutex_lock(&conn_mutex, K_FOREVER);
+		conn_busy[slot] = false;
+		k_mutex_unlock(&conn_mutex);
+	} else {
+		/* An extension ignored stdin EOF and is still running on the
+		 * shell thread.  Freeing the WOLFSSH object or reusing the slot
+		 * would be a use-after-free, so the session object is leaked and
+		 * the slot stays busy until reboot.
+		 *
+		 * BUT free the *network* resources so the rest of the system
+		 * keeps working: close the socket (releases its net_conn
+		 * context — otherwise repeated leaks exhaust CONFIG_NET_MAX_CONN
+		 * and ALL new TCP fails) and point the dead session's I/O at
+		 * fd -1, so the still-running extension's sends error out
+		 * harmlessly instead of hitting a reused fd.  (A well-behaved
+		 * `run` program terminates when getchar() returns EOF.) */
+		LOG_ERR("slot %d retired: extension ignored EOF "
+			"(session object leaked; socket reclaimed)", slot);
+		zsock_close(ca->sock);
+		ca->sock = -1;   /* ssh_send/ssh_recv now fail cleanly */
+	}
 }
 
-/* ── Listener thread ─────────────────────────────────────────────────────── */
+/* ── Listener thread ──────────────────────────────────────────────────────── */
 
 static WOLFSSH_CTX *s_ctx;
 
@@ -959,12 +325,13 @@ static void ssh_listener_entry(void *p1, void *p2, void *p3)
 	}
 }
 
-/* ── Public API ──────────────────────────────────────────────────────────── */
+/* ── Public API ───────────────────────────────────────────────────────────── */
 
 int ssh_server_start(void)
 {
 	k_mutex_init(&conn_mutex);
 	llext_loader_init();
+	ssh_shell_transport_init();
 
 	if (wolfSSH_Init() != WS_SUCCESS) {
 		LOG_ERR("wolfSSH_Init failed");

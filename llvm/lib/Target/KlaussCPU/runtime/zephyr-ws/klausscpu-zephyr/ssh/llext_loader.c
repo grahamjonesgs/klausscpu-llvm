@@ -29,6 +29,7 @@
 #include <wolfssh/ssh.h>
 
 #include "llext_loader.h"
+#include "ssh_shell_transport.h"
 
 LOG_MODULE_REGISTER(llext_loader, LOG_LEVEL_INF);
 
@@ -45,7 +46,8 @@ typedef int (*ext_entry_fn)(int argc, char **argv);
 /* Per-run I/O context, pointed to by the running thread's custom data while its
  * main() executes.  Lives on that thread's stack for the duration of the run. */
 struct ext_ctx {
-	WOLFSSH *ssh;
+	const struct shell *sh;   /* owning shell (for input routing)   */
+	WOLFSSH            *ssh;   /* its SSH session, or NULL (serial)  */
 };
 
 /* ── Console routing (run on the extension's own thread) ──────────────────── */
@@ -74,23 +76,18 @@ static int route_out(int c)
 	return 1;
 }
 
-/* Input source for the exported getchar(): reads one byte from the current
- * thread's SSH session, or -1 (EOF) if this thread is not running an extension. */
+/* Input source for the exported getchar(): drains one byte from the owning
+ * shell's RX ring (ssh_shell_getc), so the socket is never read here AND on the
+ * connection thread at the same time.  Returns -1 (EOF) when this thread is not
+ * running an extension, on a non-SSH shell, or when the session closes. */
 static int route_in(void)
 {
 	struct ext_ctx *ctx = k_thread_custom_data_get();
 
-	if (ctx == NULL || ctx->ssh == NULL) {
+	if (ctx == NULL) {
 		return -1;
 	}
-
-	uint8_t ch;
-	int n = wolfSSH_stream_read(ctx->ssh, &ch, 1);
-
-	if (n <= 0) {
-		return -1;
-	}
-	return (int)ch;
+	return ssh_shell_getc(ctx->sh);
 }
 
 /* ── Status output helper — SSH or printk ─────────────────────────────────── */
@@ -175,8 +172,9 @@ void llext_loader_init(void)
 	klausscpu_console_in_hook = route_in;
 }
 
-int llext_run_from_sd(const char *filename, WOLFSSH *ssh)
+int llext_run_from_sd(const char *filename, const struct shell *sh)
 {
+	WOLFSSH *ssh = ssh_shell_ssh(sh);   /* NULL on the serial console */
 	uint8_t *buf = NULL;
 	size_t size = 0;
 
@@ -227,7 +225,7 @@ int llext_run_from_sd(const char *filename, WOLFSSH *ssh)
 	/* Route this thread's stdout/stdin to the SSH session while main() runs,
 	 * then restore.  Running on the connection thread (rather than a shared
 	 * worker) is what lets multiple sessions run extensions concurrently. */
-	struct ext_ctx ctx = { .ssh = ssh };
+	struct ext_ctx ctx = { .sh = sh, .ssh = ssh };
 	void *prev = k_thread_custom_data_get();
 
 	k_thread_custom_data_set(&ctx);

@@ -10,7 +10,13 @@
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/fs/fs.h>
+#include <zephyr/version.h>
+#include <zephyr/sys/iterable_sections.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
+#include "shell_paths.h"
 
 /* MMIO shortcuts */
 #define REG(a)        (*(volatile uint32_t *)(unsigned long)(a))
@@ -23,56 +29,71 @@
 
 static int cmd_ls(const struct shell *sh, size_t argc, char **argv)
 {
-	const char *path = (argc > 1) ? argv[1] : "/SD:/";
+	char path[SHELL_PATH_MAX];
 	struct fs_dir_t dir;
 	struct fs_dirent entry;
 
+	if (shell_redir_begin(sh, &argc, argv) < 0) {
+		shell_error(sh, "ls: cannot open redirect target");
+		return -1;
+	}
+
+	shell_path_resolve(sh, (argc > 1) ? argv[1] : NULL, path, sizeof(path));
 	fs_dir_t_init(&dir);
 
 	if (fs_opendir(&dir, path) != 0) {
 		shell_error(sh, "Cannot open directory: %s", path);
+		shell_redir_end(sh);
 		return -1;
 	}
 
-	shell_print(sh, "Directory: %s", path);
+	sh_print(sh, "Directory: %s", path);
 
 	while (fs_readdir(&dir, &entry) == 0 && entry.name[0] != '\0') {
 		if (entry.type == FS_DIR_ENTRY_DIR) {
-			shell_print(sh, "  [DIR]  %s", entry.name);
+			sh_print(sh, "  [DIR]  %s", entry.name);
 		} else {
-			shell_print(sh, "  %6u  %s", (unsigned)entry.size,
-				    entry.name);
+			sh_print(sh, "  %6u  %s", (unsigned)entry.size,
+				 entry.name);
 		}
 	}
 	fs_closedir(&dir);
+	shell_redir_end(sh);
 	return 0;
 }
 
 static int cmd_cat(const struct shell *sh, size_t argc, char **argv)
 {
+	struct fs_file_t f;
+	uint8_t buf[128];
+	char path[SHELL_PATH_MAX];
+
+	if (shell_redir_begin(sh, &argc, argv) < 0) {
+		shell_error(sh, "cat: cannot open redirect target");
+		return -1;
+	}
 	if (argc < 2) {
-		shell_error(sh, "Usage: cat <file>");
+		shell_error(sh, "Usage: cat <file> [> out]");
+		shell_redir_end(sh);
 		return -1;
 	}
 
-	struct fs_file_t f;
-	uint8_t buf[128];
-
+	shell_path_resolve(sh, argv[1], path, sizeof(path));
 	fs_file_t_init(&f);
 
-	if (fs_open(&f, argv[1], FS_O_READ) != 0) {
-		shell_error(sh, "Cannot open: %s", argv[1]);
+	if (fs_open(&f, path, FS_O_READ) != 0) {
+		shell_error(sh, "Cannot open: %s", path);
+		shell_redir_end(sh);
 		return -1;
 	}
 
 	ssize_t n;
 
-	while ((n = fs_read(&f, buf, sizeof(buf) - 1)) > 0) {
-		buf[n] = '\0';
-		shell_fprintf(sh, SHELL_NORMAL, "%s", (char *)buf);
+	while ((n = fs_read(&f, buf, sizeof(buf))) > 0) {
+		sh_write(sh, (char *)buf, (size_t)n);
 	}
 	fs_close(&f);
-	shell_print(sh, "");
+	shell_redir_end(sh);
 	return 0;
 }
 
@@ -85,11 +106,13 @@ static int cmd_hexdump(const struct shell *sh, size_t argc, char **argv)
 
 	struct fs_file_t f;
 	uint8_t buf[16];
+	char path[SHELL_PATH_MAX];
 
+	shell_path_resolve(sh, argv[1], path, sizeof(path));
 	fs_file_t_init(&f);
 
-	if (fs_open(&f, argv[1], FS_O_READ) != 0) {
-		shell_error(sh, "Cannot open: %s", argv[1]);
+	if (fs_open(&f, path, FS_O_READ) != 0) {
+		shell_error(sh, "Cannot open: %s", path);
 		return -1;
 	}
 
@@ -125,11 +148,15 @@ static int cmd_mkdir(const struct shell *sh, size_t argc, char **argv)
 		shell_error(sh, "Usage: mkdir <path>");
 		return -1;
 	}
-	if (fs_mkdir(argv[1]) != 0) {
-		shell_error(sh, "Failed to create: %s", argv[1]);
+
+	char path[SHELL_PATH_MAX];
+
+	shell_path_resolve(sh, argv[1], path, sizeof(path));
+	if (fs_mkdir(path) != 0) {
+		shell_error(sh, "Failed to create: %s", path);
 		return -1;
 	}
-	shell_print(sh, "Created: %s", argv[1]);
+	shell_print(sh, "Created: %s", path);
 	return 0;
 }
 
@@ -139,11 +166,15 @@ static int cmd_rm(const struct shell *sh, size_t argc, char **argv)
 		shell_error(sh, "Usage: rm <file>");
 		return -1;
 	}
-	if (fs_unlink(argv[1]) != 0) {
-		shell_error(sh, "Failed to remove: %s", argv[1]);
+
+	char path[SHELL_PATH_MAX];
+
+	shell_path_resolve(sh, argv[1], path, sizeof(path));
+	if (fs_unlink(path) != 0) {
+		shell_error(sh, "Failed to remove: %s", path);
 		return -1;
 	}
-	shell_print(sh, "Removed: %s", argv[1]);
+	shell_print(sh, "Removed: %s", path);
 	return 0;
 }
 
@@ -168,6 +199,179 @@ static int cmd_df(const struct shell *sh, size_t argc, char **argv)
 		    (unsigned long long)total);
 	shell_print(sh, "  Free       : %llu bytes",
 		    (unsigned long long)free_bytes);
+	return 0;
+}
+
+static int cmd_write(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc < 3) {
+		shell_error(sh, "Usage: write <file> <text>");
+		return -1;
+	}
+
+	struct fs_file_t f;
+	char path[SHELL_PATH_MAX];
+
+	shell_path_resolve(sh, argv[1], path, sizeof(path));
+	fs_file_t_init(&f);
+
+	if (fs_open(&f, path, FS_O_WRITE | FS_O_CREATE) != 0) {
+		shell_error(sh, "Cannot open: %s", path);
+		return -1;
+	}
+
+	ssize_t bw = fs_write(&f, argv[2], strlen(argv[2]));
+
+	fs_close(&f);
+
+	if (bw < 0) {
+		shell_error(sh, "Write failed: %d", (int)bw);
+		return -1;
+	}
+	shell_print(sh, "Wrote %d bytes to %s", (int)bw, path);
+	return 0;
+}
+
+static int cmd_cp(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+
+	char src[SHELL_PATH_MAX];
+	char dst[SHELL_PATH_MAX];
+
+	shell_path_resolve(sh, argv[1], src, sizeof(src));
+	shell_path_resolve(sh, argv[2], dst, sizeof(dst));
+
+	struct fs_file_t in;
+	struct fs_file_t out;
+
+	fs_file_t_init(&in);
+	fs_file_t_init(&out);
+
+	if (fs_open(&in, src, FS_O_READ) != 0) {
+		shell_error(sh, "cp: cannot open %s", src);
+		return -1;
+	}
+	if (fs_open(&out, dst, FS_O_WRITE | FS_O_CREATE | FS_O_TRUNC) != 0) {
+		shell_error(sh, "cp: cannot create %s", dst);
+		fs_close(&in);
+		return -1;
+	}
+
+	uint8_t buf[256];
+	ssize_t n;
+	ssize_t total = 0;
+	int rc = 0;
+
+	while ((n = fs_read(&in, buf, sizeof(buf))) > 0) {
+		ssize_t w = fs_write(&out, buf, n);
+
+		if (w < 0) {
+			shell_error(sh, "cp: write failed: %d", (int)w);
+			rc = -1;
+			break;
+		}
+		total += w;
+	}
+	fs_close(&in);
+	fs_close(&out);
+
+	if (rc == 0) {
+		shell_print(sh, "Copied %d bytes: %s -> %s", (int)total, src, dst);
+	}
+	return rc;
+}
+
+static int cmd_mv(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+
+	char src[SHELL_PATH_MAX];
+	char dst[SHELL_PATH_MAX];
+
+	shell_path_resolve(sh, argv[1], src, sizeof(src));
+	shell_path_resolve(sh, argv[2], dst, sizeof(dst));
+
+	if (fs_rename(src, dst) != 0) {
+		shell_error(sh, "mv: failed %s -> %s", src, dst);
+		return -1;
+	}
+	shell_print(sh, "Moved %s -> %s", src, dst);
+	return 0;
+}
+
+static int cmd_touch(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+
+	char path[SHELL_PATH_MAX];
+	struct fs_file_t f;
+
+	shell_path_resolve(sh, argv[1], path, sizeof(path));
+	fs_file_t_init(&f);
+
+	if (fs_open(&f, path, FS_O_CREATE | FS_O_WRITE) != 0) {
+		shell_error(sh, "touch: cannot create %s", path);
+		return -1;
+	}
+	fs_close(&f);
+	return 0;
+}
+
+static int cmd_echo(const struct shell *sh, size_t argc, char **argv)
+{
+	if (shell_redir_begin(sh, &argc, argv) < 0) {
+		shell_error(sh, "echo: cannot open redirect target");
+		return -1;
+	}
+
+	for (size_t i = 1; i < argc; i++) {
+		sh_write(sh, argv[i], strlen(argv[i]));
+		if (i + 1 < argc) {
+			sh_write(sh, " ", 1);
+		}
+	}
+	sh_print(sh, "");   /* trailing newline */
+	shell_redir_end(sh);
+	return 0;
+}
+
+/* ── System commands ─────────────────────────────────────────────────────── */
+
+static int cmd_info(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	shell_print(sh, "KlaussCPU Zephyr %s", KERNEL_VERSION_STRING);
+	shell_print(sh, "Uptime : %llu ms",
+		    (unsigned long long)k_uptime_get());
+	shell_print(sh, "Clock  : %u Hz", CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC);
+	return 0;
+}
+
+#ifdef CONFIG_THREAD_MONITOR
+static void thread_print_cb(const struct k_thread *t, void *ctx)
+{
+	const struct shell *sh = ctx;
+	const char *name = k_thread_name_get((k_tid_t)t);
+
+	shell_print(sh, "  %s  prio=%d", name ? name : "(unnamed)",
+		    k_thread_priority_get((k_tid_t)t));
+}
+#endif
+
+static int cmd_threads(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	shell_print(sh, "Active threads:");
+#ifdef CONFIG_THREAD_MONITOR
+	k_thread_foreach(thread_print_cb, (void *)sh);
+#else
+	shell_print(sh, "  (enable CONFIG_THREAD_MONITOR)");
+#endif
 	return 0;
 }
 
@@ -372,20 +576,124 @@ static int cmd_perf(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+/* ── Working directory ───────────────────────────────────────────────────── */
+
+static int cmd_cd(const struct shell *sh, size_t argc, char **argv)
+{
+	/* `cd` with no arg → root (home). */
+	if (argc < 2) {
+		shell_cwd_reset(sh);
+		shell_prompt_sync(sh);
+		return 0;
+	}
+
+	char path[SHELL_PATH_MAX];
+
+	shell_path_resolve(sh, argv[1], path, sizeof(path));
+
+	struct fs_dir_t dir;
+
+	fs_dir_t_init(&dir);
+	if (fs_opendir(&dir, path) != 0) {
+		shell_error(sh, "cd: not a directory: %s", path);
+		return -1;
+	}
+	fs_closedir(&dir);
+
+	shell_cwd_set(sh, path);
+	shell_prompt_sync(sh);
+	return 0;
+}
+
+static int cmd_pwd(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	shell_print(sh, "%s", shell_cwd(sh));
+	return 0;
+}
+
+/* ── Tab-completion: entries of the completing session's cwd ─────────────────
+ * Zephyr's shell_dynamic_get callback gets neither the shell nor the typed
+ * token, so we recover the shell from the running thread (the completion runs
+ * on that shell's own thread) to read its cwd, and we can only offer the cwd's
+ * immediate entries (no descending into a typed "subdir/").  The candidate
+ * string is used by the core immediately, so one static scratch buffer is OK. */
+
+static const struct shell *completing_shell(void)
+{
+	k_tid_t cur = k_current_get();
+
+	STRUCT_SECTION_FOREACH(shell, sh) {
+		if (sh->thread == cur) {
+			return sh;
+		}
+	}
+	return NULL;
+}
+
+static void fs_path_complete(size_t idx, struct shell_static_entry *entry)
+{
+	static char compl_buf[SHELL_PATH_MAX];
+
+	entry->syntax = NULL;          /* default: no (more) candidates */
+	entry->handler = NULL;         /* completion hint only — see active_cmd */
+	entry->help = NULL;
+	entry->subcmd = NULL;
+
+	const struct shell *sh = completing_shell();
+
+	if (sh == NULL) {
+		return;
+	}
+
+	struct fs_dir_t dir;
+	struct fs_dirent de;
+
+	fs_dir_t_init(&dir);
+	if (fs_opendir(&dir, shell_cwd(sh)) != 0) {
+		return;
+	}
+
+	size_t i = 0;
+
+	while (fs_readdir(&dir, &de) == 0 && de.name[0] != '\0') {
+		if (i == idx) {
+			/* trailing '/' marks directories (bash-style) */
+			snprintf(compl_buf, sizeof(compl_buf), "%s%s", de.name,
+				 (de.type == FS_DIR_ENTRY_DIR) ? "/" : "");
+			entry->syntax = compl_buf;
+			break;
+		}
+		i++;
+	}
+	fs_closedir(&dir);
+}
+
+SHELL_DYNAMIC_CMD_CREATE(fs_complete, fs_path_complete);
+
 /* ── Register commands with the Zephyr shell ─────────────────────────────── */
 
-SHELL_STATIC_SUBCMD_SET_CREATE(
-	fs_cmds,
-	SHELL_CMD_ARG(ls, NULL, "List directory [path]", cmd_ls, 1, 1),
-	SHELL_CMD_ARG(cat, NULL, "Display file", cmd_cat, 2, 0),
-	SHELL_CMD_ARG(hexdump, NULL, "Hex dump of file", cmd_hexdump, 2, 0),
-	SHELL_CMD_ARG(mkdir, NULL, "Create directory", cmd_mkdir, 2, 0),
-	SHELL_CMD_ARG(rm, NULL, "Remove file", cmd_rm, 2, 0),
-	SHELL_CMD_ARG(df, NULL, "Filesystem free space", cmd_df, 1, 0),
-	SHELL_SUBCMD_SET_END);
+/* Filesystem commands — top-level (bash-style), all cwd-relative.  Path
+ * arguments tab-complete against the session's cwd via &fs_complete. */
+/* ls/cat allow extra optional args for an output redirect ("[>] [file]"). */
+SHELL_CMD_ARG_REGISTER(ls, &fs_complete, "List directory [path] [> out]", cmd_ls, 1, 3);
+SHELL_CMD_ARG_REGISTER(cat, &fs_complete, "Display file [> out]", cmd_cat, 2, 2);
+SHELL_CMD_ARG_REGISTER(hexdump, &fs_complete, "Hex dump of file", cmd_hexdump, 2, 0);
+SHELL_CMD_ARG_REGISTER(mkdir, NULL, "Create directory", cmd_mkdir, 2, 0);
+SHELL_CMD_ARG_REGISTER(rm, &fs_complete, "Remove file or empty dir", cmd_rm, 2, 0);
+SHELL_CMD_ARG_REGISTER(cp, &fs_complete, "Copy file: cp <src> <dst>", cmd_cp, 3, 0);
+SHELL_CMD_ARG_REGISTER(mv, &fs_complete, "Move/rename: mv <src> <dst>", cmd_mv, 3, 0);
+SHELL_CMD_ARG_REGISTER(touch, &fs_complete, "Create empty file", cmd_touch, 2, 0);
+SHELL_CMD_ARG_REGISTER(echo, NULL, "Print arguments", cmd_echo, 1, 19);
+SHELL_CMD_ARG_REGISTER(write, &fs_complete, "Write text to file: write <file> <text>",
+		       cmd_write, 3, 0);
+SHELL_CMD_ARG_REGISTER(df, NULL, "Filesystem free space", cmd_df, 1, 0);
 
-SHELL_CMD_REGISTER(fs, &fs_cmds, "Filesystem commands", NULL);
-
+SHELL_CMD_ARG_REGISTER(cd, &fs_complete, "Change directory [path] (default root)", cmd_cd, 1, 1);
+SHELL_CMD_ARG_REGISTER(pwd, NULL, "Print working directory", cmd_pwd, 1, 0);
+SHELL_CMD_ARG_REGISTER(info, NULL, "System information", cmd_info, 1, 0);
+SHELL_CMD_ARG_REGISTER(threads, NULL, "List kernel threads", cmd_threads, 1, 0);
 SHELL_CMD_ARG_REGISTER(leds, NULL, "Read/write LEDs [hex]", cmd_leds, 1, 1);
 SHELL_CMD_ARG_REGISTER(seg, NULL, "Write 7-segment <hex>", cmd_seg, 2, 0);
 SHELL_CMD_ARG_REGISTER(switches, NULL, "Read switches", cmd_switches, 1, 0);

@@ -32,13 +32,22 @@ int read_cmd(void)
 
     printf("> ");
     cmd = getchar();
+
+    /* EOF (e.g. the SSH session closed) — bail so main() can exit instead of
+     * spinning forever in the drain loop below (getchar keeps returning EOF). */
+    if (cmd == EOF)
+        return EOF;
+
     putchar(cmd);
 
-    /* Drain rest of line until CR or LF */
+    /* Drain rest of line until CR or LF (or EOF). */
     if (cmd != 13 && cmd != 10) {
         c = cmd;
-        while (c != 13 && c != 10)
+        while (c != 13 && c != 10) {
             c = getchar();
+            if (c == EOF)
+                return EOF;
+        }
     }
     putchar('\n');
 
@@ -189,6 +198,10 @@ int main(void)
 
     while (alive) {
         cmd = read_cmd();
+        if (cmd == EOF) {           /* stdin closed (session dropped) — exit */
+            puts("\nEOF — exiting.");
+            break;
+        }
         turns = turns + 1;
 
         if      (cmd == 'q') { puts("You surrender to the darkness..."); alive = 0; }
