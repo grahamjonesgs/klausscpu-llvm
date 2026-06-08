@@ -254,12 +254,25 @@ static int eth_klausscpu_send(const struct device *dev, struct net_pkt *pkt)
 		offset += frag->len;
 	}
 
+	/* Pad runts to the 60-byte Ethernet minimum.  This HW does not auto-pad,
+	 * and the switch silently drops sub-60-byte frames — which broke ARP
+	 * requests (42 B) and small ICMP echo requests (46 B) while ≥60-byte
+	 * UDP/TCP traffic (DNS, NTP, HTTP) was unaffected. */
+	uint32_t tx_len = total_len;
+
+	while (offset < 60u) {
+		slot[offset++] = 0u;
+	}
+	if (tx_len < 60u) {
+		tx_len = 60u;
+	}
+
 	while (!ETH_TX_READY) {
 		k_yield();
 	}
 
 	ETH_TX_SLOT = 0;
-	ETH_TX_LENGTH = total_len;
+	ETH_TX_LENGTH = tx_len;
 	ETH_TX_START = 1;
 
 	k_mutex_unlock(&data->tx_lock);
