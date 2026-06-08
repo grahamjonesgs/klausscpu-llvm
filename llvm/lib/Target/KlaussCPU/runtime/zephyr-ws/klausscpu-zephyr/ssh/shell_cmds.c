@@ -12,11 +12,22 @@
 #include <zephyr/fs/fs.h>
 #include <zephyr/version.h>
 #include <zephyr/sys/iterable_sections.h>
+#include <zephyr/net/sntp.h>
+#include <ff.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "shell_paths.h"
+#include "wallclock.h"
+
+/* Format a FatFs FILINFO date/time pair as "YYYY-MM-DD HH:MM" (16 chars). */
+static void fat_datetime(uint16_t fdate, uint16_t ftime, char *out, size_t n)
+{
+	snprintf(out, n, "%04u-%02u-%02u %02u:%02u",
+		 1980u + (fdate >> 9), (fdate >> 5) & 0x0Fu, fdate & 0x1Fu,
+		 ftime >> 11, (ftime >> 5) & 0x3Fu);
+}
 
 /* MMIO shortcuts */
 #define REG(a)        (*(volatile uint32_t *)(unsigned long)(a))
@@ -49,12 +60,26 @@ static int cmd_ls(const struct shell *sh, size_t argc, char **argv)
 
 	sh_print(sh, "Directory: %s", path);
 
+	bool slash = (path[0] != '\0' && path[strlen(path) - 1] == '/');
+
 	while (fs_readdir(&dir, &entry) == 0 && entry.name[0] != '\0') {
+		/* Timestamp isn't in fs_dirent — stat via FatFs (FILINFO).  The
+		 * FatFs path is the Zephyr path minus its leading '/'. */
+		char full[SHELL_PATH_MAX];
+		FILINFO fno;
+		char when[20] = "     -          ";   /* 16 cols if stat fails */
+
+		snprintf(full, sizeof(full), slash ? "%s%s" : "%s/%s",
+			 path, entry.name);
+		if (f_stat(full + 1, &fno) == FR_OK) {
+			fat_datetime(fno.fdate, fno.ftime, when, sizeof(when));
+		}
+
 		if (entry.type == FS_DIR_ENTRY_DIR) {
-			sh_print(sh, "  [DIR]  %s", entry.name);
+			sh_print(sh, "%s   [DIR]  %s", when, entry.name);
 		} else {
-			sh_print(sh, "  %6u  %s", (unsigned)entry.size,
-				 entry.name);
+			sh_print(sh, "%s  %7u  %s", when,
+				 (unsigned)entry.size, entry.name);
 		}
 	}
 	fs_closedir(&dir);
@@ -613,6 +638,62 @@ static int cmd_pwd(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+static int cmd_date(const struct shell *sh, size_t argc, char **argv)
+{
+	/* `date <unix_epoch>` sets the clock manually (host: `date +%%s`) — the
+	 * reliable path when no NTP server is reachable. */
+	if (argc > 1) {
+		char *end;
+		unsigned long epoch = strtoul(argv[1], &end, 10);
+
+		if (*end != '\0' || epoch == 0) {
+			shell_error(sh, "usage: date [<unix_epoch>]  (host: date +%%s)");
+			return -1;
+		}
+		wallclock_set((uint64_t)epoch);
+	}
+
+	char buf[24];
+
+	if (wallclock_str(buf, sizeof(buf)) == 0) {
+		shell_print(sh, "%s UTC", buf);
+	} else {
+		shell_error(sh, "time not set; set it with: date <unix_epoch>  (host: date +%%s)");
+	}
+	return 0;
+}
+
+static int cmd_ntp(const struct shell *sh, size_t argc, char **argv)
+{
+	const char *server = (argc > 1) ? argv[1] : "pool.ntp.org";
+	struct sntp_time ts;
+	int rc = -1;
+
+	shell_print(sh, "Querying %s ...", server);
+
+	/* Retry: each sntp_simple() re-resolves the name, so for pool.ntp.org a
+	 * dud/unreachable server (or a dropped reply) just gets a fresh one. */
+	for (int i = 0; i < 6; i++) {
+		rc = sntp_simple(server, 3000, &ts);
+		if (rc == 0) {
+			break;
+		}
+	}
+
+	if (rc != 0) {
+		shell_error(sh, "NTP query failed");
+		return -1;
+	}
+
+	wallclock_set(ts.seconds);
+
+	char buf[24];
+
+	(void)wallclock_str(buf, sizeof(buf));
+	shell_print(sh, "Clock set: %s UTC", buf);
+	return 0;
+}
+
 /* ── Tab-completion: entries of the completing session's cwd ─────────────────
  * Zephyr's shell_dynamic_get callback gets neither the shell nor the typed
  * token, so we recover the shell from the running thread (the completion runs
@@ -692,6 +773,8 @@ SHELL_CMD_ARG_REGISTER(df, NULL, "Filesystem free space", cmd_df, 1, 0);
 
 SHELL_CMD_ARG_REGISTER(cd, &fs_complete, "Change directory [path] (default root)", cmd_cd, 1, 1);
 SHELL_CMD_ARG_REGISTER(pwd, NULL, "Print working directory", cmd_pwd, 1, 0);
+SHELL_CMD_ARG_REGISTER(date, NULL, "Show/set UTC time: date [unix_epoch]", cmd_date, 1, 1);
+SHELL_CMD_ARG_REGISTER(ntp, NULL, "Set clock via NTP: ntp [server]", cmd_ntp, 1, 1);
 SHELL_CMD_ARG_REGISTER(info, NULL, "System information", cmd_info, 1, 0);
 SHELL_CMD_ARG_REGISTER(threads, NULL, "List kernel threads", cmd_threads, 1, 0);
 SHELL_CMD_ARG_REGISTER(leds, NULL, "Read/write LEDs [hex]", cmd_leds, 1, 1);

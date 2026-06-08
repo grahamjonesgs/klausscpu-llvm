@@ -176,6 +176,8 @@ static void sram_write(volatile uint8_t *dst, const uint8_t *src, uint32_t n)
 struct eth_klausscpu_data {
 	struct net_if *iface;
 	uint8_t mac[6];
+	struct k_mutex tx_lock;   /* serialise TX across threads */
+	uint8_t txslot;           /* 2-slot ping-pong (0/1)      */
 	K_KERNEL_STACK_MEMBER(rx_stack, CONFIG_ETH_KLAUSSCPU_RX_STACK_SIZE);
 	struct k_thread rx_thread;
 };
@@ -224,6 +226,7 @@ static void eth_hw_init(void)
 
 static int eth_klausscpu_send(const struct device *dev, struct net_pkt *pkt)
 {
+	struct eth_klausscpu_data *data = dev->data;
 	uint16_t total_len = net_pkt_get_len(pkt);
 
 	if (total_len > ETH_MAX_FRAME) {
@@ -231,10 +234,17 @@ static int eth_klausscpu_send(const struct device *dev, struct net_pkt *pkt)
 		return -EMSGSIZE;
 	}
 
-	while (!ETH_TX_READY) {
-		k_yield();
-	}
+	/* Serialise TX: eth_klausscpu_send is called from multiple threads (the RX
+	 * thread emitting replies, the net-TX/shell thread emitting requests).  The
+	 * TX registers + slot SRAM are shared, so without this lock concurrent
+	 * transmits clobber each other (symptom: self-initiated frames never egress
+	 * while reply frames do).  Also ping-pong the 2 HW slots so a new frame is
+	 * never written into the slot the hardware is still transmitting. */
+	k_mutex_lock(&data->tx_lock, K_FOREVER);
 
+	/* This HW transmits reliably only from slot 0 — a 2-slot ping-pong made
+	 * every frame that landed on slot 1 silently fail to egress (every-other-
+	 * packet loss).  Always use slot 0; the mutex serialises concurrent TX. */
 	volatile uint8_t *slot = ETH_TX_SLOT_PTR(0);
 	struct net_buf *frag;
 	uint32_t offset = 0;
@@ -244,9 +254,15 @@ static int eth_klausscpu_send(const struct device *dev, struct net_pkt *pkt)
 		offset += frag->len;
 	}
 
+	while (!ETH_TX_READY) {
+		k_yield();
+	}
+
 	ETH_TX_SLOT = 0;
 	ETH_TX_LENGTH = total_len;
 	ETH_TX_START = 1;
+
+	k_mutex_unlock(&data->tx_lock);
 
 	return 0;
 }
@@ -335,6 +351,9 @@ static const struct ethernet_api eth_klausscpu_api = {
 static int eth_klausscpu_init(const struct device *dev)
 {
 	struct eth_klausscpu_data *data = dev->data;
+
+	k_mutex_init(&data->tx_lock);
+	data->txslot = 0;
 
 	data->mac[0] = 0x00;
 	data->mac[1] = 0xAB;

@@ -1,7 +1,7 @@
 /*
  * main.c — KlaussCPU Zephyr SSH shell application.
  *
- * Boot: SD card mount → DHCP → SSH server → shell on UART.
+ * Boot: SD card mount → DHCP → NTP time → SSH server → shell on UART.
  */
 
 #include <zephyr/kernel.h>
@@ -10,14 +10,25 @@
 #include <ff.h>
 #include <zephyr/net/net_if.h>
 #include <zephyr/net/net_mgmt.h>
+#include <zephyr/net/net_ip.h>
 #include <zephyr/net/dhcpv4.h>
+#include <zephyr/net/sntp.h>
 #include <zephyr/logging/log.h>
+
+#include "wallclock.h"
 
 #ifdef CONFIG_KLAUSSCPU_SSH_SERVER
 #include "ssh_server.h"
 #endif
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
+
+/* No RTC on this board, so NTP is the time source for FatFs file timestamps.
+ * pool.ntp.org rotates servers, so each sntp_simple() re-resolves to a fresh
+ * one — retrying rides past a dud/unreachable pool entry or a dropped reply. */
+#define NTP_SERVER       "pool.ntp.org"
+#define NTP_TIMEOUT_MS   3000
+#define NTP_BOOT_TRIES   3
 
 /* ── FatFS mount ─────────────────────────────────────────────────────────── */
 
@@ -105,6 +116,27 @@ int main(void)
 
 	int sd_ok = (mount_sd() == 0);
 	int net_ok = (wait_for_dhcp() == 0);
+
+	/* Best-effort time at boot; the `ntp` shell command can re-sync, and
+	 * `date <unix_epoch>` sets it manually. */
+	if (net_ok) {
+		struct sntp_time ts;
+		bool got = false;
+
+		for (int i = 0; i < NTP_BOOT_TRIES; i++) {
+			if (sntp_simple(NTP_SERVER, NTP_TIMEOUT_MS, &ts) == 0) {
+				wallclock_set(ts.seconds);
+				LOG_INF("NTP: time set from %s", NTP_SERVER);
+				got = true;
+				break;
+			}
+		}
+
+		if (!got) {
+			LOG_WRN("NTP failed at boot; use `ntp [server]` or "
+				"`date <unix_epoch>`");
+		}
+	}
 
 #ifdef CONFIG_KLAUSSCPU_SSH_SERVER
 	if (net_ok && sd_ok) {
