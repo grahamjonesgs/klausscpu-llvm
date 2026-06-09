@@ -28,6 +28,9 @@
 #include <string.h>
 
 #include <wolfssh/ssh.h>
+#ifdef WOLFSSH_SFTP
+#include <wolfssh/wolfsftp.h>
+#endif
 #include <wolfssl/wolfcrypt/error-crypt.h>
 
 #include "ssh_server.h"
@@ -138,10 +141,13 @@ struct conn_args {
 	int sock;
 };
 
-/* The connection thread only runs wolfSSH_accept() + the RX pump now; loaded
- * extensions execute on the *shell* thread (CONFIG_SHELL_STACK_SIZE), so this
- * stack no longer needs room for a program. */
-#define CONN_STACK_SIZE 8192
+/* The connection thread runs wolfSSH_accept() + the RX pump (shell) or the
+ * SFTP read loop.  SFTP adds the SFTP protocol + FatFs ops + an 8 KiB R/W
+ * buffer on top of the crypto, so size for that (KlaussCPU 64-bit frames). */
+#define CONN_STACK_SIZE 16384
+
+/* SFTP serves files rooted here (the SD card). */
+#define SFTP_ROOT "/SD:"
 
 static K_THREAD_STACK_ARRAY_DEFINE(conn_stacks, SSH_MAX_CONNS, CONN_STACK_SIZE);
 static struct k_thread conn_threads[SSH_MAX_CONNS];
@@ -166,7 +172,30 @@ static void ssh_conn_entry(void *p1, void *p2, void *p3)
 	wolfSSH_SetIOReadCtx(ssh, &ca->sock);
 	wolfSSH_SetIOWriteCtx(ssh, &ca->sock);
 
+#ifdef WOLFSSH_SFTP
+	/* If the peer opens the SFTP subsystem, wolfSSH_accept() returns
+	 * WS_SFTP_COMPLETE instead of WS_SUCCESS; serve the SD card from /SD:. */
+	(void)wolfSSH_SFTP_SetDefaultPath(ssh, SFTP_ROOT);
+#endif
+
 	int rc = wolfSSH_accept(ssh);
+
+#ifdef WOLFSSH_SFTP
+	if (rc == WS_SFTP_COMPLETE) {
+		LOG_INF("SFTP session established (slot %d)", slot);
+
+		/* Blocking SFTP server loop: process requests until the peer
+		 * disconnects (read returns something other than success/want). */
+		do {
+			rc = wolfSSH_SFTP_read(ssh);
+		} while (rc == WS_SUCCESS || rc == WS_WANT_READ ||
+			 rc == WS_WANT_WRITE);
+
+		/* The shell was never claimed, so `safe` stays true and cleanup
+		 * frees the session + closes the socket. */
+		goto cleanup;
+	}
+#endif
 
 	if (rc != WS_SUCCESS) {
 		LOG_ERR("accept failed rc=%d err=%d", rc,

@@ -21,6 +21,9 @@ endif()
 # Kernel symbols exported to loadable extensions (libc + getchar).
 zephyr_library_sources_ifdef(CONFIG_LLEXT llext_exports.c)
 
+# Raw-socket HTTP file server (serves /SD: on :80).
+zephyr_library_sources_ifdef(CONFIG_KLAUSSCPU_HTTP_SERVER httpd.c)
+
 if(CONFIG_KLAUSSCPU_SSH_SERVER)
   zephyr_library_sources(
     ssh_server.c

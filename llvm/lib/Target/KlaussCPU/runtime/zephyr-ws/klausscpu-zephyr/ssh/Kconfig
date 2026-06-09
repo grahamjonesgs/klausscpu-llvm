@@ -8,6 +8,16 @@ config KLAUSSCPU_SSH_SERVER
 	  Requires wolfSSL and wolfSSH libraries to be available.
 	  Provides an interactive shell with filesystem and hardware commands.
 
+config KLAUSSCPU_HTTP_SERVER
+	bool "KlaussCPU HTTP file server"
+	default n
+	depends on NET_SOCKETS
+	depends on FILE_SYSTEM
+	help
+	  Minimal raw-socket HTTP/1.0 file server on port 80 serving the SD card
+	  (/SD:): GET downloads files / lists directories, PUT uploads files.
+	  No auth or TLS — intended for trusted LAN use.
+
 config KLAUSSCPU_SHELL_CMDS
 	bool "KlaussCPU shell commands"
 	default y if SHELL

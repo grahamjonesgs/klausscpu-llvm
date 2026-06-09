@@ -21,6 +21,10 @@
 #include "ssh_server.h"
 #endif
 
+#ifdef CONFIG_KLAUSSCPU_HTTP_SERVER
+#include "httpd.h"
+#endif
+
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
 /* No RTC on this board, so NTP is the time source for FatFs file timestamps.
@@ -145,6 +149,13 @@ int main(void)
 		} else {
 			LOG_ERR("SSH server failed");
 		}
+	}
+#endif
+
+#ifdef CONFIG_KLAUSSCPU_HTTP_SERVER
+	if (net_ok && sd_ok) {
+		httpd_start();
+		LOG_INF("HTTP file server ready on port 80");
 	}
 #endif
 

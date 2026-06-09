@@ -9,9 +9,26 @@
 /* ── Target / OS ─────────────────────────────────────────────────────────── */
 
 #define SINGLE_THREADED            /* no pthreads needed; single-core CPU */
-#define NO_FILESYSTEM              /* no fopen/fclose in wolfSSL core */
+/* NO_FILESYSTEM intentionally NOT defined: wolfSSH SFTP needs a filesystem.
+ * With it defined, wolfSSH port.h takes the NO_FILESYSTEM branch (which wins
+ * over the WOLFSSH_ZEPHYR branch) and stubs out all SFTP file ops.  Instead we
+ * use the Zephyr FS port (wolfSSL auto-defines WOLFSSL_ZEPHYR -> z_fs_open/etc.
+ * mapped onto Zephyr fs_*).  The server still loads its host key from memory
+ * (sshkeys.c), so no file I/O happens for auth. */
 #define WOLFSSL_NO_SOCK            /* don't compile default socket layer */
 #define WOLFSSL_USER_IO            /* suppress EmbedReceive/EmbedSend */
+
+/* Select the Zephyr filesystem/RTOS port in wolfSSL+wolfSSH headers (port.h
+ * would otherwise fall through to the POSIX branch -> <unistd.h> not found).
+ * The wolfSSL/wolfSSH module CMake sets these as -D only for the `app` target;
+ * our ssh sources live in a separate zephyr_library, so define them here too
+ * (user_settings.h reaches every wolf TU).  Guarded to avoid -D redefinition. */
+#ifndef WOLFSSL_ZEPHYR
+#define WOLFSSL_ZEPHYR
+#endif
+#ifndef WOLFSSH_ZEPHYR
+#define WOLFSSH_ZEPHYR
+#endif
 
 /* Memory: use Zephyr's k_malloc/k_free */
 #include <zephyr/kernel.h>
@@ -86,5 +103,15 @@ int klausscpu_trng_seed(unsigned char *output, unsigned int sz);
 #define WOLFSSL_SMALL_STACK
 #define WOLFSSL_SMALL_STACK_CACHE
 #define SP_WORD_SIZE 32
+
+/* ── wolfSSH SFTP / SCP (file transfer over the SSH transport) ────────────── */
+
+#define WOLFSSH_SFTP               /* compile wolfsftp.c + the sftp subsystem */
+/* WOLFSSH_SCP left off: wolfscp.c needs a complete struct timeval, which this
+ * minimal-libc config doesn't provide (SFTP doesn't need it).  SFTP covers the
+ * file-transfer use case (Cyberduck). */
+#define NO_WOLFSSL_DIR             /* use wolfSSH's dir handling, not wolfSSL's */
+#define WOLFSSH_MAX_SFTP_RW 8192   /* max SFTP read/write chunk                */
+#define DEFAULT_WINDOW_SZ (128 * 128)  /* 16 KiB SSH window — SFTP throughput  */
 
 #endif /* WOLFSSL_USER_SETTINGS_H */
