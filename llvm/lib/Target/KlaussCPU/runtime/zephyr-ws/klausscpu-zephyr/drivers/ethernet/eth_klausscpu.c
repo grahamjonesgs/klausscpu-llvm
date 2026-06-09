@@ -304,6 +304,17 @@ static void eth_klausscpu_rx_thread(void *p1, void *p2, void *p3)
 			continue;
 		}
 
+		/* The net stack binds data->iface in iface_init(), which runs *after*
+		 * this RX thread is started in eth_klausscpu_init().  A broadcast frame
+		 * (e.g. ARP) arriving in that early window would hit
+		 * net_recv_data(NULL, pkt) -> -EINVAL (the one-off boot-time
+		 * "RX: net_recv_data failed: -22").  Drop frames until the interface is
+		 * bound — there is nowhere to deliver them yet. */
+		if (data->iface == NULL) {
+			ETH_RX_EV_PENDING = 1;
+			continue;
+		}
+
 		struct net_pkt *pkt = net_pkt_rx_alloc_with_buffer(
 			data->iface, len, AF_UNSPEC, 0, K_NO_WAIT);
 		if (!pkt) {
