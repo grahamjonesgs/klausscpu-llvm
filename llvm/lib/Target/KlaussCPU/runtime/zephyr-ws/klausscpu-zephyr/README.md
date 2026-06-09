@@ -195,15 +195,33 @@ so concurrent loads are safe.
   or Kconfig aborts (`undefined symbol WOLFSSL`):
   `-DEXTRA_ZEPHYR_MODULES="$MOD;$WOLFSSL;$WOLFSSH"` where `$WOLFSSL` /
   `$WOLFSSH` point at `runtime/freertos/wolfssl/{wolfssl-src,wolfssh-src}`.
-- **Vendored Zephyr patches** (the `zephyr/` tree is git-ignored, fetched by west).
-  Captured in `zephyr-patches/llext-klausscpu.patch`; re-apply after `west update`:
+- **Vendored Zephyr patches** (the `zephyr/` tree is git-ignored, fetched by west;
+  baseline is the **v3.7.0** release tag). After every `west update`, re-apply
+  **both** patches from the workspace root:
   ```sh
+  git -C zephyr apply ../klausscpu-zephyr/zephyr-patches/klausscpu-core.patch
   git -C zephyr apply ../klausscpu-zephyr/zephyr-patches/llext-klausscpu.patch
   ```
-  The patch: `subsys/llext/Kconfig` adds `LLEXT_ELF_CLASS32`;
-  `include/zephyr/llext/elf.h` parses ELF32 under `CONFIG_64BIT` when that is set;
-  `subsys/llext/llext_link.c` accepts `SHT_RELA` on the generic path;
-  `subsys/llext/llext_load.c` recovers the merged LLVM string table, treats an
-  identical SHSTRTAB/STRTAB alias as non-overlapping, and honours a new
-  `keep_symtab` load-param flag (`include/zephyr/llext/llext.h`) so `main` can be
-  resolved by name after load.
+  - **`klausscpu-core.patch`** — the minimal core hooks that let vanilla Zephyr
+    recognise the arch (the real arch/SOC/driver code lives in this module, not
+    the core): `include/zephyr/arch/cpu.h` includes the module's
+    `arch/klausscpu/arch.h` for `CONFIG_CPU_KLAUSSCPU`;
+    `include/zephyr/linker/linker-tool-gcc.h` selects `OUTPUT_FORMAT(elf32-klausscpu)`;
+    `include/zephyr/toolchain/common.h` sets `PERFOPT_ALIGN .balign 4`;
+    `include/zephyr/toolchain/gcc.h` defines `GEN_ABSOLUTE_SYM[_KCONFIG]` with
+    `@object` notation; `modules/fatfs/zephyr_fatfs_config.h` sets `FF_FS_NORTC 0`
+    so FatFs timestamps work (backed by the SNTP-set software wall-clock in
+    `ssh/wallclock.c`, giving real `ls` dates).
+  - **`llext-klausscpu.patch`** — LLEXT loadable-extension support:
+    `subsys/llext/Kconfig` adds `LLEXT_ELF_CLASS32`;
+    `include/zephyr/llext/elf.h` parses ELF32 under `CONFIG_64BIT` when that is set;
+    `subsys/llext/llext_link.c` accepts `SHT_RELA` on the generic path;
+    `subsys/llext/llext_load.c` recovers the merged LLVM string table, treats an
+    identical SHSTRTAB/STRTAB alias as non-overlapping, and honours a new
+    `keep_symtab` load-param flag (`include/zephyr/llext/llext.h`) so `main` can be
+    resolved by name after load.
+
+  Not patched / not needed: `samples/hello_world/{prj.conf,src/main.c}` are
+  incidental bring-up scratch — discard with `git -C zephyr checkout samples/hello_world`.
+  To re-verify nothing else drifted into the core: `git -C zephyr status` should
+  show only the 10 files the two patches cover.

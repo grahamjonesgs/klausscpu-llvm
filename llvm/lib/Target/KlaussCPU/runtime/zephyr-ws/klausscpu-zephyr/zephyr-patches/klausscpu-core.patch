@@ -1,0 +1,83 @@
+diff --git a/include/zephyr/arch/cpu.h b/include/zephyr/arch/cpu.h
+index 1e107512fa2..147c40e0216 100644
+--- a/include/zephyr/arch/cpu.h
++++ b/include/zephyr/arch/cpu.h
+@@ -31,6 +31,8 @@
+ #include <zephyr/arch/posix/arch.h>
+ #elif defined(CONFIG_SPARC)
+ #include <zephyr/arch/sparc/arch.h>
++#elif defined(CONFIG_CPU_KLAUSSCPU)
++#include <zephyr/arch/klausscpu/arch.h>
+ #endif
+ 
+ #endif /* ZEPHYR_INCLUDE_ARCH_CPU_H_ */
+diff --git a/include/zephyr/linker/linker-tool-gcc.h b/include/zephyr/linker/linker-tool-gcc.h
+index 32319a41543..4c3ca31ecd1 100644
+--- a/include/zephyr/linker/linker-tool-gcc.h
++++ b/include/zephyr/linker/linker-tool-gcc.h
+@@ -59,6 +59,9 @@
+ 	/* Not needed */
+ #elif defined(CONFIG_SPARC)
+ 	OUTPUT_FORMAT("elf32-sparc")
++#elif defined(CONFIG_CPU_KLAUSSCPU)
++	/* KlaussCPU: 32-bit physical address space, little-endian ELF */
++	OUTPUT_FORMAT("elf32-klausscpu", "elf32-klausscpu", "elf32-klausscpu")
+ #else
+ 	#error Arch not supported.
+ #endif
+diff --git a/include/zephyr/toolchain/common.h b/include/zephyr/toolchain/common.h
+index c84328365fd..41aa6fc5011 100644
+--- a/include/zephyr/toolchain/common.h
++++ b/include/zephyr/toolchain/common.h
+@@ -96,6 +96,10 @@
+ 
+     #define PERFOPT_ALIGN .align  4
+ 
++  #elif defined(CONFIG_CPU_KLAUSSCPU)
++
++    #define PERFOPT_ALIGN .balign 4
++
+   #else
+ 
+     #error Architecture unsupported
+diff --git a/include/zephyr/toolchain/gcc.h b/include/zephyr/toolchain/gcc.h
+index 9af23fb219e..62ad689486d 100644
+--- a/include/zephyr/toolchain/gcc.h
++++ b/include/zephyr/toolchain/gcc.h
+@@ -569,6 +569,18 @@ do {                                                                    \
+ 		"\n\t.equ\t" #name "," #value       \
+ 		"\n\t.type\t" #name ",#object")
+ 
++#elif defined(CONFIG_CPU_KLAUSSCPU)
++/* KlaussCPU: 64-bit LE ELF, uses @object ELF type notation. */
++#define GEN_ABSOLUTE_SYM(name, value)		\
++	__asm__(".globl\t" #name "\n\t.equ\t" #name \
++		",%c0"                              \
++		"\n\t.type\t" #name ",@object" :  : "n"(value))
++
++#define GEN_ABSOLUTE_SYM_KCONFIG(name, value)       \
++	__asm__(".globl\t" #name                    \
++		"\n\t.equ\t" #name "," #value       \
++		"\n\t.type\t" #name ",@object")
++
+ #else
+ #error processor architecture not supported
+ #endif
+diff --git a/modules/fatfs/zephyr_fatfs_config.h b/modules/fatfs/zephyr_fatfs_config.h
+index 7ced4f74cdf..1c56bd5e9cc 100644
+--- a/modules/fatfs/zephyr_fatfs_config.h
++++ b/modules/fatfs/zephyr_fatfs_config.h
+@@ -78,8 +78,12 @@
+ #undef FF_FS_TINY
+ #define FF_FS_TINY 1
+ 
++/* KlaussCPU patch: enable FatFs timestamps.  We provide get_fattime() backed by
++ * a software wall-clock set from SNTP at boot (.../klausscpu-zephyr/ssh/
++ * wallclock.c) so files get real dates that `ls` can show.  (Upstream forces
++ * NORTC=1 with no Kconfig option.) */
+ #undef FF_FS_NORTC
+-#define FF_FS_NORTC 1
++#define FF_FS_NORTC 0
+ 
+ /* Zephyr uses FF_VOLUME_STRS */
+ #undef FF_STR_VOLUME_ID

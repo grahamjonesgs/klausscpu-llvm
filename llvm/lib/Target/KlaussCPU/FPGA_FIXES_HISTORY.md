@@ -1,6 +1,6 @@
 # KlaussCPU FPGA Hardware Fixes — History
 
-**Status: all five fixes shipped in silicon (April 2026).** This document is
+**Status: all six fixes shipped in silicon (Fixes 1–5 April 2026, Fix 6 June 2026).** This document is
 kept as a record of the hardware/software co-evolution during LLVM-backend
 bring-up.  It describes each issue, the workaround the backend or runtime
 needed before the fix landed, and the final hardware/software state once the
@@ -154,6 +154,53 @@ sub-word loads are one instruction.
 
 ---
 
+## Fix 6 — CMPRV immediate not sign-extended ✅
+
+### Original behaviour
+
+`CMPRV` (compare register vs. `simm32` immediate) did **not sign-extend** its
+32-bit immediate to 64 bits before computing the compare flags — it
+zero-extended/truncated it.  Any compare against a **negative** immediate was
+therefore wrong.  `CMPRR` (register vs. register) was correct, because both
+operands are already full 64-bit registers.
+
+Confirmed on silicon (unsigned compare via `JMPULT`):
+```
+val = 0xFFFFFFFFFFFFFFC6   (sign-extended -58)
+CMPRV val, -10  → ult = 0  (WRONG: -10 compared as 0x00000000FFFFFFF6)
+CMPRR val, r    → ult = 1  (correct: r = 0xFFFFFFFFFFFFFFF6)
+```
+`0xFFFFFFFFFFFFFFC6 <u -10` must be true.
+
+### Symptom / software impact
+
+Exposed by the `int`=32 migration (Step 28): `ctype` range checks compile to
+`(unsigned)(c - K) <u N`, which LLVM canonicalises into forms like
+`cmprv (c-58), -10 ; jmpult`.  For any char `< '0'` (notably `'\0'`) the negative
+immediate was mis-handled, so `isdigit('\0')` returned true and **`strtol` ran
+off the end of the string**, returning garbage.  That broke `net_addr_pton`,
+`getaddrinfo` (numeric port parse), and the net-shell `parse_arg` — so
+`net ping <ip>`, `ntp`, and any IPv4-literal / connect-by-port path failed, while
+DNS-by-hostname and every reg-reg compare worked.  It stayed hidden because the
+backend almost always materialises constants with `SETR/SETR64` + `CMPRR`; only
+an optimiser fold emitted `cmprv` with a negative immediate.
+
+### Software workaround (interim)
+
+Bypassed the broken `strtol` at two call sites in the vendored Zephyr tree:
+`net_addr_pton` (manual IPv4 octet parse) and `getaddrinfo` (manual port parse).
+Both reverted once the hardware fix shipped.
+
+### Final state (June 2026)
+
+`CMPRV` sign-extends its `simm32` immediate to 64 bits before the comparison,
+matching the `SETR`+`CMPRR` reference for all flags (`equal / less / ult / sign`).
+Verified on hardware: `strtol("192")==0xc0`, `strtol("0")==0`, and
+`CMPRV (sx -58) <u -10 == 1`.  No backend change required; the interim
+`net_addr_pton` / `getaddrinfo` workarounds were reverted to vanilla.
+
+---
+
 ## Summary
 
 | # | Fix | Status |
@@ -163,6 +210,7 @@ sub-word loads are one instruction.
 | 3 | MEMGET32 unaligned read | ✅ shipped |
 | 4 | ADDI rd, rs, imm32 | ✅ shipped |
 | 5 | LDIDX8_S / LDIDX16_S sign-extending loads | ✅ shipped |
+| 6 | CMPRV sign-extend `simm32` immediate | ✅ shipped (Jun 2026) |
 
 ---
 

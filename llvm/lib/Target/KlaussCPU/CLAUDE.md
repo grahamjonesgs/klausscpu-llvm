@@ -795,8 +795,13 @@ of the 32-bit word.  The DataLayout `e` (little-endian) now matches the hardware
 
 ## Next steps
 
-All five FPGA hardware fixes have shipped in silicon (see
-`FPGA_FIXES_HISTORY.md`).  Backend support is in place for jump tables
+All six FPGA hardware fixes have shipped in silicon (see
+`FPGA_FIXES_HISTORY.md`; Fix 6, June 2026: `CMPRV` now sign-extends its `simm32`
+immediate — previously it zero-extended/truncated it, so compares against a
+negative immediate were wrong.  This silently broke `strtol` (via the `ctype`
+`(unsigned)(c-K) <u N` range checks → `cmprv …,-10; jmpult`), which broke
+`net_addr_pton`/`getaddrinfo` → `net ping <ip>`/`ntp`.  No backend change; reg-reg
+`CMPRR` was always correct).  Backend support is in place for jump tables
 (`BR_JT` → `MEMGET32` of `EK_Custom32` table → `JMPR_R`), function-pointer
 calls (`CALLR_R`), one-instruction frame address materialisation (`ADDI`),
 and one-instruction signed sub-word loads (`LDIDX8_S`/`LDIDX16_S`).
