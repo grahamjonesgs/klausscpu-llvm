@@ -55,6 +55,7 @@
 #define HAVE_AES_ECB
 
 #define WOLFSSL_SHA256
+#define WOLFSSL_SHA384
 #define WOLFSSL_SHA512
 #define NO_SHA
 #define NO_MD5
@@ -69,6 +70,19 @@
 #define HAVE_ED25519_VERIFY
 #define HAVE_ED25519_KEY_IMPORT
 #define HAVE_ED25519_KEY_EXPORT
+
+/* ── TLS server (HTTPS, httpsd.c) ─────────────────────────────────────────── *
+ * wolfSSH only needs wolfCrypt, but CONFIG_WOLFSSL builds the full TLS layer
+ * too; these enable the TLS 1.2 + 1.3 server paths and on-device generation of
+ * the self-signed ECDSA P-256 certificate (tlscert.c).  No RSA/DH: the cert is
+ * ECDSA and key exchange is ECDHE (HAVE_ECC / HAVE_CURVE25519 above), so the
+ * cipher suites are ECDHE-ECDSA-AES-GCM (1.2) and TLS_AES_*_GCM (1.3). */
+#define WOLFSSL_TLS13              /* TLS 1.3 server (1.2 is on by default)    */
+#define HAVE_HKDF                  /* TLS 1.3 key schedule (required by 1.3)   */
+#define HAVE_TLS_EXTENSIONS        /* required by TLS 1.3; SNI/curve negotiate */
+#define HAVE_SUPPORTED_CURVES      /* ECDHE key-share groups (P-256 / x25519)  */
+#define WOLFSSL_CERT_GEN           /* wc_MakeCert / wc_SignCert                */
+#define WOLFSSL_KEY_GEN            /* DER key export for the generated key     */
 
 /* ── RNG ─────────────────────────────────────────────────────────────────── */
 

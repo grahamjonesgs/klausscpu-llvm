@@ -18,6 +18,18 @@ config KLAUSSCPU_HTTP_SERVER
 	  (/SD:): GET downloads files / lists directories, PUT uploads files.
 	  No auth or TLS — intended for trusted LAN use.
 
+config KLAUSSCPU_HTTPS_SERVER
+	bool "KlaussCPU HTTPS file server"
+	default n
+	depends on NET_SOCKETS
+	depends on FILE_SYSTEM
+	depends on WOLFSSL
+	help
+	  HTTP-over-TLS file server on port 443 serving the SD card (/SD:),
+	  reusing the HTTP request dispatch.  Presents a self-signed ECDSA
+	  P-256 certificate, generated on first boot and persisted to the SD
+	  card.  Supports TLS 1.2 and 1.3.  No client-certificate auth.
+
 config KLAUSSCPU_SHELL_CMDS
 	bool "KlaussCPU shell commands"
 	default y if SHELL

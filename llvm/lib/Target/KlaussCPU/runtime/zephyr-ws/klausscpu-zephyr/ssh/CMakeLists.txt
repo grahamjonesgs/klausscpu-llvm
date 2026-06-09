@@ -21,8 +21,18 @@ endif()
 # Kernel symbols exported to loadable extensions (libc + getchar).
 zephyr_library_sources_ifdef(CONFIG_LLEXT llext_exports.c)
 
-# Raw-socket HTTP file server (serves /SD: on :80).
-zephyr_library_sources_ifdef(CONFIG_KLAUSSCPU_HTTP_SERVER httpd.c)
+# HTTP file server (serves /SD:).  httpd.c holds the transport-agnostic request
+# dispatch (httpd_serve) shared by the plain :80 and the TLS :443 servers, so it
+# is compiled whenever either server is enabled.
+if(CONFIG_KLAUSSCPU_HTTP_SERVER OR CONFIG_KLAUSSCPU_HTTPS_SERVER)
+  zephyr_library_sources(httpd.c)
+endif()
+
+# HTTPS server (HTTP over TLS via wolfSSL, :443) + its self-signed cert.
+if(CONFIG_KLAUSSCPU_HTTPS_SERVER)
+  zephyr_library_sources(httpsd.c tlscert.c)
+  zephyr_include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+endif()
 
 if(CONFIG_KLAUSSCPU_SSH_SERVER)
   zephyr_library_sources(

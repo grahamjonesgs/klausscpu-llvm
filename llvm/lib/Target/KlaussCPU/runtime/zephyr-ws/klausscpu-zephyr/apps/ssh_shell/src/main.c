@@ -25,6 +25,10 @@
 #include "httpd.h"
 #endif
 
+#ifdef CONFIG_KLAUSSCPU_HTTPS_SERVER
+#include "httpsd.h"
+#endif
+
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
 /* No RTC on this board, so NTP is the time source for FatFs file timestamps.
@@ -156,6 +160,16 @@ int main(void)
 	if (net_ok && sd_ok) {
 		httpd_start();
 		LOG_INF("HTTP file server ready on port 80");
+	}
+#endif
+
+#ifdef CONFIG_KLAUSSCPU_HTTPS_SERVER
+	if (net_ok && sd_ok) {
+		if (httpsd_start() == 0) {
+			LOG_INF("HTTPS file server ready on port 443");
+		} else {
+			LOG_ERR("HTTPS server failed");
+		}
 	}
 #endif
 
