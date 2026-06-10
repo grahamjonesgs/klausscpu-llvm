@@ -79,18 +79,44 @@ stack-arg offset of 24 maps to `CallerSP+24 = incoming_SP+32` on the callee side
 ## Build
 
 ```bash
-# From llvm-project/build/ (create if needed):
-cmake -G Ninja ../llvm \
+# From llvm-project/ (out-of-source build dir):
+cmake -G Ninja -S llvm -B build \
   -DCMAKE_BUILD_TYPE=Debug \
   -DLLVM_TARGETS_TO_BUILD="X86" \
   -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD="KlaussCPU" \
   -DLLVM_ENABLE_PROJECTS="clang;lld" \
   -DLLVM_USE_SPLIT_DWARF=ON \
   -DLLVM_OPTIMIZED_TABLEGEN=ON \
+  -DLLVM_CCACHE_BUILD=ON \
   -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
-ninja LLVMKlaussCPUInfo LLVMKlaussCPUDesc LLVMKlaussCPUCodeGen llc
+ninja -C build LLVMKlaussCPUInfo LLVMKlaussCPUDesc LLVMKlaussCPUCodeGen llc
 ```
+
+- **`-DLLVM_CCACHE_BUILD=ON`**: route compiles through `ccache` (installed) so
+  rebuilds reuse cached objects (~70%+ hit rate). The cache lives outside `build/`
+  (survives a `build/` wipe); bump it with `ccache -M 30G` so objects aren't
+  evicted between configs.
+- **Disk**: a `Debug` build with split DWARF is ~60 GB. For a toolchain you only
+  *use* (not debug), build `Release` (optionally `-DLLVM_ENABLE_ASSERTIONS=ON` to
+  keep backend codegen asserts) — that drops it to ~10–15 GB. The only artifacts
+  the board builds actually consume are the `build/bin/` tools (`clang`, `ld.lld`,
+  `llvm-objcopy`, …), a few hundred MB total.
+- For board builds (not just the smoke test) build the full cross toolchain:
+  ```bash
+  ninja -C build clang lld \
+    llvm-objcopy llvm-objdump llvm-readelf llvm-ar llvm-nm llvm-ranlib llvm-strip llvm-size
+  ```
+  `llvm-readelf` is required — Zephyr's post-build step uses it (`CMAKE_READELF`).
+- **Then build the compiler-rt builtins** (soft-FP + integer divide) into the
+  clang resource dir — the clang driver auto-links `-lclang_rt.builtins` and the
+  archive is a `build/` artifact, **not** produced by `clang;lld`:
+  ```bash
+  runtime/build-builtins.sh        # → build/lib/clang/<ver>/lib/<triple>/libclang_rt.builtins.a
+  ```
+  Re-run it after any `build/` wipe or toolchain rebuild, or the Zephyr link
+  fails with `unable to find library -lclang_rt.builtins`. (The bare-metal
+  `runtime/Makefile` links individual `crt-*.o` instead and doesn't need this.)
 
 ### Quick smoke test
 

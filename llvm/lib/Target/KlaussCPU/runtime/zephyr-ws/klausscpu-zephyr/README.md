@@ -28,6 +28,40 @@ Boots the kernel, runs the timer ISR, dispatches the main thread, and emits
 | `boards/klausscpu/nexys_a7/nexys_a7_defconfig` | Per-board Kconfig defaults (XIP=n, minimal libc, UART_CONSOLE, …) |
 | `include/zephyr/arch/klausscpu/arch.h` | Inline `arch_irq_lock`/`unlock`, cycle counter access |
 
+## Fresh clone — what's tracked vs. fetched
+
+A clone of this repo is **source-only**. Only `klausscpu-zephyr/` (this module)
+is tracked; the upstream trees, build outputs, and west state are gitignored and
+must be recreated. So a fresh clone has no `build_*/`, `zephyr/`, or
+`wolfssl-src/` — that's by design, not a missing file, and **none of it is
+needed for diffing/review**, only to compile.
+
+Gitignored (regenerated, not in the repo):
+
+| Path | Recreated by |
+|---|---|
+| `zephyr-ws/build_*/` (e.g. `build_ssh`) | `west build` (compiled objects + `zephyr.elf`) |
+| `zephyr-ws/zephyr/` | `west update` (Zephyr 3.7.0 upstream) |
+| `zephyr-ws/.west/` | `west init` |
+| `runtime/freertos/wolfssl/{wolfssl-src,wolfssh-src}` | `build-wolfssl.sh` / `build-wolfssh.sh` (cloned at the pinned tags) |
+| `llvm-project/build/` | building the LLVM/clang/lld toolchain |
+
+To turn a clone into a buildable workspace (one-time, in order):
+
+1. Build the LLVM toolchain (KlaussCPU backend + clang + lld) — see the parent
+   `llvm-project` README. → `build/bin/{clang,ld.lld,...}`
+2. `west init -l klausscpu-zephyr` + `west update` (fetches `zephyr/`), then
+   re-apply both patches (see [Loadable extensions](#loadable-extensions-llext--the-ssh-run-command)).
+3. `cd ../freertos/wolfssl && ./build-wolfssl.sh && ./build-wolfssh.sh`
+   (clones wolfSSL/wolfSSH sources used as Zephyr modules).
+4. `west build` (below). The `ssh_shell` app additionally needs the wolfSSL +
+   wolfSSH modules on `EXTRA_ZEPHYR_MODULES` — see that section's
+   [build requirements](#build--config-requirements).
+
+In practice people keep one fully-set-up workspace rather than re-fetching all
+of the above per clone; a fresh clone is ideal for a clean diff, then point it
+at (or recreate) the workspace to compile.
+
 ## One-time setup
 
 ```sh
