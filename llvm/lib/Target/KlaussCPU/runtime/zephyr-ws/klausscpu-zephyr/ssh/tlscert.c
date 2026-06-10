@@ -19,6 +19,7 @@
 #include <zephyr/logging/log.h>
 
 #include <string.h>
+#include <time.h>
 
 #include <wolfssl/wolfcrypt/ecc.h>
 #include <wolfssl/wolfcrypt/random.h>
@@ -26,8 +27,29 @@
 #include <wolfssl/wolfcrypt/asn_public.h>
 
 #include "tlscert.h"
+#include "wallclock.h"
 
 LOG_MODULE_REGISTER(tlscert, LOG_LEVEL_INF);
+
+/* wolfSSL's Zephyr port (z_time, wc_port.c) calls clock_gettime(CLOCK_REALTIME)
+ * to stamp/validate ASN.1 certificate dates.  The board's minimal libc has no
+ * clock_gettime, and wolfSSH never referenced it — so once the TLS layer is
+ * linked in (HTTPS), it is an undefined symbol at link time.  Back it with the
+ * SNTP-set software wall-clock so the generated cert gets real validity dates.
+ * (If the clock was never set, wallclock_now() returns 0 -> epoch 1970, which
+ * is self-consistent: the server doesn't date-check its own cert, and a
+ * `curl -k` client skips verification.) */
+int clock_gettime(clockid_t clk_id, struct timespec *tp)
+{
+	ARG_UNUSED(clk_id);
+
+	if (tp == NULL) {
+		return -1;
+	}
+	tp->tv_sec = (time_t)wallclock_now();
+	tp->tv_nsec = 0;
+	return 0;
+}
 
 #define KEY_DER_MAX   256
 #define CERT_DER_MAX  1024
