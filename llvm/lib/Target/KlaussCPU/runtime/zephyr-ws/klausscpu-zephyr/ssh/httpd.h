@@ -8,6 +8,7 @@
 #define KLAUSSCPU_HTTPD_H_
 
 #include <stddef.h>
+#include <stdbool.h>
 
 /* One established connection, abstracted over its transport.  The caller binds
  * recv/send to its transport (raw socket or WOLFSSL session) and supplies a
@@ -20,10 +21,14 @@ struct httpd_conn {
 	int (*io_send)(void *ctx, const void *buf, size_t len);
 	char  *xfer;
 	size_t xfer_sz;
+	bool   head;        /* request was HEAD: send headers, suppress the body */
+	bool   keepalive;   /* serve another request on this connection?          */
 };
 
-/* Serve exactly one HTTP request/response on an established connection. */
-void httpd_serve(struct httpd_conn *c);
+/* Serve one HTTP request/response on an established connection.  Returns true
+ * if the connection should stay open for another request (HTTP keep-alive),
+ * false if the caller should close it. */
+bool httpd_serve(struct httpd_conn *c);
 
 /* Start the plain HTTP file-server thread (:80).  Call once after DHCP. */
 void httpd_start(void);

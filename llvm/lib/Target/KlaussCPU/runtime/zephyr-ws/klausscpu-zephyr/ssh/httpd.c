@@ -77,13 +77,15 @@ static int send_str(struct httpd_conn *c, const char *str)
 static void send_status(struct httpd_conn *c, const char *status,
 			const char *body)
 {
-	char hdr[160];
+	char hdr[200];
+	unsigned int blen = (body != NULL) ? (unsigned int)strlen(body) : 0;
 
 	(void)snprintk(hdr, sizeof(hdr),
-		       "HTTP/1.0 %s\r\nContent-Type: text/plain\r\n"
-		       "Connection: close\r\n\r\n", status);
+		       "HTTP/1.1 %s\r\nContent-Type: text/plain\r\n"
+		       "Content-Length: %u\r\nConnection: %s\r\n\r\n",
+		       status, blen, c->keepalive ? "keep-alive" : "close");
 	(void)send_str(c, hdr);
-	if (body != NULL) {
+	if (body != NULL && !c->head) {
 		(void)send_str(c, body);
 	}
 }
@@ -126,9 +128,16 @@ static void send_listing(struct httpd_conn *c, const char *fs_path,
 		return;
 	}
 
+	/* The listing length isn't known up front, so it is close-delimited —
+	 * which also ends keep-alive for this connection. */
+	c->keepalive = false;
 	(void)send_str(c,
-		"HTTP/1.0 200 OK\r\nContent-Type: text/html\r\n"
+		"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
 		"Connection: close\r\n\r\n");
+	if (c->head) {                  /* headers only for HEAD */
+		(void)fs_closedir(&dir);
+		return;
+	}
 	(void)snprintk(c->xfer, c->xfer_sz,
 		       "<!doctype html><html><head><meta charset=utf-8>"
 		       "<title>%s</title></head><body><h2>Index of %s</h2><ul>",
@@ -165,6 +174,45 @@ static void send_listing(struct httpd_conn *c, const char *fs_path,
 
 /* ── file download ──────────────────────────────────────────────────────── */
 
+/* Map a filename extension to a Content-Type so browsers render (rather than
+ * download) HTML/CSS/JS/images.  Unknown types fall back to octet-stream. */
+static const char *mime_type(const char *path)
+{
+	static const struct {
+		const char *ext;
+		const char *type;
+	} map[] = {
+		{ "html", "text/html" },        { "htm",  "text/html" },
+		{ "css",  "text/css" },          { "js",   "text/javascript" },
+		{ "json", "application/json" },  { "txt",  "text/plain" },
+		{ "svg",  "image/svg+xml" },     { "png",  "image/png" },
+		{ "jpg",  "image/jpeg" },        { "jpeg", "image/jpeg" },
+		{ "gif",  "image/gif" },         { "ico",  "image/x-icon" },
+		{ "xml",  "text/xml" },          { "pdf",  "application/pdf" },
+		{ "wasm", "application/wasm" },
+	};
+	const char *dot = strrchr(path, '.');
+
+	if (dot != NULL) {
+		const char *ext = dot + 1;
+
+		for (size_t i = 0; i < ARRAY_SIZE(map); i++) {
+			const char *a = ext;
+			const char *b = map[i].ext;
+
+			while (*b != '\0' &&
+			       tolower((unsigned char)*a) == *b) {
+				a++;
+				b++;
+			}
+			if (*b == '\0' && *a == '\0') {
+				return map[i].type;
+			}
+		}
+	}
+	return "application/octet-stream";
+}
+
 static void send_file(struct httpd_conn *c, const char *fs_path, size_t size)
 {
 	struct fs_file_t f;
@@ -179,10 +227,11 @@ static void send_file(struct httpd_conn *c, const char *fs_path, size_t size)
 	}
 
 	(void)snprintk(hdr, sizeof(hdr),
-		       "HTTP/1.0 200 OK\r\nContent-Type: application/octet-stream\r\n"
-		       "Content-Length: %u\r\nConnection: close\r\n\r\n",
-		       (unsigned int)size);
-	if (send_str(c, hdr) == 0) {
+		       "HTTP/1.1 200 OK\r\nContent-Type: %s\r\n"
+		       "Content-Length: %u\r\nConnection: %s\r\n\r\n",
+		       mime_type(fs_path), (unsigned int)size,
+		       c->keepalive ? "keep-alive" : "close");
+	if (send_str(c, hdr) == 0 && !c->head) {
 		for (;;) {
 			ssize_t n = fs_read(&f, c->xfer, c->xfer_sz);
 
@@ -196,6 +245,21 @@ static void send_file(struct httpd_conn *c, const char *fs_path, size_t size)
 	}
 
 	(void)fs_close(&f);
+}
+
+/* Serve a directory: an index.html inside it if present, else the listing.
+ * fs_dir has no trailing slash (except the bare mount root); url ends with '/'. */
+static void serve_dir(struct httpd_conn *c, const char *fs_dir, const char *url)
+{
+	char idx[DOC_ROOT_LEN + URL_MAX + 12];
+	struct fs_dirent ent;
+
+	(void)snprintk(idx, sizeof(idx), "%s/index.html", fs_dir);
+	if (fs_stat(idx, &ent) == 0 && ent.type == FS_DIR_ENTRY_FILE) {
+		send_file(c, idx, ent.size);
+		return;
+	}
+	send_listing(c, fs_dir, url);
 }
 
 /* ── file upload (PUT) ──────────────────────────────────────────────────── */
@@ -236,6 +300,8 @@ static void recv_put(struct httpd_conn *c, const char *fs_path,
 	if (remaining == 0) {
 		send_status(c, "201 Created", "stored\n");
 	} else {
+		/* Body framing is broken — don't try to read another request. */
+		c->keepalive = false;
 		send_status(c, "400 Bad Request", "short upload\n");
 	}
 }
@@ -258,9 +324,32 @@ static const char *find_header(const char *req, const char *key_lc)
 	return NULL;
 }
 
+/* True if the request's Connection header contains token (case-insensitive),
+ * scanning only that header's value (up to end of line). */
+static bool conn_has(const char *req, const char *token)
+{
+	const char *v = find_header(req, "connection:");
+
+	if (v == NULL) {
+		return false;
+	}
+	for (; *v != '\0' && *v != '\r' && *v != '\n'; v++) {
+		size_t i = 0;
+
+		while (token[i] != '\0' &&
+		       tolower((unsigned char)v[i]) == tolower((unsigned char)token[i])) {
+			i++;
+		}
+		if (token[i] == '\0') {
+			return true;
+		}
+	}
+	return false;
+}
+
 /* ── request dispatch ───────────────────────────────────────────────────── */
 
-void httpd_serve(struct httpd_conn *c)
+bool httpd_serve(struct httpd_conn *c)
 {
 	char req[REQ_MAX];
 	int n;
@@ -270,33 +359,45 @@ void httpd_serve(struct httpd_conn *c)
 	const char *sp1, *sp2;
 	size_t mlen, ulen;
 
+	c->head = false;
+	c->keepalive = false;   /* default to close until the version is parsed */
+
 	n = c->io_recv(c->io_ctx, req, sizeof(req) - 1);
 	if (n <= 0) {
-		return;
+		return false;       /* client closed, error, or idle timeout */
 	}
 	req[n] = '\0';
 
-	/* Parse "METHOD SP URL SP HTTP/x.y" from the first line. */
+	/* Parse "METHOD SP URL SP HTTP/x.y" from the first line.  A malformed
+	 * request line leaves stream framing uncertain, so always close. */
 	sp1 = strchr(req, ' ');
 	if (sp1 == NULL) {
 		send_status(c, "400 Bad Request", NULL);
-		return;
+		return false;
 	}
 	sp2 = strchr(sp1 + 1, ' ');
 	if (sp2 == NULL) {
 		send_status(c, "400 Bad Request", NULL);
-		return;
+		return false;
 	}
 	mlen = (size_t)(sp1 - req);
 	ulen = (size_t)(sp2 - (sp1 + 1));
 	if (mlen >= sizeof(method) || ulen >= sizeof(url)) {
 		send_status(c, "414 URI Too Long", NULL);
-		return;
+		return false;
 	}
 	memcpy(method, req, mlen);
 	method[mlen] = '\0';
 	memcpy(url, sp1 + 1, ulen);
 	url[ulen] = '\0';
+
+	/* Keep-alive: default on for HTTP/1.1 unless "Connection: close";
+	 * default off for HTTP/1.0 unless "Connection: keep-alive". */
+	if (strncmp(sp2 + 1, "HTTP/1.1", 8) == 0) {
+		c->keepalive = !conn_has(req, "close");
+	} else {
+		c->keepalive = conn_has(req, "keep-alive");
+	}
 
 	/* strip query string, decode, reject path traversal */
 	{
@@ -309,7 +410,7 @@ void httpd_serve(struct httpd_conn *c)
 	url_decode(url);
 	if (url[0] != '/' || strstr(url, "..") != NULL) {
 		send_status(c, "403 Forbidden", "bad path\n");
-		return;
+		return c->keepalive;
 	}
 
 	(void)snprintk(fs_path, sizeof(fs_path), "%s%s", DOC_ROOT, url);
@@ -322,16 +423,20 @@ void httpd_serve(struct httpd_conn *c)
 		}
 	}
 
-	if (strcmp(method, "GET") == 0) {
+	/* HEAD is served exactly like GET but with the body suppressed
+	 * (c->head, honoured in send_file/send_listing). */
+	c->head = (strcmp(method, "HEAD") == 0);
+
+	if (c->head || strcmp(method, "GET") == 0) {
 		struct fs_dirent ent;
 
 		if (strcmp(url, "/") == 0) {
-			send_listing(c, DOC_ROOT, "/");
-			return;
+			serve_dir(c, DOC_ROOT, "/");
+			return c->keepalive;
 		}
 		if (fs_stat(fs_path, &ent) != 0) {
 			send_status(c, "404 Not Found", "not found\n");
-			return;
+			return c->keepalive;
 		}
 		if (ent.type == FS_DIR_ENTRY_DIR) {
 			/* ensure the listing href base ends in '/' */
@@ -339,7 +444,7 @@ void httpd_serve(struct httpd_conn *c)
 
 			(void)snprintk(base, sizeof(base), "%s%s", url,
 				       url[strlen(url) - 1] == '/' ? "" : "/");
-			send_listing(c, fs_path, base);
+			serve_dir(c, fs_path, base);
 		} else {
 			send_file(c, fs_path, ent.size);
 		}
@@ -364,8 +469,10 @@ void httpd_serve(struct httpd_conn *c)
 		}
 		recv_put(c, fs_path, bodystart, body_in_req, clen);
 	} else {
-		send_status(c, "405 Method Not Allowed", "GET/PUT only\n");
+		send_status(c, "405 Method Not Allowed", "GET/HEAD/PUT only\n");
 	}
+
+	return c->keepalive;
 }
 
 /* ── plain (:80) raw-socket server ──────────────────────────────────────── */
@@ -421,6 +528,13 @@ static void httpd_main(void *a, void *b, void *cc)
 			continue;
 		}
 
+		/* Bound blocking recv so a client that stalls mid-request can't
+		 * hang this single-threaded worker indefinitely. */
+		struct zsock_timeval tv = { .tv_sec = 15, .tv_usec = 0 };
+
+		(void)zsock_setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv,
+				       sizeof(tv));
+
 		struct httpd_conn conn = {
 			.io_ctx = &cfd,
 			.io_recv = plain_recv,
@@ -429,7 +543,10 @@ static void httpd_main(void *a, void *b, void *cc)
 			.xfer_sz = sizeof(xfer),
 		};
 
-		httpd_serve(&conn);
+		/* Keep serving requests on this connection (HTTP keep-alive)
+		 * until the client closes, errors, or the recv timeout fires. */
+		while (httpd_serve(&conn)) {
+		}
 		(void)zsock_close(cfd);
 	}
 }

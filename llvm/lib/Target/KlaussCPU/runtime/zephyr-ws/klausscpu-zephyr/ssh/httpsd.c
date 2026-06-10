@@ -141,6 +141,14 @@ static void httpsd_main(void *a, void *b, void *cc)
 			continue;
 		}
 
+		/* Bound blocking recv (handshake + request reads) so a stalled
+		 * client can't hang this single-threaded worker indefinitely —
+		 * e.g. a PUT that sends Expect: 100-continue and then no body. */
+		struct zsock_timeval tv = { .tv_sec = 15, .tv_usec = 0 };
+
+		(void)zsock_setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv,
+				       sizeof(tv));
+
 		WOLFSSL *ssl = wolfSSL_new(s_ctx);
 
 		if (ssl == NULL) {
@@ -168,7 +176,12 @@ static void httpsd_main(void *a, void *b, void *cc)
 				.xfer_sz = sizeof(xfer),
 			};
 
-			httpd_serve(&conn);
+			/* Serve multiple requests over this one TLS session
+			 * (keep-alive) so a page's assets share a single
+			 * handshake.  Loop until the client closes, errors, or
+			 * the recv timeout fires. */
+			while (httpd_serve(&conn)) {
+			}
 			(void)wolfSSL_shutdown(ssl);
 		}
 
