@@ -61,6 +61,52 @@ static int     s_key_der_len;
 static uint8_t s_cert_der[CERT_DER_MAX];
 static int     s_cert_der_len;
 static int     s_initialized;
+static uint8_t s_ip[4];           /* board IPv4 (network order), for the SAN */
+static bool    s_have_ip;
+
+/* Naive substring search (minimal libc has no memmem). */
+static bool mem_contains(const uint8_t *hay, int haylen,
+			 const uint8_t *needle, int needlelen)
+{
+	for (int i = 0; i + needlelen <= haylen; i++) {
+		if (memcmp(hay + i, needle, needlelen) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/* Build the SAN GeneralNames SEQUENCE into cert->altNames:
+ *   SEQUENCE { [2] dNSName TLS_HOSTNAME, [7] iPAddress <s_ip> }
+ * This is the raw value wolfSSL's SetAltNames() wraps in the SAN extension.
+ * Lengths stay < 128 so all DER length octets are single-byte. */
+static void build_san(Cert *cert)
+{
+	uint8_t *a = cert->altNames;
+	size_t   dlen = strlen(TLS_HOSTNAME);
+	int      p = 2;                  /* leave a[0..1] for the SEQUENCE header */
+
+	if (dlen > 127) {
+		cert->altNamesSz = 0;    /* shouldn't happen; skip SAN if it would */
+		return;
+	}
+
+	a[p++] = 0x82;                   /* [2] dNSName (context, primitive)    */
+	a[p++] = (uint8_t)dlen;
+	memcpy(&a[p], TLS_HOSTNAME, dlen);
+	p += (int)dlen;
+
+	if (s_have_ip) {
+		a[p++] = 0x87;           /* [7] iPAddress                        */
+		a[p++] = 0x04;
+		memcpy(&a[p], s_ip, 4);
+		p += 4;
+	}
+
+	a[0] = 0x30;                     /* SEQUENCE                             */
+	a[1] = (uint8_t)(p - 2);
+	cert->altNamesSz = p;
+}
 
 /* ── DER blob persistence (same shape as sshkeys.c) ──────────────────────── */
 
@@ -160,7 +206,10 @@ static int generate(void)
 	cert.isCA      = 0;
 	strncpy(cert.subject.country, "GB", CTC_NAME_SIZE - 1);
 	strncpy(cert.subject.org, "KlaussCPU", CTC_NAME_SIZE - 1);
-	strncpy(cert.subject.commonName, "klausscpu.local", CTC_NAME_SIZE - 1);
+	strncpy(cert.subject.commonName, TLS_HOSTNAME, CTC_NAME_SIZE - 1);
+
+	/* Subject Alternative Name — browsers match on this, not the CN. */
+	build_san(&cert);
 
 	bodySz = wc_MakeCert(&cert, s_cert_der, (word32)sizeof(s_cert_der),
 			     NULL, &key, &rng);
@@ -186,22 +235,34 @@ out:
 
 /* ── Public API ──────────────────────────────────────────────────────────── */
 
-int tlscert_init(void)
+int tlscert_init(const uint8_t *ip4)
 {
 	if (s_initialized) {
 		return 0;
+	}
+
+	if (ip4 != NULL) {
+		memcpy(s_ip, ip4, 4);
+		s_have_ip = true;
 	}
 
 	/* Floors below a valid P-256 key (~121 B) / cert (~378 B) so a stale
 	 * truncated blob is rejected and regenerated. */
 	if (load_blob(KEY_PATH, s_key_der, KEY_DER_MAX, 64, &s_key_der_len) == 0 &&
 	    load_blob(CERT_PATH, s_cert_der, CERT_DER_MAX, 100, &s_cert_der_len) == 0) {
-		/* One value per LOG line: Zephyr's packaged logging mis-renders
-		 * some multi-arg width packing on this target (see CLAUDE.md). */
-		LOG_INF("Loaded TLS cert from SD: %d bytes", s_cert_der_len);
-		LOG_INF("Loaded TLS key from SD: %d bytes", s_key_der_len);
-		s_initialized = 1;
-		return 0;
+		/* Reuse the persisted pair only if it still covers our IP — the
+		 * 4 IP bytes appear verbatim in the iPAddress SAN.  If the
+		 * reserved address changed, fall through and regenerate. */
+		if (!s_have_ip ||
+		    mem_contains(s_cert_der, s_cert_der_len, s_ip, 4)) {
+			/* One value per LOG line: Zephyr's packaged logging
+			 * mis-renders some multi-arg width packing here (CLAUDE.md). */
+			LOG_INF("Loaded TLS cert from SD: %d bytes", s_cert_der_len);
+			LOG_INF("Loaded TLS key from SD: %d bytes", s_key_der_len);
+			s_initialized = 1;
+			return 0;
+		}
+		LOG_INF("Persisted TLS cert does not cover current IP; regenerating");
 	}
 
 	int rc = generate();

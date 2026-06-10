@@ -25,6 +25,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/net/socket.h>
+#include <zephyr/net/net_if.h>
 #include <errno.h>
 
 #include <wolfssl/ssl.h>
@@ -186,7 +187,25 @@ int httpsd_start(void)
 		return -1;
 	}
 
-	if (tlscert_init() != 0) {
+	/* Board IPv4 (network byte order) for the cert's iPAddress SAN, so
+	 * browsers accept https://<ip> without a name-mismatch error.  DHCP is
+	 * already bound by the time httpsd_start() runs (see main.c). */
+	const uint8_t *ip4 = NULL;
+	uint8_t ipbuf[4];
+	struct net_if *iface = net_if_get_default();
+
+	if (iface != NULL) {
+		struct net_if_config *cfg = net_if_get_config(iface);
+
+		if (cfg != NULL && cfg->ip.ipv4 != NULL) {
+			memcpy(ipbuf,
+			       &cfg->ip.ipv4->unicast[0].ipv4.address.in_addr.s_addr,
+			       4);
+			ip4 = ipbuf;
+		}
+	}
+
+	if (tlscert_init(ip4) != 0) {
 		LOG_ERR("TLS cert init failed");
 		return -1;
 	}

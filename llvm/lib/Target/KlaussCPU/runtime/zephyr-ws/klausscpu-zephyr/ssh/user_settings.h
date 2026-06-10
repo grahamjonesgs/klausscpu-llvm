@@ -83,6 +83,10 @@
 #define HAVE_SUPPORTED_CURVES      /* ECDHE key-share groups (P-256 / x25519)  */
 #define WOLFSSL_CERT_GEN           /* wc_MakeCert / wc_SignCert                */
 #define WOLFSSL_KEY_GEN            /* DER key export for the generated key     */
+#define WOLFSSL_ALT_NAMES          /* Subject Alternative Name (IP + hostname) */
+/* Shrink the Cert struct's altNames buffer (default 16 KiB) — our SAN is a few
+ * dozen bytes, and Cert is built on the stack in tlscert.c. */
+#define WC_CTC_MAX_ALT_SIZE 256
 
 /* ── RNG ─────────────────────────────────────────────────────────────────── */
 
