@@ -87,6 +87,13 @@
 /* Shrink the Cert struct's altNames buffer (default 16 KiB) — our SAN is a few
  * dozen bytes, and Cert is built on the stack in tlscert.c. */
 #define WC_CTC_MAX_ALT_SIZE 256
+/* Session tickets (HAVE_SESSION_TICKET) were tried for resumption but the
+ * wolfSSL default-ticket-cb encodes the InternalTicket from a session whose
+ * ticketAdd/bornOn are stale (ageAdd=0, bogus timestamp) on this build, so the
+ * server's ±1000ms ticket-age check rejects every resumption -> full handshake
+ * anyway, at the cost of per-handshake ticket AES-GCM+RNG.  Left disabled until
+ * that wolfSSL session-encoding issue is fixed.  (SP ECC already cut the full
+ * handshake to ~0.8s, so this is low priority.) */
 
 /* ── RNG ─────────────────────────────────────────────────────────────────── */
 
@@ -114,13 +121,28 @@ int klausscpu_trng_seed(unsigned char *output, unsigned int sz);
 #define NO_PSK
 #define NO_WOLFSSL_CLIENT
 #define NO_FIPS
-#define WC_NO_HARDEN
+/* WC_NO_HARDEN dropped: SP ECC (above) is constant-time, so keep wolfCrypt's
+ * timing-attack hardening on — the speed now comes from SP, not from skipping
+ * the protections. */
 
-/* ── Performance ─────────────────────────────────────────────────────────── */
+/* ── Performance: SP (single-precision) ECC math ─────────────────────────── *
+ * The TLS handshake's dominant cost is P-256 — the ECDSA CertVerify signature
+ * (and P-256 ECDHE when negotiated).  SP replaces the generic bignum with
+ * hand-optimized, constant-time P-256, typically 5-20x faster per scalar mult.
+ * Being constant-time it also closes the remote-timing hole, so WC_NO_HARDEN is
+ * dropped (see Disabled features).  SP_WORD_SIZE 64 uses the CPU's 64x64->128
+ * multiply via the backend's __int128 lowering (verified to build); if that
+ * ever regresses, fall back to 32 — SP at 32-bit still far outpaces generic. */
+#define WOLFSSL_HAVE_SP_ECC
+#define WOLFSSL_SP_MATH_ALL
+/* Tell wolfSSL the platform has a native 128-bit type (clang lowers __int128
+ * for klausscpu via the 64x64->128 multiply).  Without this, sp_int.h leaves
+ * sp_int128 undefined and the SP_WORD_SIZE 64 path (sp_c64.c) won't compile. */
+#define HAVE___UINT128_T
+#define SP_WORD_SIZE 64
 
 #define WOLFSSL_SMALL_STACK
 #define WOLFSSL_SMALL_STACK_CACHE
-#define SP_WORD_SIZE 32
 
 /* ── wolfSSH SFTP / SCP (file transfer over the SSH transport) ────────────── */
 
