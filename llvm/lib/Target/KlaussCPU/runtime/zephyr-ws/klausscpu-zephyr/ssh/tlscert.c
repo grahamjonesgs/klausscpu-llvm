@@ -64,7 +64,8 @@ static int     s_initialized;
 
 /* ── DER blob persistence (same shape as sshkeys.c) ──────────────────────── */
 
-static int load_blob(const char *path, uint8_t *buf, int cap, int *out_len)
+static int load_blob(const char *path, uint8_t *buf, int cap, int min_len,
+		     int *out_len)
 {
 	struct fs_file_t f;
 	ssize_t br;
@@ -76,8 +77,11 @@ static int load_blob(const char *path, uint8_t *buf, int cap, int *out_len)
 	br = fs_read(&f, buf, cap);
 	fs_close(&f);
 
-	/* Minimal sanity: DER SEQUENCE starts with 0x30. */
-	if (br < 16 || buf[0] != 0x30) {
+	/* Must be a DER SEQUENCE (0x30) of at least min_len bytes.  A real
+	 * P-256 key DER is ~121 B and a cert ~378 B, so a stale truncated blob
+	 * (e.g. a 21-byte key from an earlier export bug) is rejected and
+	 * regenerated rather than served. */
+	if (br < min_len || buf[0] != 0x30) {
 		return -1;
 	}
 	*out_len = (int)br;
@@ -130,6 +134,17 @@ static int generate(void)
 		goto out;
 	}
 
+	/* Export the private key (same SEC1 DER form sshkeys.c uses).  Done
+	 * before building the cert just to keep the key handling identical to
+	 * sshkeys.c; the order is not significant (signing leaves the key
+	 * intact). */
+	rc = wc_EccKeyToDer(&key, s_key_der, (word32)sizeof(s_key_der));
+	if (rc <= 0) {
+		rc = (rc == 0) ? BAD_FUNC_ARG : rc;
+		goto out;
+	}
+	s_key_der_len = rc;
+
 	/* Build + self-sign the certificate (issuer defaults to subject when no
 	 * CA is set, so passing the same key to MakeCert and SignCert yields a
 	 * self-signed cert — see wolfCrypt's certecc_test). */
@@ -137,7 +152,10 @@ static int generate(void)
 	if (rc != 0) {
 		goto out;
 	}
-	cert.daysValid = 3650;                   /* 10 years                     */
+	/* 397 days: Safari/Chrome reject server certs valid for more than 398
+	 * days with a fatal TLS alert (and often won't let the user click
+	 * through).  curl has no such limit, which is why it connects fine. */
+	cert.daysValid = 397;
 	cert.sigType   = CTC_SHA256wECDSA;
 	cert.isCA      = 0;
 	strncpy(cert.subject.country, "GB", CTC_NAME_SIZE - 1);
@@ -153,17 +171,11 @@ static int generate(void)
 
 	rc = wc_SignCert(cert.bodySz, cert.sigType, s_cert_der,
 			 (word32)sizeof(s_cert_der), NULL, &key, &rng);
-	if (rc < 0) {
+	if (rc <= 0) {
+		rc = (rc == 0) ? BAD_FUNC_ARG : rc;
 		goto out;
 	}
 	s_cert_der_len = rc;
-
-	/* Export the matching private key (same SEC1 DER form sshkeys.c uses). */
-	rc = wc_EccKeyToDer(&key, s_key_der, (word32)sizeof(s_key_der));
-	if (rc < 0) {
-		goto out;
-	}
-	s_key_der_len = rc;
 	rc = 0;
 
 out:
@@ -180,10 +192,14 @@ int tlscert_init(void)
 		return 0;
 	}
 
-	if (load_blob(KEY_PATH, s_key_der, KEY_DER_MAX, &s_key_der_len) == 0 &&
-	    load_blob(CERT_PATH, s_cert_der, CERT_DER_MAX, &s_cert_der_len) == 0) {
-		LOG_INF("Loaded TLS cert (%d B) + key (%d B) from SD",
-			s_cert_der_len, s_key_der_len);
+	/* Floors below a valid P-256 key (~121 B) / cert (~378 B) so a stale
+	 * truncated blob is rejected and regenerated. */
+	if (load_blob(KEY_PATH, s_key_der, KEY_DER_MAX, 64, &s_key_der_len) == 0 &&
+	    load_blob(CERT_PATH, s_cert_der, CERT_DER_MAX, 100, &s_cert_der_len) == 0) {
+		/* One value per LOG line: Zephyr's packaged logging mis-renders
+		 * some multi-arg width packing on this target (see CLAUDE.md). */
+		LOG_INF("Loaded TLS cert from SD: %d bytes", s_cert_der_len);
+		LOG_INF("Loaded TLS key from SD: %d bytes", s_key_der_len);
 		s_initialized = 1;
 		return 0;
 	}
@@ -194,8 +210,8 @@ int tlscert_init(void)
 		LOG_ERR("TLS cert generation failed: %d", rc);
 		return rc;
 	}
-	LOG_INF("Generated self-signed ECDSA P-256 cert (%d B) + key (%d B)",
-		s_cert_der_len, s_key_der_len);
+	LOG_INF("Generated self-signed ECDSA P-256 cert: %d bytes", s_cert_der_len);
+	LOG_INF("Generated TLS private key: %d bytes", s_key_der_len);
 
 	/* Best-effort persist; a failed save just means we regenerate next boot. */
 	if (save_blob(KEY_PATH, s_key_der, s_key_der_len) == 0 &&
