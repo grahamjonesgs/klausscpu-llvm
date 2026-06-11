@@ -1,2 +1,0 @@
-zephyr_library()
-zephyr_library_sources_ifdef(CONFIG_DISK_KLAUSSCPU_SD disk_klausscpu_sd.c)

@@ -1,4 +1,0 @@
-name: klausscpu-zephyr
-build:
-  cmake: .
-  kconfig: Kconfig

@@ -1,3 +1,0 @@
-config SOC_KLAUSSCPU_NEXYS_A7
-	bool "KlaussCPU SoC on Nexys A7"
-	select CPU_KLAUSSCPU

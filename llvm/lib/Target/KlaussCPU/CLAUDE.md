@@ -110,13 +110,15 @@ ninja -C build LLVMKlaussCPUInfo LLVMKlaussCPUDesc LLVMKlaussCPUCodeGen llc
   `llvm-readelf` is required — Zephyr's post-build step uses it (`CMAKE_READELF`).
 - **Then build the compiler-rt builtins** (soft-FP + integer divide) into the
   clang resource dir — the clang driver auto-links `-lclang_rt.builtins` and the
-  archive is a `build/` artifact, **not** produced by `clang;lld`:
+  archive is a `build/` artifact, **not** produced by `clang;lld`. The
+  `build-builtins.sh` script now lives in the **`klausscpu-runtime`** repo (run it
+  with `KLAUSSCPU_LLVM_BIN` pointing at this fork's `build/bin`):
   ```bash
-  runtime/build-builtins.sh        # → build/lib/clang/<ver>/lib/<triple>/libclang_rt.builtins.a
+  <klausscpu-runtime>/build-builtins.sh   # → build/lib/clang/<ver>/lib/<triple>/libclang_rt.builtins.a
   ```
   Re-run it after any `build/` wipe or toolchain rebuild, or the Zephyr link
   fails with `unable to find library -lclang_rt.builtins`. (The bare-metal
-  `runtime/Makefile` links individual `crt-*.o` instead and doesn't need this.)
+  `Makefile` in that repo links individual `crt-*.o` instead and doesn't need this.)
 
 ### Quick smoke test
 
@@ -865,17 +867,21 @@ and one-instruction signed sub-word loads (`LDIDX8_S`/`LDIDX16_S`).
 
 ## Systems built on this backend (current stable state, 2026-05)
 
-The backend is feature-complete and hardware-confirmed; ongoing work is in the
-runtime/OS layers under `runtime/`. See their own READMEs for build/run detail:
+The backend is feature-complete and hardware-confirmed. **The runtime/OS layers
+were split out (2026-06-11) into a separate repo:
+[`klausscpu-runtime`](https://github.com/grahamjonesgs/klausscpu-runtime).** That
+repo depends on a *built* copy of this fork via the `KLAUSSCPU_LLVM_BIN` env var
+(→ `<this-fork>/build/bin`) — it is not a submodule. Paths below are relative to
+the `klausscpu-runtime` repo root; see its READMEs for build/run detail:
 
-- **Bare-metal programs** (`runtime/programs/`, `make all`) — load `.elf`/`.bin`
+- **Bare-metal programs** (`programs/`, `make all`) — load `.elf`/`.bin`
   via the FPGA serial loader.
-- **FreeRTOS V11.1.0 port** (`runtime/freertos/`) — demo, console shell, lwIP
+- **FreeRTOS V11.1.0 port** (`freertos/`) — demo, console shell, lwIP
   net demos, telnet, wolfSSL/wolfSSH.
-- **lwIP 2.2.0** (`runtime/lwip_port/`, fetched by `runtime/get-lwip.sh`) —
+- **lwIP 2.2.0** (`lwip_port/`, fetched by `get-lwip.sh`) —
   Ethernet (LiteEth) + DHCP; ping/UDP/TCP/HTTP demos. Checksum fix:
   `LWIP_CHKSUM_ALGORITHM=1` in `lwipopts.h`.
-- **Zephyr 3.7 LTS port** (`runtime/zephyr-ws/klausscpu-zephyr/`) — `hello_world`
+- **Zephyr 3.7 LTS port** (`zephyr-ws/klausscpu-zephyr/`) — `hello_world`
   through to the `ssh_shell` app (SSH login + `run` command).
 - **LLEXT loadable programs** — the SSH `run` command loads ELFCLASS32 `ET_REL`
   programs at runtime against the kernel's exported libc; concurrent runs across

@@ -1,9 +1,0 @@
-description: KlaussCPU LiteEth Ethernet MAC
-
-compatible: "klausscpu,ethernet"
-
-include: [base.yaml]
-
-properties:
-  reg:
-    required: true

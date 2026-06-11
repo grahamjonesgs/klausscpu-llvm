@@ -1,9 +1,0 @@
-if SOC_KLAUSSCPU_NEXYS_A7
-
-config SOC
-	default "nexys_a7"
-
-# No SOC_SERIES — soc_v1.cmake uses SOC_PATH=SOC_NAME when series is empty,
-# giving the correct search path soc/klausscpu/nexys_a7.
-
-endif # SOC_KLAUSSCPU_NEXYS_A7
