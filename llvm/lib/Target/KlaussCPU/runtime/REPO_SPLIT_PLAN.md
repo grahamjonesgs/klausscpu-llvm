@@ -33,6 +33,24 @@ the Makefile's `BUILD_DIR` should default from it).
       backend `.cpp/.td/.h` stay).
 - [ ] Standardize the toolchain path on `KLAUSSCPU_LLVM_BIN`
       (→ `<fork>/build/bin`). Audit every hardcoded path (see Phase 3).
+- [x] **Dangling fatfs gitlink resolved (2026-06-11).**
+      `zephyr-ws/modules/fs/fatfs` was tracked as a submodule gitlink (mode
+      160000, commit `427159bf…`) with **no `.gitmodules`** entry — a broken
+      pointer that `git filter-repo`/`subtree split` would carry without
+      populating. Resolved the same way `/zephyr/` is handled: it is a
+      **west-managed module** (fetched by `west update`), so it should not be
+      committed. Did `git rm --cached …/modules/fs/fatfs` and added `/modules/`
+      to `zephyr-ws/.gitignore` (on-disk files preserved; west repopulates on a
+      fresh clone). Considered but rejected: committing the ~260 KB of FatFs
+      source (inconsistent with the other fetched upstreams) or adding a real
+      `.gitmodules` submodule (extra moving part for a tree west already owns).
+      **This change must be committed before the extraction** so the cleaned
+      tree is what gets sliced.
+      Note: the upstreams (`lwip/`, `picolibc-src|build|install/`,
+      `zephyr-ws/zephyr/`, `zephyr-ws/modules/`, `freertos/FreeRTOS-Kernel/`,
+      `freertos/wolfssl/*`) are all **untracked on disk** (gitignored), so only
+      ~7.7 MB of glue actually moves — the 1.6 GB working tree does **not**
+      travel with the history extraction.
 
 ### Phase 1 — Extract the software repo *with history*
 ```sh

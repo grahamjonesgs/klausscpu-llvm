@@ -6,6 +6,12 @@
 # klausscpu-zephyr/include/zephyr/ arch include namespace.
 /zephyr/
 
+# West-managed module trees (e.g. modules/fs/fatfs) — also fetched by
+# `west update`, not part of our repo. modules/fs/fatfs was previously
+# committed as a dangling submodule gitlink (no .gitmodules); it is now
+# untracked and repopulated by west like /zephyr/ above.
+/modules/
+
 # Hardcoded build directories (any prefix variant)
 build/
 build_*/
