@@ -12,6 +12,11 @@
 #include "webapi.h"
 #include "board_io.h"
 
+/* Software shadow of the 7-seg value: the register at 0xF0030010 is write-only
+ * in practice (reads don't return what was written), so we report the last
+ * value this API set rather than reading it back. */
+static uint32_t s_seg;
+
 /* Extract an unsigned value for `key` from a "k=v&k2=v2" query string.
  * Base 0: accepts decimal or 0x-prefixed hex. */
 static bool query_ulong(const char *query, const char *key, unsigned long *out)
@@ -51,7 +56,7 @@ static void api_status(struct httpd_conn *c)
 		"\"wb\":%llu,\"stall\":%llu}}",
 		(unsigned long long)k_uptime_get(),
 		(unsigned)board_switches_get(), (unsigned)board_leds_get(),
-		(unsigned)board_seg_get(),
+		(unsigned)s_seg,
 		(unsigned long long)p.cycles, (unsigned long long)p.instr,
 		(unsigned long long)p.fetch,  (unsigned long long)p.exec,
 		(unsigned long long)p.mul,    (unsigned long long)p.div,
@@ -98,10 +103,11 @@ bool webapi_handle(struct httpd_conn *c, const char *method, const char *url,
 		unsigned long v;
 
 		if (query_ulong(query, "v", &v)) {
-			board_seg_set((uint32_t)v);
+			s_seg = (uint32_t)v;
+			board_seg_set(s_seg);
 		}
 		(void)snprintk(c->xfer, c->xfer_sz, "{\"seg\":%u}",
-			       (unsigned)board_seg_get());
+			       (unsigned)s_seg);
 		httpd_send(c, "200 OK", "application/json", c->xfer);
 		return true;
 	}

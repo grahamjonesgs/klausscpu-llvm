@@ -19,6 +19,9 @@ static inline void     board_leds_set(uint16_t v)  { BOARD_REG_LEDS = v; }
 static inline uint16_t board_leds_get(void)         { return (uint16_t)BOARD_REG_LEDS; }
 static inline uint16_t board_switches_get(void)     { return (uint16_t)BOARD_REG_SWITCHES; }
 static inline void     board_seg_set(uint32_t v)    { BOARD_REG_SEG_ALL = v; }
+/* NB: the 7-seg register is effectively write-only — reads don't return the
+ * value written, so callers that need the current value track it in software
+ * (see s_seg in webapi.c). */
 static inline uint32_t board_seg_get(void)          { return BOARD_REG_SEG_ALL; }
 
 /* CPU performance counters — cumulative since power-on (CPU pipeline block at
