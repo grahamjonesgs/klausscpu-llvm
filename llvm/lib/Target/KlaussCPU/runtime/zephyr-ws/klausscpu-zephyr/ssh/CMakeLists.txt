@@ -23,9 +23,10 @@ zephyr_library_sources_ifdef(CONFIG_LLEXT llext_exports.c)
 
 # HTTP file server (serves /SD:).  httpd.c holds the transport-agnostic request
 # dispatch (httpd_serve) shared by the plain :80 and the TLS :443 servers, so it
-# is compiled whenever either server is enabled.
+# is compiled whenever either server is enabled.  webapi.c adds the JSON
+# control/telemetry API (/api/*) used by the index.html dashboard.
 if(CONFIG_KLAUSSCPU_HTTP_SERVER OR CONFIG_KLAUSSCPU_HTTPS_SERVER)
-  zephyr_library_sources(httpd.c)
+  zephyr_library_sources(httpd.c webapi.c)
 endif()
 
 # HTTPS server (HTTP over TLS via wolfSSL, :443) + its self-signed cert.

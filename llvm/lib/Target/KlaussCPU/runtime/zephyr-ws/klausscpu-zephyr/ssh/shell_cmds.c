@@ -20,6 +20,7 @@
 
 #include "shell_paths.h"
 #include "wallclock.h"
+#include "board_io.h"
 
 /* Format a FatFs FILINFO date/time pair as "YYYY-MM-DD HH:MM" (16 chars). */
 static void fat_datetime(uint16_t fdate, uint16_t ftime, char *out, size_t n)
@@ -468,30 +469,8 @@ static int cmd_uptime(const struct shell *sh, size_t argc, char **argv)
  * cannot occur here.
  */
 
-struct perfsnap {
-	uint64_t cycles, instr, fetch, exec, mul, div, intc, idle;
-	uint64_t mul_ops, div_ops, int_ops;
-	uint64_t alu, load, store, branch, taken, jump, call, ind, other;
-	uint64_t rh, rm, wh, wm, wb, stall;
-};
-
-static void perf_read(struct perfsnap *s)
-{
-	s->cycles  = REG64(0xF00D0008u); s->instr = REG64(0xF00D0010u);
-	s->fetch   = REG64(0xF00D0018u); s->exec  = REG64(0xF00D0020u);
-	s->mul     = REG64(0xF00D0028u); s->div   = REG64(0xF00D0030u);
-	s->intc    = REG64(0xF00D0038u); s->idle  = REG64(0xF00D0040u);
-	s->mul_ops = REG64(0xF00D0048u); s->div_ops = REG64(0xF00D0050u);
-	s->int_ops = REG64(0xF00D0058u);
-	s->alu     = REG64(0xF00D0060u); s->load  = REG64(0xF00D0068u);
-	s->store   = REG64(0xF00D0070u); s->branch = REG64(0xF00D0078u);
-	s->taken   = REG64(0xF00D0080u); s->jump  = REG64(0xF00D0088u);
-	s->call    = REG64(0xF00D0090u); s->ind   = REG64(0xF00D0098u);
-	s->other   = REG64(0xF00D00A0u);
-	s->rh      = REG64(0xF0050040u); s->rm    = REG64(0xF0050048u);
-	s->wh      = REG64(0xF0050050u); s->wm    = REG64(0xF0050058u);
-	s->wb      = REG64(0xF0050060u); s->stall = REG64(0xF0050068u);
-}
+/* perf counters: struct board_perf + board_perf_read() live in board_io.h
+ * (shared with the web API). */
 
 /* print "<label>NN.NN% " using only 64-bit args (cbprintf-safe) */
 static void sh_pct(const struct shell *sh, const char *label,
@@ -510,11 +489,11 @@ static int cmd_perf(const struct shell *sh, size_t argc, char **argv)
 	if (ms < 10u)    ms = 10u;
 	if (ms > 60000u) ms = 60000u;
 
-	struct perfsnap a, b;
+	struct board_perf a, b;
 
-	perf_read(&a);
+	board_perf_read(&a);
 	k_msleep((int32_t)ms);
-	perf_read(&b);
+	board_perf_read(&b);
 
 #define DLT(f) ((uint64_t)(b.f - a.f))
 	uint64_t cyc = DLT(cycles), ins = DLT(instr), idle = DLT(idle);

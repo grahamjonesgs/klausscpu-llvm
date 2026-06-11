@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KlaussCPU</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 system-ui,sans-serif; background:#0d1117; color:#e6edf3; }
+  header { padding:1.1rem 1.3rem; border-bottom:1px solid #30363d; display:flex;
+           align-items:baseline; gap:1rem; flex-wrap:wrap; }
+  h1 { font-size:1.5rem; margin:0; }
+  .sub { color:#7d8590; }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:#f85149; }
+  .dot.ok { background:#3fb950; }
+  main { max-width:880px; margin:0 auto; padding:1.3rem; display:grid; gap:1.1rem;
+         grid-template-columns:1fr 1fr; }
+  .card { background:#161b22; border:1px solid #30363d; border-radius:10px; padding:1rem 1.15rem; }
+  .card.wide { grid-column:1 / -1; }
+  h2 { font-size:.8rem; text-transform:uppercase; letter-spacing:.06em; color:#7d8590;
+       margin:0 0 .8rem; }
+  .big { font-size:1.9rem; font-variant-numeric:tabular-nums; }
+  .bits { display:flex; gap:5px; flex-wrap:wrap; }
+  .bit { width:30px; height:34px; border:1px solid #30363d; border-radius:6px; display:flex;
+         flex-direction:column; align-items:center; justify-content:center; font-size:9px;
+         color:#7d8590; user-select:none; }
+  .bit .lab { font-size:8px; }
+  .bit.on { background:#1f6feb; color:#fff; border-color:#388bfd; }
+  .bit.click { cursor:pointer; }
+  .bit.click:hover { border-color:#8b949e; }
+  input[type=text] { background:#0d1117; border:1px solid #30363d; color:#e6edf3;
+       border-radius:6px; padding:.35rem .5rem; font:inherit; width:9rem; }
+  button { background:#21262d; border:1px solid #30363d; color:#e6edf3; border-radius:6px;
+       padding:.35rem .7rem; font:inherit; cursor:pointer; }
+  button:hover { border-color:#8b949e; }
+  .row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; margin-top:.6rem; }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+  td { padding:.15rem 0; } td.r { text-align:right; color:#9aa4af; }
+  .bar { height:8px; background:#30363d; border-radius:4px; overflow:hidden; }
+  .bar > i { display:block; height:100%; background:#1f6feb; }
+  .verdict { margin-top:.7rem; padding:.55rem .7rem; background:#0d1117; border:1px solid #30363d;
+       border-radius:6px; color:#d29922; }
+  a { color:#58a6ff; text-decoration:none; } a:hover { text-decoration:underline; }
+  code { background:#30363d; border-radius:4px; padding:.05em .35em; }
+  footer { max-width:880px; margin:0 auto; padding:0 1.3rem 2rem; color:#7d8590; }
+</style>
+</head>
+<body>
+<header>
+  <h1>KlaussCPU</h1>
+  <span class="sub">home-built 64-bit CPU · Zephyr · served off the SD card</span>
+  <span class="sub" style="margin-left:auto"><span id="conn" class="dot"></span> <span id="connlbl">connecting…</span></span>
+</header>
+
+<main>
+  <div class="card">
+    <h2>Uptime</h2>
+    <div class="big" id="uptime">—</div>
+  </div>
+
+  <div class="card">
+    <h2>Switches</h2>
+    <div class="bits" id="switches"></div>
+  </div>
+
+  <div class="card wide">
+    <h2>LEDs <span class="sub">— click a bit to toggle</span></h2>
+    <div class="bits" id="leds"></div>
+    <div class="row">
+      value <code id="ledval">0x0000</code>
+      <input id="ledhex" type="text" placeholder="hex e.g. 0x1f">
+      <button onclick="setLeds(document.getElementById('ledhex').value)">Set</button>
+      <button onclick="api('/api/leds?v=0')">All off</button>
+      <button onclick="api('/api/leds?v=0xffff')">All on</button>
+    </div>
+  </div>
+
+  <div class="card wide">
+    <h2>7-segment display</h2>
+    <div class="row">
+      value <code id="segval">0x00000000</code>
+      <input id="seghex" type="text" placeholder="hex e.g. 0x1234abcd">
+      <button onclick="setSeg(document.getElementById('seghex').value)">Set</button>
+      <button onclick="api('/api/seg?v=0')">Blank</button>
+    </div>
+  </div>
+
+  <div class="card wide">
+    <h2>Performance <span class="sub">— live, sampled between polls</span></h2>
+    <table id="perftab"></table>
+    <div class="verdict" id="verdict">collecting a sample…</div>
+  </div>
+</main>
+
+<footer>
+  <a href="/?list">Browse the SD card →</a> ·
+  HTTPS served by the KlaussCPU Zephyr file server.
+</footer>
+
+<script>
+const $ = id => document.getElementById(id);
+let prev = null, ledCur = 0;
+
+function setConn(ok){
+  $('conn').className = 'dot' + (ok ? ' ok' : '');
+  $('connlbl').textContent = ok ? 'live' : 'offline';
+}
+function fmtUptime(ms){
+  let s = Math.floor(ms/1000), h = Math.floor(s/3600), m = Math.floor(s/60)%60;
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+}
+function bitcells(host, val, clickable, prefix){
+  if (host.childElementCount !== 16){
+    host.innerHTML = '';
+    for (let i=15;i>=0;i--){
+      const d = document.createElement('div');
+      d.className = 'bit' + (clickable ? ' click' : '');
+      d.innerHTML = `<span class="lab">${prefix}${i}</span>`;
+      if (clickable) d.onclick = () => setLeds(ledCur ^ (1<<i));
+      host.appendChild(d);
+    }
+  }
+  [...host.children].forEach((d,idx)=>{
+    const bit = 15 - idx;
+    d.classList.toggle('on', !!(val & (1<<bit)));
+  });
+}
+function pct(n,d){ return d ? (100*n/d) : 0; }
+function rowHtml(label, value, frac){
+  const f = frac==null ? '' :
+    `<div class="bar"><i style="width:${Math.min(100,frac).toFixed(0)}%"></i></div>`;
+  return `<tr><td>${label}</td><td class="r">${value}</td><td style="width:45%;padding-left:.8rem">${f}</td></tr>`;
+}
+function renderPerf(p){
+  if (!prev){ prev = p; return; }
+  const d = {}; for (const k in p) d[k] = p[k] - prev[k]; prev = p;
+  const cyc = d.cycles, ins = d.instr, idle = d.idle, busy = cyc - idle;
+  const acc = d.rh + d.rm + d.wh + d.wm, miss = d.rm + d.wm;
+  if (cyc <= 0){ $('perftab').innerHTML = rowHtml('(idle — no cycles sampled)','',null); return; }
+  const cpi = ins ? (cyc/ins) : 0;
+  let html = '';
+  html += rowHtml('CPI', ins ? cpi.toFixed(2) : 'n/a', null);
+  html += rowHtml('Utilisation', pct(busy,cyc).toFixed(1)+'% busy', pct(busy,cyc));
+  html += rowHtml('— fetch', pct(d.fetch,cyc).toFixed(1)+'%', pct(d.fetch,cyc));
+  html += rowHtml('— exec',  pct(d.exec,cyc).toFixed(1)+'%',  pct(d.exec,cyc));
+  html += rowHtml('— mul/div', (pct(d.mul,cyc)+pct(d.div,cyc)).toFixed(1)+'%', pct(d.mul+d.div,cyc));
+  html += rowHtml('— idle', pct(idle,cyc).toFixed(1)+'%', pct(idle,cyc));
+  if (ins){
+    html += rowHtml('Instr mix: ALU', pct(d.alu,ins).toFixed(0)+'%', pct(d.alu,ins));
+    html += rowHtml('— load/store', (pct(d.load,ins)+pct(d.store,ins)).toFixed(0)+'%', pct(d.load+d.store,ins));
+    html += rowHtml('— branch/jump', (pct(d.branch,ins)+pct(d.jump,ins)).toFixed(0)+'%', pct(d.branch+d.jump,ins));
+    html += rowHtml('Branch taken', d.branch? pct(d.taken,d.branch).toFixed(0)+'%':'n/a', pct(d.taken,d.branch));
+  }
+  if (acc) html += rowHtml('Cache hit rate', pct(acc-miss,acc).toFixed(1)+'%', pct(acc-miss,acc));
+  $('perftab').innerHTML = html;
+
+  let v;
+  if (idle/cyc > 0.97) v = 'Mostly idle — waiting on the network. Load the board (or hammer this page) to see real work.';
+  else {
+    const fb = d.fetch/busy;
+    v = ins ? `CPI ${cpi.toFixed(1)} — ` : '';
+    if (fb > 0.5) v += `fetch-bound: ${(100*fb).toFixed(0)}% of busy cycles are instruction fetch (the known pipeline bottleneck).`;
+    else v += `${(100*d.exec/busy).toFixed(0)}% of busy cycles in execute.`;
+    if (miss && acc) v += ` Cache miss rate ${pct(miss,acc).toFixed(1)}%.`;
+  }
+  $('verdict').textContent = v;
+}
+function render(s){
+  $('uptime').textContent = fmtUptime(s.uptime_ms);
+  bitcells($('switches'), s.switches, false, 'SW');
+  ledCur = s.leds;
+  bitcells($('leds'), s.leds, true, 'L');
+  $('ledval').textContent = '0x' + s.leds.toString(16).padStart(4,'0');
+  $('segval').textContent = '0x' + (s.seg>>>0).toString(16).padStart(8,'0');
+  renderPerf(s.perf);
+}
+async function api(path){
+  try { await fetch(path, {cache:'no-store'}); poll(); } catch(e){ setConn(false); }
+}
+function setLeds(v){ v = (typeof v==='string') ? parseInt(v,16) : v;
+  if (!isNaN(v)) api('/api/leds?v=' + (v & 0xffff)); }
+function setSeg(v){ v = parseInt(v,16); if (!isNaN(v)) api('/api/seg?v=' + (v>>>0)); }
+
+async function poll(){
+  try {
+    const r = await fetch('/api/status', {cache:'no-store'});
+    render(await r.json());
+    setConn(true);
+  } catch(e){ setConn(false); }
+}
+poll();
+setInterval(poll, 1000);
+</script>
+</body>
+</html>

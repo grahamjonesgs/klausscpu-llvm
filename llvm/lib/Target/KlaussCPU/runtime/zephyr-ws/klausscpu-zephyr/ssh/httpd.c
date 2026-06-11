@@ -31,6 +31,7 @@
 #include <errno.h>
 
 #include "httpd.h"
+#include "webapi.h"
 
 LOG_MODULE_REGISTER(httpd, LOG_LEVEL_INF);
 
@@ -74,20 +75,27 @@ static int send_str(struct httpd_conn *c, const char *str)
 	return send_all(c, str, strlen(str));
 }
 
-static void send_status(struct httpd_conn *c, const char *status,
-			const char *body)
+void httpd_send(struct httpd_conn *c, const char *status,
+		const char *content_type, const char *body)
 {
 	char hdr[200];
 	unsigned int blen = (body != NULL) ? (unsigned int)strlen(body) : 0;
 
 	(void)snprintk(hdr, sizeof(hdr),
-		       "HTTP/1.1 %s\r\nContent-Type: text/plain\r\n"
+		       "HTTP/1.1 %s\r\nContent-Type: %s\r\n"
 		       "Content-Length: %u\r\nConnection: %s\r\n\r\n",
-		       status, blen, c->keepalive ? "keep-alive" : "close");
+		       status, content_type, blen,
+		       c->keepalive ? "keep-alive" : "close");
 	(void)send_str(c, hdr);
 	if (body != NULL && !c->head) {
 		(void)send_str(c, body);
 	}
+}
+
+static void send_status(struct httpd_conn *c, const char *status,
+			const char *body)
+{
+	httpd_send(c, status, "text/plain", body);
 }
 
 /* In-place URL decode (%XX and '+' → space). */
@@ -248,16 +256,21 @@ static void send_file(struct httpd_conn *c, const char *fs_path, size_t size)
 }
 
 /* Serve a directory: an index.html inside it if present, else the listing.
+ * force_list (from a "?list" query) skips index.html and always lists — needed
+ * because the root's index.html otherwise masks the SD card listing.
  * fs_dir has no trailing slash (except the bare mount root); url ends with '/'. */
-static void serve_dir(struct httpd_conn *c, const char *fs_dir, const char *url)
+static void serve_dir(struct httpd_conn *c, const char *fs_dir, const char *url,
+		      bool force_list)
 {
 	char idx[DOC_ROOT_LEN + URL_MAX + 12];
 	struct fs_dirent ent;
 
-	(void)snprintk(idx, sizeof(idx), "%s/index.html", fs_dir);
-	if (fs_stat(idx, &ent) == 0 && ent.type == FS_DIR_ENTRY_FILE) {
-		send_file(c, idx, ent.size);
-		return;
+	if (!force_list) {
+		(void)snprintk(idx, sizeof(idx), "%s/index.html", fs_dir);
+		if (fs_stat(idx, &ent) == 0 && ent.type == FS_DIR_ENTRY_FILE) {
+			send_file(c, idx, ent.size);
+			return;
+		}
 	}
 	send_listing(c, fs_dir, url);
 }
@@ -399,12 +412,15 @@ bool httpd_serve(struct httpd_conn *c)
 		c->keepalive = conn_has(req, "keep-alive");
 	}
 
-	/* strip query string, decode, reject path traversal */
+	/* Split off the query string (kept for the API and the "?list" flag),
+	 * then decode + reject path traversal on the path. */
+	const char *query = "";
 	{
 		char *q = strchr(url, '?');
 
 		if (q != NULL) {
 			*q = '\0';
+			query = q + 1;
 		}
 	}
 	url_decode(url);
@@ -412,6 +428,14 @@ bool httpd_serve(struct httpd_conn *c)
 		send_status(c, "403 Forbidden", "bad path\n");
 		return c->keepalive;
 	}
+
+	/* Control/telemetry JSON API (GET only; sets via query param). */
+	if (strncmp(url, "/api/", 5) == 0) {
+		(void)webapi_handle(c, method, url, query);
+		return c->keepalive;
+	}
+
+	bool force_list = (strstr(query, "list") != NULL);
 
 	(void)snprintk(fs_path, sizeof(fs_path), "%s%s", DOC_ROOT, url);
 	/* drop a trailing '/' (except the bare mount root) so fs_* is happy */
@@ -431,7 +455,7 @@ bool httpd_serve(struct httpd_conn *c)
 		struct fs_dirent ent;
 
 		if (strcmp(url, "/") == 0) {
-			serve_dir(c, DOC_ROOT, "/");
+			serve_dir(c, DOC_ROOT, "/", force_list);
 			return c->keepalive;
 		}
 		if (fs_stat(fs_path, &ent) != 0) {
@@ -444,7 +468,7 @@ bool httpd_serve(struct httpd_conn *c)
 
 			(void)snprintk(base, sizeof(base), "%s%s", url,
 				       url[strlen(url) - 1] == '/' ? "" : "/");
-			serve_dir(c, fs_path, base);
+			serve_dir(c, fs_path, base, force_list);
 		} else {
 			send_file(c, fs_path, ent.size);
 		}

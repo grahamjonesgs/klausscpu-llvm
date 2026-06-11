@@ -30,6 +30,11 @@ struct httpd_conn {
  * false if the caller should close it. */
 bool httpd_serve(struct httpd_conn *c);
 
+/* Send a complete response (status line + Content-Type/Length + Connection +
+ * body).  Honours c->keepalive and c->head.  Used by the web API (webapi.c). */
+void httpd_send(struct httpd_conn *c, const char *status,
+		const char *content_type, const char *body);
+
 /* Start the plain HTTP file-server thread (:80).  Call once after DHCP. */
 void httpd_start(void);
 
