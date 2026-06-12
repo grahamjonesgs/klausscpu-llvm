@@ -158,11 +158,30 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::UMAX,  MVT::i64, Legal);
   setOperationAction(ISD::SETCC, MVT::i64, Legal);
 
-  // No hardware rotate — expand to (shl | lshr) pairs.
-  setOperationAction(ISD::ROTL, MVT::i64, Expand);
-  setOperationAction(ISD::ROTR, MVT::i64, Expand);
+  // Hardware 64-bit rotate (ROLR/RORR). 32-bit rotates stay Expand: a 64-bit
+  // register rotate is not a 32-bit rotate, so promoted i32 rotl/rotr must
+  // lower to the shift-pair form instead.
+  setOperationAction(ISD::ROTL, MVT::i64, Legal);
+  setOperationAction(ISD::ROTR, MVT::i64, Legal);
   setOperationAction(ISD::ROTL, MVT::i32, Expand);
   setOperationAction(ISD::ROTR, MVT::i32, Expand);
+
+  // Hardware absolute value (ABSR).
+  setOperationAction(ISD::ABS, MVT::i64, Legal);
+
+  // Hardware bit-reverse (BITREV) — defaults to Expand (bswap + mask
+  // sequence) unless declared Legal. CTPOP/BSWAP select already; explicit
+  // for clarity.
+  setOperationAction(ISD::BITREVERSE, MVT::i64, Legal);
+  setOperationAction(ISD::CTPOP, MVT::i64, Legal);
+  setOperationAction(ISD::BSWAP, MVT::i64, Legal);
+
+  // CLZ(0) and CTZ(0) both return 64 in hardware (confirmed 2026-06-12),
+  // matching LLVM's zero-defined ctlz/cttz semantics — so the zero-guard
+  // compare/branch around u64::leading_zeros()/trailing_zeros() is not
+  // needed and CTLZ/CTTZ are Legal, not just their ZERO_UNDEF variants.
+  setOperationAction(ISD::CTLZ, MVT::i64, Legal);
+  setOperationAction(ISD::CTTZ, MVT::i64, Legal);
 
   // No 128-bit multiply node — expand UMUL_LOHI/SMUL_LOHI to MUL + MULHU/MULHS.
   setOperationAction(ISD::UMUL_LOHI, MVT::i64, Expand);

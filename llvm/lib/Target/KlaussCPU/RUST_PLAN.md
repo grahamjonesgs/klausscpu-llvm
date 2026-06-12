@@ -506,7 +506,7 @@ choice.)
 | Milestone | Contents | Depends on |
 |---|---|---|
 | **M1** ✅ | **Hardware-confirmed 2026-06-12.** stage1 rustc 1.98-dev vs this LLVM; JSON target spec + `Arch::Other` (no built-in target needed); `rust/hello-smoke` ran on the board (7-seg `0x518C9058` = const-folded `mix()`, LEDs mirror switches⊕0x55). rustc fork: `~/Documents/src/klausscpu-rust`, branch `klausscpu` | — |
-| **M2** | build-std core+alloc; allocator; `klauss-{sys,io,mmio,rt}`; backend pattern audit (§3.5) + `.ll` tests | M1 |
+| **M2** ◐ | **Backend audit + UART hello HW-confirmed 2026-06-12**: ROLR/RORR/ABSR patterns + BITREVERSE Legal (was expanding); `bitmanip.ll` added, 3 stale goldens regenerated, suite 9/9; `rust/hello-uart` (core::fmt over C-shim uart_putc) output matched prediction byte-for-byte. CLZ(0)/CTZ(0)=64 HW-confirmed → CTLZ/CTTZ Legal + `isCheapToSpeculateCtlz/Cttz` overrides (bare clz/ctz, no zero guard). Open: alloc + `klauss-{sys,io,mmio,rt}` crates → klausscpu-runtime | M1 |
 | **M3** | Rust `.llext` via `run` on Zephyr; `klauss-llext-rt`; export-table checks; test ladder 1–3 | M2 + §6.6 |
 | **M4** | `klauss-fs`; adventure-rs; docs (`RUST.md` in runtime repo); CI job building all examples | M3 |
 | **M5** (opt) | `klauss-critical-section` over MMIO `INT_MASK` → `portable-atomic` (`Arc` etc.); `asm!`; disassembler; std PAL | none — §3.2 contract confirmed 2026-06-12; can start any time after M2 |

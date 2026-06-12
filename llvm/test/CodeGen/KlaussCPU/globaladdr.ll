@@ -90,7 +90,7 @@ define i64 @call_ext_and_use() {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    push r15
 ; CHECK-NEXT:    getsp r15
-; CHECK-NEXT:    addsp -32
+; CHECK-NEXT:    addsp -24
 ; CHECK-NEXT:    call ext
 ; CHECK-NEXT:    setr r12, g_i64
 ; CHECK-NEXT:    ldidx64 r12, r12, 0

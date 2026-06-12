@@ -30,7 +30,7 @@ define void @pass_local_addr() {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    push r15
 ; CHECK-NEXT:    getsp r15
-; CHECK-NEXT:    addsp -40
+; CHECK-NEXT:    addsp -32
 ; CHECK-NEXT:    addi r0, r15, -8
 ; CHECK-NEXT:    call use_ptr
 ; CHECK-NEXT:    setsp r15
@@ -71,7 +71,7 @@ define i64 @spill_across_call(i64 %a) {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    push r15
 ; CHECK-NEXT:    getsp r15
-; CHECK-NEXT:    addsp -40
+; CHECK-NEXT:    addsp -32
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    setr r0, 0

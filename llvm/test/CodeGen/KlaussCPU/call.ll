@@ -12,7 +12,7 @@ define i64 @call_4_args(i64 %a, i64 %b, i64 %c, i64 %d) {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    push r15
 ; CHECK-NEXT:    getsp r15
-; CHECK-NEXT:    addsp -32
+; CHECK-NEXT:    addsp -24
 ; CHECK-NEXT:    call ext
 ; CHECK-NEXT:    setsp r15
 ; CHECK-NEXT:    pop r15
@@ -28,10 +28,10 @@ define i64 @call_5_args(i64 %a, i64 %b, i64 %c, i64 %d, i64 %e) {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    push r15
 ; CHECK-NEXT:    getsp r15
-; CHECK-NEXT:    addsp -40
+; CHECK-NEXT:    addsp -32
 ; CHECK-NEXT:    getsp r12
 ; CHECK-NEXT:    ldidx64 r14, r15, 40
-; CHECK-NEXT:    stidx64 r14, r12, 32
+; CHECK-NEXT:    stidx64 r14, r12, 24
 ; CHECK-NEXT:    call ext5
 ; CHECK-NEXT:    setsp r15
 ; CHECK-NEXT:    pop r15
@@ -46,7 +46,7 @@ define i64 @callee_saved_live_across_call(i64 %x) {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    push r15
 ; CHECK-NEXT:    getsp r15
-; CHECK-NEXT:    addsp -40
+; CHECK-NEXT:    addsp -32
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    call ext_void
@@ -94,7 +94,7 @@ define i64 @indirect_call(ptr %fp, i64 %a) {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    push r15
 ; CHECK-NEXT:    getsp r15
-; CHECK-NEXT:    addsp -32
+; CHECK-NEXT:    addsp -24
 ; CHECK-NEXT:    copy r12, r0
 ; CHECK-NEXT:    copy r0, r1
 ; CHECK-NEXT:    callr r12

@@ -43,6 +43,12 @@ public:
 
   const char *getTargetNodeName(unsigned Opcode) const override;
 
+  // CLZ/CTZ are single-cycle and return 64 for input 0 (hardware-confirmed),
+  // so CodeGenPrepare must not despeculate zero-defined ctlz/cttz into a
+  // zero-check branch around the count.
+  bool isCheapToSpeculateCtlz(Type *Ty) const override { return true; }
+  bool isCheapToSpeculateCttz(Type *Ty) const override { return true; }
+
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                 bool IsVarArg,
                                 const SmallVectorImpl<ISD::InputArg> &Ins,

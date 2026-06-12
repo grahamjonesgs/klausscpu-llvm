@@ -412,11 +412,14 @@ def SARR   : RRR<0x00220, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "sarr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (sra GPR:$rs1, GPR:$rs2))]>;
 
-// Rotate (no isel patterns — no LLVM DAG equivalent; lowered in ISelLowering)
+// Rotate — selected from ISD::ROTL/ROTR (i64 Legal in ISelLowering).
+// Rust's u64::rotate_left/right and hash/crypto kernels hit these hard.
 def ROLR   : RRR<0x00230, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
-                "rolr\t$rd, $rs1, $rs2">;
+                "rolr\t$rd, $rs1, $rs2",
+                [(set GPR:$rd, (rotl GPR:$rs1, GPR:$rs2))]>;
 def RORR_R : RRR<0x00240, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
-                "rorr\t$rd, $rs1, $rs2">;
+                "rorr\t$rd, $rs1, $rs2",
+                [(set GPR:$rd, (rotr GPR:$rs1, GPR:$rs2))]>;
 
 // Compare-and-materialise: rd = (rs1 cond rs2) ? 1 : 0
 def CMPEQR  : RRR<0x00300, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
@@ -506,7 +509,8 @@ def INCR    : R_inplace<0x0000084, "incr\t$rd">;
 def DECR    : R_inplace<0x0000085, "decr\t$rd">;
 def NEGR    : R_inplace<0x000008A, "negr\t$rd",
                 [(set GPR:$rd, (ineg GPR:$rs1))]>;
-def ABSR    : R_inplace<0x000008B, "absr\t$rd">;
+def ABSR    : R_inplace<0x000008B, "absr\t$rd",
+                [(set GPR:$rd, (abs GPR:$rs1))]>;
 def SHLR1   : R_inplace<0x000008D, "shlr1\t$rd">;
 def SHRR1   : R_inplace<0x000008E, "shrr1\t$rd">;
 def NOTR    : R_inplace<0x0000098, "notr\t$rd",
