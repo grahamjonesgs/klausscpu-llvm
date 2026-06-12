@@ -1,0 +1,20 @@
+[package]
+name = "hello-ext"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["staticlib"]
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+
+# compiler_builtins must stay split into many small objects: the final
+# `ld.lld -r` cannot gc-sections, so it relies on archive-member selection
+# (-u main) to pull in only the intrinsics actually referenced. One CGU
+# would merge all ~250 intrinsics into one member and bloat the .llext.
+[profile.release.package.compiler_builtins]
+codegen-units = 256

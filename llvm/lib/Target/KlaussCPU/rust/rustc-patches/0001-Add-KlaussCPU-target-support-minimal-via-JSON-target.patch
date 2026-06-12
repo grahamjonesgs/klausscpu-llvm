@@ -1,0 +1,141 @@
+From b4b8699d51ada399b275d123228ac5602891450c Mon Sep 17 00:00:00 2001
+From: Graham Jones <grahamjonesgs@gmail.com>
+Date: Fri, 12 Jun 2026 11:16:00 +0200
+Subject: [PATCH 1/2] Add KlaussCPU target support (minimal, via JSON target
+ spec)
+
+- callconv: new klausscpu module mirroring clang's DefaultABIInfo
+  (scalars direct + extended to 64-bit, aggregates indirect, i128
+  direct/legalizer-split), dispatched via Arch::Other("klausscpu")
+  guard so no Arch enum variant or exhaustive-match churn is needed.
+- rustc_llvm: register the klausscpu LLVM component and its five
+  LLVMInitializeKlaussCPU* entry points.
+
+Target spec ships as JSON next to the backend in the klausscpu-llvm
+fork (llvm/lib/Target/KlaussCPU/rust/klausscpu-unknown-none-elf.json);
+arch strings unknown to rustc parse as Arch::Other, which flows through
+desc_symbol/object-arch already.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+---
+ compiler/rustc_llvm/build.rs                  |  1 +
+ compiler/rustc_llvm/src/lib.rs                |  8 +++
+ .../rustc_target/src/callconv/klausscpu.rs    | 54 +++++++++++++++++++
+ compiler/rustc_target/src/callconv/mod.rs     |  2 +
+ 4 files changed, 65 insertions(+)
+ create mode 100644 compiler/rustc_target/src/callconv/klausscpu.rs
+
+diff --git a/compiler/rustc_llvm/build.rs b/compiler/rustc_llvm/build.rs
+index 5be8bd46..214e4e46 100644
+--- a/compiler/rustc_llvm/build.rs
++++ b/compiler/rustc_llvm/build.rs
+@@ -28,6 +28,7 @@
+     "riscv",
+     "xtensa",
+     "bpf",
++    "klausscpu",
+ ];
+ 
+ const REQUIRED_COMPONENTS: &[&str] =
+diff --git a/compiler/rustc_llvm/src/lib.rs b/compiler/rustc_llvm/src/lib.rs
+index a565e1fe..b58b5c62 100644
+--- a/compiler/rustc_llvm/src/lib.rs
++++ b/compiler/rustc_llvm/src/lib.rs
+@@ -222,6 +222,14 @@ fn init() { }
+         LLVMInitializeXtensaAsmPrinter,
+         LLVMInitializeXtensaAsmParser
+     );
++    init_target!(
++        llvm_component = "klausscpu",
++        LLVMInitializeKlaussCPUTargetInfo,
++        LLVMInitializeKlaussCPUTarget,
++        LLVMInitializeKlaussCPUTargetMC,
++        LLVMInitializeKlaussCPUAsmPrinter,
++        LLVMInitializeKlaussCPUAsmParser
++    );
+     init_target!(
+         llvm_component = "webassembly",
+         LLVMInitializeWebAssemblyTargetInfo,
+diff --git a/compiler/rustc_target/src/callconv/klausscpu.rs b/compiler/rustc_target/src/callconv/klausscpu.rs
+new file mode 100644
+index 00000000..2f647ca0
+--- /dev/null
++++ b/compiler/rustc_target/src/callconv/klausscpu.rs
+@@ -0,0 +1,54 @@
++// KlaussCPU calling convention.
++//
++// Mirrors clang's DefaultABIInfo for the klausscpu-unknown-elf target (the
++// LLVM fork's clang has no custom TargetCodeGenInfo), so Rust and C agree at
++// FFI boundaries:
++//   - scalar arguments/returns are passed direct, with sub-word integers
++//     extended to the 64-bit GPR width (the backend's CC_KlaussCPU promotes
++//     i8/i16/i32 to i64 via CCPromoteToType);
++//   - aggregates are passed and returned indirectly (byval pointer / sret);
++//   - i128 stays direct: the LLVM type legalizer splits it into two i64s
++//     (returned in R12+R11 per RetCC_KlaussCPU).
++
++use rustc_abi::TyAbiInterface;
++
++use crate::callconv::{ArgAbi, FnAbi};
++
++fn classify_ret<Ty>(ret: &mut ArgAbi<'_, Ty>) {
++    if ret.layout.is_aggregate() {
++        ret.make_indirect();
++    } else {
++        ret.extend_integer_width_to(64);
++    }
++}
++
++fn classify_arg<'a, Ty, C>(cx: &C, arg: &mut ArgAbi<'a, Ty>)
++where
++    Ty: TyAbiInterface<'a, C> + Copy,
++{
++    if arg.layout.pass_indirectly_in_non_rustic_abis(cx) {
++        arg.make_indirect();
++        return;
++    }
++    if arg.layout.is_aggregate() {
++        arg.make_indirect();
++    } else {
++        arg.extend_integer_width_to(64);
++    }
++}
++
++pub(crate) fn compute_abi_info<'a, Ty, C>(cx: &C, fn_abi: &mut FnAbi<'a, Ty>)
++where
++    Ty: TyAbiInterface<'a, C> + Copy,
++{
++    if !fn_abi.ret.is_ignore() {
++        classify_ret(&mut fn_abi.ret);
++    }
++
++    for arg in fn_abi.args.iter_mut() {
++        if arg.is_ignore() {
++            continue;
++        }
++        classify_arg(cx, arg);
++    }
++}
+diff --git a/compiler/rustc_target/src/callconv/mod.rs b/compiler/rustc_target/src/callconv/mod.rs
+index b3f7efb4..907e8327 100644
+--- a/compiler/rustc_target/src/callconv/mod.rs
++++ b/compiler/rustc_target/src/callconv/mod.rs
+@@ -17,6 +17,7 @@
+ mod bpf;
+ mod csky;
+ mod hexagon;
++mod klausscpu;
+ mod loongarch;
+ mod m68k;
+ mod mips;
+@@ -719,6 +720,7 @@ pub fn adjust_for_foreign_abi<C>(&mut self, cx: &C, abi: ExternAbi)
+             Arch::RiscV32 | Arch::RiscV64 => riscv::compute_abi_info(cx, self),
+             Arch::Wasm32 | Arch::Wasm64 => wasm::compute_abi_info(cx, self),
+             Arch::Bpf => bpf::compute_abi_info(cx, self),
++            Arch::Other(name) if name == "klausscpu" => klausscpu::compute_abi_info(cx, self),
+             arch @ (Arch::SpirV | Arch::Other(_)) => {
+                 panic!("no lowering implemented for {arch}")
+             }
+-- 
+2.50.1 (Apple Git-155)
+

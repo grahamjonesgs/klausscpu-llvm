@@ -1,0 +1,81 @@
+From 4b7914b51a5ee86f6681003f7d02fb4b71ae632e Mon Sep 17 00:00:00 2001
+From: Graham Jones <grahamjonesgs@gmail.com>
+Date: Fri, 12 Jun 2026 12:27:32 +0200
+Subject: [PATCH 2/2] llvm-wrapper: relax six LLVM 23 guards our trunk snapshot
+ predates
+
+rust master's LLVM_VERSION_GE(23,0) guards in PassWrapper.cpp were
+written against a newer LLVM 23 trunk than the klausscpu-llvm fork's
+snapshot: getMCSubtargetInfo() still returns a pointer there, and
+CfiFunctionIndex still exposes symbols() rather than
+getExportedThinLTOGUIDs(); OptimizationLevel::Os/Oz still exist.
+Bump those six guards to LLVM_VERSION_GE(24,0) so the pre-change
+branches compile. The DeadOnReturnInfo guard is left at 23 (the fork
+has that API). Re-audit on every fork rebase.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+---
+ compiler/rustc_llvm/llvm-wrapper/PassWrapper.cpp | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/compiler/rustc_llvm/llvm-wrapper/PassWrapper.cpp b/compiler/rustc_llvm/llvm-wrapper/PassWrapper.cpp
+index 5dcaa5f6..973c6094 100644
+--- a/compiler/rustc_llvm/llvm-wrapper/PassWrapper.cpp
++++ b/compiler/rustc_llvm/llvm-wrapper/PassWrapper.cpp
+@@ -91,7 +91,7 @@ extern "C" void LLVMRustTimeTraceProfilerFinish(const char *FileName) {
+ extern "C" bool LLVMRustHasFeature(LLVMTargetMachineRef TM,
+                                    const char *Feature) {
+   TargetMachine *Target = unwrap(TM);
+-#if LLVM_VERSION_GE(23, 0)
++#if LLVM_VERSION_GE(24, 0) // klausscpu: our LLVM 23 trunk snapshot predates this API change
+   const MCSubtargetInfo &MCInfo = Target->getMCSubtargetInfo();
+ #else
+   const MCSubtargetInfo &MCInfo = *Target->getMCSubtargetInfo();
+@@ -189,7 +189,7 @@ static OptimizationLevel fromRust(LLVMRustPassBuilderOptLevel Level) {
+     return OptimizationLevel::O2;
+   case LLVMRustPassBuilderOptLevel::O3:
+     return OptimizationLevel::O3;
+-#if LLVM_VERSION_GE(23, 0)
++#if LLVM_VERSION_GE(24, 0) // klausscpu: our LLVM 23 trunk snapshot predates this API change
+   case LLVMRustPassBuilderOptLevel::Os:
+     return OptimizationLevel::O2;
+   case LLVMRustPassBuilderOptLevel::Oz:
+@@ -278,7 +278,7 @@ static llvm::DebugCompressionType fromRust(LLVMRustCompressionKind Kind) {
+ extern "C" void LLVMRustPrintTargetCPUs(LLVMTargetMachineRef TM,
+                                         RustStringRef OutStr) {
+   ArrayRef<SubtargetSubTypeKV> CPUTable =
+-#if LLVM_VERSION_GE(23, 0)
++#if LLVM_VERSION_GE(24, 0) // klausscpu: our LLVM 23 trunk snapshot predates this API change
+       unwrap(TM)->getMCSubtargetInfo().getAllProcessorDescriptions();
+ #else
+       unwrap(TM)->getMCSubtargetInfo()->getAllProcessorDescriptions();
+@@ -294,7 +294,7 @@ extern "C" void LLVMRustPrintTargetCPUs(LLVMTargetMachineRef TM,
+ 
+ extern "C" size_t LLVMRustGetTargetFeaturesCount(LLVMTargetMachineRef TM) {
+   const TargetMachine *Target = unwrap(TM);
+-#if LLVM_VERSION_GE(23, 0)
++#if LLVM_VERSION_GE(24, 0) // klausscpu: our LLVM 23 trunk snapshot predates this API change
+   const MCSubtargetInfo &MCInfo = Target->getMCSubtargetInfo();
+ #else
+   const MCSubtargetInfo &MCInfo = *Target->getMCSubtargetInfo();
+@@ -308,7 +308,7 @@ extern "C" void LLVMRustGetTargetFeature(LLVMTargetMachineRef TM, size_t Index,
+                                          const char **Feature,
+                                          const char **Desc) {
+   const TargetMachine *Target = unwrap(TM);
+-#if LLVM_VERSION_GE(23, 0)
++#if LLVM_VERSION_GE(24, 0) // klausscpu: our LLVM 23 trunk snapshot predates this API change
+   const MCSubtargetInfo &MCInfo = Target->getMCSubtargetInfo();
+ #else
+   const MCSubtargetInfo &MCInfo = *Target->getMCSubtargetInfo();
+@@ -1503,7 +1503,7 @@ extern "C" void LLVMRustComputeLTOCacheKey(RustStringRef KeyOut,
+   DenseSet<GlobalValue::GUID> CfiFunctionDecls;
+ 
+   // Based on the 'InProcessThinBackend' constructor in LLVM
+-#if LLVM_VERSION_GE(23, 0)
++#if LLVM_VERSION_GE(24, 0) // klausscpu: our LLVM 23 trunk snapshot predates this API change
+   CfiFunctionDefs.insert_range(
+       Data->Index.cfiFunctionDefs().getExportedThinLTOGUIDs());
+   CfiFunctionDecls.insert_range(
+-- 
+2.50.1 (Apple Git-155)
+

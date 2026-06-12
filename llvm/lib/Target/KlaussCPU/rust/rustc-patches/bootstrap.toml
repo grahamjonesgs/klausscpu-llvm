@@ -1,0 +1,22 @@
+# KlaussCPU rustc build — links against the klausscpu-llvm fork.
+# See llvm/lib/Target/KlaussCPU/RUST_PLAN.md in that repo (§2).
+
+profile = "compiler"
+change-id = "ignore"
+
+[llvm]
+download-ci-llvm = false
+
+[target.x86_64-apple-darwin]
+llvm-config = "/Users/gjonesblackcyton/Documents/src/llvm-project/build/bin/llvm-config"
+
+[rust]
+# Keep LLVM assertions visible; debuginfo off for build speed.
+debug = false
+codegen-units = 0
+incremental = true
+
+[build]
+# stage1 compiler + std for the host is all M1 needs.
+extended = false
+docs = false

@@ -1,0 +1,18 @@
+# Builds a staticlib only — no link step here. build-llext.sh does the
+# `ld.lld -r` partial link into the final ET_REL .llext.
+
+[build]
+target = "../klausscpu-unknown-none-elf.json"
+
+[unstable]
+build-std = ["core", "alloc"]
+# Replaces the default feature set (an empty list is ignored by cargo):
+# - drops compiler-builtins-mem, so mem* stay undefined and resolve against
+#   the kernel's exports at load time (one shared mem* impl, no float/libm
+#   avalanche through the builtins mem CGU);
+# - optimize_for_size tunes core (fmt etc.) for embedded code size.
+build-std-features = ["optimize_for_size"]
+json-target-spec = true
+
+[target.klausscpu-unknown-none-elf]
+rustflags = ["-Zunstable-options"]
