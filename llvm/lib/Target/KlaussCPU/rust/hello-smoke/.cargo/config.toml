@@ -1,0 +1,16 @@
+# Machine-local paths: the fork's ld.lld and the runtime repo's linker script.
+# (M1 smoke test only — the real crate workspace lands in klausscpu-runtime.)
+
+[build]
+target = "../klausscpu-unknown-none-elf.json"
+
+[unstable]
+build-std = ["core"]
+json-target-spec = true
+
+[target.klausscpu-unknown-none-elf]
+rustflags = [
+    "-Zunstable-options",
+    "-C", "linker=/Users/gjonesblackcyton/Documents/src/llvm-project/build/bin/ld.lld",
+    "-C", "link-arg=-T/Users/gjonesblackcyton/Documents/src/klausscpu-runtime/klausscpu.ld",
+]

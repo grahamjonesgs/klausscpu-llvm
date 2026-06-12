@@ -505,7 +505,7 @@ choice.)
 
 | Milestone | Contents | Depends on |
 |---|---|---|
-| **M1** | rustc fork builds vs this LLVM; `klausscpu-unknown-none-elf` target; no_std hello on hardware | — |
+| **M1** ✅ | **Hardware-confirmed 2026-06-12.** stage1 rustc 1.98-dev vs this LLVM; JSON target spec + `Arch::Other` (no built-in target needed); `rust/hello-smoke` ran on the board (7-seg `0x518C9058` = const-folded `mix()`, LEDs mirror switches⊕0x55). rustc fork: `~/Documents/src/klausscpu-rust`, branch `klausscpu` | — |
 | **M2** | build-std core+alloc; allocator; `klauss-{sys,io,mmio,rt}`; backend pattern audit (§3.5) + `.ll` tests | M1 |
 | **M3** | Rust `.llext` via `run` on Zephyr; `klauss-llext-rt`; export-table checks; test ladder 1–3 | M2 + §6.6 |
 | **M4** | `klauss-fs`; adventure-rs; docs (`RUST.md` in runtime repo); CI job building all examples | M3 |
