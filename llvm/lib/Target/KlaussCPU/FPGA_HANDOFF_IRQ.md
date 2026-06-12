@@ -6,6 +6,17 @@
 `claude/rust-klauss-cpu-llvm-jasibj`; companion doc: `RUST_PLAN.md` §3.2).
 **Date**: 2026-06-12
 
+> **STATUS: RESOLVED 2026-06-12** — see `FPGA_HANDOFF_IRQ_RESPONSE.md`.
+> All four questions confirmed (multi-cycle FSM core: IRQs dispatch only at
+> the instruction boundary; mask writes are zero-window, no fence needed).
+> §7's `IEXCHR` opcode is dead — do not build it. The response also corrects
+> two §3.1 rows: `INT_MASK` bit 1 is *not* ethernet yet (bits 1–3 reserved
+> until Phase 6), and `0xF00F_0038` is the timer *period* counter, not
+> free-running (free-running time = `0xF00F_0040` `CLOCK_MS`, 64-bit ms);
+> plus `0xF00F_0030` = `TIMER_PERIOD`, and `INT_PEND` clears on dispatch
+> (entry), not IRET. The confirmed contract is mirrored in `RUST_PLAN.md`
+> §3.2; the questions below are kept as-asked for the record.
+
 ---
 
 ## 1. Why this matters (one paragraph)

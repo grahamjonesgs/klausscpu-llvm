@@ -193,14 +193,15 @@ ALU incl. MULH (used by 128-bit multiply), divide/modulo, variable shifts,
 sub-word loads/stores with sign/zero extension, indirect call/branch (function
 pointers, vtables, jump tables), and i128 via register pairs.
 
-### 3.2 Interrupt masking — already exists (MMIO), needs confirmation not opcodes
+### 3.2 Interrupt masking — MMIO, contract **CONFIRMED** by the FPGA session
 
 - **What exists**: a flat MMIO interrupt controller at `0xF00F_0000`
   (`INT_MASK` bitmask, `INT_PEND`, `INT_VEC(n)` vectors); interrupt entry
-  pushes an 8-byte IRET frame (PC + flags/`INT_MASK`) and clears the mask;
-  `IRET (0x6011)` atomically restores both. Zephyr's `arch_irq_lock()` is
-  already a read-then-clear of `INT_MASK`, race-free given the entry/IRET
-  save-restore (analysis in `FPGA_HANDOFF_IRQ.md` §5).
+  pushes an 8-byte IRET frame (PC + flags/`INT_MASK`) and clears the
+  dispatched source's mask bit; `IRET (0x6011)` atomically restores PC,
+  flags, and the full mask. Zephyr's `arch_irq_lock()` is already a
+  read-then-clear of `INT_MASK`, race-free given the entry/IRET save-restore
+  (analysis in `FPGA_HANDOFF_IRQ.md` §5).
 - **Why Rust cares**: with `max_atomic_width = 0`, `core::sync::atomic` types
   don't exist on the target. The ecosystem answer is the
   [`portable-atomic`](https://crates.io/crates/portable-atomic) crate with its
@@ -208,15 +209,34 @@ pointers, vtables, jump tables), and i128 via register pairs.
   masking interrupts around a plain load/store. MMIO is *ideal* for Rust here:
   `read_volatile`/`write_volatile` on `INT_MASK` compiles from pure stable
   Rust — no builtins, no `asm!`, no C shim.
-- **What's needed from hardware**: confirmation of the contract (mask-write
-  takes effect synchronously; entry/IRET save-restore semantics; pending IRQs
-  latched while masked; IRET-word bit layout) — **not new opcodes**. The
-  questions and acceptance tests are in **`FPGA_HANDOFF_IRQ.md`** (Q1–Q4). An
-  atomic `IEXCHR` opcode is sketched there as a fallback only if the
-  synchronous-write guarantee can't be met.
-- **Toolchain plumbing**: `klauss-critical-section` crate (pure Rust over
-  `INT_MASK`) implementing the `critical-section` trait; `portable-atomic` on
-  top; Zephyr's `arch_irq_lock()` already matches the same contract.
+- **Confirmed contract** (`FPGA_HANDOFF_IRQ_RESPONSE.md`, 2026-06-12 — all
+  four questions confirmed; the core is a multi-cycle FSM, so IRQs dispatch
+  only at the instruction boundary):
+  - **Q1**: mask writes are zero-window — the mask updates *before* the store
+    retires; **no read-back fence needed**; the §5 sequence is correct as
+    written. The `IEXCHR` fallback opcode is dead — do not build it.
+  - **Q2**: entry stacks the pre-entry mask; IRET restores PC + flags + mask
+    on one edge. Rule: **an ISR changes the mask persistently by patching
+    frame bits [42:39]**, never by direct MMIO write (IRET overwrites it).
+  - **Q3**: entry clears only the dispatched source's bit (ISRs are nestable
+    by other sources once sources 1–3 are wired — today only source 0/timer
+    exists); pending is latched while masked and **coalesced** (N events →
+    one delivery); reads are side-effect-free; a source with vector 0 never
+    dispatches.
+  - **Q4**: IRET high word: `hi[10:7]` = 4-bit `INT_MASK` (frame bits
+    [42:39]), `hi[6:0]` = flags (zero/equal/carry/overflow/sign/less/ult),
+    low 32 = resume PC. `0x80` = mask bit 0 set, flags clear.
+  - Register-map corrections that matter to runtime code: `INT_MASK` bit 1
+    is **not** ethernet yet (bits 1–3 reserved until Phase 6 wiring);
+    `0xF00F_0030` = `TIMER_PERIOD`; `0xF00F_0038` is the timer **period
+    counter** (wraps every rollover — *not* free-running); free-running time
+    is `0xF00F_0040` `CLOCK_MS` (64-bit ms, read with `MEMGET64`).
+- **Toolchain plumbing (unblocked)**: `klauss-critical-section` crate (pure
+  Rust over `INT_MASK`) implementing the `critical-section` trait;
+  `portable-atomic` on top; Zephyr's `arch_irq_lock()` already matches the
+  same contract. Known follow-up in `klausscpu-runtime`: Zephyr's
+  `arch_k_cycle_get_32()` reads `0xF00F_0038` as if free-running — it must
+  move to `CLOCK_MS`-derived time (or period-counter + tick accumulation).
 
 ### 3.3 Optional (performance / future, not needed for this plan)
 
@@ -489,7 +509,7 @@ choice.)
 | **M2** | build-std core+alloc; allocator; `klauss-{sys,io,mmio,rt}`; backend pattern audit (§3.5) + `.ll` tests | M1 |
 | **M3** | Rust `.llext` via `run` on Zephyr; `klauss-llext-rt`; export-table checks; test ladder 1–3 | M2 + §6.6 |
 | **M4** | `klauss-fs`; adventure-rs; docs (`RUST.md` in runtime repo); CI job building all examples | M3 |
-| **M5** (opt) | `klauss-critical-section` over MMIO `INT_MASK` → `portable-atomic` (`Arc` etc.); `asm!`; disassembler; std PAL | §3.2 contract confirmed (`FPGA_HANDOFF_IRQ.md`) |
+| **M5** (opt) | `klauss-critical-section` over MMIO `INT_MASK` → `portable-atomic` (`Arc` etc.); `asm!`; disassembler; std PAL | none — §3.2 contract confirmed 2026-06-12; can start any time after M2 |
 
 **Risks & mitigations**
 
@@ -515,4 +535,4 @@ choice.)
 | **this fork (klausscpu-llvm)** | §3.5 isel pattern audit + tests; optional Disassembler; (later) IRQ-mask opcodes + builtins; no relocation/ABI changes |
 | **new `klausscpu-rust`** (rust-lang/rust fork) | LLVM component wiring; built-in target spec(s); `callconv/klausscpu.rs`; (later) `asm/klausscpu.rs` |
 | **klausscpu-runtime** | `rust/` workspace (crates §5, examples, xtask packaging §6.1); `libklauss_ioshim.a`; Zephyr: wire `elf.c`, extend `llext_exports.c`, heap config |
-| **hardware (Verilog)** | nothing required; confirm the existing MMIO `INT_MASK` contract per `FPGA_HANDOFF_IRQ.md` (Q1–Q4); optional `IEXCHR` opcode only as fallback |
+| **hardware (Verilog)** | nothing — MMIO `INT_MASK` contract confirmed (`FPGA_HANDOFF_IRQ_RESPONSE.md`); `IEXCHR` fallback dead; board run of `test_irq_mask.c` T1–T4 as regression anchor when IRQ sources 1–3 get wired |
