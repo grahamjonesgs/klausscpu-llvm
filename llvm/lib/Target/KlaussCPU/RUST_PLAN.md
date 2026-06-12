@@ -193,23 +193,30 @@ ALU incl. MULH (used by 128-bit multiply), divide/modulo, variable shifts,
 sub-word loads/stores with sign/zero extension, indirect call/branch (function
 pointers, vtables, jump tables), and i128 via register pairs.
 
-### 3.2 Strongly recommended: interrupt-mask control instructions
+### 3.2 Interrupt masking — already exists (MMIO), needs confirmation not opcodes
 
-- **What**: read-modify IRQ enable state from software, e.g.
-  `GETIE rd` / `SETIE rs` (or a single `CSRSWAP`-style op). The RTOS notes
-  already list this as the blocker for preemptive scheduling; `IRET (0x6011)`
-  exists but mask control does not.
+- **What exists**: a flat MMIO interrupt controller at `0xF00F_0000`
+  (`INT_MASK` bitmask, `INT_PEND`, `INT_VEC(n)` vectors); interrupt entry
+  pushes an 8-byte IRET frame (PC + flags/`INT_MASK`) and clears the mask;
+  `IRET (0x6011)` atomically restores both. Zephyr's `arch_irq_lock()` is
+  already a read-then-clear of `INT_MASK`, race-free given the entry/IRET
+  save-restore (analysis in `FPGA_HANDOFF_IRQ.md` §5).
 - **Why Rust cares**: with `max_atomic_width = 0`, `core::sync::atomic` types
   don't exist on the target. The ecosystem answer is the
   [`portable-atomic`](https://crates.io/crates/portable-atomic) crate with its
   `critical-section` feature: on single-core it emulates every atomic by
-  masking interrupts around a plain load/store. That requires a sound,
-  cheap IRQ-disable/restore primitive. This unblocks `Arc`, channels, `static`
-  cells, most of the async ecosystem — without touching the LLVM backend.
-- **Plumbing once hardware ships**: two new opcodes in `KlaussCPUInstrInfo.td`
-  + two `__builtin_klausscpu_*` builtins (same recipe as Step 22), a
-  `critical-section` impl crate (`klauss-critical-section`), and Zephyr's
-  `arch_irq_lock()` migrates onto it.
+  masking interrupts around a plain load/store. MMIO is *ideal* for Rust here:
+  `read_volatile`/`write_volatile` on `INT_MASK` compiles from pure stable
+  Rust — no builtins, no `asm!`, no C shim.
+- **What's needed from hardware**: confirmation of the contract (mask-write
+  takes effect synchronously; entry/IRET save-restore semantics; pending IRQs
+  latched while masked; IRET-word bit layout) — **not new opcodes**. The
+  questions and acceptance tests are in **`FPGA_HANDOFF_IRQ.md`** (Q1–Q4). An
+  atomic `IEXCHR` opcode is sketched there as a fallback only if the
+  synchronous-write guarantee can't be met.
+- **Toolchain plumbing**: `klauss-critical-section` crate (pure Rust over
+  `INT_MASK`) implementing the `critical-section` trait; `portable-atomic` on
+  top; Zephyr's `arch_irq_lock()` already matches the same contract.
 
 ### 3.3 Optional (performance / future, not needed for this plan)
 
@@ -482,7 +489,7 @@ choice.)
 | **M2** | build-std core+alloc; allocator; `klauss-{sys,io,mmio,rt}`; backend pattern audit (§3.5) + `.ll` tests | M1 |
 | **M3** | Rust `.llext` via `run` on Zephyr; `klauss-llext-rt`; export-table checks; test ladder 1–3 | M2 + §6.6 |
 | **M4** | `klauss-fs`; adventure-rs; docs (`RUST.md` in runtime repo); CI job building all examples | M3 |
-| **M5** (opt) | IRQ-mask opcodes → `critical-section` → `portable-atomic` (`Arc` etc.); `asm!`; disassembler; std PAL | hardware §3.2 |
+| **M5** (opt) | `klauss-critical-section` over MMIO `INT_MASK` → `portable-atomic` (`Arc` etc.); `asm!`; disassembler; std PAL | §3.2 contract confirmed (`FPGA_HANDOFF_IRQ.md`) |
 
 **Risks & mitigations**
 
@@ -508,4 +515,4 @@ choice.)
 | **this fork (klausscpu-llvm)** | §3.5 isel pattern audit + tests; optional Disassembler; (later) IRQ-mask opcodes + builtins; no relocation/ABI changes |
 | **new `klausscpu-rust`** (rust-lang/rust fork) | LLVM component wiring; built-in target spec(s); `callconv/klausscpu.rs`; (later) `asm/klausscpu.rs` |
 | **klausscpu-runtime** | `rust/` workspace (crates §5, examples, xtask packaging §6.1); `libklauss_ioshim.a`; Zephyr: wire `elf.c`, extend `llext_exports.c`, heap config |
-| **hardware (Verilog)** | nothing required; recommended: IRQ-mask control instructions (§3.2) — already on the RTOS roadmap |
+| **hardware (Verilog)** | nothing required; confirm the existing MMIO `INT_MASK` contract per `FPGA_HANDOFF_IRQ.md` (Q1–Q4); optional `IEXCHR` opcode only as fallback |
