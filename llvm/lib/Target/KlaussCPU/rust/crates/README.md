@@ -20,30 +20,38 @@ addresses, the console, the allocator, and the startup/panic glue.
 
 | Example | Kind | Crates used | Build |
 |---|---|---|---|
-| `examples/blinky` | bare-metal ELF | mmio + rt + io/uart | `cargo build -p blinky --release` → `target/.../blinky` |
-| `examples/ext-hello` | Zephyr `.llext` | llext-rt + io/kernel (alloc) | `examples/ext-hello/build-llext.sh` → `ext_hello.llext` |
+| `examples/blinky` | bare-metal ELF | mmio + rt + io/uart | `../klauss-build elf blinky` |
+| `examples/ext-hello` | Zephyr `.llext` | llext-rt + io/kernel (alloc) | `../klauss-build llext ext-hello` |
 
-Set `RUSTC` to the stage1 compiler first:
+## Building — use the `klauss-build` driver
+
+[`../klauss-build`](../klauss-build) drives both flavors with one interface,
+baking in the bits that are easy to get wrong by hand (the llext section-merge,
+the weak-`mem*` strip, the loader invariant + import checks). Point it at the
+stage1 rustc once (the only required external path); everything else is
+discovered relative to the repo:
 
 ```sh
-export RUSTC=<klausscpu-rust>/build/x86_64-apple-darwin/stage1/bin/rustc
+cp ../.klaussbuild.env.sample ../.klaussbuild.env   # then edit KLAUSSCPU_RUSTC
+../klauss-build elf   blinky        # -> examples/blinky/blinky.elf + .bin
+../klauss-build llext ext-hello     # -> examples/ext-hello/ext_hello.llext
+../klauss-build all                 # both
 ```
 
-## Build one example at a time
+`KLAUSSCPU_RUNTIME` (optional) makes the llext build cross-check every import
+against the kernel's `ssh/llext_exports.c`, catching a missing export on the
+host instead of as a load failure on the board.
+
+### Why per-package, and the two flavors
 
 The `klauss-io` sink features `uart` and `kernel` are **mutually exclusive**
-(a program has one console). So build examples *individually* with `-p`:
-a whole-workspace `cargo build` would unify `klauss-io` to both features and
-trip the `compile_error!` guard. That guard is deliberate — it also catches a
-program that forgets to pick a sink.
-
-`build.target`, `build-std`, and the linker flags live in
-`.cargo/config.toml` (shared). The bare-metal default keeps
-`compiler-builtins-mem` (binaries link standalone); `ext-hello`'s build script
-overrides it with `-Z build-std-features=optimize_for_size` so `mem*` resolve
-against the kernel exports. Toolchain paths default to the machine-local
-`build/bin`; override with `KLAUSSCPU_LLVM_BIN`. See `../README.md` for the
-full rebuild-from-clone guide.
+(a program has one console), so the driver builds one package at a time — a
+whole-workspace `cargo build` would unify `klauss-io` to both and trip the
+`compile_error!` guard (which also catches a program that forgot to pick a
+sink). The flavors differ in `build-std-features`: bare-metal keeps
+`compiler-builtins-mem` (binaries link standalone), the llext drops it so
+`mem*` resolve against the kernel — the driver handles both. `.cargo/config.toml`
+holds only machine-independent settings; the driver injects the linker paths.
 
 ## Migration note
 

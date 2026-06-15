@@ -12,6 +12,9 @@ directory:
 | `hello-uart/` | bare-metal UART hello via `core::fmt` + C shim (M2 artifact) |
 | `hello-ext/` | Zephyr LLEXT extension with `alloc` over the kernel heap (M3 artifact); `build-llext.sh` is the packaging pipeline |
 | `crates/` | the `klauss-*` reusable library crates (a Cargo workspace) + `blinky`/`ext-hello` examples built from them — see `crates/README.md` |
+| `klauss-build` | one driver for both flavors (`elf` / `llext`), with path discovery, section-merge, and loader/import verification baked in |
+| `klausscpu.ld` | bundled bare-metal linker script (mirror of the runtime's; makes bare-metal links self-contained) |
+| `.klaussbuild.env.sample` | template for the machine-local `.klaussbuild.env` (gitignored) the driver sources |
 
 Pinned versions (re-verify on any change — see "Rebasing" below):
 
@@ -52,9 +55,7 @@ their absence fails the rustc build at minute 3 with confusing errors.
 
 > **Path note:** the checked-in `.cargo/config.toml` files and
 > `build-llext.sh` default to the toolchain at
-> `~/Documents/src/llvm-project/build/bin` (historical name; on the original
-> machine `llvm-project` is a symlink to this repo). Either recreate that
-> symlink (`ln -s klausscpu-llvm ~/Documents/src/llvm-project`), or adjust
+> `~/Documents/src/klausscpu-llvm/build/bin`. On a different machine, adjust
 > the paths / set `KLAUSSCPU_LLVM_BIN`. They also reference
 > `~/Documents/src/klausscpu-runtime/klausscpu.ld` for bare-metal links.
 
@@ -81,32 +82,35 @@ The stage1 sysroot contains a `rust-src` link automatically — that is what
 
 ## 3. Build the example crates
 
-All builds use the host nightly **cargo** driving the **stage1 rustc**:
+**Preferred path — the `klauss-build` driver** ([`klauss-build`](klauss-build)).
+It builds both flavors with one interface, discovering toolchain paths relative
+to the repo and baking in the steps that are easy to get wrong by hand (the
+llext section-merge, weak-`mem*` strip, loader invariant + import checks). Set
+the one required external path once:
+
+```sh
+cp .klaussbuild.env.sample .klaussbuild.env   # edit KLAUSSCPU_RUSTC (stage1 rustc)
+./klauss-build elf   blinky        # -> crates/examples/blinky/blinky.elf + .bin
+./klauss-build llext ext-hello     # -> crates/examples/ext-hello/ext_hello.llext
+./klauss-build all                 # both
+```
+
+It operates on the `crates/` workspace; see `crates/README.md`. Setting
+`KLAUSSCPU_RUNTIME` additionally cross-checks every llext import against the
+kernel's `ssh/llext_exports.c`.
+
+**Standalone `hello-*` crates** (legacy reference, predate the workspace) build
+directly. Bare metal → a normal ELF for the `klausscc` serial loader:
 
 ```sh
 export RUSTC=<klausscpu-rust>/build/x86_64-apple-darwin/stage1/bin/rustc
-```
-
-**Bare metal** (`hello-smoke/`, `hello-uart/`) — produces a normal ELF for
-the `klausscc` serial loader:
-
-```sh
 cd hello-uart && cargo +nightly build --release
 cp target/klausscpu-unknown-none-elf/release/hello-uart hello-uart.elf
-# klausscc -e hello-uart.elf --serial /dev/tty.usbserial-...
 ```
 
-**LLEXT extension** (`hello-ext/`) — produces an ELFCLASS32 `ET_REL`
-loadable by the Zephyr SSH `run` command:
-
-```sh
-cd hello-ext && ./build-llext.sh     # → hello_rs.llext (~31 KB)
-# copy to SD, then over SSH:  run hello_rs.llext
-```
-
-`build-llext.sh` honors `KLAUSSCPU_LLVM_BIN` and `KLAUSSCPU_RUSTC`, and
-self-verifies the loader invariants (ET_REL/ELF32/EM_KLAUSSCPU, only
-ABS32/ABS64/PCREL32 relocations, imports, `main` present).
+LLEXT extension → `cd hello-ext && ./build-llext.sh` (→ `hello_rs.llext`); the
+script self-verifies the loader invariants and now also does the section-merge
+(see the gotcha below).
 
 ## 4. Gotchas (each cost real debugging time)
 
@@ -124,6 +128,15 @@ ABS32/ABS64/PCREL32 relocations, imports, `main` present).
   mem* resolve against the kernel exports; and `ld.lld -r -u main` against
   the archive (member selection — `-r` cannot gc-sections). Skipping any of
   these turns 31 KB into 1.3 MB.
+- **Rust `.llext` must merge per-function sections** (hardware-confirmed
+  2026-06-15). Rust defaults to function-sections → 100+ `.text.<mangled>`
+  sections; the KlaussCPU LLEXT loader only handles a C-like single-`.text`
+  layout and mis-relocates internal cross-section calls (target resolves to
+  `0` → `PC=0` crash *after* the first print, which only used the external
+  `putchar`). The fix is the `-T crates/llext-merge.ld` step in the
+  `build-llext.sh` scripts — it collapses everything to `.text`/`.rodata`.
+  Crash signature: `PC=0`/`RA=0`, dies right after the first external-only
+  output line.
 - **`lib.rmeta is neither ET_REL nor LLVM bitcode`** warnings from ld.lld
   are benign (metadata members in rlibs).
 - **Extension panics park the SSH connection thread** (no `llext_exit`

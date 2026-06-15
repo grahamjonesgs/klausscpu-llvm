@@ -3,7 +3,7 @@
 # then verify every invariant the Zephyr LLEXT loader relies on.
 set -e
 
-BIN=${KLAUSSCPU_LLVM_BIN:-/Users/gjonesblackcyton/Documents/src/llvm-project/build/bin}
+BIN=${KLAUSSCPU_LLVM_BIN:-/Users/gjonesblackcyton/Documents/src/klausscpu-llvm/build/bin}
 RUSTC=${KLAUSSCPU_RUSTC:-/Users/gjonesblackcyton/Documents/src/klausscpu-rust/build/x86_64-apple-darwin/stage1/bin/rustc}
 CARGO=${CARGO:-"$HOME/.cargo/bin/cargo"}
 
@@ -32,7 +32,12 @@ mkdir -p "$REL/llext-ar"
 # -u main seeds archive-member selection: only the LTO'd crate object and
 # the compiler_builtins members it actually references are pulled in
 # (ld -r cannot gc-sections, so member granularity is the size control).
-"$BIN/ld.lld" -r -m elf32klausscpu -u main -o hello_rs.llext "$REL/llext-ar/nomem.a"
+# -T merges Rust's per-function sections into one .text/.rodata — the
+# KlaussCPU LLEXT loader only handles a C-like single-.text layout; with
+# 100+ sections an internal call resolves to 0 -> PC=0 crash. See
+# ../crates/llext-merge.ld (hardware-confirmed 2026-06-15).
+"$BIN/ld.lld" -r -m elf32klausscpu -u main -T "$(dirname "$0")/../crates/llext-merge.ld" \
+    -o hello_rs.llext "$REL/llext-ar/nomem.a"
 "$BIN/llvm-strip" --strip-debug --strip-unneeded hello_rs.llext
 
 echo "==> hello_rs.llext built ($(wc -c < hello_rs.llext | tr -d ' ') bytes)"

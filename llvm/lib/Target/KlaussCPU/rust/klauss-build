@@ -1,0 +1,138 @@
+#!/bin/sh
+# klauss-build — one driver for both KlaussCPU Rust build flavors.
+#
+#   klauss-build elf   <pkg>   bare-metal binary  -> <pkg>.elf + <pkg>.bin
+#   klauss-build llext <pkg>   Zephyr LLEXT object -> <pkg>.llext
+#   klauss-build all           build blinky (elf) + ext-hello (llext)
+#
+# Replaces the per-example build-llext.sh scripts and the manual
+# "cargo build + cp to .elf" dance, with the section-merge and the loader
+# invariant checks baked in so they can't be forgotten (see crates/README.md
+# and llext-merge.ld for why those matter).
+#
+# Paths are discovered relative to this repo; only the two genuinely external
+# tools need pointing at:
+#   KLAUSSCPU_RUSTC      stage1 rustc built against this LLVM fork  (required)
+#   KLAUSSCPU_LLVM_BIN   the fork's build/bin (default: <repo>/build/bin)
+#   KLAUSSCPU_LD         bare-metal linker script (default: bundled klausscpu.ld)
+#   KLAUSSCPU_RUNTIME    klausscpu-runtime root; if set, llext imports are
+#                        cross-checked against ssh/llext_exports.c (optional)
+# A machine-local rust/.klaussbuild.env (gitignored), if present, is sourced
+# first so each dev sets these once.
+set -eu
+
+# ── locate ourselves and the repo ────────────────────────────────────────
+RUSTDIR="$(cd "$(dirname "$0")" && pwd)"               # .../KlaussCPU/rust
+REPO="$(cd "$RUSTDIR/../../../../.." && pwd)"          # llvm-project repo root
+WS="$RUSTDIR/crates"                                    # the cargo workspace
+
+[ -f "$RUSTDIR/.klaussbuild.env" ] && . "$RUSTDIR/.klaussbuild.env"
+
+LLVM_BIN="${KLAUSSCPU_LLVM_BIN:-$REPO/build/bin}"
+LD_SCRIPT="${KLAUSSCPU_LD:-$RUSTDIR/klausscpu.ld}"
+MERGE_LD="$WS/llext-merge.ld"
+TARGET="klausscpu-unknown-none-elf"
+CARGO="${CARGO:-cargo}"
+
+die() { echo "klauss-build: $*" >&2; exit 1; }
+need() { [ -x "$1" ] || die "missing tool: $1 (set KLAUSSCPU_LLVM_BIN)"; }
+
+[ -n "${KLAUSSCPU_RUSTC:-}" ] || die "set KLAUSSCPU_RUSTC to the stage1 rustc \
+(see rust/README.md §2); e.g. <klausscpu-rust>/build/<host>/stage1/bin/rustc"
+[ -x "$KLAUSSCPU_RUSTC" ] || die "KLAUSSCPU_RUSTC not executable: $KLAUSSCPU_RUSTC"
+need "$LLVM_BIN/ld.lld"; need "$LLVM_BIN/llvm-readelf"; need "$LLVM_BIN/llvm-nm"
+
+# staticlib archive name for a package: lib<crate_name>.a (crate name = pkg
+# with '-' -> '_'); the .llext / .elf basename uses the same underscored form.
+crate_name() { echo "$1" | tr '-' '_'; }
+
+REL="$WS/target/$TARGET/release"
+
+# ── bare-metal ELF ───────────────────────────────────────────────────────
+build_elf() {
+    pkg="$1"; cn="$(crate_name "$pkg")"
+    [ -f "$LD_SCRIPT" ] || die "linker script not found: $LD_SCRIPT (set KLAUSSCPU_LD)"
+    echo "==> elf: $pkg"
+    ( cd "$WS"
+      RUSTC="$KLAUSSCPU_RUSTC" \
+      KLAUSSCPU_LLVM_BIN="$LLVM_BIN" \
+      RUSTFLAGS="-Zunstable-options -Clinker=$LLVM_BIN/ld.lld -Clink-arg=-T$LD_SCRIPT" \
+        "$CARGO" +nightly build -p "$pkg" --release )
+    out="$WS/examples/$pkg/$cn.elf"
+    cp "$REL/$cn" "$out" 2>/dev/null || cp "$REL/$pkg" "$out"
+    "$LLVM_BIN/llvm-objcopy" -O binary "$out" "$WS/examples/$pkg/$cn.bin"
+    # verify
+    "$LLVM_BIN/llvm-readelf" -h "$out" | grep -q "4b43" || die "$out: not EM_KLAUSSCPU"
+    "$LLVM_BIN/llvm-readelf" -h "$out" | grep -qE "Entry.*0x20$" || die "$out: entry not 0x20"
+    sz=$("$LLVM_BIN/llvm-size" "$out" | awk 'NR==2{print $1"B text"}')
+    echo "    $out  ($sz)  + $cn.bin"
+}
+
+# ── Zephyr LLEXT object ──────────────────────────────────────────────────
+build_llext() {
+    pkg="$1"; cn="$(crate_name "$pkg")"
+    [ -f "$MERGE_LD" ] || die "merge script not found: $MERGE_LD"
+    echo "==> llext: $pkg"
+    # No compiler-builtins-mem: mem* resolve against the kernel exports.
+    ( cd "$WS"
+      RUSTC="$KLAUSSCPU_RUSTC" \
+      RUSTFLAGS="-Zunstable-options" \
+        "$CARGO" +nightly build -p "$pkg" --release \
+          -Z build-std-features=optimize_for_size )
+
+    # Drop compiler_builtins members that weakly define mem* (else they drag a
+    # ~250 KB float/libm web into the image; the kernel exports mem* anyway).
+    ar="$REL/llext-ar"; rm -rf "$ar"; mkdir -p "$ar"
+    ( cd "$ar"
+      "$LLVM_BIN/llvm-ar" x "../lib$cn.a"
+      for o in *.o; do
+        "$LLVM_BIN/llvm-nm" "$o" 2>/dev/null \
+          | grep -qE "^[0-9a-f]+ [Ww] (memcpy|memset|memmove|memcmp)$" && rm "$o" || true
+      done
+      "$LLVM_BIN/llvm-ar" rcs nomem.a ./*.o )
+
+    out="$WS/examples/$pkg/$cn.llext"
+    # -u main: member selection (ld -r can't gc-sections).
+    # -T merge: collapse Rust's per-function sections to one .text/.rodata —
+    #           the KlaussCPU LLEXT loader needs a C-like single-.text layout.
+    "$LLVM_BIN/ld.lld" -r -m elf32klausscpu -u main -T "$MERGE_LD" \
+        -o "$out" "$ar/nomem.a"
+    "$LLVM_BIN/llvm-strip" --strip-debug --strip-unneeded "$out"
+
+    verify_llext "$out"
+    echo "    $out  ($(wc -c < "$out" | tr -d ' ') bytes)"
+    echo "    copy to SD, then over SSH:  run $cn.llext"
+}
+
+verify_llext() {
+    out="$1"
+    "$LLVM_BIN/llvm-readelf" -h "$out" | grep -qi "REL (Relocatable" || die "$out: not ET_REL"
+    "$LLVM_BIN/llvm-readelf" -h "$out" | grep -q "4b43" || die "$out: not EM_KLAUSSCPU"
+    # Single loaded text/rodata (merge worked) — split sections crash the loader.
+    split=$("$LLVM_BIN/llvm-readelf" -S "$out" | grep -cE '\] \.(text|rodata)\.' || true)
+    [ "$split" -eq 0 ] || die "$out: $split un-merged sections — loader will crash (PC=0)"
+    bad=$("$LLVM_BIN/llvm-readelf" -r "$out" | awk '/R_/{print $3}' | sort -u \
+            | grep -vE "R_KLAUSSCPU_(ABS32|ABS64|PCREL32)" || true)
+    [ -z "$bad" ] || die "$out: relocations the loader can't apply: $bad"
+    "$LLVM_BIN/llvm-nm" "$out" | grep -q " T main$" || die "$out: no 'main' symbol"
+    echo "    imports:" $("$LLVM_BIN/llvm-nm" -u "$out" | awk '{print $2}' | tr '\n' ' ')
+    # Optional: every import must be exported by the kernel.
+    if [ -n "${KLAUSSCPU_RUNTIME:-}" ]; then
+        exp="$KLAUSSCPU_RUNTIME/zephyr-ws/klausscpu-zephyr/ssh/llext_exports.c"
+        if [ -f "$exp" ]; then
+            for s in $("$LLVM_BIN/llvm-nm" -u "$out" | awk '{print $2}'); do
+                grep -q "EXPORT_SYMBOL($s)" "$exp" \
+                    || die "import '$s' is not EXPORT_SYMBOL'd in the kernel"
+            done
+            echo "    all imports verified against llext_exports.c"
+        fi
+    fi
+}
+
+cmd="${1:-}"; pkg="${2:-}"
+case "$cmd" in
+    elf)   [ -n "$pkg" ] || die "usage: klauss-build elf <pkg>";   build_elf "$pkg" ;;
+    llext) [ -n "$pkg" ] || die "usage: klauss-build llext <pkg>"; build_llext "$pkg" ;;
+    all)   build_elf blinky; build_llext ext-hello ;;
+    *)     die "usage: klauss-build {elf|llext} <pkg> | all" ;;
+esac

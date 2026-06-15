@@ -8,7 +8,7 @@ use std::process::Command;
 fn main() {
     let out = env::var("OUT_DIR").unwrap();
     let bin = env::var("KLAUSSCPU_LLVM_BIN").unwrap_or_else(|_| {
-        "/Users/gjonesblackcyton/Documents/src/llvm-project/build/bin".into()
+        "/Users/gjonesblackcyton/Documents/src/klausscpu-llvm/build/bin".into()
     });
 
     let status = Command::new(format!("{bin}/clang"))

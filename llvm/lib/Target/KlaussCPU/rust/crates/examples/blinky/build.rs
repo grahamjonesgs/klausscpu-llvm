@@ -7,8 +7,16 @@ use std::process::Command;
 
 fn main() {
     let out = env::var("OUT_DIR").unwrap();
+    // klauss-build exports KLAUSSCPU_LLVM_BIN; otherwise default to the fork's
+    // build/bin found relative to this crate (…/llvm/lib/Target/KlaussCPU/rust/
+    // crates/examples/blinky → 8 levels up to the repo root).
     let bin = env::var("KLAUSSCPU_LLVM_BIN").unwrap_or_else(|_| {
-        "/Users/gjonesblackcyton/Documents/src/llvm-project/build/bin".into()
+        let manifest = env::var("CARGO_MANIFEST_DIR").unwrap();
+        let repo = std::path::Path::new(&manifest)
+            .ancestors()
+            .nth(8)
+            .expect("repo root above blinky crate");
+        repo.join("build/bin").to_string_lossy().into_owned()
     });
 
     let ok = Command::new(format!("{bin}/clang"))

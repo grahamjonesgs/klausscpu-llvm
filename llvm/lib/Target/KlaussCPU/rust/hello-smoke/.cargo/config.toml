@@ -11,6 +11,6 @@ json-target-spec = true
 [target.klausscpu-unknown-none-elf]
 rustflags = [
     "-Zunstable-options",
-    "-C", "linker=/Users/gjonesblackcyton/Documents/src/llvm-project/build/bin/ld.lld",
+    "-C", "linker=/Users/gjonesblackcyton/Documents/src/klausscpu-llvm/build/bin/ld.lld",
     "-C", "link-arg=-T/Users/gjonesblackcyton/Documents/src/klausscpu-runtime/klausscpu.ld",
 ]

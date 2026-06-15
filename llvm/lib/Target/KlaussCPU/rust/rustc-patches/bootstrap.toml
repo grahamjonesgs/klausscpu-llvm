@@ -8,7 +8,7 @@ change-id = "ignore"
 download-ci-llvm = false
 
 [target.x86_64-apple-darwin]
-llvm-config = "/Users/gjonesblackcyton/Documents/src/llvm-project/build/bin/llvm-config"
+llvm-config = "/Users/gjonesblackcyton/Documents/src/klausscpu-llvm/build/bin/llvm-config"
 
 [rust]
 # Keep LLVM assertions visible; debuginfo off for build speed.
