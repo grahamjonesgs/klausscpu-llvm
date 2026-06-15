@@ -11,6 +11,7 @@ directory:
 | `hello-smoke/` | bare-metal MMIO smoke test (M1 artifact; no C runtime at all) |
 | `hello-uart/` | bare-metal UART hello via `core::fmt` + C shim (M2 artifact) |
 | `hello-ext/` | Zephyr LLEXT extension with `alloc` over the kernel heap (M3 artifact); `build-llext.sh` is the packaging pipeline |
+| `crates/` | the `klauss-*` reusable library crates (a Cargo workspace) + `blinky`/`ext-hello` examples built from them — see `crates/README.md` |
 
 Pinned versions (re-verify on any change — see "Rebasing" below):
 

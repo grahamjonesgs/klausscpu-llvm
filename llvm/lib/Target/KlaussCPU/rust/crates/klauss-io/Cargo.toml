@@ -1,0 +1,17 @@
+[package]
+name = "klauss-io"
+version = "0.1.0"
+edition = "2021"
+description = "print!/println! and a core::fmt::Write console for KlaussCPU (UART or kernel sink)"
+
+[dependencies]
+klauss-sys = { path = "../klauss-sys" }
+
+[features]
+# Exactly one sink must be selected by the consuming binary:
+#   uart   — bare-metal, bytes go through the C uart_putc shim
+#   kernel — LLEXT, bytes go through the kernel's exported putchar (the
+#            loader routes it to the calling SSH session)
+default = []
+uart = []
+kernel = []

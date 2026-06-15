@@ -1,0 +1,11 @@
+[package]
+name = "klauss-rt"
+version = "0.1.0"
+edition = "2021"
+description = "Bare-metal runtime for KlaussCPU: _start/BSS/startup-delay glue + panic handler (Rust crt0)"
+
+[features]
+# Provide the program's #[panic_handler] (LEDs = 0xAAAA, then park). Disable
+# to write your own (e.g. one that prints the panic over UART).
+default = ["panic-handler"]
+panic-handler = []

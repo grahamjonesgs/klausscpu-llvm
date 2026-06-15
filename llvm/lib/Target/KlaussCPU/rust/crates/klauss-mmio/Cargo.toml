@@ -1,0 +1,7 @@
+[package]
+name = "klauss-mmio"
+version = "0.1.0"
+edition = "2021"
+description = "Typed volatile access to KlaussCPU memory-mapped peripherals (Rust port of mmio.h)"
+
+[lib]

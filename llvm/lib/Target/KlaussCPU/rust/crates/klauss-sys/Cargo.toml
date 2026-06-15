@@ -1,0 +1,7 @@
+[package]
+name = "klauss-sys"
+version = "0.1.0"
+edition = "2021"
+description = "Raw FFI to the KlaussCPU runtime: kernel LLEXT exports + bare-metal IO shim"
+
+[lib]

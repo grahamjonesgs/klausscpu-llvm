@@ -1,0 +1,8 @@
+[package]
+name = "klauss-alloc"
+version = "0.1.0"
+edition = "2021"
+description = "Global allocator backing Rust `alloc` with the KlaussCPU runtime heap (malloc/free)"
+
+[dependencies]
+klauss-sys = { path = "../klauss-sys" }

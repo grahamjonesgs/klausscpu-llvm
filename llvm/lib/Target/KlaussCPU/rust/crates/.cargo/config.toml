@@ -1,0 +1,27 @@
+# Shared build config for every workspace member.
+#
+# Machine-local toolchain paths: the fork's ld.lld and the runtime repo's
+# bare-metal linker script. Override the LLVM bin dir for build.rs steps via
+# KLAUSSCPU_LLVM_BIN. See ../README.md.
+
+[build]
+target = "../klausscpu-unknown-none-elf.json"
+
+[unstable]
+build-std = ["core", "alloc"]
+# compiler-builtins-mem: bare-metal binaries link standalone and need their
+# own memcpy/memset. The llext example's build script overrides this on the
+# CLI (-Z build-std-features=optimize_for_size) so mem* stay undefined and
+# resolve against the kernel's exports.
+build-std-features = ["compiler-builtins-mem"]
+json-target-spec = true
+
+[target.klausscpu-unknown-none-elf]
+rustflags = [
+    "-Zunstable-options",
+    # Bare-metal binaries link here with the fork's lld + the flat linker
+    # script. The llext staticlib has no cargo link step, so these are inert
+    # for it.
+    "-C", "linker=/Users/gjonesblackcyton/Documents/src/llvm-project/build/bin/ld.lld",
+    "-C", "link-arg=-T/Users/gjonesblackcyton/Documents/src/klausscpu-runtime/klausscpu.ld",
+]

@@ -1,0 +1,12 @@
+[package]
+name = "ext-hello"
+version = "0.1.0"
+edition = "2021"
+description = "Zephyr LLEXT extension built from the klauss-* workspace crates"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+klauss-llext-rt = { path = "../../klauss-llext-rt" }
+klauss-io = { path = "../../klauss-io", features = ["kernel"] }

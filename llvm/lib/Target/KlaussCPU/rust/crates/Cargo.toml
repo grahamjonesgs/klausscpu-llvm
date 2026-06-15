@@ -1,0 +1,37 @@
+# KlaussCPU Rust support crates — a Cargo workspace.
+#
+# Library crates factor out the boilerplate the standalone examples
+# (../hello-{smoke,uart,ext}) each duplicated: MMIO addresses, the Console
+# Write impl, the global allocator, _start/BSS glue, panic handlers.
+#
+# Build for the klausscpu target via the shared .cargo/config.toml (build-std).
+# Bare-metal binaries link standalone (compiler-builtins-mem on); the llext
+# example overrides build-std-features per its build script (mem* resolve
+# against the kernel). See README.md / RUST_PLAN.md §5.
+
+[workspace]
+resolver = "2"
+members = [
+    "klauss-sys",
+    "klauss-mmio",
+    "klauss-alloc",
+    "klauss-io",
+    "klauss-rt",
+    "klauss-llext-rt",
+    "examples/blinky",
+    "examples/ext-hello",
+]
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+
+# compiler_builtins must stay split into many small archive members so the
+# llext's `ld.lld -r` (which cannot gc-sections) pulls in only the referenced
+# intrinsics. Harmless for the bare-metal binaries. (Cargo prints "did not
+# match any packages" because it is a build-std crate — the override still
+# applies; see hello-ext history.)
+[profile.release.package.compiler_builtins]
+codegen-units = 256

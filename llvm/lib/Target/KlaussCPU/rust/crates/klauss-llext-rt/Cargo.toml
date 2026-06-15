@@ -1,0 +1,10 @@
+[package]
+name = "klauss-llext-rt"
+version = "0.1.0"
+edition = "2021"
+description = "LLEXT runtime for KlaussCPU: main entry wrapper, kernel-heap allocator, panic handler"
+
+[dependencies]
+klauss-sys = { path = "../klauss-sys" }
+klauss-alloc = { path = "../klauss-alloc" }
+klauss-io = { path = "../klauss-io", features = ["kernel"] }

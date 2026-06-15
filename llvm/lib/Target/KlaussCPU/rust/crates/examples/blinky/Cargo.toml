@@ -1,0 +1,10 @@
+[package]
+name = "blinky"
+version = "0.1.0"
+edition = "2021"
+description = "Bare-metal KlaussCPU example using the klauss-* crates (MMIO + UART)"
+
+[dependencies]
+klauss-mmio = { path = "../../klauss-mmio" }
+klauss-rt = { path = "../../klauss-rt" }
+klauss-io = { path = "../../klauss-io", features = ["uart"] }
