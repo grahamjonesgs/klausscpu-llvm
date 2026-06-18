@@ -890,27 +890,48 @@ the `klausscpu-runtime` repo root; see its READMEs for build/run detail:
 
 ---
 
+## Fixed issues
+
+### Sub-i64 `va_arg` load-width reduction → MEMGET32 garble (FIXED 2026-06-18)
+- **Symptom (hardware-confirmed):** any `printf`/`cbvprintf`/`printk` with ≥2
+  variadic `%u`/`%d`/`%x` (sub-64-bit) args printed the 1st correctly then
+  garbage/zeros for the rest; 64-bit conversions (`%lu`/`%llu`/`%p`) were always
+  correct. E.g. `printk("%u %u %u %u", 0x11111111,0x22222222,0x33333333,0x44444444)`
+  → `11111111 33333333 0 0`, while the `%lu` form printed all four. System-wide,
+  affected the `gui_lvgl` startup `printk` diagnostic.
+- **Root cause:** `LowerVAARG` deliberately loads the full 8-byte slot
+  (`ldidx64`) and truncates, advancing the va_list by 8. For an `i32` va_arg the
+  result is `(trunc (ldidx64 slot))`; at `-O1`+ the DAG combiner's load-width
+  reduction (`DAGCombiner::reduceLoadWidth`, gated by `shouldReduceLoadWidth`)
+  rewrote that into a register-addressed 32-bit **`memget32`** load. `MEMGET32`
+  reads the wrong slot for va_arg's computed pointer on real silicon, so the
+  consumption mis-strided. The advance (+8) was always correct — only the load
+  was wrong, which is why `%lu` (kept as `ldidx64`) worked and `%u` did not.
+  - Earlier (2026-05) "verified correct" inspection missed this: it only checked
+    cases where the narrowing combine happened not to fire (the value stayed in a
+    live incoming register or was used as i64). The bug surfaces specifically when
+    a sub-i64 va_arg result is consumed (e.g. zero-extended into cbprintf's
+    `uintmax_t value->uint`) in a way that triggers `reduceLoadWidth`.
+- **Fix:** `KlaussCPUTargetLowering::shouldReduceLoadWidth()` returns `false`
+  (see `KlaussCPUISelLowering.h`). KlaussCPU has a single 64-bit register class,
+  so narrowing a wide load saves no register and only risks emitting the
+  divergent `MEMGET32`; keeping the wide load + truncate is always correct.
+  (BPF overrides the same hook for an analogous reason.) Normal direct `int`
+  pointer loads are unaffected (they are not a *narrowing* of a wider load).
+- **Regression test:** `llvm/test/CodeGen/KlaussCPU/varargs.ll` (`pick_u32`:
+  `i32` va_arg must emit `ldidx64`, never `memget32`). Also `runtime/programs/
+  test_varargs.c`. Requires a clang+llc rebuild and a Zephyr/runtime rebuild to
+  pick up.
+
 ## Known issues
 
-- **Zephyr *packaged* logging (`cbprintf_package`) mis-renders mixed 32/64-bit
-  conversions.** A `LOG_*` call that interleaves `%d` (32-bit) and
-  `%zd`/`%zx`/`%lx`/`%lu` (64-bit) can print garbage (e.g. `size 8589934601` =
-  `0x2_00000009`). **The compiler's `va_arg` path is NOT the cause** — see below.
-  - **Verified correct (2026-05):** `KlaussCPUTargetLowering::LowerVAARG` reads a
-    full 8-byte va_list slot and advances by 8 for every argument, matching the
-    promote-everything-to-i64 calling convention. Confirmed by codegen inspection
-    at -O0 and -O1/-Os for single / multiple-straight-line / mixed-width / loop
-    consumption (the "spurious +8 advance" seen in optimized output is the
-    compiler legitimately taking the first arg from its still-live incoming
-    register and only bumping the pointer — not an off-by-one). Regression test:
-    `runtime/programs/test_varargs.c` (`make test_varargs.elf`).
-  - **Consequence:** bare-metal picolibc `printf` and Zephyr's *direct* `cbvprintf`
-    are correct. Only the *packaged* path (`lib/os/cbprintf_packaged.c`, used by
-    deferred/immediate `LOG_*`) is affected — it packs each arg by its C-type size
-    (`sizeof(int)`=4 for `%d`) and `VA_STACK_ALIGN`, which does not match
-    KlaussCPU's uniform 8-byte vararg slots.
-  - **Status:** cosmetic and **already silenced** in the production `ssh_shell`
-    (`CONFIG_LLEXT_LOG_LEVEL_WRN`). A real fix would live in Zephyr's cbprintf
-    packaging (likely a KlaussCPU `VA_STACK_ALIGN`/arg-size definition), not the
-    LLVM backend. See the printf-format memory note (`%lu` not `%llu`, since
-    `long` is 64-bit and picolibc lacks the `ll` modifier) for related context.
+- **Zephyr *packaged* logging (`cbprintf_package`) may still mis-render mixed
+  32/64-bit conversions** independently of the above. The packaged path
+  (`lib/os/cbprintf_packaged.c`, used by deferred/immediate `LOG_*`) packs each
+  arg by its C-type size (`sizeof(int)`=4 for `%d`) and `VA_STACK_ALIGN`, which
+  does not match KlaussCPU's uniform 8-byte vararg slots. This is separate from
+  the now-fixed `va_arg` load bug — the *direct* `cbvprintf`/`printk` path is
+  fixed; verify whether the packaged path needs a KlaussCPU `VA_STACK_ALIGN`
+  definition. Production `ssh_shell` already silences it
+  (`CONFIG_LLEXT_LOG_LEVEL_WRN`). See the printf-format memory note (`%lu` not
+  `%llu`, since `long` is 64-bit and picolibc lacks the `ll` modifier).

@@ -49,6 +49,18 @@ public:
   bool isCheapToSpeculateCtlz(Type *Ty) const override { return true; }
   bool isCheapToSpeculateCttz(Type *Ty) const override { return true; }
 
+  // Never narrow a wide load into a smaller one.  KlaussCPU has a single
+  // 64-bit register class, so narrowing saves no register, and the combine
+  // turns LowerVAARG's deliberate full-8-byte-slot load + truncate
+  // ((trunc (ldidx64 slot)) for an i32 va_arg) into a register-addressed
+  // 32-bit MEMGET32 load.  MEMGET32 reads the wrong slot for va_arg's
+  // computed pointers (hardware-confirmed: mixed-width printf "%u" garbles
+  // while "%lu" via ldidx64 is correct), so always keep the wide load.
+  bool shouldReduceLoadWidth(SDNode *Load, ISD::LoadExtType ExtTy, EVT NewVT,
+                             std::optional<unsigned> ByteOffset) const override {
+    return false;
+  }
+
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                 bool IsVarArg,
                                 const SmallVectorImpl<ISD::InputArg> &Ins,

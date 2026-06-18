@@ -79,5 +79,29 @@ define i64 @first_stack_vararg(i64 %a, i64 %b, i64 %c, i64 %d, ...) {
   ret i64 %r
 }
 
+; Sub-i64 va_arg must read the FULL 8-byte slot (ldidx64) and truncate, never a
+; narrowed 32-bit MEMGET32.  The DAG combiner would otherwise reduce
+; (trunc (ldidx64 slot)) to a register-addressed MEMGET32, which reads the wrong
+; slot for va_arg's computed pointer on hardware (mixed-width printf "%u"
+; garbles).  shouldReduceLoadWidth() returns false to prevent this.
+define i64 @pick_u32(i64 %n, ...) {
+; CHECK-LABEL: pick_u32:
+; CHECK-NOT:     memget32
+; CHECK:         ldidx64
+; CHECK-NOT:     memget32
+  %ap = alloca ptr
+  call void @llvm.va_start.p0(ptr %ap)
+  %a = va_arg ptr %ap, i32
+  %b = va_arg ptr %ap, i32
+  %c = va_arg ptr %ap, i32
+  call void @llvm.va_end.p0(ptr %ap)
+  %za = zext i32 %a to i64
+  %zb = zext i32 %b to i64
+  %zc = zext i32 %c to i64
+  %s1 = add i64 %za, %zb
+  %s2 = add i64 %s1, %zc
+  ret i64 %s2
+}
+
 declare void @llvm.va_start.p0(ptr)
 declare void @llvm.va_end.p0(ptr)
