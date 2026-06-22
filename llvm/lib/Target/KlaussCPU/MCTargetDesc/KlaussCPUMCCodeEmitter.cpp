@@ -358,6 +358,8 @@ uint64_t KlaussCPUMCCodeEmitter::encode64(
   case KlaussCPU::MULV:    return fmtRV_2addr(0x00000B8, MI);
   case KlaussCPU::DIVV:    return fmtRV_2addr(0x00000B9, MI);
   case KlaussCPU::MODV:    return fmtRV_2addr(0x00000BA, MI);
+  case KlaussCPU::ROLV:    return fmtRV_2addr(0x00000FC, MI);
+  case KlaussCPU::RORV:    return fmtRV_2addr(0x00000FD, MI);
 
   // ── RV_cmp (rs, imm32) ───────────────────────────────────────────────────
   case KlaussCPU::CMPRV_I: return fmtRV_cmp(0x0000083, MI);

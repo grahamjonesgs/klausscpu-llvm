@@ -624,6 +624,10 @@ def MULV    : RV_2addr<0x00000B8, "mulv\t$rd, $imm">;
 def DIVV    : RV_2addr<0x00000B9, "divv\t$rd, $imm">;
 def MODV    : RV_2addr<0x00000BA, "modv\t$rd, $imm">;
 
+// Rotate by immediate (count = imm[5:0]).  Register-amount forms are ROLR/RORR_R.
+def ROLV    : RV_2addr<0x00000FC, "rolv\t$rd, $imm">;
+def RORV    : RV_2addr<0x00000FD, "rorv\t$rd, $imm">;
+
 // reg+imm32 add: rd = rs + sign_extend(imm32). Two distinct regs; sign-extends.
 // Replaces the SETR+ADDR two-instruction sequence for frame-address materialisation.
 // Pattern deferred: simm32_imm is not yet defined here; see isel patterns section.
@@ -635,9 +639,19 @@ def CMPRV_I : RV_cmp<0x0000083, "cmprv\t$rs, $imm"> { let hasSideEffects = 1; }
 //===----------------------------------------------------------------------===//
 // Memory: indexed load / store  (primary frame-slot instructions)
 //
-// Opcodes from opcode_select.txt (authoritative assembler source):
+// Opcodes from opcode_select.vh (authoritative hardware source — the
+// fpga/KlaussCPU/.../opcode_select.vh casez, NOT the stale klatest copies):
 //   LDIDX64  = 0x0000FC?? (64-bit indexed load)
 //   STIDX64  = 0x0000FD?? (64-bit indexed store)
+//
+// IMPORTANT: opcodes 0xFC/0xFD are the *force-aligned* hardware variants
+// (LDIDX64A/STIDX64A) — the RTL computes (rs2 + imm) & ~7 before the bus
+// access.  The non-aligned 64-bit indexed ops live at 0x0C/0x0D.  Using the
+// force-aligned form is only safe because LLVM never emits a misaligned i64
+// access: allowsMisalignedMemoryAccesses() is left at its default (false), so
+// under-aligned i64 loads/stores are expanded to byte ops by the legalizer.
+// If misaligned i64 access is ever enabled, switch these to 0x0C/0x0D first
+// (and confirm the HW handles a 64-bit read spanning two cache lines).
 //   LDIDX32  = 0x0000C0?? (32-bit indexed load, zero-extends to 64)
 //   STIDX32  = 0x0000C1?? (32-bit indexed store)
 //   LDIDX16  = 0x0000C2?? (16-bit indexed load, zero-extends to 64)
@@ -681,6 +695,59 @@ def : Pat<(i64 simm32_imm:$imm), (SETR simm32_imm:$imm)>;
 
 // Register + signed-32-bit constant addition → ADDI (one instruction).
 def : Pat<(i64 (add GPR:$rs, simm32_imm:$imm)), (ADDI GPR:$rs, simm32_imm:$imm)>;
+
+//===----------------------------------------------------------------------===//
+// Immediate-form ALU patterns
+//
+// These fold a constant operand directly into the RV_2addr / R_inplace
+// encoding, avoiding the separate SETR (8 B) that the register-register form
+// would need to materialise the constant.  This matters disproportionately on
+// KlaussCPU because the core is fetch-bound — fewer fetched words ≈ fewer
+// cycles.  The encoder (KlaussCPUMCCodeEmitter) already handles all of these
+// opcodes, so this is a pure pattern-matching addition.
+//
+// Extension semantics come straight from opcode_select.vh and gate each
+// pattern — getting these wrong would silently miscompile:
+//   SHLV/SHRV/SHRAV : shift count is imm[5:0]            → uimm6   (0–63)
+//   ANDV/ORV/XORV   : imm32 is ZERO-extended to 64 bits  → uimm32_imm (hi32==0)
+//   MULV            : imm32 is SIGN-extended to 64 bits   → simm32_imm
+// Out-of-range constants simply fall through to the register-register form.
+//===----------------------------------------------------------------------===//
+
+def uimm6      : ImmLeaf<i64, [{ return isUInt<6>(Imm); }]>;
+def uimm32_imm : ImmLeaf<i64, [{ return isUInt<32>(Imm); }]>;
+
+// Shift by a constant amount (0–63).
+def : Pat<(shl GPR:$rs, uimm6:$sh), (SHLV  GPR:$rs, uimm6:$sh)>;
+def : Pat<(srl GPR:$rs, uimm6:$sh), (SHRV  GPR:$rs, uimm6:$sh)>;
+def : Pat<(sra GPR:$rs, uimm6:$sh), (SHRAV GPR:$rs, uimm6:$sh)>;
+
+// Bitwise op with a mask that fits in unsigned 32 bits (imm is zero-extended).
+// Masks with non-zero high 32 bits fall through to SETR64 + ANDR/ORR/XORR.
+def : Pat<(and GPR:$rs, uimm32_imm:$i), (ANDV GPR:$rs, uimm32_imm:$i)>;
+def : Pat<(or  GPR:$rs, uimm32_imm:$i), (ORV  GPR:$rs, uimm32_imm:$i)>;
+def : Pat<(xor GPR:$rs, uimm32_imm:$i), (XORV GPR:$rs, uimm32_imm:$i)>;
+
+// Multiply by a signed-32 constant (imm is sign-extended).
+def : Pat<(mul GPR:$rs, simm32_imm:$i), (MULV GPR:$rs, simm32_imm:$i)>;
+
+// Rotate by a constant amount (0–63) → ROLV/RORV (count = imm[5:0]).
+def : Pat<(rotl GPR:$rs, uimm6:$sh), (ROLV GPR:$rs, uimm6:$sh)>;
+def : Pat<(rotr GPR:$rs, uimm6:$sh), (RORV GPR:$rs, uimm6:$sh)>;
+
+// (x & 0xFFFFFFFF) is exactly a 32→64 zero-extend → single 4-byte ZEXTW.
+// AddedComplexity beats the ANDV pattern above for this specific mask.
+let AddedComplexity = 3 in
+def : Pat<(and GPR:$rs, 0xFFFFFFFF), (ZEXTW GPR:$rs)>;
+
+// Cheap 4-byte in-place forms.  AddedComplexity so they win over ADDI / SHLV
+// for these specific immediates.
+let AddedComplexity = 2 in {
+def : Pat<(add GPR:$rs,  1), (INCR  GPR:$rs)>;
+def : Pat<(add GPR:$rs, -1), (DECR  GPR:$rs)>;
+def : Pat<(shl GPR:$rs,  1), (SHLR1 GPR:$rs)>;
+def : Pat<(srl GPR:$rs,  1), (SHRR1 GPR:$rs)>;
+}
 
 // Global addresses and external symbols are materialized in C++ Select()
 // via SETR (non-call uses) to avoid the "leaf node not emitted" crash.
