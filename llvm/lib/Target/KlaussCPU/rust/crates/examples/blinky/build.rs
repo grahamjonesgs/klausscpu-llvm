@@ -1,6 +1,6 @@
-// Compiles the UART C shim (the TX path is an opcode reachable only via
-// __builtin_klausscpu_*; Rust has no asm!/builtin access on this target yet).
-// Shared with the standalone hello-uart example.
+// Compiles the UART C shim. UART is memory-mapped (MMIO at 0xF001_0000), so the
+// shim is plain volatile loads/stores — no CPU I/O opcodes. Shared with the
+// standalone hello-uart example.
 
 use std::env;
 use std::process::Command;

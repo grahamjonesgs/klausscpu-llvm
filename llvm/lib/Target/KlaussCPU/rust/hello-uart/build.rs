@@ -1,6 +1,7 @@
-// Compiles the UART C shim with the fork's clang. The TXCHARMEMR transmit
-// path is only reachable via __builtin_klausscpu_* (opcodes, not MMIO), and
-// Rust has no asm!/builtin access on this target yet — see RUST_PLAN.md §5.3.
+// Compiles the UART C shim with the fork's clang. UART is memory-mapped
+// (MMIO at 0xF001_0000), so the shim is plain volatile loads/stores — no CPU
+// I/O opcodes. It stays in C only because this example has no Rust volatile-MMIO
+// wrapper wired up yet (klauss-mmio covers the typed path).
 
 use std::env;
 use std::process::Command;

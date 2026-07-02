@@ -815,7 +815,6 @@ of the 32-bit word.  The DataLayout `e` (little-endian) now matches the hardware
 |---|---|---|
 | LDIDX8 / MEMGET8 | lane N = bits[8N+7:8N] (LE) — correct | ✅ YES — `*s++` works |
 | STIDX8 / MEMSET8 | lane N = bits[8N+7:8N] (LE) — correct | ✅ YES |
-| TXSTRMEMR | scans lane 0 first = lowest address first | ✅ YES — `txstrmemr(s)` works |
 | MEMGET32 | first byte at bits[7:0], last at bits[31:24] | use with shift=0,8,16,24 |
 | LDIDX64 | 8 bytes, LE lane order | ✅ standard 64-bit load |
 
@@ -862,6 +861,87 @@ and one-instruction signed sub-word loads (`LDIDX8_S`/`LDIDX16_S`).
   monorepo `compiler-rt/lib/builtins/`) are linked by the Makefile. The
   hand-written `softfp.c` is no longer the FP runtime. Single- and double-
   precision soft-FP and 64/128-bit integer divide all work.
+
+### Step 33 ✅ Standalone assembler — `llvm-mc` with opcode_select.vh mnemonics
+- The same AsmParser used for inline asm (Step 31) now also drives standalone
+  assembly: `llvm-mc -triple=klausscpu-unknown-elf -filetype=obj foo.s` parses
+  hand-written `.s` and emits ELF32 (`EM_KLAUSSCPU`) via the *same*
+  `KlaussCPUMCCodeEmitter` + `KlaussCPUAsmBackend` that `llc -filetype=obj` uses
+  — byte-identical to compiler output, so already hardware-validated.
+- **Case-insensitive mnemonics**: `KlaussCPUAsmParser::parseInstruction` now
+  lower-cases the mnemonic (`Name.lower()`) before matching, so the UPPERCASE
+  `opcode_select.vh` spellings (`ADDR`, `SETR`, `LDIDX64`) match the lower-case
+  `.td` AsmStrings. The `Tok` member of `KlaussCPUOperand` was changed from
+  `StringRef` to `std::string` to own the lower-cased copy. Registers were
+  already case-folded in `matchRegisterByName` (so `A`–`P` aliases work too).
+- **Underscore aliases**: `MnemonicAlias`es map the canonical vh spellings
+  `ldidx8_s`/`ldidx16_s` → the printed `ldidx8s`/`ldidx16s`.
+- **GAS dialect only** — operands are comma-separated, `#` comments, `r0`/`a`
+  registers, `.long`/`.globl` directives, `label:`/`label` (no trailing colon on
+  refs). The native `.kla` dialect (space-separated operands, `//` comments,
+  `LABEL:` refs, `#DATA`/`$MACRO`) is NOT supported — keep `klausscc` for that.
+- **Full opcode coverage** (Step 33b): the ~57 remaining hardware opcodes were
+  added as **assembler-only** instructions (no isel Pattern; codegen never emits
+  them) in a marked "Assembler-only opcodes" section of `KlaussCPUInstrInfo.td`,
+  each with a matching `case` in `KlaussCPUMCCodeEmitter.cpp`. Opcode values +
+  formats are verbatim from `opcode_select.vh`, so bytes match the hardware-
+  verified `klausscc` assembler. Added: ADDC, SUBC, BSETRR/BCLRRR/BTGLRR/BTSTRR
+  (RRR); SETFR, SHLAR, SHRAR, ROLR1, RORR1, ROLCR, RORCR (R in-place); BSET,
+  BCLR, BTGL, BEXTR, BDEP (RV 2-addr), BTST (RV cmp); MEMREADRR, MEMSET64RR (RR);
+  MEMREADR, MEMSETR (RV absolute, symbol-capable via new `fmtRV_addr`);
+  LDIDX64U/STIDX64U (non-aligned), LDIDX64R/STIDX64R (reg-offset); PUSHV, JMPO,
+  JMPNO, CALLZ/NZ/E/NE/C/NC/O/NO (V/Vcall); PUSHV64 (V64, 12-byte, manual emit);
+  DELAYR/V, RGB1R/V, RGB2R/V, LCD, LCDCMDV, LCDDATAR/V, TXMEM, TXSTRMEM
+  (peripherals, `hasSideEffects`).
+  - **Naming caveat — `ldidx64`/`stidx64` are the FORCE-ALIGNED 0xFC/0xFD**
+    (= vh `LDIDX64A`/`STIDX64A`), because that's what codegen has always emitted.
+    `MnemonicAlias`es map `ldidx64a`/`stidx64a` → those. vh's *non-aligned*
+    `LDIDX64`/`STIDX64` (0x0C/0x0D) are exposed as **`ldidx64u`/`stidx64u`** to
+    avoid colliding with the existing codegen mnemonics. (For 8-byte-aligned
+    addresses — the normal case — 0xFC and 0x0C behave identically.)
+  - **Operand conventions worth noting**: bit ops `bset/bclr/btgl/btst` take the
+    bit index in the immediate; `bextr/bdep` pack start (imm[4:0]) + len
+    (imm[12:8]); `ldidx64r/stidx64r` take the *offset register number* in the
+    immediate (imm[3:0]). All are 2-address where vh says `rd=rs op …`.
+  - *Deliberately skipped (unused in silicon)*: TRAP (0xF014), RESET, TESTMSG,
+    SWR, CDCDMR, WAIT, and digit-leading mnemonics (`7seg*` — unparseable).
+- Smoke tests: `smoke.s` (mixed-case, `A`-style regs, `ldidx8_s` alias, `jmpne`)
+  and `allops.s` (every new opcode) both assemble to ELF32 with correct
+  `R_KLAUSSCPU_ABS32` relocations; spot-checked encodings (e.g. `addc r4,r0,r1`
+  → `0x00060401`, `setfr r5` → `0x00000895`) match `opcode_select.vh`. Codegen
+  smoke test (`llc -march=klausscpu`) unchanged.
+
+### Step 34 ✅ UART moved to MMIO — opcode UART removed from the backend (2026-07)
+- **Hardware change**: the UART is now a memory-mapped peripheral at
+  `0xF001_0000` (polled 8-bit), not a set of CPU opcodes. Register map:
+  `+0x00 TX` (write, low byte → transmit; busy until sent), `+0x08 RX`
+  (read, pop one RX-FIFO byte), `+0x10 STATUS` (read; bit0 = TX busy,
+  bit1 = RX empty, bit2 = RX full). Drivers are plain **volatile MMIO
+  loads/stores** and live in `klausscpu-runtime` (`mmio.h`, `src/uart_stubs.c`)
+  — nothing UART-specific belongs in the backend anymore.
+- **Removed from the backend** (the opcodes no longer exist in silicon):
+  - Instr defs `TXR_R`, `TXMEMR_R`, `TXCHARMEMR_R`, `TXSTRMEMR_R`, `RXRB_R`,
+    `RXRNB_R`, `NEWLINE_I` and the assembler-only `TXMEM`/`TXSTRMEM`
+    (`KlaussCPUInstrInfo.td`), with their encoder cases
+    (`KlaussCPUMCCodeEmitter.cpp`) and the `INTRINSIC_VOID`/`INTRINSIC_W_CHAIN`
+    isel handlers (`KlaussCPUISelDAGToDAG.cpp`).
+  - The entire target-intrinsic + target-builtin subsystem, since UART was its
+    only user: deleted `llvm/IR/IntrinsicsKlaussCPU.td` (+ its `Intrinsics.td`
+    include and `IR/CMakeLists.txt` tablegen line), `BuiltinsKlaussCPU.def`, and
+    `clang/lib/CodeGen/TargetBuiltins/KlaussCPU.cpp`; dropped the `KlaussCPU`
+    enum from `TargetBuiltins.h`, the `klausscpu` dispatch in `CGBuiltin.cpp`,
+    the `EmitKlaussCPUBuiltinExpr` decl, and the CMakeLists entry.
+    `KlaussCPUTargetInfo::getTargetBuiltins()` now returns `{}` (still overrides
+    the pure-virtual). LED/7-seg/RGB/LCD legacy peripheral opcodes were kept.
+  - **Note**: editing the global `Intrinsics.td` regenerates the master
+    `Intrinsic::` enum (included tree-wide), so this triggers a near-full
+    LLVM+clang rebuild — expect ~1h, not an incremental build.
+- **Verified**: full `ninja llc clang` green; `clang` now rejects
+  `__builtin_klausscpu_txcharmemr` ("unknown builtin"); MMIO UART C lowers to
+  `memget32` (poll STATUS) + `memset32` (write TX), no UART opcode. The in-tree
+  Rust demo shims (`rust/hello-uart`, `rust/crates/examples/blinky`
+  `uart_shim.c`) were rewritten to the MMIO poll-then-write pattern and compile
+  clean with the rebuilt clang.
 
 ---
 

@@ -4,8 +4,9 @@
 //! subset it links against, so unused declarations cost nothing:
 //!
 //! * **Bare-metal IO shim** (`uart_putc`) — compiled per-binary from the C
-//!   shim, since the UART TX path is an opcode (`__builtin_klausscpu_*`) that
-//!   Rust cannot emit without `asm!`/builtins (RUST_PLAN.md §5.3).
+//!   shim. UART is memory-mapped (MMIO at `0xF001_0000`), so the shim is plain
+//!   volatile loads/stores; it stays in C only for lack of a Rust MMIO wrapper
+//!   in these examples (`klauss-mmio` covers the typed path).
 //! * **Zephyr LLEXT kernel exports** (`putchar`, `malloc`, …) — resolved by
 //!   the loader against `ssh/llext_exports.c`.
 //!

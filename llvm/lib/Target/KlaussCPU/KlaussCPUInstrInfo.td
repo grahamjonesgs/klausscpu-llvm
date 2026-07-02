@@ -674,6 +674,12 @@ def STIDX8    : RRV_st<0x0000C5, "stidx8\t$rs_data, $base, $offset">;
 def LDIDX8_S  : RRV_ld<0x0000C6, "ldidx8s\t$rd, $base, $offset">   { let mayLoad = 1; }
 def LDIDX16_S : RRV_ld<0x0000C7, "ldidx16s\t$rd, $base, $offset">  { let mayLoad = 1; }
 
+// Accept the canonical opcode_select.vh spelling of the signed sub-word loads
+// (LDIDX8_S / LDIDX16_S) as assembler aliases for the printed mnemonics.
+// Mnemonics reach the matcher lower-cased, so the alias keys are lower-case.
+def : MnemonicAlias<"ldidx8_s",  "ldidx8s">;
+def : MnemonicAlias<"ldidx16_s", "ldidx16s">;
+
 //===----------------------------------------------------------------------===//
 // Load / store isel patterns
 //
@@ -894,25 +900,13 @@ let hasSideEffects = 1 in
 def WAIT_I  : I0<0x00006012, (outs), (ins), "wait">;
 
 //===----------------------------------------------------------------------===//
-// UART / I-O instructions (hasSideEffects prevents reordering/elimination)
+// Peripheral I-O instructions (hasSideEffects prevents reordering/elimination)
+//
+// UART is memory-mapped (MMIO at 0xF001_0000) and accessed via ordinary
+// volatile loads/stores — there are no UART opcodes/intrinsics anymore.
 //===----------------------------------------------------------------------===//
 
 let hasSideEffects = 1 in {
-  // Send 64-bit register as 16 hex digits over UART.
-  def TXR_R        : R_in <0x0000501, (ins GPR:$reg), "txr\t$reg">;
-  // Send 64-bit value at mem[reg] as hex over UART.
-  def TXMEMR_R     : R_in <0x0000502, (ins GPR:$reg), "txmemr\t$reg">;
-  // Send byte at mem[reg] as ASCII character over UART.
-  def TXCHARMEMR_R : R_in <0x0000503, (ins GPR:$reg), "txcharmemr\t$reg">;
-  // Send null-terminated string at mem[reg] over UART.
-  def TXSTRMEMR_R  : R_in <0x0000504, (ins GPR:$reg), "txstrmemr\t$reg">;
-  // Blocking receive: wait for UART byte, write to rd.
-  def RXRB_R       : R_out<0x0000505, (outs GPR:$rd),  "rxrb\t$rd">;
-  // Non-blocking receive: write UART byte to rd; zero_flag=1 if FIFO empty.
-  def RXRNB_R      : R_out<0x0000506, (outs GPR:$rd),  "rxrnb\t$rd">;
-  // Send CR+LF over UART.
-  def NEWLINE_I    : I0<0x00005001, (outs), (ins), "newline">;
-
   // ── Legacy peripheral opcodes (still in hardware; accessible via inline asm)
   // Set 16 on-board LEDs from register bits [15:0].
   def LEDR_R      : R_in<0x0000300, (ins GPR:$reg), "ledr\t$reg">;
@@ -925,6 +919,109 @@ let hasSideEffects = 1 in {
   // Blank both 7-seg displays.
   def SEG7BLANK_I : I0<0x00003073, (outs), (ins), "7segblank">;
 }
+
+//===----------------------------------------------------------------------===//
+// Assembler-only opcodes — full opcode_select.vh coverage
+//
+// These instructions are NOT emitted by the code generator (no isel Pattern);
+// they exist so hand-written `.s` / inline-asm can name every hardware opcode
+// in opcode_select.vh.  Opcode values and formats are taken verbatim from that
+// file, so the bytes produced by KlaussCPUMCCodeEmitter match the hardware-
+// verified `klausscc` assembler.  Each new def needs a matching `case` in
+// KlaussCPUMCCodeEmitter.cpp.
+//===----------------------------------------------------------------------===//
+
+// ── RRR (rd, rs1, rs2) ─────────────────────────────────────────────────────
+def ADDC   : RRR<0x00060, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "addc\t$rd, $rs1, $rs2">;
+def SUBC   : RRR<0x00070, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "subc\t$rd, $rs1, $rs2">;
+def BSETRR : RRR<0x00500, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "bsetrr\t$rd, $rs1, $rs2">;
+def BCLRRR : RRR<0x00510, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "bclrrr\t$rd, $rs1, $rs2">;
+def BTGLRR : RRR<0x00520, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "btglrr\t$rd, $rs1, $rs2">;
+def BTSTRR : RRR<0x00530, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "btstrr\t$rd, $rs1, $rs2">;
+
+// ── R in-place (rd = f(rd); 2-address) ─────────────────────────────────────
+def SETFR : R_inplace<0x0000089, "setfr\t$rd">;
+def SHLAR : R_inplace<0x000008F, "shlar\t$rd">;
+def SHRAR : R_inplace<0x0000090, "shrar\t$rd">;
+def ROLR1 : R_inplace<0x00000F8, "rolr1\t$rd">;
+def RORR1 : R_inplace<0x00000F9, "rorr1\t$rd">;
+def ROLCR : R_inplace<0x00000FA, "rolcr\t$rd">;
+def RORCR : R_inplace<0x00000FB, "rorcr\t$rd">;
+
+// ── RV 2-address (rd op= imm32) and RV compare (rs, imm32) ──────────────────
+// Bit position / start+len are packed in the immediate (see opcode_select.vh).
+def BSET  : RV_2addr<0x00000A0, "bset\t$rd, $imm">;
+def BCLR  : RV_2addr<0x00000A1, "bclr\t$rd, $imm">;
+def BTGL  : RV_2addr<0x00000A2, "btgl\t$rd, $imm">;
+def BEXTR : RV_2addr<0x00000AC, "bextr\t$rd, $imm">;
+def BDEP  : RV_2addr<0x00000AD, "bdep\t$rd, $imm">;
+def BTST  : RV_cmp <0x00000A3, "btst\t$rs, $imm">;
+
+// ── RR (rd, rs) load / (rs_data, rs_addr) store — 8-byte aligned ────────────
+def MEMREADRR  : RR1<0x000071, (outs GPR:$rd), (ins GPR:$rs), "memreadrr\t$rd, $rs"> { let mayLoad = 1; }
+def MEMSET64RR : RRst<0x000070, "memset64rr\t$rs_data, $rs_addr">;
+
+// ── RV absolute memory access (rd/rs, address-imm32) — symbol-capable ───────
+def MEMREADR : RV_ld <0x0000721, "memreadr\t$rd, $imm"> { let mayLoad = 1; }
+def MEMSETR  : RV_cmp<0x0000720, "memsetr\t$rs, $imm"> { let mayStore = 1; }
+
+// ── RRV 64-bit indexed: non-aligned (vh LDIDX64/STIDX64 = 0x0C/0x0D) and
+//    register-offset (vh LDIDX64R/STIDX64R).  NOTE: LLVM's ldidx64/stidx64 are
+//    the *force-aligned* 0xFC/0xFD (= vh LDIDX64A/STIDX64A); aliases below.
+//    For the *R variants the offset operand is a register *number* in imm[3:0].
+def LDIDX64U : RRV_ld<0x00000C, "ldidx64u\t$rd, $base, $offset">;
+def STIDX64U : RRV_st<0x00000D, "stidx64u\t$rs_data, $base, $offset">;
+def LDIDX64R : RRV_ld<0x00000E, "ldidx64r\t$rd, $base, $offset">;
+def STIDX64R : RRV_st<0x000073, "stidx64r\t$rs_data, $base, $offset">;
+
+// ── V (fixed op32 + imm32/address) — push / conditional jumps ───────────────
+def PUSHV : Vsp<0x00004020, "pushv\t$imm"> { let mayStore = 1; }
+def JMPO  : Vbr_cond<0x00001007, "jmpo\t$target">;
+def JMPNO : Vbr_cond<0x00001008, "jmpno\t$target">;
+
+// ── Vcall (conditional calls) ───────────────────────────────────────────────
+def CALLZ  : Vcall<0x0000100A, "callz\t$target">;
+def CALLNZ : Vcall<0x0000100B, "callnz\t$target">;
+def CALLE  : Vcall<0x0000100C, "calle\t$target">;
+def CALLNE : Vcall<0x0000100D, "callne\t$target">;
+def CALLC  : Vcall<0x0000100E, "callc\t$target">;
+def CALLNC : Vcall<0x0000100F, "callnc\t$target">;
+def CALLO  : Vcall<0x00001010, "callo\t$target">;
+def CALLNO : Vcall<0x00001011, "callno\t$target">;
+
+// ── V64 (push 64-bit immediate; 12-byte) ────────────────────────────────────
+class V64_imm<bits<32> op, string asmstr>
+    : KCInst96<(outs), (ins simm32:$lo, simm32:$hi), asmstr> {
+  bits<32> lo;
+  bits<32> hi;
+  let Inst{95-64} = op;
+  let Inst{63-32} = lo;
+  let Inst{31-0}  = hi;
+}
+def PUSHV64 : V64_imm<0x00004060, "pushv64\t$lo, $hi"> { let mayStore = 1; }
+
+// ── Peripheral / timing ops (side-effecting) ────────────────────────────────
+let hasSideEffects = 1 in {
+  // R_in (single source register)
+  def DELAYR   : R_in<0x0000F00, (ins GPR:$reg), "delayr\t$reg">;
+  def RGB1R    : R_in<0x0000305, (ins GPR:$reg), "rgb1r\t$reg">;
+  def RGB2R    : R_in<0x0000306, (ins GPR:$reg), "rgb2r\t$reg">;
+  def LCDDATAR : R_in<0x0000201, (ins GPR:$reg), "lcddatar\t$reg">;
+  // V (fixed op32 + imm32)
+  def DELAYV   : Vsp<0x0000F013, "delayv\t$imm">;
+  def LEDV     : Vsp<0x00003070, "ledv\t$imm">;
+  def RGB1V    : Vsp<0x00003074, "rgb1v\t$imm">;
+  def RGB2V    : Vsp<0x00003075, "rgb2v\t$imm">;
+  def LCD      : Vsp<0x00002023, "lcd\t$imm">;
+  def LCDCMDV  : Vsp<0x00002021, "lcdcmdv\t$imm">;
+  def LCDDATAV : Vsp<0x00002022, "lcddatav\t$imm">;
+}
+
+// ── Mnemonic aliases for the canonical opcode_select.vh spellings ───────────
+// 0xFC/0xFD are the force-aligned 64-bit indexed ops (= vh LDIDX64A/STIDX64A);
+// LLVM already defines them as ldidx64/stidx64.
+def : MnemonicAlias<"ldidx64a", "ldidx64">;
+def : MnemonicAlias<"stidx64a", "stidx64">;
 
 //===----------------------------------------------------------------------===//
 // Call patterns — matched from KlaussCPUISD::CALL nodes emitted by LowerCall.

@@ -20,7 +20,6 @@
 #include "KlaussCPUTargetMachine.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
-#include "llvm/IR/IntrinsicsKlaussCPU.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/MathExtras.h"
 
@@ -455,81 +454,6 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
         {N->getOperand(0), N->getOperand(1), N->getOperand(2)});
     ReplaceNode(N, Res);
     return;
-  }
-
-  // ---- ISD::INTRINSIC_VOID → UART transmit instructions -------------------
-  // Void intrinsics: chain=op(0), intrinsic_id=op(1), args=op(2+)
-  if (N->getOpcode() == ISD::INTRINSIC_VOID) {
-    unsigned IntID = N->getConstantOperandVal(1);
-    SDValue Chain = N->getOperand(0);
-    SDLoc DL(N);
-    switch (IntID) {
-    case Intrinsic::klausscpu_txr: {
-      SDValue Reg = N->getOperand(2);
-      SDNode *Res = CurDAG->getMachineNode(KlaussCPU::TXR_R, DL, MVT::Other,
-                                            {Reg, Chain});
-      ReplaceNode(N, Res);
-      return;
-    }
-    case Intrinsic::klausscpu_txmemr: {
-      SDValue Ptr = N->getOperand(2);
-      SDNode *Res = CurDAG->getMachineNode(KlaussCPU::TXMEMR_R, DL, MVT::Other,
-                                            {Ptr, Chain});
-      ReplaceNode(N, Res);
-      return;
-    }
-    case Intrinsic::klausscpu_txcharmemr: {
-      SDValue Ptr = N->getOperand(2);
-      SDNode *Res = CurDAG->getMachineNode(KlaussCPU::TXCHARMEMR_R, DL,
-                                            MVT::Other, {Ptr, Chain});
-      ReplaceNode(N, Res);
-      return;
-    }
-    case Intrinsic::klausscpu_txstrmemr: {
-      SDValue Ptr = N->getOperand(2);
-      SDNode *Res = CurDAG->getMachineNode(KlaussCPU::TXSTRMEMR_R, DL,
-                                            MVT::Other, {Ptr, Chain});
-      ReplaceNode(N, Res);
-      return;
-    }
-    case Intrinsic::klausscpu_newline: {
-      SDNode *Res = CurDAG->getMachineNode(KlaussCPU::NEWLINE_I, DL,
-                                            MVT::Other, {Chain});
-      ReplaceNode(N, Res);
-      return;
-    }
-    default:
-      break;
-    }
-  }
-
-  // ---- ISD::INTRINSIC_W_CHAIN → UART receive instructions -----------------
-  // Value-producing intrinsics: chain=op(0), intrinsic_id=op(1)
-  // Produce (i64 value, chain).
-  if (N->getOpcode() == ISD::INTRINSIC_W_CHAIN) {
-    unsigned IntID = N->getConstantOperandVal(1);
-    SDValue Chain = N->getOperand(0);
-    SDLoc DL(N);
-    switch (IntID) {
-    case Intrinsic::klausscpu_rxrb: {
-      SDNode *Res = CurDAG->getMachineNode(
-          KlaussCPU::RXRB_R, DL,
-          CurDAG->getVTList(MVT::i64, MVT::Other), {Chain});
-      ReplaceUses(N, Res);
-      CurDAG->RemoveDeadNode(N);
-      return;
-    }
-    case Intrinsic::klausscpu_rxrnb: {
-      SDNode *Res = CurDAG->getMachineNode(
-          KlaussCPU::RXRNB_R, DL,
-          CurDAG->getVTList(MVT::i64, MVT::Other), {Chain});
-      ReplaceUses(N, Res);
-      CurDAG->RemoveDeadNode(N);
-      return;
-    }
-    default:
-      break;
-    }
   }
 
   // ---- ISD::TRAP → HALT_I --------------------------------------------------
