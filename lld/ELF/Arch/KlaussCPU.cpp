@@ -14,6 +14,12 @@
 //                             field_value = S + A − instr_addr.
 //                             lld computes S + A − (instr_addr+4) (R_PC) and
 //                             we add 4 in relocate() for the hardware convention.
+//   R_KLAUSSCPU_PC32   (4) — 32-bit signed PC-relative *data* — a cross-section
+//                             symbol difference (A − B) in .rodata/.data, e.g.
+//                             the -fPIC relative lookup tables emitted by
+//                             RelLookupTableConverter (`.long str - table`).
+//                             field_value = S + A − P exactly (NO +4: unlike the
+//                             instruction form, the fixup slot IS the PC origin).
 //
 //===----------------------------------------------------------------------===//
 
@@ -54,6 +60,7 @@ RelExpr KlaussCPU::getRelExpr(RelType type, const Symbol &s,
   case R_KLAUSSCPU_ABS64:
     return R_ABS;
   case R_KLAUSSCPU_PCREL32:
+  case R_KLAUSSCPU_PC32:
     return R_PC;
   default:
     Err(ctx) << getErrorLoc(ctx, loc) << "unrecognized relocation " << type;
@@ -78,6 +85,12 @@ void KlaussCPU::relocate(uint8_t *loc, const Relocation &rel,
     // Hardware uses instr_addr as PC origin, so field = val + 4.
     checkInt(ctx, loc, static_cast<int64_t>(val) + 4, 32, rel);
     write32le(loc, static_cast<uint32_t>(val + 4));
+    break;
+  case R_KLAUSSCPU_PC32:
+    // Data symbol difference (A − B): the fixup slot itself is the PC origin,
+    // so the field is exactly S + A − P — no instruction "+4" correction.
+    checkInt(ctx, loc, static_cast<int64_t>(val), 32, rel);
+    write32le(loc, static_cast<uint32_t>(val));
     break;
   default:
     llvm_unreachable("unrecognized KlaussCPU relocation");

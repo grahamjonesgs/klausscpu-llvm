@@ -1,32 +1,33 @@
 //===-- KlaussCPUMCCodeEmitter.cpp - KlaussCPU instruction encoder ---------===//
 //
-// Converts MCInst to raw bytes for ELF object output.
+// Converts MCInst to raw bytes for ELF object output — ISA encoding **v2**
+// (the flag-day renumbering, ISA_ENCODING_V2.md).  There is no
+// -gen-emitter, so this file is the sole source of truth for instruction
+// bytes; the `let Inst{}` fields in KlaussCPUInstrInfo.td are documentary.
 //
-// All instruction words are written little-endian (least-significant byte first),
-// matching the KlaussCPU LE physical memory.  The CPU instruction-fetch unit
-// reads each 32-bit word with the byte at the lowest address in bits[7:0].
+// All instruction words are written little-endian (least-significant byte
+// first), matching the KlaussCPU LE physical memory / instruction-fetch unit.
 //
-// Instruction word layouts (tablegen bit numbering; bit N = 2^N):
+// v2 word-0 layout (every instruction):
 //
-//  KCInst32 (4 B, 1 word):
-//    RRR    [31:12]=op20  [11:8]=rd   [7:4]=rs1  [3:0]=rs2
-//    RR1    [31:8] =op24  [7:4] =rd   [3:0]=rs
-//    RR0    [31:8] =op24  [7:4] =rs1  [3:0]=rs2
-//    RRst   [31:8] =op24  [7:4] =rs_data  [3:0]=rs_addr
-//    R      [31:4] =op28  [3:0] =reg
-//    I0     [31:0] =exact_opcode32
+//   31 30 29    26 25              16 15  12 11  8 7   4 3   0
+//   ┌─────┬───────┬──────────────────┬──────┬─────┬─────┬─────┐
+//   │ LEN │ CLASS │ attributes + OP  │  x   │ rd  │ rs1 │ rs2 │
+//   └─────┴───────┴──────────────────┴──────┴─────┴─────┴─────┘
 //
-//  KCInst64 (8 B, 2 words — high word emitted first):
-//    RV_ld    [63:36]=op28  [35:32]=rd   [31:0]=imm32
-//    RV_2addr [63:36]=op28  [35:32]=rd   [31:0]=imm32  ($rd=$rs tie)
-//    RV_cmp   [63:36]=op28  [35:32]=rs   [31:0]=imm32
-//    RRV      [63:40]=op24  [39:36]=rd   [35:32]=base  [31:0]=offset32
-//    Vimm     [63:32]=exact_op32          [31:0]=target/imm
+//   LEN[31:30]  01=1 word, 10=2 words, 11=3 words.
+//   rd [11:8]   destination (loads: dest; STORES: data source).
+//   rs1[7:4]    first source / base address.
+//   rs2[3:0]    second source / shift count reg / indirect branch target.
 //
-//  KCInst96 (12 B, 3 words — SETR64 only):
-//    Word0: [31:8]=op24  [7:4]=rd  [3:0]=0
-//    Word1: lo32
-//    Word2: hi32
+// The "template" for each instruction is the full 32-bit word 0 with all
+// register fields = 0 (LEN + CLASS + attribute/OP bits already baked in).
+// To assemble:  word0 = template | rd<<8 | rs1<<4 | rs2  (+ N<<15 for the
+// class-4 embedded-count forms).  Unused register/x fields MUST stay 0 — the
+// v2 CPU matches them strictly and traps otherwise.
+//
+// imm32 lives at PC+4 (word 1) of a 2-word instruction; imm64 is lo32 at PC+4,
+// hi32 at PC+8 of a 3-word instruction.
 //
 //===----------------------------------------------------------------------===//
 
@@ -84,121 +85,32 @@ private:
     CB.push_back(static_cast<char>((V >> 24) & 0xFF));
   }
 
-  // ── Per-format encoding helpers ───────────────────────────────────────────
+  // ── v2 register-field placement (uniform across all instructions) ─────────
+  //   rd  -> [11:8]   rs1 -> [7:4]   rs2 -> [3:0]
+  // Helpers name the *v2 fields* they fill, and take the MCInst operand index
+  // whose register goes there.  Everything not named is left 0.
 
-  // RRR: (op20<<12) | (rd<<8) | (rs1<<4) | rs2   MCInst:[0]=rd [1]=rs1 [2]=rs2
-  uint32_t fmtRRR(uint32_t op20, const MCInst &MI) const {
-    return (op20 << 12) | (getReg(MI,0) << 8) | (getReg(MI,1) << 4) | getReg(MI,2);
+  uint32_t fRd (const MCInst &MI, unsigned Op) const { return getReg(MI, Op) << 8; }
+  uint32_t fRs1(const MCInst &MI, unsigned Op) const { return getReg(MI, Op) << 4; }
+  uint32_t fRs2(const MCInst &MI, unsigned Op) const { return getReg(MI, Op) << 0; }
+
+  // Combine a template with a lo-32 immediate into the 64-bit value the
+  // top-level packer splits into word0 (bytes 0-3) then word1 (bytes 4-7).
+  static uint64_t pack2(uint32_t W0, uint32_t W1) {
+    return (static_cast<uint64_t>(W0) << 32) | W1;
   }
 
-  // RR1: (op24<<8) | (rd<<4) | rs   MCInst:[0]=rd [1]=rs
-  uint32_t fmtRR1(uint32_t op24, const MCInst &MI) const {
-    return (op24 << 8) | (getReg(MI,0) << 4) | getReg(MI,1);
-  }
-
-  // RR0 / RRst: (op24<<8) | (r0<<4) | r1   MCInst:[0]=r0 [1]=r1
-  uint32_t fmtRR2(uint32_t op24, const MCInst &MI) const {
-    return (op24 << 8) | (getReg(MI,0) << 4) | getReg(MI,1);
-  }
-
-  // R_inplace, R_in, R_out: (op28<<4) | reg(OpNo)
-  uint32_t fmtR(uint32_t op28, const MCInst &MI, unsigned OpNo) const {
-    return (op28 << 4) | getReg(MI, OpNo);
-  }
-
-  // RV_ld: ((op28<<36) | (rd<<32) | imm)   MCInst:[0]=rd [1]=imm
-  uint64_t fmtRV_ld(uint64_t op28, const MCInst &MI) const {
-    return (op28 << 36)
-         | (static_cast<uint64_t>(getReg(MI, 0)) << 32)
-         | getImm32(MI, 1);
-  }
-
-  // RV_2addr: ((op28<<36) | (rd<<32) | imm)   MCInst:[0]=rd [1]=rs(tied) [2]=imm
-  uint64_t fmtRV_2addr(uint64_t op28, const MCInst &MI) const {
-    return (op28 << 36)
-         | (static_cast<uint64_t>(getReg(MI, 0)) << 32)
-         | getImm32(MI, 2);
-  }
-
-  // RV_cmp: ((op28<<36) | (rs<<32) | imm)   MCInst:[0]=rs [1]=imm
-  uint64_t fmtRV_cmp(uint64_t op28, const MCInst &MI) const {
-    return (op28 << 36)
-         | (static_cast<uint64_t>(getReg(MI, 0)) << 32)
-         | getImm32(MI, 1);
-  }
-
-  // RV with an absolute-address immediate that may be a symbol (MEMREADR/
-  // MEMSETR).  Same slot layout as RV_ld/RV_cmp: reg at operand 0, address at
-  // operand 1.  Emits an ABS32 fixup at byte offset 4 when the address is an
-  // MCExpr so the linker fills in the 32-bit absolute address.
-  uint64_t fmtRV_addr(uint64_t op28, const MCInst &MI,
-                       SmallVectorImpl<MCFixup> &Fixups) const {
-    uint64_t W = (op28 << 36)
-               | (static_cast<uint64_t>(getReg(MI, 0)) << 32);
-    const MCOperand &MO = MI.getOperand(1);
+  // 2-word instruction whose word-1 immediate may be a symbol.  Emits the
+  // given fixup at byte offset 4 (word 1) when the operand is an MCExpr.
+  uint64_t pack2Sym(uint32_t W0, const MCInst &MI, unsigned ImmOp,
+                    KlaussCPU::Fixups FK,
+                    SmallVectorImpl<MCFixup> &Fixups) const {
+    const MCOperand &MO = MI.getOperand(ImmOp);
     if (MO.isImm())
-      return W | static_cast<uint32_t>(MO.getImm());
-    assert(MO.isExpr() && "memreadr/memsetr address must be imm or expr");
-    Fixups.push_back(MCFixup::create(
-        4, MO.getExpr(), MCFixupKind(KlaussCPU::FK_KlaussCPU_ABS32)));
-    return W;
-  }
-
-  // RRV_ld: ((op24<<40) | (rd<<36) | (base<<32) | off)
-  //   MCInst:[0]=rd [1]=base [2]=off
-  uint64_t fmtRRV_ld(uint64_t op24, const MCInst &MI) const {
-    return (op24 << 40)
-         | (static_cast<uint64_t>(getReg(MI, 0)) << 36)
-         | (static_cast<uint64_t>(getReg(MI, 1)) << 32)
-         | getImm32(MI, 2);
-  }
-
-  // RRV_st: ((op24<<40) | (rs_data<<36) | (base<<32) | off)
-  //   MCInst:[0]=rs_data [1]=base [2]=off
-  uint64_t fmtRRV_st(uint64_t op24, const MCInst &MI) const {
-    return (op24 << 40)
-         | (static_cast<uint64_t>(getReg(MI, 0)) << 36)
-         | (static_cast<uint64_t>(getReg(MI, 1)) << 32)
-         | getImm32(MI, 2);
-  }
-
-  // Vimm with plain immediate: ((op32<<32) | imm)   MCInst:[0]=imm
-  uint64_t fmtVimm(uint64_t op32, const MCInst &MI) const {
-    return (op32 << 32) | getImm32(MI, 0);
-  }
-
-  // Vbr / Vcall: ((op32<<32) | target32).
-  // target is always an MCExpr (basic-block or global symbol); adds an ABS32
-  // fixup at byte offset 4 within the 8-byte instruction (word 1).
-  uint64_t fmtVbr(uint64_t op32, const MCInst &MI,
-                   SmallVectorImpl<MCFixup> &Fixups) const {
-    const MCOperand &MO = MI.getOperand(0);
-    uint32_t Target = 0;
-    if (MO.isImm()) {
-      Target = static_cast<uint32_t>(MO.getImm());
-    } else {
-      assert(MO.isExpr() && "branch/call target must be imm or expr");
-      Fixups.push_back(MCFixup::create(
-          4, MO.getExpr(), MCFixupKind(KlaussCPU::FK_KlaussCPU_ABS32)));
-    }
-    return (op32 << 32) | Target;
-  }
-
-  // PC-relative Vbr / Vcall / RV-ld: same layout but emits a PCREL32 fixup.
-  // Used by JMPREL, JMPxxREL, CALLREL, and LEAPC.
-  // applyFixup adds 4 to (target − (instr+4)) to give (target − instr).
-  uint64_t fmtVbrRel(uint64_t op32, const MCInst &MI,
-                      SmallVectorImpl<MCFixup> &Fixups) const {
-    const MCOperand &MO = MI.getOperand(0);
-    uint32_t Target = 0;
-    if (MO.isImm()) {
-      Target = static_cast<uint32_t>(MO.getImm());
-    } else {
-      assert(MO.isExpr() && "PC-relative target must be imm or expr");
-      Fixups.push_back(MCFixup::create(
-          4, MO.getExpr(), MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL32)));
-    }
-    return (op32 << 32) | Target;
+      return pack2(W0, static_cast<uint32_t>(MO.getImm()));
+    assert(MO.isExpr() && "operand must be imm or expr");
+    Fixups.push_back(MCFixup::create(4, MO.getExpr(), MCFixupKind(FK)));
+    return pack2(W0, 0);
   }
 
   uint32_t encode32(const MCInst &MI) const;
@@ -208,128 +120,159 @@ private:
 } // anonymous namespace
 
 //===----------------------------------------------------------------------===//
-// 4-byte instruction dispatch
+// 4-byte (1-word) instruction dispatch
 //===----------------------------------------------------------------------===//
 
 uint32_t KlaussCPUMCCodeEmitter::encode32(const MCInst &MI) const {
   switch (MI.getOpcode()) {
 
-  // ── RRR format ───────────────────────────────────────────────────────────
-  case KlaussCPU::ADDR:    return fmtRRR(0x00010, MI);
-  case KlaussCPU::SUBR:    return fmtRRR(0x00020, MI);
-  case KlaussCPU::ANDR:    return fmtRRR(0x00030, MI);
-  case KlaussCPU::ORR:     return fmtRRR(0x00040, MI);
-  case KlaussCPU::XORR:    return fmtRRR(0x00050, MI);
-  case KlaussCPU::MULR:    return fmtRRR(0x00100, MI);
-  case KlaussCPU::MULUR:   return fmtRRR(0x00110, MI);
-  case KlaussCPU::MULHR:   return fmtRRR(0x00120, MI);
-  case KlaussCPU::MULHUR:  return fmtRRR(0x00130, MI);
-  case KlaussCPU::DIVR:    return fmtRRR(0x00140, MI);
-  case KlaussCPU::DIVUR:   return fmtRRR(0x00150, MI);
-  case KlaussCPU::MODR:    return fmtRRR(0x00160, MI);
-  case KlaussCPU::MODUR:   return fmtRRR(0x00170, MI);
-  case KlaussCPU::SHLR:    return fmtRRR(0x00200, MI);
-  case KlaussCPU::SHRR:    return fmtRRR(0x00210, MI);
-  case KlaussCPU::SARR:    return fmtRRR(0x00220, MI);
-  case KlaussCPU::ROLR:    return fmtRRR(0x00230, MI);
-  case KlaussCPU::RORR_R:  return fmtRRR(0x00240, MI);
-  case KlaussCPU::CMPEQR:  return fmtRRR(0x00300, MI);
-  case KlaussCPU::CMPNER:  return fmtRRR(0x00310, MI);
-  case KlaussCPU::CMPLTR:  return fmtRRR(0x00320, MI);
-  case KlaussCPU::CMPLER:  return fmtRRR(0x00330, MI);
-  case KlaussCPU::CMPGTR:  return fmtRRR(0x00340, MI);
-  case KlaussCPU::CMPGER:  return fmtRRR(0x00350, MI);
-  case KlaussCPU::CMPULTR: return fmtRRR(0x00360, MI);
-  case KlaussCPU::CMPULER: return fmtRRR(0x00370, MI);
-  case KlaussCPU::CMPUGTR: return fmtRRR(0x00380, MI);
-  case KlaussCPU::CMPUGER: return fmtRRR(0x00390, MI);
-  case KlaussCPU::MINR:    return fmtRRR(0x00400, MI);
-  case KlaussCPU::MAXR:    return fmtRRR(0x00410, MI);
-  case KlaussCPU::MINUR:   return fmtRRR(0x00420, MI);
-  case KlaussCPU::MAXUR:   return fmtRRR(0x00430, MI);
-  // RRR assembler-only ops (opcode_select.vh coverage)
-  case KlaussCPU::ADDC:    return fmtRRR(0x00060, MI);
-  case KlaussCPU::SUBC:    return fmtRRR(0x00070, MI);
-  case KlaussCPU::BSETRR:  return fmtRRR(0x00500, MI);
-  case KlaussCPU::BCLRRR:  return fmtRRR(0x00510, MI);
-  case KlaussCPU::BTGLRR:  return fmtRRR(0x00520, MI);
-  case KlaussCPU::BTSTRR:  return fmtRRR(0x00530, MI);
+  // ── Class 1/A/4/3 RRR: rd = rs1 OP rs2  (rd,rs1,rs2 at ops 0,1,2) ─────────
+  case KlaussCPU::ADDR:  return 0x44200000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::SUBR:  return 0x44600000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::ADDC:  return 0x44A00000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::SUBC:  return 0x44E00000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::ANDR:  return 0x45000000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::ORR:   return 0x45400000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::XORR:  return 0x45800000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::MINR:  return 0x45C00000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::MAXR:  return 0x46000000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::MINUR: return 0x46400000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::MAXUR: return 0x46800000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
 
-  // ── RR1 (rd, rs) ─────────────────────────────────────────────────────────
-  case KlaussCPU::COPY_R:   return fmtRR1(0x000001, MI);
-  case KlaussCPU::MEMGET64: return fmtRR1(0x00007B, MI);
-  case KlaussCPU::MEMGET8:  return fmtRR1(0x000075, MI);
-  case KlaussCPU::MEMGET16: return fmtRR1(0x000077, MI);
-  case KlaussCPU::MEMGET32: return fmtRR1(0x000079, MI);
-  case KlaussCPU::MEMREADRR: return fmtRR1(0x000071, MI); // rd = mem64[rs]
+  case KlaussCPU::MULUR:  return 0x68000000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::MULHUR: return 0x68400000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::MULR:   return 0x68800000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::MULHR:  return 0x68C00000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::DIVUR:  return 0x69000000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::DIVR:   return 0x69800000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::MODUR:  return 0x6A000000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::MODR:   return 0x6A800000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
 
-  // ── RR0 (rs1, rs2, flags only) ───────────────────────────────────────────
-  case KlaussCPU::CMPRR_I:  return fmtRR2(0x000005, MI);
+  // Class 4 shifts/rotates, register count = rs2[5:0].
+  case KlaussCPU::SHLR:   return 0x50004000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::SHRR:   return 0x50404000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::SARR:   return 0x50804000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::ROLR:   return 0x50C04000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::RORR_R: return 0x51004000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
 
-  // ── RRst (rs_data, rs_addr) ──────────────────────────────────────────────
-  case KlaussCPU::MEMSET64: return fmtRR2(0x00007A, MI);
-  case KlaussCPU::MEMSET8:  return fmtRR2(0x000074, MI);
-  case KlaussCPU::MEMSET16: return fmtRR2(0x000076, MI);
-  case KlaussCPU::MEMSET32: return fmtRR2(0x000078, MI);
-  case KlaussCPU::MEMSET64RR: return fmtRR2(0x000070, MI); // mem64[rs_addr]=rs_data
+  // Class 4 bit ops, register position = rs2[5:0].
+  case KlaussCPU::BSETRR: return 0x52000000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::BCLRRR: return 0x52400000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::BTGLRR: return 0x52800000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::BTSTRR: return 0x52C00000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
 
-  // ── R_inplace (def at operand 0; use tied = same reg) ────────────────────
-  case KlaussCPU::INCR:    return fmtR(0x0000084, MI, 0);
-  case KlaussCPU::DECR:    return fmtR(0x0000085, MI, 0);
-  case KlaussCPU::NEGR:    return fmtR(0x000008A, MI, 0);
-  case KlaussCPU::ABSR:    return fmtR(0x000008B, MI, 0);
-  case KlaussCPU::SHLR1:   return fmtR(0x000008D, MI, 0);
-  case KlaussCPU::SHRR1:   return fmtR(0x000008E, MI, 0);
-  case KlaussCPU::NOTR:    return fmtR(0x0000098, MI, 0);
-  case KlaussCPU::POPCNT:  return fmtR(0x00000A8, MI, 0);
-  case KlaussCPU::CLZ:     return fmtR(0x00000A9, MI, 0);
-  case KlaussCPU::CTZ:     return fmtR(0x00000AA, MI, 0);
-  case KlaussCPU::BITREV:  return fmtR(0x00000AB, MI, 0);
-  case KlaussCPU::BSWAP_R: return fmtR(0x0000097, MI, 0);
-  case KlaussCPU::SEXTB:   return fmtR(0x000008C, MI, 0);
-  case KlaussCPU::SEXTH:   return fmtR(0x0000094, MI, 0);
-  case KlaussCPU::ZEXTB:   return fmtR(0x0000095, MI, 0);
-  case KlaussCPU::ZEXTH:   return fmtR(0x0000096, MI, 0);
-  case KlaussCPU::SEXTW:   return fmtR(0x00000F0, MI, 0);
-  case KlaussCPU::ZEXTW:   return fmtR(0x00000F1, MI, 0);
-  // R in-place assembler-only ops (opcode_select.vh coverage)
-  case KlaussCPU::SETFR:   return fmtR(0x0000089, MI, 0);
-  case KlaussCPU::SHLAR:   return fmtR(0x000008F, MI, 0);
-  case KlaussCPU::SHRAR:   return fmtR(0x0000090, MI, 0);
-  case KlaussCPU::ROLR1:   return fmtR(0x00000F8, MI, 0);
-  case KlaussCPU::RORR1:   return fmtR(0x00000F9, MI, 0);
-  case KlaussCPU::ROLCR:   return fmtR(0x00000FA, MI, 0);
-  case KlaussCPU::RORCR:   return fmtR(0x00000FB, MI, 0);
+  // Class 3 boolean compare: rd = (rs1 cond rs2).
+  case KlaussCPU::CMPEQR:  return 0x4C200000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::CMPNER:  return 0x4C600000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::CMPLTR:  return 0x4CA00000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::CMPGER:  return 0x4CE00000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::CMPLER:  return 0x4D200000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::CMPGTR:  return 0x4D600000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::CMPULTR: return 0x4DA00000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::CMPUGER: return 0x4DE00000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::CMPULER: return 0x4E200000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::CMPUGTR: return 0x4E600000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
 
-  // ── R_in (input reg at operand 0) ────────────────────────────────────────
-  case KlaussCPU::PUSH_R:  return fmtR(0x0000400, MI, 0);
-  case KlaussCPU::SETSP_R: return fmtR(0x0000404, MI, 0);
-  case KlaussCPU::JMPR_R:  return fmtR(0x0000102, MI, 0);
-  case KlaussCPU::CALLR_R: return fmtR(0x0000407, MI, 0);
+  // ── Class 5 unary (rd,rs1 at ops 0,1) and 2-address in-place (rd=rs1) ─────
+  // COPY / MEMGET* have independent rd,rs at ops 0,1; the in-place unary ops
+  // are tied ($rd=$rs1), so operand 0 and operand 1 are the same register.
+  case KlaussCPU::COPY_R:    return 0x54000000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::NEGR:      return 0x54480000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::NOTR:      return 0x54880000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::ABSR:      return 0x54C80000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::SEXTB:     return 0x55080000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::SEXTH:     return 0x55180000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::SEXTW:     return 0x55200000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::ZEXTB:     return 0x55480000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::ZEXTH:     return 0x55580000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::ZEXTW:     return 0x55600000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::BSWAP_R:   return 0x55800000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::BITREV:    return 0x55C00000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::POPCNT:    return 0x56080000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::CLZ:       return 0x56400000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::CTZ:       return 0x56800000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::INCR:      return 0x57880000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::DECR:      return 0x57C80000u | fRd(MI,0) | fRs1(MI,1);
 
-  // ── R_out (output reg at operand 0) ──────────────────────────────────────
-  case KlaussCPU::POP_R:   return fmtR(0x0000401, MI, 0);
-  case KlaussCPU::GETSP_R: return fmtR(0x0000403, MI, 0);
+  // SETFR writes only rd (rs1 field must stay 0 even though the .td ties it).
+  case KlaussCPU::SETFR:     return 0x57000000u | fRd(MI,0);
 
-  // ── LEDs / 7-seg ─────────────────────────────────────────────────────────
-  case KlaussCPU::LEDR_R:       return fmtR(0x0000300, MI, 0);
-  case KlaussCPU::SEG7_1R_R:    return fmtR(0x0000302, MI, 0);
-  case KlaussCPU::SEG7_2R_R:    return fmtR(0x0000303, MI, 0);
-  case KlaussCPU::SEG7R_R:      return fmtR(0x0000304, MI, 0);
+  // ── Class 4 shift/rotate-by-1 and by-immediate-N (1 word in v2) ───────────
+  // Fixed-N (=1) forms: rd,rs1 (2-address, tied).
+  case KlaussCPU::SHLR1:  return 0x50208000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::SHLAR:  return 0x50208000u | fRd(MI,0) | fRs1(MI,1); // alias of SHLR1
+  case KlaussCPU::SHRR1:  return 0x50608000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::SHRAR:  return 0x50A08000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::ROLR1:  return 0x50E0C000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::RORR1:  return 0x5120C000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::ROLCR:  return 0x5160C000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::RORCR:  return 0x51A0C000u | fRd(MI,0) | fRs1(MI,1);
 
-  // ── Peripherals — R_in (operand 0 = source register) ─────────────────────
-  case KlaussCPU::DELAYR:       return fmtR(0x0000F00, MI, 0);
-  case KlaussCPU::RGB1R:        return fmtR(0x0000305, MI, 0);
-  case KlaussCPU::RGB2R:        return fmtR(0x0000306, MI, 0);
-  case KlaussCPU::LCDDATAR:     return fmtR(0x0000201, MI, 0);
+  // Embedded-count forms: N at word0[20:15], rd,rs1 (tied), count at op 2.
+  case KlaussCPU::SHLV:   return 0x50204000u | ((getImm32(MI,2) & 0x3F) << 15) | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::SHRV:   return 0x50604000u | ((getImm32(MI,2) & 0x3F) << 15) | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::SHRAV:  return 0x50A04000u | ((getImm32(MI,2) & 0x3F) << 15) | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::ROLV:   return 0x50E04000u | ((getImm32(MI,2) & 0x3F) << 15) | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::RORV:   return 0x51204000u | ((getImm32(MI,2) & 0x3F) << 15) | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::BSET:   return 0x52200000u | ((getImm32(MI,2) & 0x3F) << 15) | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::BCLR:   return 0x52600000u | ((getImm32(MI,2) & 0x3F) << 15) | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::BTGL:   return 0x52A00000u | ((getImm32(MI,2) & 0x3F) << 15) | fRd(MI,0) | fRs1(MI,1);
+  // BTST-imm is flag-only: rs1 + embedded N, no rd write (op 0 = rs1, op 1 = N).
+  case KlaussCPU::BTST:   return 0x52E00000u | ((getImm32(MI,1) & 0x3F) << 15) | fRs1(MI,0);
 
-  // ── I0 (fixed opcode, no register/immediate operands) ────────────────────
-  case KlaussCPU::SEG7BLANK_I:  return 0x00003073;
-  case KlaussCPU::RET_I:     return 0x00001012;
-  case KlaussCPU::NOP_I:     return 0x0000F010;
-  case KlaussCPU::HALT_I:    return 0x0000F011;
-  case KlaussCPU::IRET_I:    return 0x00006011;
-  case KlaussCPU::WAIT_I:    return 0x00006012;
+  // ── Class 6/7 register-addressed loads / stores (1 word) ──────────────────
+  // Loads: rd,rs1(base) at ops 0,1.  Stores: data->rd, addr->rs1 at ops 0,1.
+  case KlaussCPU::MEMGET8:    return 0x58000000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::MEMGET16:   return 0x59000000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::MEMGET32:   return 0x5A000000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::MEMREADRR:  return 0x5B000000u | fRd(MI,0) | fRs1(MI,1); // raw 64
+  case KlaussCPU::MEMGET64:   return 0x5B100000u | fRd(MI,0) | fRs1(MI,1); // aligned 64
+  case KlaussCPU::MEMSET8:    return 0x5C000000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::MEMSET16:   return 0x5D000000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::MEMSET32:   return 0x5E000000u | fRd(MI,0) | fRs1(MI,1);
+  case KlaussCPU::MEMSET64RR: return 0x5F000000u | fRd(MI,0) | fRs1(MI,1); // raw 64
+  case KlaussCPU::MEMSET64:   return 0x5F100000u | fRd(MI,0) | fRs1(MI,1); // aligned 64
+
+  // Register-offset indexed 64-bit (v2: 1 word; offset register in rs2[3:0]).
+  // The .td models the offset as a register *number* immediate (op 2).
+  case KlaussCPU::LDIDX64R: return 0x5B600000u | fRd(MI,0) | fRs1(MI,1) | (getImm32(MI,2) & 0xF);
+  case KlaussCPU::STIDX64R: return 0x5F600000u | fRd(MI,0) | fRs1(MI,1) | (getImm32(MI,2) & 0xF);
+
+  // ── Class 3 flag-setting compare (rs1,rs2 at ops 0,1) ─────────────────────
+  case KlaussCPU::CMPRR_I: return 0x4C000000u | fRs1(MI,0) | fRs2(MI,1);
+
+  // ── Class 9 stack (single register in its designated field) ───────────────
+  case KlaussCPU::PUSH_R:  return 0x64000000u | fRs1(MI,0);
+  case KlaussCPU::POP_R:   return 0x64800000u | fRd (MI,0);
+  case KlaussCPU::GETSP_R: return 0x64C00000u | fRd (MI,0);
+  case KlaussCPU::SETSP_R: return 0x65000000u | fRs1(MI,0);
+  case KlaussCPU::RET_I:   return 0x65800000u;
+  case KlaussCPU::IRET_I:  return 0x65C00000u;
+
+  // ── Class 8 register-target branch / call (target in rs2[3:0]) ────────────
+  case KlaussCPU::JMPR_R:  return 0x60800000u | fRs2(MI,0);
+  case KlaussCPU::CALLR_R: return 0x62800000u | fRs2(MI,0);
+
+  // ── Class B system (no register/immediate operands) ───────────────────────
+  case KlaussCPU::NOP_I:   return 0x6C000000u;
+  case KlaussCPU::HALT_I:  return 0x6C010000u;
+  case KlaussCPU::WAIT_I:  return 0x6C020000u;
+
+  // ── Class B / C register-source peripherals (source register in rs1[7:4]) ─
+  case KlaussCPU::DELAYR:   return 0x6C050000u | fRs1(MI,0);
+  case KlaussCPU::LCDDATAR: return 0x71000000u | fRs1(MI,0);
+
+  // ── RETIRED in v2 (LED / 7-seg / RGB): no v2 encoding — these keep their
+  //    v1 opcodes purely so hand-written inline asm still assembles.  Their
+  //    LEN[31:30]=00 means the v2 CPU traps (ERR_INV_OPCODE) if one executes,
+  //    which is the intended fail-fast behaviour.  Codegen never emits them.
+  case KlaussCPU::LEDR_R:      return 0x00003000u | getReg(MI,0);
+  case KlaussCPU::SEG7_1R_R:   return 0x00003020u | getReg(MI,0);
+  case KlaussCPU::SEG7_2R_R:   return 0x00003030u | getReg(MI,0);
+  case KlaussCPU::SEG7R_R:     return 0x00003040u | getReg(MI,0);
+  case KlaussCPU::SEG7BLANK_I: return 0x00003073u;
+  case KlaussCPU::RGB1R:       return 0x00003050u | getReg(MI,0);
+  case KlaussCPU::RGB2R:       return 0x00003060u | getReg(MI,0);
 
   default:
     llvm_unreachable("unhandled 4-byte KlaussCPU instruction in encode32");
@@ -337,166 +280,135 @@ uint32_t KlaussCPUMCCodeEmitter::encode32(const MCInst &MI) const {
 }
 
 //===----------------------------------------------------------------------===//
-// 8-byte instruction dispatch
+// 8-byte (2-word) instruction dispatch — returns word0<<32 | word1
 //===----------------------------------------------------------------------===//
 
 uint64_t KlaussCPUMCCodeEmitter::encode64(
     const MCInst &MI, SmallVectorImpl<MCFixup> &Fixups) const {
   switch (MI.getOpcode()) {
 
-  // ── RV_ld (rd, imm32-or-symbol) ─────────────────────────────────────────
-  // SETR is used both for plain immediates and for global-address loads.
-  // When the operand is an MCExpr (symbol reference), emit a fixup at word 1
-  // (byte offset 4) so the linker fills in the 32-bit absolute address.
-  case KlaussCPU::SETR: {
-    uint64_t W0 = (static_cast<uint64_t>(0x0000080u) << 36)
-                | (static_cast<uint64_t>(getReg(MI, 0)) << 32);
-    const MCOperand &MO = MI.getOperand(1);
-    if (MO.isImm())
-      return W0 | static_cast<uint32_t>(MO.getImm());
-    assert(MO.isExpr() && "SETR: operand 1 must be imm or expr");
-    Fixups.push_back(MCFixup::create(
-        4, MO.getExpr(), MCFixupKind(KlaussCPU::FK_KlaussCPU_ABS32)));
-    return W0;
-  }
+  // ── Class 2 register ← 32-bit immediate / PC-relative address ─────────────
+  // SETR (rd, imm-or-symbol) and LEAPC (rd, PC-relative symbol).
+  case KlaussCPU::SETR:
+    return pack2Sym(0x8BD00000u | fRd(MI,0), MI, 1,
+                    KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::LEAPC:
+    return pack2Sym(0x8B800000u | fRd(MI,0), MI, 1,
+                    KlaussCPU::FK_KlaussCPU_PCREL32, Fixups);
 
-  // LEAPC: rd = PC_of_instruction + sign_ext(imm32).
-  // Same RV_ld slot layout as SETR but emits a PCREL32 fixup.
-  // Opcode 0x0000099: word0 = (0x099 << 4) | rd (using op28 field encoding).
-  case KlaussCPU::LEAPC: {
-    uint64_t W0 = (static_cast<uint64_t>(0x0000099u) << 36)
-                | (static_cast<uint64_t>(getReg(MI, 0)) << 32);
-    const MCOperand &MO = MI.getOperand(1);
-    if (MO.isImm())
-      return W0 | static_cast<uint32_t>(MO.getImm());
-    assert(MO.isExpr() && "LEAPC: operand 1 must be imm or expr");
-    Fixups.push_back(MCFixup::create(
-        4, MO.getExpr(), MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL32)));
-    return W0;
-  }
+  // Class 2 reg+imm add (rd,rs1 independent): rd = rs1 + sext(imm32).
+  case KlaussCPU::ADDI:
+    return pack2(0x88300000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
 
-  // ── RV_2addr (rd=rs tied, imm32 at operand 2) ────────────────────────────
-  case KlaussCPU::ADDV:    return fmtRV_2addr(0x0000081, MI);
-  case KlaussCPU::MINUSV:  return fmtRV_2addr(0x0000082, MI);
-  case KlaussCPU::ANDV:    return fmtRV_2addr(0x0000086, MI);
-  case KlaussCPU::ORV:     return fmtRV_2addr(0x0000087, MI);
-  case KlaussCPU::XORV:    return fmtRV_2addr(0x0000088, MI);
-  case KlaussCPU::SHLV:    return fmtRV_2addr(0x0000091, MI);
-  case KlaussCPU::SHRV:    return fmtRV_2addr(0x0000092, MI);
-  case KlaussCPU::SHRAV:   return fmtRV_2addr(0x0000093, MI);
-  case KlaussCPU::MULV:    return fmtRV_2addr(0x00000B8, MI);
-  case KlaussCPU::DIVV:    return fmtRV_2addr(0x00000B9, MI);
-  case KlaussCPU::MODV:    return fmtRV_2addr(0x00000BA, MI);
-  case KlaussCPU::ROLV:    return fmtRV_2addr(0x00000FC, MI);
-  case KlaussCPU::RORV:    return fmtRV_2addr(0x00000FD, MI);
-  // RV_2addr assembler-only bit ops (bit index / start+len packed in imm)
-  case KlaussCPU::BSET:    return fmtRV_2addr(0x00000A0, MI);
-  case KlaussCPU::BCLR:    return fmtRV_2addr(0x00000A1, MI);
-  case KlaussCPU::BTGL:    return fmtRV_2addr(0x00000A2, MI);
-  case KlaussCPU::BEXTR:   return fmtRV_2addr(0x00000AC, MI);
-  case KlaussCPU::BDEP:    return fmtRV_2addr(0x00000AD, MI);
+  // Class 2 in-place ALU-immediate (rd=rs1, tied): imm at op 2.
+  case KlaussCPU::ADDV:   return pack2(0x88200000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
+  case KlaussCPU::MINUSV: return pack2(0x88600000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
+  case KlaussCPU::ANDV:   return pack2(0x89000000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
+  case KlaussCPU::ORV:    return pack2(0x89400000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
+  case KlaussCPU::XORV:   return pack2(0x89800000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
 
-  // ── RV_cmp (rs, imm32) ───────────────────────────────────────────────────
-  case KlaussCPU::CMPRV_I: return fmtRV_cmp(0x0000083, MI);
-  case KlaussCPU::BTST:    return fmtRV_cmp(0x00000A3, MI);
+  // Class A in-place mul/div/mod-immediate (rd=rs1, tied): imm at op 2.
+  case KlaussCPU::MULV:   return pack2(0xA8800000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
+  case KlaussCPU::DIVV:   return pack2(0xA9800000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
+  case KlaussCPU::MODV:   return pack2(0xAA800000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
 
-  // ── RV absolute memory access (rd/rs, address-imm32; symbol-capable) ──────
-  case KlaussCPU::MEMREADR: return fmtRV_addr(0x0000721, MI, Fixups); // rd=mem64[addr]
-  case KlaussCPU::MEMSETR:  return fmtRV_addr(0x0000720, MI, Fixups); // mem64[addr]=rs
+  // Class 4 bit-field extract/deposit (2 words; params packed in imm32).
+  case KlaussCPU::BEXTR:  return pack2(0x93000000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
+  case KlaussCPU::BDEP:   return pack2(0x93400000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
 
-  // ── RRV ALU (rd, rs, imm32) ──────────────────────────────────────────────
-  case KlaussCPU::ADDI: return fmtRRV_ld(0x000002, MI);
+  // Class 3 compare register to immediate — flags only (rs1 + imm32).
+  case KlaussCPU::CMPRV_I: return pack2(0x8C100000u | fRs1(MI,0), getImm32(MI,1));
 
-  // ── RRV loads (rd, base, offset32) ───────────────────────────────────────
-  case KlaussCPU::LDIDX64:   return fmtRRV_ld(0x0000FC, MI);
-  case KlaussCPU::LDIDX32:   return fmtRRV_ld(0x0000C0, MI);
-  case KlaussCPU::LDIDX16:   return fmtRRV_ld(0x0000C2, MI);
-  case KlaussCPU::LDIDX8:    return fmtRRV_ld(0x0000C4, MI);
-  case KlaussCPU::LDIDX8_S:  return fmtRRV_ld(0x0000C6, MI);
-  case KlaussCPU::LDIDX16_S: return fmtRRV_ld(0x0000C7, MI);
+  // ── Class 6 indexed loads: rd,base at ops 0,1; offset32 at op 2 ───────────
+  case KlaussCPU::LDIDX8:    return pack2(0x98200000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
+  case KlaussCPU::LDIDX8_S:  return pack2(0x98A00000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
+  case KlaussCPU::LDIDX16:   return pack2(0x99200000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
+  case KlaussCPU::LDIDX16_S: return pack2(0x99A00000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
+  case KlaussCPU::LDIDX32:   return pack2(0x9A200000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
+  case KlaussCPU::LDIDX64:   return pack2(0x9B300000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2)); // aligned (v2 LDIDX64A)
+  case KlaussCPU::LDIDX64U:  return pack2(0x9B200000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2)); // raw (v2 LDIDX64)
 
-  // ── RRV stores (rs_data, base, offset32) ─────────────────────────────────
-  case KlaussCPU::STIDX64: return fmtRRV_st(0x0000FD, MI);
-  case KlaussCPU::STIDX32: return fmtRRV_st(0x0000C1, MI);
-  case KlaussCPU::STIDX16: return fmtRRV_st(0x0000C3, MI);
-  case KlaussCPU::STIDX8:  return fmtRRV_st(0x0000C5, MI);
+  // ── Class 7 indexed stores: data->rd, base->rs1 at ops 0,1; offset32 op 2 ─
+  case KlaussCPU::STIDX8:   return pack2(0x9C200000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
+  case KlaussCPU::STIDX16:  return pack2(0x9D200000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
+  case KlaussCPU::STIDX32:  return pack2(0x9E200000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
+  case KlaussCPU::STIDX64:  return pack2(0x9F300000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2)); // aligned (v2 STIDX64A)
+  case KlaussCPU::STIDX64U: return pack2(0x9F200000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2)); // raw (v2 STIDX64)
 
-  // ── RRV 64-bit non-aligned (vh LDIDX64/STIDX64) + register-offset ─────────
-  // (ldidx64/stidx64 above are the force-aligned 0xFC/0xFD = vh *64A.)
-  case KlaussCPU::LDIDX64U: return fmtRRV_ld(0x00000C, MI);
-  case KlaussCPU::STIDX64U: return fmtRRV_st(0x00000D, MI);
-  case KlaussCPU::LDIDX64R: return fmtRRV_ld(0x00000E, MI); // offset = reg# in imm[3:0]
-  case KlaussCPU::STIDX64R: return fmtRRV_st(0x000073, MI);
+  // ── Class 6/7 absolute-address memory (symbol-capable) ────────────────────
+  case KlaussCPU::MEMREADR: // rd = mem64[addr32]
+    return pack2Sym(0x9B400000u | fRd(MI,0), MI, 1,
+                    KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::MEMSETR:  // mem64[addr32] = reg[rd]  (.td op0 = data, op1 = addr)
+    return pack2Sym(0x9F400000u | fRd(MI,0), MI, 1,
+                    KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
 
-  // ── Vbr unconditional ────────────────────────────────────────────────────
-  case KlaussCPU::JMP:     return fmtVbr(0x00001000, MI, Fixups);
+  // ── Class 8 absolute-target branches (target32 at op 0, ABS32 fixup) ──────
+  case KlaussCPU::JMP:    return pack2Sym(0xA0000000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::JMPZ:   return pack2Sym(0xA0080000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::JMPNZ:  return pack2Sym(0xA00C0000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::JMPC:   return pack2Sym(0xA0100000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::JMPNC:  return pack2Sym(0xA0140000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::JMPO:   return pack2Sym(0xA0180000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::JMPNO:  return pack2Sym(0xA01C0000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::JMPS:   return pack2Sym(0xA0200000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::JMPNS:  return pack2Sym(0xA0240000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::JMPLT:  return pack2Sym(0xA0280000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::JMPGE:  return pack2Sym(0xA02C0000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::JMPLE:  return pack2Sym(0xA0300000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::JMPGT:  return pack2Sym(0xA0340000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::JMPULT: return pack2Sym(0xA0380000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::JMPUGE: return pack2Sym(0xA03C0000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::JMPULE: return pack2Sym(0xA0400000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::JMPUGT: return pack2Sym(0xA0440000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::JMPE:   return pack2Sym(0xA0480000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::JMPNE:  return pack2Sym(0xA04C0000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
 
-  // ── Vbr conditional ──────────────────────────────────────────────────────
-  case KlaussCPU::JMPZ:    return fmtVbr(0x00001001, MI, Fixups);
-  case KlaussCPU::JMPNZ:   return fmtVbr(0x00001002, MI, Fixups);
-  case KlaussCPU::JMPE:    return fmtVbr(0x00001003, MI, Fixups);
-  case KlaussCPU::JMPNE:   return fmtVbr(0x00001004, MI, Fixups);
-  case KlaussCPU::JMPC:    return fmtVbr(0x00001005, MI, Fixups);
-  case KlaussCPU::JMPNC:   return fmtVbr(0x00001006, MI, Fixups);
-  case KlaussCPU::JMPS:    return fmtVbr(0x00001013, MI, Fixups);
-  case KlaussCPU::JMPNS:   return fmtVbr(0x00001014, MI, Fixups);
-  case KlaussCPU::JMPLT:   return fmtVbr(0x00001015, MI, Fixups);
-  case KlaussCPU::JMPLE:   return fmtVbr(0x00001016, MI, Fixups);
-  case KlaussCPU::JMPGT:   return fmtVbr(0x00001017, MI, Fixups);
-  case KlaussCPU::JMPGE:   return fmtVbr(0x00001018, MI, Fixups);
-  case KlaussCPU::JMPULT:  return fmtVbr(0x00001019, MI, Fixups);
-  case KlaussCPU::JMPULE:  return fmtVbr(0x0000101A, MI, Fixups);
-  case KlaussCPU::JMPUGT:  return fmtVbr(0x0000101B, MI, Fixups);
-  case KlaussCPU::JMPUGE:  return fmtVbr(0x0000101C, MI, Fixups);
-  case KlaussCPU::JMPO:    return fmtVbr(0x00001007, MI, Fixups);
-  case KlaussCPU::JMPNO:   return fmtVbr(0x00001008, MI, Fixups);
+  // ── Class 8 absolute-target calls (ABS32 fixup) ───────────────────────────
+  case KlaussCPU::CALL_I:  return pack2Sym(0xA2000000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::CALLZ:   return pack2Sym(0xA2080000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::CALLNZ:  return pack2Sym(0xA20C0000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::CALLC:   return pack2Sym(0xA2100000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::CALLNC:  return pack2Sym(0xA2140000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::CALLO:   return pack2Sym(0xA2180000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::CALLNO:  return pack2Sym(0xA21C0000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::CALLE:   return pack2Sym(0xA2480000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
+  case KlaussCPU::CALLNE:  return pack2Sym(0xA24C0000u, MI, 0, KlaussCPU::FK_KlaussCPU_ABS32, Fixups);
 
-  // ── Vcall ─────────────────────────────────────────────────────────────────
-  case KlaussCPU::CALL_I:   return fmtVbr   (0x00001009, MI, Fixups);
-  case KlaussCPU::CALLREL:  return fmtVbrRel(0x00001041, MI, Fixups);
-  // Conditional calls (assembler-only)
-  case KlaussCPU::CALLZ:    return fmtVbr(0x0000100A, MI, Fixups);
-  case KlaussCPU::CALLNZ:   return fmtVbr(0x0000100B, MI, Fixups);
-  case KlaussCPU::CALLE:    return fmtVbr(0x0000100C, MI, Fixups);
-  case KlaussCPU::CALLNE:   return fmtVbr(0x0000100D, MI, Fixups);
-  case KlaussCPU::CALLC:    return fmtVbr(0x0000100E, MI, Fixups);
-  case KlaussCPU::CALLNC:   return fmtVbr(0x0000100F, MI, Fixups);
-  case KlaussCPU::CALLO:    return fmtVbr(0x00001010, MI, Fixups);
-  case KlaussCPU::CALLNO:   return fmtVbr(0x00001011, MI, Fixups);
+  // ── Class 8 PC-relative branches / call (PCREL32 fixup) ───────────────────
+  case KlaussCPU::JMPREL:    return pack2Sym(0xA1000000u, MI, 0, KlaussCPU::FK_KlaussCPU_PCREL32, Fixups);
+  case KlaussCPU::JMPZREL:   return pack2Sym(0xA1080000u, MI, 0, KlaussCPU::FK_KlaussCPU_PCREL32, Fixups);
+  case KlaussCPU::JMPNZREL:  return pack2Sym(0xA10C0000u, MI, 0, KlaussCPU::FK_KlaussCPU_PCREL32, Fixups);
+  case KlaussCPU::JMPCREL:   return pack2Sym(0xA1100000u, MI, 0, KlaussCPU::FK_KlaussCPU_PCREL32, Fixups);
+  case KlaussCPU::JMPNCREL:  return pack2Sym(0xA1140000u, MI, 0, KlaussCPU::FK_KlaussCPU_PCREL32, Fixups);
+  case KlaussCPU::JMPSREL:   return pack2Sym(0xA1200000u, MI, 0, KlaussCPU::FK_KlaussCPU_PCREL32, Fixups);
+  case KlaussCPU::JMPNSREL:  return pack2Sym(0xA1240000u, MI, 0, KlaussCPU::FK_KlaussCPU_PCREL32, Fixups);
+  case KlaussCPU::JMPLTREL:  return pack2Sym(0xA1280000u, MI, 0, KlaussCPU::FK_KlaussCPU_PCREL32, Fixups);
+  case KlaussCPU::JMPGEREL:  return pack2Sym(0xA12C0000u, MI, 0, KlaussCPU::FK_KlaussCPU_PCREL32, Fixups);
+  case KlaussCPU::JMPLEREL:  return pack2Sym(0xA1300000u, MI, 0, KlaussCPU::FK_KlaussCPU_PCREL32, Fixups);
+  case KlaussCPU::JMPGTREL:  return pack2Sym(0xA1340000u, MI, 0, KlaussCPU::FK_KlaussCPU_PCREL32, Fixups);
+  case KlaussCPU::JMPULTREL: return pack2Sym(0xA1380000u, MI, 0, KlaussCPU::FK_KlaussCPU_PCREL32, Fixups);
+  case KlaussCPU::JMPUGEREL: return pack2Sym(0xA13C0000u, MI, 0, KlaussCPU::FK_KlaussCPU_PCREL32, Fixups);
+  case KlaussCPU::JMPULEREL: return pack2Sym(0xA1400000u, MI, 0, KlaussCPU::FK_KlaussCPU_PCREL32, Fixups);
+  case KlaussCPU::JMPUGTREL: return pack2Sym(0xA1440000u, MI, 0, KlaussCPU::FK_KlaussCPU_PCREL32, Fixups);
+  case KlaussCPU::JMPEREL:   return pack2Sym(0xA1480000u, MI, 0, KlaussCPU::FK_KlaussCPU_PCREL32, Fixups);
+  case KlaussCPU::JMPNEREL:  return pack2Sym(0xA14C0000u, MI, 0, KlaussCPU::FK_KlaussCPU_PCREL32, Fixups);
+  case KlaussCPU::CALLREL:   return pack2Sym(0xA3000000u, MI, 0, KlaussCPU::FK_KlaussCPU_PCREL32, Fixups);
 
-  // ── PC-relative unconditional branch ─────────────────────────────────────
-  case KlaussCPU::JMPREL:    return fmtVbrRel(0x00001030, MI, Fixups);
+  // ── Class 9 stack immediate ops (imm32 at op 0) ───────────────────────────
+  case KlaussCPU::ADDSP_I: return pack2(0xA5400000u, getImm32(MI,0)); // sext
+  case KlaussCPU::PUSHV:   return pack2(0xA4400000u, getImm32(MI,0)); // zext
 
-  // ── PC-relative conditional branches ─────────────────────────────────────
-  case KlaussCPU::JMPZREL:   return fmtVbrRel(0x00001031, MI, Fixups);
-  case KlaussCPU::JMPNZREL:  return fmtVbrRel(0x00001032, MI, Fixups);
-  case KlaussCPU::JMPEREL:   return fmtVbrRel(0x00001033, MI, Fixups);
-  case KlaussCPU::JMPNEREL:  return fmtVbrRel(0x00001034, MI, Fixups);
-  case KlaussCPU::JMPCREL:   return fmtVbrRel(0x00001035, MI, Fixups);
-  case KlaussCPU::JMPNCREL:  return fmtVbrRel(0x00001036, MI, Fixups);
-  case KlaussCPU::JMPSREL:   return fmtVbrRel(0x00001037, MI, Fixups);
-  case KlaussCPU::JMPNSREL:  return fmtVbrRel(0x00001038, MI, Fixups);
-  case KlaussCPU::JMPLTREL:  return fmtVbrRel(0x00001039, MI, Fixups);
-  case KlaussCPU::JMPLEREL:  return fmtVbrRel(0x0000103A, MI, Fixups);
-  case KlaussCPU::JMPGTREL:  return fmtVbrRel(0x0000103B, MI, Fixups);
-  case KlaussCPU::JMPGEREL:  return fmtVbrRel(0x0000103C, MI, Fixups);
-  case KlaussCPU::JMPULTREL: return fmtVbrRel(0x0000103D, MI, Fixups);
-  case KlaussCPU::JMPULEREL: return fmtVbrRel(0x0000103E, MI, Fixups);
-  case KlaussCPU::JMPUGTREL: return fmtVbrRel(0x0000103F, MI, Fixups);
-  case KlaussCPU::JMPUGEREL: return fmtVbrRel(0x00001040, MI, Fixups);
+  // ── Class B / C immediate peripherals (imm32 at op 0) ─────────────────────
+  case KlaussCPU::DELAYV:   return pack2(0xAC050000u, getImm32(MI,0));
+  case KlaussCPU::LCDCMDV:  return pack2(0xB0000000u, getImm32(MI,0));
+  case KlaussCPU::LCDDATAV: return pack2(0xB1000000u, getImm32(MI,0));
+  case KlaussCPU::LCD:      return pack2(0xB2000000u, getImm32(MI,0)); // v2 LCDRST
 
-  // ── Vsp (ADDSP: fixed op32, signed imm32 at operand 0) ───────────────────
-  case KlaussCPU::ADDSP_I:  return fmtVimm(0x00004050, MI);
-
-  // ── V (fixed op32 + imm32/address; fmtVbr handles literal or symbol) ─────
-  case KlaussCPU::PUSHV:    return fmtVbr(0x00004020, MI, Fixups);
-  case KlaussCPU::DELAYV:   return fmtVbr(0x0000F013, MI, Fixups);
-  case KlaussCPU::LEDV:     return fmtVbr(0x00003070, MI, Fixups);
-  case KlaussCPU::RGB1V:    return fmtVbr(0x00003074, MI, Fixups);
-  case KlaussCPU::RGB2V:    return fmtVbr(0x00003075, MI, Fixups);
-  case KlaussCPU::LCD:      return fmtVbr(0x00002023, MI, Fixups);
-  case KlaussCPU::LCDCMDV:  return fmtVbr(0x00002021, MI, Fixups);
-  case KlaussCPU::LCDDATAV: return fmtVbr(0x00002022, MI, Fixups);
+  // ── RETIRED in v2 (LED / RGB immediate): v1 opcodes retained (see above) ──
+  case KlaussCPU::LEDV:  return pack2(0x00003070u, getImm32(MI,0));
+  case KlaussCPU::RGB1V: return pack2(0x00003074u, getImm32(MI,0));
+  case KlaussCPU::RGB2V: return pack2(0x00003075u, getImm32(MI,0));
 
   default:
     llvm_unreachable("unhandled 8-byte KlaussCPU instruction in encode64");
@@ -513,24 +425,19 @@ void KlaussCPUMCCodeEmitter::encodeInstruction(
 
   unsigned Opcode = MI.getOpcode();
 
-  // SETR64: 12-byte instruction (three big-endian 32-bit words).
-  // Word0 uses R format: op28 in bits[31:4], rd in bits[3:0].
-  // opcode = 0x00000FE → Word0 = (0x00000FE << 4) | rd = 0x00000FEx
-  // Word1 = lo32, Word2 = hi32.
+  // SETR64: 12-byte, 3-word (v2 class 2, LEN=11).  Template 0xCBC00000.
+  //   Word0 = template | rd<<8,  Word1 = lo32,  Word2 = hi32.
   if (Opcode == KlaussCPU::SETR64) {
-    unsigned Rd = getReg(MI, 0);
-    uint32_t Lo = getImm32(MI, 1);
-    uint32_t Hi = getImm32(MI, 2);
-    emitLE32((static_cast<uint32_t>(0x00000FEu) << 4) | Rd, CB);
-    emitLE32(Lo, CB);
-    emitLE32(Hi, CB);
+    emitLE32(0xCBC00000u | fRd(MI, 0), CB);
+    emitLE32(getImm32(MI, 1), CB); // lo
+    emitLE32(getImm32(MI, 2), CB); // hi
     return;
   }
 
-  // PUSHV64: 12-byte push of a 64-bit immediate.
-  // Word0 = fixed opcode 0x00004060, Word1 = lo32, Word2 = hi32.
+  // PUSHV64: 12-byte push of a 64-bit immediate (v2 class 9, LEN=11).
+  //   Word0 = template 0xE4400000,  Word1 = lo32,  Word2 = hi32.
   if (Opcode == KlaussCPU::PUSHV64) {
-    emitLE32(0x00004060u, CB);
+    emitLE32(0xE4400000u, CB);
     emitLE32(getImm32(MI, 0), CB); // lo
     emitLE32(getImm32(MI, 1), CB); // hi
     return;
@@ -541,8 +448,8 @@ void KlaussCPUMCCodeEmitter::encodeInstruction(
     emitLE32(encode32(MI), CB);
   } else if (Size == 8) {
     uint64_t Bits = encode64(MI, Fixups);
-    emitLE32(static_cast<uint32_t>(Bits >> 32), CB); // high word (opcode+regs)
-    emitLE32(static_cast<uint32_t>(Bits),        CB); // low word (imm/target)
+    emitLE32(static_cast<uint32_t>(Bits >> 32), CB); // word0 (opcode + regs)
+    emitLE32(static_cast<uint32_t>(Bits),        CB); // word1 (imm / target)
   } else {
     llvm_unreachable("unexpected KlaussCPU instruction size in encodeInstruction");
   }

@@ -1,7 +1,19 @@
 //===-- KlaussCPUInstrInfo.td - KlaussCPU Instruction Definitions ----------===//
 //
-// Instruction encoding overview (all words big-endian on the memory bus):
+// NOTE ON ENCODING (ISA v2, the flag-day renumbering — ISA_ENCODING_V2.md):
+// The **authoritative** instruction bytes are produced by the hand-written
+// KlaussCPUMCCodeEmitter.cpp (there is no -gen-emitter / -gen-disassembler).
+// The opcode template arguments and `let Inst{}` fields in THIS file are
+// legacy/documentary only and are NOT consumed by any generated code.  What
+// this file must get right for v2 is each instruction's **Size**, operand
+// list, and 2-address ties — those drive register allocation and the emitter's
+// operand indexing.  Do not trust the numeric `op` args below as v2 opcodes.
 //
+// v2 word-0 layout (all instructions, little-endian on the bus):
+//   [31:30]=LEN(01/10/11 = 1/2/3 words)  [29:26]=CLASS  [25:12]=attrs+OP
+//   [11:8]=rd  [7:4]=rs1  [3:0]=rs2   (stores put their data source in rd)
+//
+//   Legacy format table (v1 bit layout; kept for the class helpers below):
 //   Format   Size  Layout
 //   ------   ----  ------
 //   RRR       4B   [31:12]=op20  [11:8]=rd  [7:4]=rs1  [3:0]=rs2
@@ -288,6 +300,37 @@ class RRV_st<bits<24> op, string asmstr, list<dag> pat = []>
   let Inst{35-32} = base;
   let Inst{31-0}  = offset;
   let mayStore    = 1;
+}
+
+//===----------------------------------------------------------------------===//
+// v2 single-word (4-byte) forms that were 2 words in v1.
+// Encoding is produced entirely by KlaussCPUMCCodeEmitter.cpp; `Inst` is left
+// unset here (documentary only, no generated emitter/decoder consumes it).
+//===----------------------------------------------------------------------===//
+
+// Class 4 shift/rotate/bit by embedded constant N (word0[20:15]); 2-address
+// ($rd = $rs1).  The count/position operand is a plain immediate; the encoder
+// masks it to 6 bits.  (v1: these were 8-byte RV_2addr forms.)
+class ShiftImmN<string asmstr, list<dag> pat = []>
+    : KCInst32<(outs GPR:$rd), (ins GPR:$rs, simm32:$imm), asmstr, pat> {
+  let Constraints = "$rd = $rs";
+}
+
+// Class 4 bit-test by embedded constant N — flag-only, no destination register
+// (Z = ~bit).  (v1: 8-byte RV_cmp form.)
+class BitTestImmN<string asmstr>
+    : KCInst32<(outs), (ins GPR:$rs, simm32:$imm), asmstr>;
+
+// Class 6/7 register-offset indexed 64-bit load/store (v2: 1 word; the offset
+// register number rides in rs2[3:0]).  Modelled with the offset as an
+// immediate register number, matching the v1 assembler-only defs.
+class Idx64RegOff_ld<string asmstr>
+    : KCInst32<(outs GPR:$rd), (ins GPR:$base, simm32:$offset), asmstr> {
+  let mayLoad = 1;
+}
+class Idx64RegOff_st<string asmstr>
+    : KCInst32<(outs), (ins GPR:$rs_data, GPR:$base, simm32:$offset), asmstr> {
+  let mayStore = 1;
 }
 
 //===----------------------------------------------------------------------===//
@@ -617,16 +660,18 @@ def MINUSV  : RV_2addr<0x0000082, "minusv\t$rd, $imm">;
 def ANDV    : RV_2addr<0x0000086, "andv\t$rd, $imm">;
 def ORV     : RV_2addr<0x0000087, "orv\t$rd, $imm">;
 def XORV    : RV_2addr<0x0000088, "xorv\t$rd, $imm">;
-def SHLV    : RV_2addr<0x0000091, "shlv\t$rd, $imm">;
-def SHRV    : RV_2addr<0x0000092, "shrv\t$rd, $imm">;
-def SHRAV   : RV_2addr<0x0000093, "shrav\t$rd, $imm">;
+// Shift by immediate (count = imm[5:0]); v2: single word, count embedded.
+def SHLV    : ShiftImmN<"shlv\t$rd, $imm">;
+def SHRV    : ShiftImmN<"shrv\t$rd, $imm">;
+def SHRAV   : ShiftImmN<"shrav\t$rd, $imm">;
 def MULV    : RV_2addr<0x00000B8, "mulv\t$rd, $imm">;
 def DIVV    : RV_2addr<0x00000B9, "divv\t$rd, $imm">;
 def MODV    : RV_2addr<0x00000BA, "modv\t$rd, $imm">;
 
-// Rotate by immediate (count = imm[5:0]).  Register-amount forms are ROLR/RORR_R.
-def ROLV    : RV_2addr<0x00000FC, "rolv\t$rd, $imm">;
-def RORV    : RV_2addr<0x00000FD, "rorv\t$rd, $imm">;
+// Rotate by immediate (count = imm[5:0]); v2: single word.  Register-amount
+// forms are ROLR/RORR_R.
+def ROLV    : ShiftImmN<"rolv\t$rd, $imm">;
+def RORV    : ShiftImmN<"rorv\t$rd, $imm">;
 
 // reg+imm32 add: rd = rs + sign_extend(imm32). Two distinct regs; sign-extends.
 // Replaces the SETR+ADDR two-instruction sequence for frame-address materialisation.
@@ -746,14 +791,20 @@ def : Pat<(rotr GPR:$rs, uimm6:$sh), (RORV GPR:$rs, uimm6:$sh)>;
 let AddedComplexity = 3 in
 def : Pat<(and GPR:$rs, 0xFFFFFFFF), (ZEXTW GPR:$rs)>;
 
-// Cheap 4-byte in-place forms.  AddedComplexity so they win over ADDI / SHLV
-// for these specific immediates.
+// INCR/DECR: add ±1 as a single 4-byte op that also sets zero_flag (consumed
+// by the KlaussCPUFlagReuse peephole).  AddedComplexity so they beat ADDV/ADDI.
 let AddedComplexity = 2 in {
-def : Pat<(add GPR:$rs,  1), (INCR  GPR:$rs)>;
-def : Pat<(add GPR:$rs, -1), (DECR  GPR:$rs)>;
-def : Pat<(shl GPR:$rs,  1), (SHLR1 GPR:$rs)>;
-def : Pat<(srl GPR:$rs,  1), (SHRR1 GPR:$rs)>;
+def : Pat<(add GPR:$rs,  1), (INCR GPR:$rs)>;
+def : Pat<(add GPR:$rs, -1), (DECR GPR:$rs)>;
 }
+
+// Shift-by-1 needs no special case under v2: SHLV/SHRV with an embedded count
+// are single-word (they were 2-word in v1, which is the only reason SHLR1/SHRR1
+// were preferred then).  `(shl x, 1)` / `(srl x, 1)` now fold into the general
+// SHLV/SHRV patterns above; the sole delta from SHLR1/SHRR1 is that SHLV/SHRV
+// also set the Z flag, which LLVM does not model.  This mirrors rotate-by-1,
+// which already lowers through ROLV/RORV — byte-identical to ROLR1/RORR1 (and
+// additionally updates carry).  SHLR1/SHRR1 remain as assembler-only mnemonics.
 
 // Global addresses and external symbols are materialized in C++ Select()
 // via SETR (non-call uses) to avoid the "leaf node not emitted" crash.
@@ -950,12 +1001,15 @@ def RORCR : R_inplace<0x00000FB, "rorcr\t$rd">;
 
 // ── RV 2-address (rd op= imm32) and RV compare (rs, imm32) ──────────────────
 // Bit position / start+len are packed in the immediate (see opcode_select.vh).
-def BSET  : RV_2addr<0x00000A0, "bset\t$rd, $imm">;
-def BCLR  : RV_2addr<0x00000A1, "bclr\t$rd, $imm">;
-def BTGL  : RV_2addr<0x00000A2, "btgl\t$rd, $imm">;
+// Bit set/clear/toggle by embedded position N — v2: single word, 2-address.
+def BSET  : ShiftImmN<"bset\t$rd, $imm">;
+def BCLR  : ShiftImmN<"bclr\t$rd, $imm">;
+def BTGL  : ShiftImmN<"btgl\t$rd, $imm">;
+// Bit-field extract/deposit stay 2 words (params packed in imm32).
 def BEXTR : RV_2addr<0x00000AC, "bextr\t$rd, $imm">;
 def BDEP  : RV_2addr<0x00000AD, "bdep\t$rd, $imm">;
-def BTST  : RV_cmp <0x00000A3, "btst\t$rs, $imm">;
+// Bit-test by embedded position N — v2: single word, flag-only.
+def BTST  : BitTestImmN<"btst\t$rs, $imm">;
 
 // ── RR (rd, rs) load / (rs_data, rs_addr) store — 8-byte aligned ────────────
 def MEMREADRR  : RR1<0x000071, (outs GPR:$rd), (ins GPR:$rs), "memreadrr\t$rd, $rs"> { let mayLoad = 1; }
@@ -971,8 +1025,9 @@ def MEMSETR  : RV_cmp<0x0000720, "memsetr\t$rs, $imm"> { let mayStore = 1; }
 //    For the *R variants the offset operand is a register *number* in imm[3:0].
 def LDIDX64U : RRV_ld<0x00000C, "ldidx64u\t$rd, $base, $offset">;
 def STIDX64U : RRV_st<0x00000D, "stidx64u\t$rs_data, $base, $offset">;
-def LDIDX64R : RRV_ld<0x00000E, "ldidx64r\t$rd, $base, $offset">;
-def STIDX64R : RRV_st<0x000073, "stidx64r\t$rs_data, $base, $offset">;
+// v2: register-offset indexed ops are a single word (offset reg in rs2[3:0]).
+def LDIDX64R : Idx64RegOff_ld<"ldidx64r\t$rd, $base, $offset">;
+def STIDX64R : Idx64RegOff_st<"stidx64r\t$rs_data, $base, $offset">;
 
 // ── V (fixed op32 + imm32/address) — push / conditional jumps ───────────────
 def PUSHV : Vsp<0x00004020, "pushv\t$imm"> { let mayStore = 1; }

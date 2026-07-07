@@ -49,6 +49,16 @@ public:
       return ELF::R_KLAUSSCPU_ABS64;
     if (Fixup.getKind() == MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL32))
       return ELF::R_KLAUSSCPU_PCREL32;
+    // A cross-section symbol difference (A - B) reaches us as a PC-relative
+    // data fixup (FK_Data_4 with IsPCRel).  The prime source is the relative
+    // lookup tables the RelLookupTableConverter emits under -fPIC:
+    //   .long <str> - <table>   accessed via llvm.load.relative.
+    // These need a *data* PC-relative relocation — value = S + A - P exactly,
+    // WITHOUT the instruction word-1 "+4" convention that FK_KlaussCPU_PCREL32
+    // carries.  Emitting ABS32 here (the old fallthrough) silently dropped the
+    // "- B" term and miscompiled the table into absolute addresses.
+    if (IsPCRel)
+      return ELF::R_KLAUSSCPU_PC32;
     return ELF::R_KLAUSSCPU_ABS32;
   }
 };
@@ -116,14 +126,14 @@ public:
 
   // ── NOP padding ──────────────────────────────────────────────────────────
 
-  // NOP_I = 0x0000F010 (4-byte, little-endian: 10 F0 00 00).
+  // v2 NOP = 0x6C000000 (4-byte, little-endian: 00 00 00 6C).
   // KlaussCPU instructions are 4-byte aligned; reject sub-word padding.
   bool writeNopData(raw_ostream &OS, uint64_t Count,
                     const MCSubtargetInfo *STI) const override {
     if (Count % 4 != 0)
       return false;
     for (uint64_t i = 0, n = Count / 4; i < n; ++i)
-      OS.write("\x10\xF0\x00\x00", 4);
+      OS.write("\x00\x00\x00\x6C", 4);
     return true;
   }
 

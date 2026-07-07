@@ -6,3 +6,4 @@ ELF_RELOC(R_KLAUSSCPU_NONE,    0)
 ELF_RELOC(R_KLAUSSCPU_ABS32,   1)  // 32-bit absolute, LE — instruction word-1 slot or 4-byte data ref
 ELF_RELOC(R_KLAUSSCPU_ABS64,   2)  // 64-bit absolute, LE — 8-byte pointer field in .rodata/.data
 ELF_RELOC(R_KLAUSSCPU_PCREL32, 3)  // 32-bit PC-relative — JMPREL/JMPxxREL/CALLREL/LEAPC word-1 slot
+ELF_RELOC(R_KLAUSSCPU_PC32,    4)  // 32-bit PC-relative *data* (symbol difference A-B), no instruction +4
