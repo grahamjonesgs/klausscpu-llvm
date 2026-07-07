@@ -372,6 +372,16 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
     SDValue Dest     = N->getOperand(4);
     SDLoc DL(N);
 
+    // A3a (arithmetic zero_flag reuse) is NOT done here.  A DAG-level attempt
+    // to drop the compare and branch on the arithmetic op's zero_flag has to
+    // glue the arithmetic op adjacent to the branch, which is unschedulable
+    // whenever that op's result also feeds a loop back-edge (the CopyToReg has
+    // nowhere to go) — it deadlocks the DAG scheduler.  A3a is instead a
+    // post-RA MI peephole (KlaussCPUFlagReuse.cpp) that rewrites the already-
+    // scheduled `<arith Rd>; CMPRV Rd,0; JMP{E,NE}` triple into
+    // `<arith Rd>; JMP{Z,NZ}`, where adjacency in the final stream proves no
+    // flag-clobbering instruction sits between the producer and the branch.
+
     // Emit the compare.
     SDNode *CmpNode;
     if (auto *C = dyn_cast<ConstantSDNode>(RHS);

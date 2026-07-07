@@ -13,6 +13,7 @@ add_public_tablegen_target(KlaussCPUCommonTableGen)
 
 add_llvm_target(KlaussCPUCodeGen
   KlaussCPUAsmPrinter.cpp
+  KlaussCPUFlagReuse.cpp
   KlaussCPUFrameLowering.cpp
   KlaussCPUInstrInfo.cpp
   KlaussCPUISelDAGToDAG.cpp
@@ -20,6 +21,7 @@ add_llvm_target(KlaussCPUCodeGen
   KlaussCPURegisterInfo.cpp
   KlaussCPUSubtarget.cpp
   KlaussCPUTargetMachine.cpp
+  KlaussCPUTargetTransformInfo.cpp
 
   LINK_COMPONENTS
   Analysis

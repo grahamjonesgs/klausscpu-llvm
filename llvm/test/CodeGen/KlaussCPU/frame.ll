@@ -48,10 +48,9 @@ define i64 @stack_array(i64 %i, i64 %v) {
 ; CHECK-NEXT:    push r15
 ; CHECK-NEXT:    getsp r15
 ; CHECK-NEXT:    addsp -64
-; CHECK-NEXT:    setr r12, 3
-; CHECK-NEXT:    shlr r12, r0, r12
-; CHECK-NEXT:    addi r14, r15, -64
-; CHECK-NEXT:    addr r12, r14, r12
+; CHECK-NEXT:    shlv r0, 3
+; CHECK-NEXT:    addi r12, r15, -64
+; CHECK-NEXT:    addr r12, r12, r0
 ; CHECK-NEXT:    stidx64 r1, r12, 0
 ; CHECK-NEXT:    copy r12, r1
 ; CHECK-NEXT:    setsp r15

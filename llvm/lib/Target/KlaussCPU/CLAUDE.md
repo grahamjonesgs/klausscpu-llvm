@@ -154,8 +154,10 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPUISelLowering.h/.cpp  LowerFormalArguments, LowerReturn, KlaussCPUISD nodes
 ├── KlaussCPUISelDAGToDAG.cpp   SelectionDAGISelLegacy pass; SelectCode() dispatch
 ├── KlaussCPUAsmPrinter.cpp     MachineInstr → MCInst → text assembly
+├── KlaussCPUFlagReuse.cpp      A3a: post-RA peephole, CMPRV Rd,0+JMPE/NE → JMPZ/NZ (opt-in flag)
+├── KlaussCPUTargetTransformInfo.h/.cpp  A4: TTI — no partial/runtime unroll, no peel (fetch-bound)
 ├── KlaussCPUSubtarget.h/.cpp   single global subtarget; member init order is critical
-├── KlaussCPUTargetMachine.h/.cpp CodeGenTargetMachineImpl; PassConfig::addInstSelector
+├── KlaussCPUTargetMachine.h/.cpp CodeGenTargetMachineImpl; PassConfig::addInstSelector + addPreEmitPass + getTargetTransformInfo
 ├── MCTargetDesc/
 │   ├── CMakeLists.txt          LLVMKlaussCPUDesc; depends on KlaussCPUCommonTableGen
 │   ├── KlaussCPUMCAsmInfo.h/.cpp  MCAsmInfoELF subclass
@@ -942,6 +944,37 @@ and one-instruction signed sub-word loads (`LDIDX8_S`/`LDIDX16_S`).
   Rust demo shims (`rust/hello-uart`, `rust/crates/examples/blinky`
   `uart_shim.c`) were rewritten to the MMIO poll-then-write pattern and compile
   clean with the rebuilt clang.
+
+### Step 35 ✅ Performance: TTI (A4) + arithmetic zero_flag reuse (A3a) (2026-07-03)
+- Driven by `PERF_LLVM_HANDOFF.md` (fetch-bound core; see that doc for the
+  baseline + which items remain). Two backend changes, both built + llc-verified
+  in this tree; on-silicon instruction-count measurement is the user's board step.
+- **A4 — `KlaussCPUTargetTransformInfo.{h,cpp}`** (new): subclasses
+  `BasicTTIImplBase`, registered via `KlaussCPUTargetMachine::getTargetTransformInfo`.
+  `getUnrollingPreferences` disables partial/runtime unrolling + unroll-and-jam
+  (keeps full-unroll of tiny constant-trip loops); `getPeelingPreferences`
+  disables peeling. Rationale: on a core where fetch is 59–75% of cycles, every
+  duplicated loop-body word costs cycles. Default-on. Verified: a runtime-trip
+  reduction loop keeps one body at `-O2`.
+- **A3a — `KlaussCPUFlagReuse.cpp`** (new MachineFunctionPass, run in
+  `addPreEmitPass`): drops the redundant `CMPRV Rd,0` before a `JMP{E,NE}` when
+  `Rd` is written by an immediately-preceding zero_flag arithmetic op
+  (INCR/DECR/ADDR/SUBR), retargeting the branch to `JMP{Z,NZ}` (+ REL variants
+  in PIC). **Default-OFF** behind `-klausscpu-arith-flag-reuse` (Hidden) — it
+  changes which HW flag a branch reads (zero_flag vs equal_flag; see §6), so it
+  must pass the on-silicon regression before promotion to `cl::init(true)`.
+  - **Why a post-RA peephole and not a DAG rewrite:** a DAG-level version has to
+    glue the arith op adjacent to the branch, which is unschedulable when the
+    arith result also feeds a loop back-edge (the `CopyToReg` has nowhere to go)
+    → `SUnit::ComputeHeight` overflow crash. Operating on the final instruction
+    stream sidesteps it; adjacency there proves no flag-clobber between producer
+    and branch. `JMPZ/JMPNZ` are intentionally NOT added to `isBranchOpcode` —
+    the pass is the last transform, after all `analyzeBranch` callers.
+  - Verified: fires on `fact` (`decr; jmpnz`), `x+y==0`, `x-y!=0`, non-PIC + PIC;
+    inert by default; no crash over every KlaussCPU test × {-O1,-O2,PIC}. Test:
+    `llvm/test/CodeGen/KlaussCPU/flag-reuse.ll`.
+  - `Select(BR_CC)` in `KlaussCPUISelDAGToDAG.cpp` is unchanged in behaviour
+    (comment-only diff pointing at the peephole).
 
 ---
 

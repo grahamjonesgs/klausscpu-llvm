@@ -58,10 +58,9 @@ define i64 @read_array_elem(i64 %i) {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    push r15
 ; CHECK-NEXT:    getsp r15
-; CHECK-NEXT:    setr r12, 3
-; CHECK-NEXT:    shlr r12, r0, r12
-; CHECK-NEXT:    setr r14, g_arr
-; CHECK-NEXT:    addr r12, r14, r12
+; CHECK-NEXT:    shlv r0, 3
+; CHECK-NEXT:    setr r12, g_arr
+; CHECK-NEXT:    addr r12, r12, r0
 ; CHECK-NEXT:    ldidx64 r12, r12, 0
 ; CHECK-NEXT:    setsp r15
 ; CHECK-NEXT:    pop r15

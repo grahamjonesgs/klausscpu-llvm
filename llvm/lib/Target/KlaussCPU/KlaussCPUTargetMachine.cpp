@@ -20,6 +20,7 @@
 
 #include "KlaussCPUTargetMachine.h"
 #include "KlaussCPUMachineFunctionInfo.h"
+#include "KlaussCPUTargetTransformInfo.h"
 #include "TargetInfo/KlaussCPUTargetInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
@@ -31,6 +32,7 @@
 
 namespace llvm {
 FunctionPass *createKlaussCPUISelDag(KlaussCPUTargetMachine &TM);
+FunctionPass *createKlaussCPUFlagReusePass();
 } // namespace llvm
 
 using namespace llvm;
@@ -75,6 +77,7 @@ public:
   }
 
   bool addInstSelector() override;
+  void addPreEmitPass() override;
 };
 } // namespace
 
@@ -94,4 +97,16 @@ KlaussCPUTargetMachine::createMachineFunctionInfo(BumpPtrAllocator &Allocator,
 bool KlaussCPUPassConfig::addInstSelector() {
   addPass(createKlaussCPUISelDag(getKlaussCPUTargetMachine()));
   return false;
+}
+
+void KlaussCPUPassConfig::addPreEmitPass() {
+  // A3a — arithmetic zero_flag reuse.  Runs on the final (post-RA, post-
+  // scheduling) instruction stream so adjacency is meaningful.  No-op unless
+  // -klausscpu-arith-flag-reuse is set.
+  addPass(createKlaussCPUFlagReusePass());
+}
+
+TargetTransformInfo
+KlaussCPUTargetMachine::getTargetTransformInfo(const Function &F) const {
+  return TargetTransformInfo(std::make_unique<KlaussCPUTTIImpl>(this, F));
 }
