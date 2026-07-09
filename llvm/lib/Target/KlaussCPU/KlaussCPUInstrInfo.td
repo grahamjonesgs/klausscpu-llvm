@@ -540,6 +540,19 @@ def MEMGET32 : RR1<0x000079, (outs GPR:$rd), (ins GPR:$rs),
                   "memget32\t$rd, $rs"> { let mayLoad = 1; }
 
 // Sub-word register-addressed stores (stores low N bits of rs_data to mem[rs_addr]).
+//
+// ALIGNMENT WARNING: MEMSET16/MEMSET32 silently mask the low address bits in
+// hardware (mem16[rs2 & ~1], mem32[rs2 & ~3] — CPU_ARCHITECTURE.md §8.1). An
+// under-aligned store writes the *aligned* slot with NO fault → silent memory
+// corruption, not a trap. These (and STIDX16/STIDX32 below) are only safe
+// because allowsMisalignedMemoryAccesses() is left at its default (false), so
+// the legalizer expands every under-aligned i16/i32 store to byte ops (MEMSET8/
+// STIDX8) and never selects a masking store on an unaligned address.
+// If misaligned access is ever enabled (e.g. to get cheap unaligned i32 *loads*
+// for crypto), scope that permission to the LOAD path only — do NOT let the
+// store path reach these opcodes on an unaligned address; route unaligned
+// stores through STIDX8/MEMSET8, or switch to a HW store that faults instead of
+// masking. (Same invariant as the force-aligned LDIDX64/STIDX64 note above.)
 def MEMSET8  : RRst<0x000074, "memset8\t$rs_data, $rs_addr">;
 def MEMSET16 : RRst<0x000076, "memset16\t$rs_data, $rs_addr">;
 def MEMSET32 : RRst<0x000078, "memset32\t$rs_data, $rs_addr">;
@@ -710,6 +723,9 @@ def LDIDX64 : RRV_ld<0x0000FC, "ldidx64\t$rd, $base, $offset">;
 def STIDX64 : RRV_st<0x0000FD, "stidx64\t$rs_data, $base, $offset">;
 
 def LDIDX32 : RRV_ld<0x0000C0, "ldidx32\t$rd, $base, $offset">;
+// STIDX32/STIDX16 mask addr&~3 / addr&~1 like MEMSET32/16 — safe only while
+// allowsMisalignedMemoryAccesses()==false. See the alignment warning above the
+// MEMSET8/16/32 defs before enabling any unaligned store path.
 def STIDX32 : RRV_st<0x0000C1, "stidx32\t$rs_data, $base, $offset">;
 
 def LDIDX16   : RRV_ld<0x0000C2, "ldidx16\t$rd, $base, $offset">   { let mayLoad = 1; }
