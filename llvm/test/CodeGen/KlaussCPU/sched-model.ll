@@ -37,3 +37,45 @@ small:
 big:
   ret i64 0
 }
+
+; itoa-class flag hazard (picolibc __ultoa_invert): a pointer increment (INCR — a
+; flag CLOBBERER, so R_inplace carries Defs=[FLAGS]) inside a loop whose condition
+; also sets flags.  With scheduling on, INCR must NOT be hoisted into the
+; compare->branch gap; if it were, the branch would read INCR's flags (pointer != 0,
+; always true) and spin forever — the board printf/itoa hang.
+;
+; A *runtime* base forces DIVUR (not constant-fold to MULHUR); the latency of DIVUR
+; is exactly what tempts the scheduler to fill the gap with the independent INCR.
+; This only schedules correctly because FLAGS is a TRACKED (non-reserved) physreg —
+; reserving it hides the live range and the scheduler slots INCR into the gap.
+; Pin: the compare is immediately followed by its branch (nothing flag-setting
+; between), i.e. INCR is scheduled before the compare.
+define ptr @itoa_no_flag_clobber(i64 %n, ptr %p, i64 %base) {
+; The flag-clobbering INCR must not appear between the compare and its branch
+; (a flag-neutral COPY there is fine — COPY_R does not set FLAGS).
+; CHECK-LABEL: itoa_no_flag_clobber:
+; CHECK:         cmprr r{{[0-9]+}}, r{{[0-9]+}}
+; CHECK-NOT:     incr
+; CHECK:         jmp{{[a-z]+}} .LBB
+;
+; NOSCHED-LABEL: itoa_no_flag_clobber:
+; NOSCHED:       cmprr r{{[0-9]+}}, r{{[0-9]+}}
+; NOSCHED-NOT:   incr
+; NOSCHED:       jmp{{[a-z]+}} .LBB
+entry:
+  br label %loop
+loop:
+  %nv = phi i64 [ %n, %entry ], [ %ndiv, %loop ]
+  %pv = phi ptr [ %p, %entry ], [ %pn, %loop ]
+  %ndiv = udiv i64 %nv, %base
+  %mul = mul i64 %ndiv, %base
+  %rem = sub i64 %nv, %mul
+  %digit = trunc i64 %rem to i8
+  %c = add i8 %digit, 48
+  store i8 %c, ptr %pv
+  %pn = getelementptr i8, ptr %pv, i64 1
+  %cond = icmp uge i64 %ndiv, %base
+  br i1 %cond, label %loop, label %done
+done:
+  ret ptr %pn
+}

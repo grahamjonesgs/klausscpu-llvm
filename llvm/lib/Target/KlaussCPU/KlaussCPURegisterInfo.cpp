@@ -60,7 +60,14 @@ KlaussCPURegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   BitVector Reserved(getNumRegs());
   Reserved.set(KlaussCPU::SP);    // hardware stack pointer
   Reserved.set(KlaussCPU::R15);   // frame pointer (always active)
-  Reserved.set(KlaussCPU::FLAGS); // condition flags (never allocated)
+  // FLAGS is deliberately NOT reserved (it is in no allocatable class, so it is
+  // still never allocated).  Reserving it excludes it from the machine
+  // scheduler's block-boundary liveness, so a conditional branch's FLAGS use (a
+  // terminator, outside the scheduling region) was not seen as keeping FLAGS
+  // live-out — and a flag-clobbering arithmetic op (e.g. INCR from `*p++`) could
+  // be scheduled into the compare->branch gap, making the branch read the wrong
+  // flags (board itoa/printf infinite loop).  Tracking FLAGS as a normal physreg
+  // (the X86 EFLAGS model) makes that live range visible so nothing clobbers it.
   return Reserved;
 }
 
