@@ -43,6 +43,19 @@ public:
     return Feature == "klausscpu";
   }
 
+  // CPU names: "generic" (default, M8 scheduling model ON) and "no-sched"
+  // (NoSchedModel — the M8 A/B baseline).  Selected on the C build path with
+  // `-Xclang -target-cpu -Xclang no-sched`.  Without these overrides the base
+  // TargetInfo::setCPU returns false and cc1 rejects any -target-cpu.
+  bool isValidCPUName(StringRef Name) const override {
+    return Name == "generic" || Name == "no-sched";
+  }
+  void fillValidCPUList(SmallVectorImpl<StringRef> &Values) const override {
+    static const char *const CPUs[] = {"generic", "no-sched"};
+    Values.append(std::begin(CPUs), std::end(CPUs));
+  }
+  bool setCPU(const std::string &Name) override { return isValidCPUName(Name); }
+
   ArrayRef<const char *> getGCCRegNames() const override;
 
   ArrayRef<TargetInfo::GCCRegAlias> getGCCRegAliases() const override {

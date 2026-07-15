@@ -13,8 +13,8 @@ define i64 @with_alloca(i64 %x) {
 ; CHECK-NEXT:    push r15
 ; CHECK-NEXT:    getsp r15
 ; CHECK-NEXT:    addsp -8
-; CHECK-NEXT:    stidx64 r0, r15, -8
 ; CHECK-NEXT:    copy r12, r0
+; CHECK-NEXT:    stidx64 r0, r15, -8
 ; CHECK-NEXT:    setsp r15
 ; CHECK-NEXT:    pop r15
 ; CHECK-NEXT:    ret
@@ -50,9 +50,9 @@ define i64 @stack_array(i64 %i, i64 %v) {
 ; CHECK-NEXT:    addsp -64
 ; CHECK-NEXT:    shlv r0, 3
 ; CHECK-NEXT:    addi r12, r15, -64
-; CHECK-NEXT:    addr r12, r12, r0
-; CHECK-NEXT:    stidx64 r1, r12, 0
+; CHECK-NEXT:    addr r14, r12, r0
 ; CHECK-NEXT:    copy r12, r1
+; CHECK-NEXT:    stidx64 r1, r14, 0
 ; CHECK-NEXT:    setsp r15
 ; CHECK-NEXT:    pop r15
 ; CHECK-NEXT:    ret
@@ -72,8 +72,9 @@ define i64 @spill_across_call(i64 %a) {
 ; CHECK-NEXT:    getsp r15
 ; CHECK-NEXT:    addsp -32
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
+; CHECK-NEXT:    setr r12, 0
 ; CHECK-NEXT:    copy r4, r0
-; CHECK-NEXT:    setr r0, 0
+; CHECK-NEXT:    copy r0, r12
 ; CHECK-NEXT:    call use_ptr
 ; CHECK-NEXT:    addi r12, r4, 3
 ; CHECK-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
@@ -93,9 +94,9 @@ define i64 @multi_alloca(i64 %x, i64 %y) {
 ; CHECK-NEXT:    push r15
 ; CHECK-NEXT:    getsp r15
 ; CHECK-NEXT:    addsp -16
-; CHECK-NEXT:    stidx64 r1, r15, -16
-; CHECK-NEXT:    stidx64 r0, r15, -8
 ; CHECK-NEXT:    addr r12, r0, r1
+; CHECK-NEXT:    stidx64 r0, r15, -8
+; CHECK-NEXT:    stidx64 r1, r15, -16
 ; CHECK-NEXT:    setsp r15
 ; CHECK-NEXT:    pop r15
 ; CHECK-NEXT:    ret

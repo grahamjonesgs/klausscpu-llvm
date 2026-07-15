@@ -13,11 +13,11 @@ define i64 @sum2(i64 %fmt, ...) {
 ; CHECK-NEXT:    getsp r15
 ; CHECK-NEXT:    addsp -8
 ; CHECK-NEXT:    stidx64 r3, r15, 32
-; CHECK-NEXT:    addi r12, r15, 16
-; CHECK-NEXT:    stidx64 r12, r15, -8
 ; CHECK-NEXT:    stidx64 r2, r15, 24
-; CHECK-NEXT:    stidx64 r1, r15, 16
 ; CHECK-NEXT:    addr r12, r1, r2
+; CHECK-NEXT:    addi r14, r15, 16
+; CHECK-NEXT:    stidx64 r1, r15, 16
+; CHECK-NEXT:    stidx64 r14, r15, -8
 ; CHECK-NEXT:    setsp r15
 ; CHECK-NEXT:    pop r15
 ; CHECK-NEXT:    ret
@@ -40,10 +40,10 @@ define i64 @sum1_named2(i64 %a, i64 %b, ...) {
 ; CHECK-NEXT:    getsp r15
 ; CHECK-NEXT:    addsp -8
 ; CHECK-NEXT:    stidx64 r3, r15, 32
-; CHECK-NEXT:    addi r12, r15, 24
-; CHECK-NEXT:    stidx64 r12, r15, -8
-; CHECK-NEXT:    stidx64 r2, r15, 24
 ; CHECK-NEXT:    addr r12, r1, r2
+; CHECK-NEXT:    addi r14, r15, 24
+; CHECK-NEXT:    stidx64 r2, r15, 24
+; CHECK-NEXT:    stidx64 r14, r15, -8
 ; CHECK-NEXT:    setsp r15
 ; CHECK-NEXT:    pop r15
 ; CHECK-NEXT:    ret

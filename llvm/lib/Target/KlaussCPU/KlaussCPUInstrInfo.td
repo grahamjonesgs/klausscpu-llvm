@@ -636,6 +636,9 @@ class Pseudo<dag outs, dag ins, list<dag> pattern = []>
   let isPseudo         = 1;
   let isCodeGenOnly    = 1;
   let Size             = 0;
+  // Eliminated before scheduling (PEI / custom inserter), so they never reach
+  // the scheduler — required for CompleteModel=1 (KlaussCPUSchedule.td).
+  let hasNoSchedulingInfo = 1;
   field bits<32> Inst  = 0;
   field bits<32> SoftFail = 0;
   let DecoderNamespace = "KlaussCPU";

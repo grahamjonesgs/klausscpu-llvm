@@ -2,19 +2,24 @@
 //
 // KlaussCPU LLVM backend — target-specific TargetTransformInfo.
 //
-// The generic (BasicTTI) cost model assumes a conventional load/store machine
-// with a fast instruction stream, so mid-level passes happily grow IR (partial
-// and runtime loop unrolling, loop peeling) to trade code size for fewer
-// dynamic branches.  KlaussCPU is *fetch-bound*: 59-75% of cycles are spent in
-// the fetch FSM and the instruction fetch buffer is a single 16-byte line, so
-// every extra instruction word fetched costs cycles.  Growing the static
-// instruction count is therefore usually a net loss, not a win.
+// The generic (BasicTTI) cost model assumes a conventional load/store machine.
+// KlaussCPU's tuning tracks the microarchitecture, which changed with M7/M8:
 //
-// This TTI subclass keeps the generic cost model but overrides the loop
-// transform preferences to stop the size-growing unroll/peel heuristics.  Full
-// unrolling of tiny constant-trip loops is left enabled (it removes the
-// back-branch without adding a remainder loop), only partial/runtime unrolling
-// and peeling — which duplicate the loop body — are disabled.
+//   Pre-M7 the core was fetch-bound (59-75% of cycles in the fetch FSM, single
+//   16-byte IFB line) so every extra instruction word cost cycles, and this hook
+//   disabled all body-duplicating unrolling.
+//
+//   M7's fill-through I-cache collapsed IF_MISS (board CPI -22..-44%) and exposed
+//   DATA (GPR RAW) latency as the next bottleneck.  M8 attacks that with a
+//   latency-aware scheduling model (KlaussCPUSchedule.td) plus MODERATE unrolling
+//   here: partial + runtime unrolling (capped at MaxCount=4, well inside the 8 KB
+//   I-cache) hands the scheduler independent iterations to fill the 2-cycle
+//   dependent-chain gaps.  Peeling stays off (it duplicates the body for little
+//   gain on these kernels).
+//
+// getUnrollingPreferences is tied to the scheduling model: with `-mcpu=no-sched`
+// (NoSchedModel, the M8 A/B baseline) there is no scheduler to fill the gaps, so
+// it reverts to the conservative pre-M8 preferences.
 //
 //===----------------------------------------------------------------------===//
 

@@ -21,14 +21,25 @@ def KlaussCPUSchedModel : SchedMachineModel {
   let MicroOpBufferSize = 0;      // in-order, no reorder buffer
   let LoadLatency       = 3;      // load->use (forwards from WB only)
   let MispredictPenalty = 3;      // taken-redirect IFB refill via the I-cache (post-M7)
-  let CompleteModel     = 0;      // only the hot classes are modeled; rest default to 1
-  // PostRAScheduler MUST stay 0: the backend has no modeled FLAGS register, so the
-  // post-RA scheduler (unaware that ADDI clobbers flags and that a conditional JMP
-  // reads them) hoists a flag-clobbering frame-address ADDI into a compare->branch
-  // gap and breaks the branch (seen as the -O2 SHA-256 `len==0` guard misfiring ->
-  // infinite copy loop).  Re-enabling this needs a real FLAGS reg (compares Defs,
-  // cond-branches Uses, flag-setting ALU Defs).  Pre-RA MISched still uses the model.
-  let PostRAScheduler   = 0;
+  let CompleteModel     = 1;      // every KlaussCPU instr resolves a SchedRW (§4): the
+                                  // KCInst32/64/96 base classes default to [WriteALU]
+                                  // and the memory/branch/SP/mul/div formats override,
+                                  // so nothing falls back to the latency-1 default.
+  // PostRAScheduler ON (M8 §3): the post-RA list scheduler spreads dependent chains
+  // using the latencies below.  The pre-RA MISched (enabled via
+  // KlaussCPUSubtarget::enableMachineScheduler) does most of the spreading with full
+  // freedom; the post-RA pass then catches spills/reloads and frame-address
+  // materialisation the pre-RA pass never sees (those appear only after regalloc/PEI).
+  // This was previously forced OFF because the backend had no modeled FLAGS register,
+  // so the scheduler could hoist a flag-clobbering frame-address ADDI into a
+  // compare->branch gap and break the branch (the -O2 SHA-256 `len==0` guard misfired
+  // -> infinite copy loop).  The FLAGS register is now modeled
+  // (KlaussCPURegisterInfo.td): Defs=[FLAGS] on every flag-setting ALU op incl. ADDI,
+  // Uses=[FLAGS] on conditional branches (and ADC/SBC/rotate-through-carry).  That
+  // makes the hazard a real scheduling dependency the post-RA scheduler respects, so
+  // the original blocker is gone.  Escape hatch if a regression appears:
+  // -enable-post-ra-scheduler=false (or revert this to 0).
+  let PostRAScheduler   = 1;
 }
 
 // SchedWrites referenced from KlaussCPUInstrInfo.td (must precede its include).
@@ -56,6 +67,21 @@ let SchedModel = KlaussCPUSchedModel in {
   // (formerly ResourceCycles).
   def : WriteRes<WriteMul,    [KCUnit]> { let Latency = 5;  let ReleaseAtCycles = [5];  }
   def : WriteRes<WriteDiv,    [KCUnit]> { let Latency = 20; let ReleaseAtCycles = [20]; }
+
+  // The target-independent COPY pseudo survives to the scheduler as a register
+  // move (it lowers to COPY_R = WriteALU).  CompleteModel=1 requires it to carry
+  // sched info; model it as the ALU move it becomes.
+  def : InstRW<[WriteALU], (instrs COPY)>;
 }
 
 def : ProcessorModel<"generic", KlaussCPUSchedModel, []>;
+
+// A/B baseline (spec §7.1): `-mcpu=no-sched` selects NoSchedModel — no per-op
+// latencies, PostRAScheduler off — so the whole M8 transform can be turned off with
+// one flag (a whole SchedMachineModel can't be gated by a SubtargetFeature in LLVM,
+// so a second processor is the idiomatic A/B lever).  The default CPU is forced to
+// "generic" in KlaussCPUSubtarget, so the model stays ON by default; -mcpu=no-sched
+// overrides it.  The TTI unroll re-tune keys on the same switch
+// (KlaussCPUTTIImpl::getUnrollingPreferences checks getSchedModel().hasInstrSchedModel()),
+// so -mcpu=no-sched reverts both halves of M8 together.
+def : ProcessorModel<"no-sched", NoSchedModel, []>;

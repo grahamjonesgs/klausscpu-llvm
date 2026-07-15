@@ -50,14 +50,23 @@ static Reloc::Model getEffectiveRelocModel(std::optional<Reloc::Model> RM) {
   return RM.value_or(Reloc::Static);
 }
 
+// Resolve the default CPU to "generic" (the M8 ProcessorModel).  Without this the
+// TargetMachine/Subtarget are built with an empty CPU string, getSchedModelForCPU("")
+// returns NoSchedModel, and the M8 scheduling model + post-RA scheduler are inert
+// unless -mcpu=generic is passed explicitly.  `-mcpu=no-sched` (non-empty) is left
+// untouched so it still selects NoSchedModel as the A/B baseline.
+static StringRef getEffectiveCPU(StringRef CPU) {
+  return CPU.empty() ? StringRef("generic") : CPU;
+}
+
 KlaussCPUTargetMachine::KlaussCPUTargetMachine(
     const Target &T, const Triple &TT, StringRef CPU, StringRef FS,
     const TargetOptions &Options, std::optional<Reloc::Model> RM,
     std::optional<CodeModel::Model> CM, CodeGenOptLevel OL, bool JIT)
-    : CodeGenTargetMachineImpl(T, KlaussCPUDataLayout, TT, CPU, FS, Options,
-                                getEffectiveRelocModel(RM),
+    : CodeGenTargetMachineImpl(T, KlaussCPUDataLayout, TT, getEffectiveCPU(CPU), FS,
+                                Options, getEffectiveRelocModel(RM),
                                 getEffectiveCodeModel(CM, CodeModel::Small), OL),
-      Subtarget(TT, CPU, FS, *this),
+      Subtarget(TT, getEffectiveCPU(CPU), FS, *this),
       TLOF(std::make_unique<TargetLoweringObjectFileELF>()) {
   initAsmInfo();
 }

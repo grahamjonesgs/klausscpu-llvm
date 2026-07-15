@@ -45,6 +45,18 @@ public:
 
   // True when -fPIC / -relocation-model=pic is active.
   bool isPositionIndependent() const;
+
+  // Enable the pre-RA machine scheduler (MISched) so the M8 latency model actually
+  // spreads dependent chains before register allocation — the primary M8 lever.
+  // TargetSubtargetInfo defaults this to false, which silently skips MachineScheduler
+  // (MachineScheduler.cpp) and leaves only the post-RA list scheduler consuming the
+  // latencies after regalloc has already pinned much of the order.  Keyed on the same
+  // switch as the post-RA scheduler and the TTI unroll re-tune, so `-mcpu=no-sched`
+  // (NoSchedModel) reverts pre-RA MISched too.  Side effects are standard: ISel falls
+  // back to source-order SDAG scheduling and enableJoinGlobalCopies() turns on with it.
+  bool enableMachineScheduler() const override {
+    return getSchedModel().hasInstrSchedModel();
+  }
 };
 
 } // namespace llvm

@@ -29,9 +29,9 @@ define i64 @call_5_args(i64 %a, i64 %b, i64 %c, i64 %d, i64 %e) {
 ; CHECK-NEXT:    push r15
 ; CHECK-NEXT:    getsp r15
 ; CHECK-NEXT:    addsp -32
-; CHECK-NEXT:    getsp r12
-; CHECK-NEXT:    ldidx64 r14, r15, 40
-; CHECK-NEXT:    stidx64 r14, r12, 24
+; CHECK-NEXT:    ldidx64 r12, r15, 40
+; CHECK-NEXT:    getsp r14
+; CHECK-NEXT:    stidx64 r12, r14, 24
 ; CHECK-NEXT:    call ext5
 ; CHECK-NEXT:    setsp r15
 ; CHECK-NEXT:    pop r15

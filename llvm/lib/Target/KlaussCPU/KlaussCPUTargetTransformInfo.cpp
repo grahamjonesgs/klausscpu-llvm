@@ -24,6 +24,21 @@ void KlaussCPUTTIImpl::getUnrollingPreferences(
   // Guardrail: the I-cache is 8 KB (512 x 16 B lines) — keep the unrolled body
   // well inside it, or conflict misses re-introduce the fetch stalls we just
   // removed.  The thresholds below cap the body at roughly a few hundred bytes.
+  //
+  // A/B switch (spec §7.1): the M8 unroll re-tune is tied to the scheduling model
+  // so `-mcpu=no-sched` (NoSchedModel) reverts BOTH halves of M8 with one flag.
+  // Without a latency model the scheduler cannot fill dependent-chain gaps, so the
+  // independent iterations unrolling produces have nowhere to go and only grow the
+  // instruction stream — fall back to the conservative pre-M8 preferences
+  // (full-unroll of tiny constant-trip loops only; no body-duplicating unroll).
+  if (!ST->getSchedModel().hasInstrSchedModel()) {
+    UP.Partial = false;
+    UP.Runtime = false;
+    UP.UnrollAndJam = false;
+    UP.OptSizeThreshold = 0;
+    return;
+  }
+
   UP.Partial   = true;         // partial-unroll larger loops
   UP.Runtime   = true;         // and unknown trip counts (memory/pointer loops)
   UP.UpperBound = true;        // may unroll using a trip-count upper bound
