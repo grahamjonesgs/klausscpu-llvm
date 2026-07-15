@@ -6,9 +6,10 @@
 // arithmetic op does not need a compare: that op already set the hardware
 // zero_flag to `(X == 0)`.  This pass rewrites the already-scheduled triple
 //
-//     <arith> Rd, ...        ; sets zero_flag = (Rd == 0)
-//     cmprv   Rd, 0          ; sets equal_flag = (Rd == 0)   ← redundant
-//     jmpe/jmpne  <target>   ; reads equal_flag
+//     <arith> Rd, ...        ; sets Z = (Rd == 0)  (and S/C/V)
+//     cmprv   Rd, 0          ; CMP is now SUB-without-writeback → re-derives
+//                            ;   the identical Z            ← redundant
+//     jmpe/jmpne  <target>   ; equality reads Z (JMPE ≡ JMPZ post-unification)
 //
 // into
 //
@@ -27,11 +28,14 @@
 // avoids that entirely, and adjacency in that stream is itself the proof that
 // no flag-clobbering instruction sits between the producer and the branch.
 //
-// Flag discipline (CPU_ARCHITECTURE.md §6 — a wrong-flag branch silently
-// miscompiles): zero_flag is set by ARITHMETIC ops and read by JMPZ/JMPNZ;
-// equal_flag is a DIFFERENT register set only by CMPRR/CMPRV and read by
-// JMPE/JMPNE.  This pass only ever routes to JMPZ/JMPNZ, and only when the
-// producer is an arithmetic op whose zero_flag is exactly `(result == 0)`.
+// Flag model (post-unification — see FLAG_UNIFICATION_CHANGES / RTL fbb77d7):
+// there is ONE flags register Z/S/C/V.  Equality is Z for BOTH arithmetic ops
+// and CMP (CMP is now SUB without writeback), so JMPE and JMPZ read the very
+// same bit.  This pass canonicalises the branch to JMPZ/JMPNZ and drops the
+// compare; it fires only when the producer is an arithmetic op whose Z is
+// exactly `(result == 0)`.  (Before unification JMPE read a *separate*
+// equal_flag that arithmetic did not set — which is why this was gated OFF;
+// that hazard no longer exists.)
 //
 //===----------------------------------------------------------------------===//
 
@@ -48,14 +52,15 @@ using namespace llvm;
 
 #define DEBUG_TYPE "klausscpu-flag-reuse"
 
-// Default OFF: this changes which hardware flag a branch reads, so it must be
-// validated by the on-silicon regression suite (queens/test_64bit/bst plus the
-// branchy/calls_fib perf kernels) before being promoted to the default.  Flip
-// to cl::init(true) once that board run is green.
+// Default ON since the flag unification (RTL fbb77d7 / FLAG_UNIFICATION_CHANGES):
+// equality is now the single Z flag for both arithmetic ops and CMP, so dropping
+// the redundant `CMPRV Rd,0` and reading Z is unconditionally safe — the old
+// "which hardware flag does the branch read" hazard is gone.  Kept as an escape
+// hatch (`-klausscpu-arith-flag-reuse=false`) for A/B measurement and bisection.
 static cl::opt<bool> EnableArithFlagReuse(
-    "klausscpu-arith-flag-reuse", cl::Hidden, cl::init(false),
-    cl::desc("KlaussCPU: reuse the arithmetic zero_flag for (X==0)/(X!=0) "
-             "branches, deleting the redundant CMPRV before JMPE/JMPNE"));
+    "klausscpu-arith-flag-reuse", cl::Hidden, cl::init(true),
+    cl::desc("KlaussCPU: reuse the arithmetic Z flag for (X==0)/(X!=0) "
+             "branches, deleting the redundant CMPRV before the equality jump"));
 
 namespace {
 
@@ -75,7 +80,8 @@ static bool setsZeroFlagAsResult(unsigned Opc) {
   }
 }
 
-// Map an equal_flag branch to the corresponding zero_flag branch.
+// Map an equality branch (JMPE/JMPNE) to its canonical zero-flag form. Both
+// read Z post-unification; this normalises the mnemonic after dropping the CMP.
 static unsigned zeroFlagBranchOpc(unsigned Opc) {
   switch (Opc) {
   case KlaussCPU::JMPE:      return KlaussCPU::JMPZ;
@@ -139,8 +145,8 @@ bool KlaussCPUFlagReuse::runOnMachineFunction(MachineFunction &MF) {
         continue;
 
       // The instruction immediately after must be the conditional branch that
-      // consumes this compare's equal_flag (JMPE/JMPNE).  It is the compare's
-      // only flag consumer: each BR_CC emits its own compare, and the branch
+      // consumes this compare's Z flag (JMPE/JMPNE — equality).  It is the
+      // compare's only flag consumer: each BR_CC emits its own compare, and the branch
       // is a terminator so control leaves the block after it.
       MachineInstr *Br = MI.getNextNode();
       if (!Br || Br->isMetaInstruction())

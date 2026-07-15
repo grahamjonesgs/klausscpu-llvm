@@ -397,7 +397,15 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
     }
 
     // Map ISD::CondCode to the KlaussCPU conditional jump opcode.
-    // CMPRR/CMPRV set: equal / less (signed) / ult (unsigned) / sign.
+    // Post flag-unification (RTL fbb77d7 / FLAG_UNIFICATION_CHANGES) there is a
+    // single Z/S/C/V flags register: CMP is SUB-without-writeback, and each COND
+    // is DERIVED in hardware (EQ=Z, signed LT=S^V, unsigned ULT=C, ...).  This
+    // mnemonic mapping is unchanged and still correct — the derivations are
+    // bit-identical to the retired equal/less/ult flags for every operand pair.
+    // BORROW POLARITY (x86, NOT ARM): after SUB/CMP, unsigned `<` is C and
+    // unsigned `>=` is ¬C — i.e. C==1 means a borrow occurred (a <u b).
+    // SETULT→JMPULT / SETUGE→JMPUGE already encode this; do NOT invert it in any
+    // future carry-based (ADC/SBC / setcc-from-carry) lowering.
     // PIC mode uses the PC-relative REL variants; non-PIC uses absolute.
     bool PIC = TM.isPositionIndependent();
     unsigned JmpOpc;

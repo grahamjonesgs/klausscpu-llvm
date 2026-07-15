@@ -4,13 +4,14 @@
 ; flag-setting arithmetic op immediately before the compare, the compare
 ; against 0 is redundant: the arithmetic op already set zero_flag = (X == 0).
 ;
-; Default (flag off): the redundant CMPRV against 0 is kept.
-; With -klausscpu-arith-flag-reuse: the CMPRV is dropped and the branch reads
-; zero_flag via JMPZ/JMPNZ instead of equal_flag via JMPE/JMPNE.
+; Default (now ON post flag-unification): the redundant CMPRV against 0 is
+; dropped and the equality branch reads Z via JMPZ/JMPNZ.
+; With -klausscpu-arith-flag-reuse=false: the CMPRV is kept (JMPE/JMPNE) — the
+; escape hatch retained for A/B measurement and bisection.
 ;
-; RUN: llc -march=klausscpu -O1 < %s | FileCheck %s --check-prefix=OFF
-; RUN: llc -march=klausscpu -O1 -klausscpu-arith-flag-reuse < %s \
-; RUN:   | FileCheck %s --check-prefix=ON
+; RUN: llc -march=klausscpu -O1 < %s | FileCheck %s --check-prefix=ON
+; RUN: llc -march=klausscpu -O1 -klausscpu-arith-flag-reuse=false < %s \
+; RUN:   | FileCheck %s --check-prefix=OFF
 
 ; Branch on (a + b) == 0 — the ADDR result is tested against zero.
 define i64 @add_eq0(i64 %a, i64 %b) {

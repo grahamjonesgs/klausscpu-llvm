@@ -978,6 +978,36 @@ and one-instruction signed sub-word loads (`LDIDX8_S`/`LDIDX16_S`).
 
 ---
 
+### Step 36 ✅ Flag-model unification — backend support (2026-07-09)
+- Mirrors the CPU-side flag unification (RTL branch `feat/core-pipeline`, commit
+  `fbb77d7`; spec in `FLAG_UNIFICATION_CHANGES`).  Hardware retired the separate
+  compare flags `E/L/U`; there is now ONE `Z/S/C/V` register, `CMP` is
+  `SUB`-without-writeback, and every branch COND is *derived* in RTL
+  (EQ=Z, signed LT=S^V, unsigned **ULT=C** — x86 borrow polarity, NOT ARM).
+  Encoding is stable, so existing ELFs still run on the new silicon.
+- **A3a flag-reuse promoted to default-ON** (`KlaussCPUFlagReuse.cpp`,
+  `cl::init(false)`→`cl::init(true)`).  Its only hazard was a branch reading a
+  *different* HW flag (zero vs equal); equality is now a single `Z`, so dropping
+  the redundant `CMPRV Rd,0` before an equality branch is unconditionally safe.
+  Escape hatch `-klausscpu-arith-flag-reuse=false` retained for A/B + bisection.
+  Scope stays equality-only — reusing arithmetic flags for a *relational* branch
+  is unsafe under overflow (`V` differs), so relational branches keep their CMP.
+- **`Select(BR_CC)` mapping unchanged; comment hardened**
+  (`KlaussCPUISelDAGToDAG.cpp`): the CondCode→JMP** table was already correct (RTL
+  derives each COND bit-identically to the retired flags).  Added a comment
+  pinning the **borrow polarity (ULT=C / UGE=¬C)** so a future carry-based
+  (ADC/SBC / setcc-from-carry) lowering can't invert it.
+- **Tests**: new `cmp-branch.ll` pins every CondCode→mnemonic (reg-reg + reg-imm,
+  non-PIC + PIC, incl. the unsigned borrow-polarity forms); `flag-reuse.ll`
+  updated so the default run is the reused `JMPZ/NZ` form and `=false` pins the
+  kept-CMP form.  `llc` rebuilt; full KlaussCPU lit suite green (13/13).
+- **Deliberately deferred** (own validation, larger blast radius): `ADC/SBC` +
+  rotate-through-carry isel patterns for i128 (`FLAG_UNIFICATION_CHANGES` §2.3) —
+  touches wolfSSL bignum.  Emulator (`klausscc`), boot-ROM/netboot regen, and
+  `klausscpu-runtime` re-validation are out-of-repo (doc §2.5–2.7).
+
+---
+
 ## Systems built on this backend (current stable state, 2026-05)
 
 The backend is feature-complete and hardware-confirmed. **The runtime/OS layers

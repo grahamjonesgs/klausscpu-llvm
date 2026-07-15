@@ -58,8 +58,9 @@ KlaussCPURegisterInfo::getCallPreservedMask(const MachineFunction &MF,
 BitVector
 KlaussCPURegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   BitVector Reserved(getNumRegs());
-  Reserved.set(KlaussCPU::SP);   // hardware stack pointer
-  Reserved.set(KlaussCPU::R15);  // frame pointer (always active)
+  Reserved.set(KlaussCPU::SP);    // hardware stack pointer
+  Reserved.set(KlaussCPU::R15);   // frame pointer (always active)
+  Reserved.set(KlaussCPU::FLAGS); // condition flags (never allocated)
   return Reserved;
 }
 

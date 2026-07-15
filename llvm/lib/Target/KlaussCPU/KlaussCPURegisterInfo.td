@@ -73,6 +73,16 @@ let Namespace = "KlaussCPU" in {
     let Namespace = "KlaussCPU";
   }
 
+  // ---- Condition flags (Z/S/C/V) ----
+  // The comparison/arithmetic flags.  Not a data-path register and never
+  // allocated; modeled so the scheduler/LICM know compares DEF it, conditional
+  // branches USE it, and flag-setting ALU ops CLOBBER it.  Without this, a
+  // flag-clobbering ADDI gets hoisted into a compare->branch gap and breaks the
+  // branch (the -O2 SHA-256 len==0 guard miscompile).
+  def FLAGS : Register<"flags"> {
+    let Namespace = "KlaussCPU";
+  }
+
 } // end Namespace = "KlaussCPU"
 
 // ---- GPR register class (all 16 GPRs, 64-bit aligned) ----

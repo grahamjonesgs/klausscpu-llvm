@@ -100,6 +100,7 @@ class KCInst32<dag outs, dag ins, string asmstr, list<dag> pat = []>
   field bits<32> Inst;
   field bits<32> SoftFail = 0;
   let DecoderNamespace = "KlaussCPU";
+  let SchedRW          = [WriteALU];   // default; overridden per format (M8)
 }
 
 class KCInst64<dag outs, dag ins, string asmstr, list<dag> pat = []>
@@ -113,6 +114,7 @@ class KCInst64<dag outs, dag ins, string asmstr, list<dag> pat = []>
   field bits<64> Inst;
   field bits<64> SoftFail = 0;
   let DecoderNamespace = "KlaussCPU";
+  let SchedRW          = [WriteALU];   // default; overridden per format (M8)
 }
 
 // 12-byte (3-word) instruction: opcode word + lo32 + hi32.
@@ -130,6 +132,7 @@ class KCInst96<dag outs, dag ins, string asmstr, list<dag> pat = []>
   field bits<96> Inst;
   field bits<96> SoftFail = 0;
   let DecoderNamespace = "KlaussCPU";
+  let SchedRW          = [WriteALU];   // default; overridden per format (M8)
 }
 
 //===----------------------------------------------------------------------===//
@@ -146,6 +149,7 @@ class RRR<bits<20> op, dag outs, dag ins, string asmstr, list<dag> pat = []>
   let Inst{11-8}  = rd;
   let Inst{7-4}   = rs1;
   let Inst{3-0}   = rs2;
+  let Defs        = [FLAGS];   // arith/cmp/shift/mul/div set flags (bitwise over-marked; safe)
 }
 
 //===----------------------------------------------------------------------===//
@@ -161,6 +165,7 @@ class RR1<bits<24> op, dag outs, dag ins, string asmstr, list<dag> pat = []>
   let Inst{31-8} = op;
   let Inst{7-4}  = rd;
   let Inst{3-0}  = rs;
+  let SchedRW    = [WriteLoad];   // MEMGET*/MEMREADRR (COPY_R overrides to WriteALU)
 }
 
 // 0 outputs, 2 source inputs (CMPRR)
@@ -171,6 +176,7 @@ class RR0<bits<24> op, string asmstr, list<dag> pat = []>
   let Inst{31-8} = op;
   let Inst{7-4}  = rs1;
   let Inst{3-0}  = rs2;
+  let Defs       = [FLAGS];    // CMPRR sets flags
 }
 
 // Store: data in [7:4], address in [3:0], no output (MEMSET64)
@@ -182,6 +188,7 @@ class RRst<bits<24> op, string asmstr, list<dag> pat = []>
   let Inst{7-4}  = rs_data;
   let Inst{3-0}  = rs_addr;
   let mayStore   = 1;
+  let SchedRW    = [WriteStore];
 }
 
 //===----------------------------------------------------------------------===//
@@ -196,6 +203,7 @@ class R_inplace<bits<28> op, string asmstr, list<dag> pat = []>
   let Inst{31-4}  = op;
   let Inst{3-0}   = rd;
   let Constraints = "$rd = $rs1";
+  let Defs        = [FLAGS];   // inc/dec/neg/shift-by-1/sext set flags (over-marked; safe)
 }
 
 // Input-only R: PUSH, SETSP, JMPR, CALLR
@@ -247,6 +255,7 @@ class RV_2addr<bits<28> op, string asmstr, list<dag> pat = []>
   let Inst{35-32} = rd;
   let Inst{31-0}  = imm;
   let Constraints = "$rd = $rs";
+  let Defs        = [FLAGS];   // addv/minusv set flags (bitwise-imm over-marked; safe)
 }
 
 // Compare register to immediate — flags only, no output (CMPRV)
@@ -257,6 +266,7 @@ class RV_cmp<bits<28> op, string asmstr>
   let Inst{63-36} = op;
   let Inst{35-32} = rs;
   let Inst{31-0}  = imm;
+  let Defs        = [FLAGS];   // CMPRV sets flags
 }
 
 //===----------------------------------------------------------------------===//
@@ -274,6 +284,7 @@ class RRV_alu<bits<24> op, string asmstr, list<dag> pat = []>
   let Inst{39-36} = rd;
   let Inst{35-32} = rs;
   let Inst{31-0}  = imm;
+  let Defs        = [FLAGS];   // addi sets flags
 }
 
 // Indexed 64-bit load: rd = mem64[base + offset]
@@ -287,6 +298,7 @@ class RRV_ld<bits<24> op, string asmstr, list<dag> pat = []>
   let Inst{35-32} = base;
   let Inst{31-0}  = offset;
   let mayLoad     = 1;
+  let SchedRW     = [WriteLoad];
 }
 
 // Indexed 64-bit store: mem64[base + offset] = rs_data
@@ -300,6 +312,7 @@ class RRV_st<bits<24> op, string asmstr, list<dag> pat = []>
   let Inst{35-32} = base;
   let Inst{31-0}  = offset;
   let mayStore    = 1;
+  let SchedRW     = [WriteStore];
 }
 
 //===----------------------------------------------------------------------===//
@@ -314,6 +327,7 @@ class RRV_st<bits<24> op, string asmstr, list<dag> pat = []>
 class ShiftImmN<string asmstr, list<dag> pat = []>
     : KCInst32<(outs GPR:$rd), (ins GPR:$rs, simm32:$imm), asmstr, pat> {
   let Constraints = "$rd = $rs";
+  let Defs        = [FLAGS];   // shlv/shrv/rolv/rorv set flags
 }
 
 // Class 4 bit-test by embedded constant N — flag-only, no destination register
@@ -327,10 +341,12 @@ class BitTestImmN<string asmstr>
 class Idx64RegOff_ld<string asmstr>
     : KCInst32<(outs GPR:$rd), (ins GPR:$base, simm32:$offset), asmstr> {
   let mayLoad = 1;
+  let SchedRW = [WriteLoad];
 }
 class Idx64RegOff_st<string asmstr>
     : KCInst32<(outs), (ins GPR:$rs_data, GPR:$base, simm32:$offset), asmstr> {
   let mayStore = 1;
+  let SchedRW  = [WriteStore];
 }
 
 //===----------------------------------------------------------------------===//
@@ -347,6 +363,7 @@ class Vbr_uncond<bits<32> op, string asmstr, list<dag> pat = []>
   let isBranch     = 1;
   let isTerminator = 1;
   let isBarrier    = 1;
+  let SchedRW      = [WriteBranch];
 }
 
 // Conditional branch (flags set by preceding CMPRR/CMPRV)
@@ -357,6 +374,8 @@ class Vbr_cond<bits<32> op, string asmstr>
   let Inst{31-0}  = target;
   let isBranch    = 1;
   let isTerminator = 1;
+  let SchedRW     = [WriteBranch];
+  let Uses        = [FLAGS];   // conditional branch reads the flags a compare set
 }
 
 // Direct call
@@ -366,6 +385,7 @@ class Vcall<bits<32> op, string asmstr>
   let Inst{63-32} = op;
   let Inst{31-0}  = target;
   let isCall      = 1;
+  let SchedRW     = [WriteBranch];
 }
 
 // SP adjustment (ADDSP)
@@ -374,6 +394,7 @@ class Vsp<bits<32> op, string asmstr>
   bits<32> imm;
   let Inst{63-32} = op;
   let Inst{31-0}  = imm;
+  let SchedRW     = [WriteSP];
 }
 
 //===----------------------------------------------------------------------===//
@@ -417,7 +438,8 @@ def XORR   : RRR<0x00050, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "xorr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (xor GPR:$rs1, GPR:$rs2))]>;
 
-// Multiply
+// Multiply (EX-serialized, ~5c — M8)
+let SchedRW = [WriteMul] in {
 def MULR   : RRR<0x00100, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "mulr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (mul GPR:$rs1, GPR:$rs2))]>;
@@ -429,8 +451,10 @@ def MULHR  : RRR<0x00120, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
 def MULHUR : RRR<0x00130, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "mulhur\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (mulhu GPR:$rs1, GPR:$rs2))]>;
+}
 
-// Divide / modulo
+// Divide / modulo (EX-serialized, iterative — M8)
+let SchedRW = [WriteDiv] in {
 def DIVR   : RRR<0x00140, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "divr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (sdiv GPR:$rs1, GPR:$rs2))]>;
@@ -443,6 +467,7 @@ def MODR   : RRR<0x00160, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
 def MODUR  : RRR<0x00170, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "modur\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (urem GPR:$rs1, GPR:$rs2))]>;
+}
 
 // Shifts
 def SHLR   : RRR<0x00200, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
@@ -516,7 +541,7 @@ def MAXUR  : RRR<0x00430, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
 
 // Register copy: rd = rs
 def COPY_R   : RR1<0x000001, (outs GPR:$rd), (ins GPR:$rs),
-                  "copy\t$rd, $rs">;
+                  "copy\t$rd, $rs"> { let SchedRW = [WriteALU]; } // move, not a load
 
 // Compare (flags only): rs1 - rs2, no writeback.
 // hasSideEffects = 1 prevents the optimizer from removing or reordering these
@@ -999,8 +1024,8 @@ let hasSideEffects = 1 in {
 //===----------------------------------------------------------------------===//
 
 // ── RRR (rd, rs1, rs2) ─────────────────────────────────────────────────────
-def ADDC   : RRR<0x00060, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "addc\t$rd, $rs1, $rs2">;
-def SUBC   : RRR<0x00070, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "subc\t$rd, $rs1, $rs2">;
+def ADDC   : RRR<0x00060, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "addc\t$rd, $rs1, $rs2"> { let Uses = [FLAGS]; } // reads carry-in
+def SUBC   : RRR<0x00070, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "subc\t$rd, $rs1, $rs2"> { let Uses = [FLAGS]; } // reads borrow-in
 def BSETRR : RRR<0x00500, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "bsetrr\t$rd, $rs1, $rs2">;
 def BCLRRR : RRR<0x00510, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "bclrrr\t$rd, $rs1, $rs2">;
 def BTGLRR : RRR<0x00520, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "btglrr\t$rd, $rs1, $rs2">;
@@ -1012,8 +1037,8 @@ def SHLAR : R_inplace<0x000008F, "shlar\t$rd">;
 def SHRAR : R_inplace<0x0000090, "shrar\t$rd">;
 def ROLR1 : R_inplace<0x00000F8, "rolr1\t$rd">;
 def RORR1 : R_inplace<0x00000F9, "rorr1\t$rd">;
-def ROLCR : R_inplace<0x00000FA, "rolcr\t$rd">;
-def RORCR : R_inplace<0x00000FB, "rorcr\t$rd">;
+def ROLCR : R_inplace<0x00000FA, "rolcr\t$rd"> { let Uses = [FLAGS]; } // rotate through carry
+def RORCR : R_inplace<0x00000FB, "rorcr\t$rd"> { let Uses = [FLAGS]; } // rotate through carry
 
 // ── RV 2-address (rd op= imm32) and RV compare (rs, imm32) ──────────────────
 // Bit position / start+len are packed in the immediate (see opcode_select.vh).
@@ -1068,6 +1093,7 @@ class V64_imm<bits<32> op, string asmstr>
   let Inst{95-64} = op;
   let Inst{63-32} = lo;
   let Inst{31-0}  = hi;
+  let SchedRW     = [WriteSP];
 }
 def PUSHV64 : V64_imm<0x00004060, "pushv64\t$lo, $hi"> { let mayStore = 1; }
 
