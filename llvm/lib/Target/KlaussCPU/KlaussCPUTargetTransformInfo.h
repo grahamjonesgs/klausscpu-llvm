@@ -17,6 +17,11 @@
 //   dependent-chain gaps.  Peeling stays off (it duplicates the body for little
 //   gain on these kernels).
 //
+//   That unroll budget is gated on the body's branch density (spec §7.4): the
+//   scheduler is block-local and KlaussCPU has no CMOV to flatten an if/else, so
+//   the copies of a branch-dense body land in blocks it cannot interleave — all
+//   of the fetch cost, none of the DATA win.  Such loops get a reduced budget.
+//
 // getUnrollingPreferences is tied to the scheduling model: with `-mcpu=no-sched`
 // (NoSchedModel, the M8 A/B baseline) there is no scheduler to fill the gaps, so
 // it reverts to the conservative pre-M8 preferences.

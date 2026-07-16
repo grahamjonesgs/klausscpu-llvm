@@ -29,10 +29,19 @@
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/IR/CallingConv.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <optional>
 
 using namespace llvm;
+
+// Loop-header alignment, in bytes.  Defaults to the 16-byte I-cache line so a
+// hot loop's back-edge target starts a line (see setPrefLoopAlignment below).
+// 0 disables alignment entirely, restoring the pre-M8b baseline for a clean A/B.
+static cl::opt<unsigned>
+    PrefLoopAlign("klausscpu-pref-loop-align", cl::Hidden, cl::init(16),
+                  cl::desc("Preferred loop-header alignment in bytes "
+                           "(16 = I-cache line; 0 = off)."));
 
 // Generated calling convention functions.  Must be included inside namespace
 // llvm because the generated code uses unqualified names (MVT, CCState, etc.).
@@ -207,6 +216,29 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   // Only 32-bit and 64-bit native integer widths.
   setMinFunctionAlignment(Align(4));
   setPrefFunctionAlignment(Align(4));
+
+  // Align loop headers to the 16-byte I-cache line.  Fetch works in aligned
+  // 16-byte lines, so a back-edge target at offset 12 in a line makes the first
+  // fetch of EVERY iteration deliver one useful instruction instead of four.
+  // Aligning the header costs up to 3 NOPs once on loop entry (amortized to
+  // nothing over a hot loop) and buys a full line of useful instructions per
+  // iteration — it shows up as reduced fetch-idle (the counter perf_haz reports
+  // as IFMISS, PERF_BASE+0xE0, which counts fetch starvation, not just misses).
+  //
+  // Not a cold-miss optimization: the compute kernels fit inside the 8 KB
+  // I-cache and iterate ~20k times, so capacity/cold misses amortize away — this
+  // targets the per-iteration line-straddle only.  It cannot help fetch-idle
+  // caused by branch redirects, so expect little on branch-dense loops.
+  //
+  // A/B (spec §7.1): -klausscpu-pref-loop-align=0 restores the unaligned
+  // baseline without a rebuild.  Padding is emitted by KlaussCPUAsmBackend::
+  // writeNopData as v2 NOP 0x6C000000; it sits in the fall-through path and IS
+  // executed, so that encoding must stay correct.
+  if (PrefLoopAlign) {
+    if (!isPowerOf2_32(PrefLoopAlign))
+      report_fatal_error("-klausscpu-pref-loop-align must be a power of 2");
+    setPrefLoopAlignment(Align(PrefLoopAlign));
+  }
 }
 
 SDValue KlaussCPUTargetLowering::LowerOperation(SDValue Op,

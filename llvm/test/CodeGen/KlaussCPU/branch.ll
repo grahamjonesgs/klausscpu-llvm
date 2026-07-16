@@ -132,6 +132,7 @@ define i64 @countdown(i64 %n) {
 ; CHECK-NEXT:    push r15
 ; CHECK-NEXT:    getsp r15
 ; CHECK-NEXT:    incr r0
+; CHECK-NEXT:    .p2align 4
 ; CHECK-NEXT:  .LBB6_1: # %loop
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
 ; CHECK-NEXT:    decr r0
@@ -161,6 +162,7 @@ define i64 @sum_loop(i64 %n) {
 ; CHECK-NEXT:    getsp r15
 ; CHECK-NEXT:    setr r12, 0
 ; CHECK-NEXT:    copy r14, r12
+; CHECK-NEXT:    .p2align 4
 ; CHECK-NEXT:  .LBB7_1: # %loop
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
 ; CHECK-NEXT:    addr r12, r12, r14
