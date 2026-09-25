@@ -1,4 +1,4 @@
-; RUN: llc -march=klausscpu -O2 -filetype=obj < %s \
+; RUN: llc -march=klausscpu -verify-machineinstrs -O2 -filetype=obj < %s \
 ; RUN:   | llvm-objdump -s -j .text - | FileCheck %s
 ;
 ; Byte-level regression test for the ISA v2 (flag-day) encoding.  Each CHECK is
@@ -42,13 +42,14 @@ define void @f_store8(ptr %p, i64 %v) {
 }
 ; CHECK-DAG: 0001005c
 
-; Shift-by-immediate is now a single word with the count embedded at bit 15:
-;   shlv r0, 3 -> 0x5021C000
+; Shift-by-immediate is now a single word with the count embedded at bit 15,
+; and rd/rs1 are independent (no 2-address tie):
+;   shlv r12, r0, 3 -> 0x5021CC00
 define i64 @f_shl(i64 %a) {
   %r = shl i64 %a, 3
   ret i64 %r
 }
-; CHECK-DAG: 00c02150
+; CHECK-DAG: 00cc2150
 
 ; 64-bit constant: setr64 r12, ... -> word0 0xCBC00C00 (LEN=11, 3 words)
 define i64 @f_big() {

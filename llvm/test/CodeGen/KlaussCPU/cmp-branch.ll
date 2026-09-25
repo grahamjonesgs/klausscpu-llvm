@@ -13,8 +13,8 @@
 ; block.  That negation is itself part of the mapping table, so pinning it still
 ; catches any swap (e.g. ult<->uge, the borrow-polarity landmine).
 ;
-; RUN: llc -march=klausscpu -O1 < %s | FileCheck %s
-; RUN: llc -march=klausscpu -O1 -relocation-model=pic < %s \
+; RUN: llc -march=klausscpu -verify-machineinstrs -O1 < %s | FileCheck %s
+; RUN: llc -march=klausscpu -verify-machineinstrs -O1 -relocation-model=pic < %s \
 ; RUN:   | FileCheck %s --check-prefix=PIC
 
 ; ---- reg-reg compares (CMPRR) --------------------------------------------

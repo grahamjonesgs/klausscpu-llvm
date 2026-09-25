@@ -6,11 +6,11 @@
 ; scheduled into the compare->branch gap.  FLAGS is modeled (Defs on flag-setting
 ; ops, Uses on conditional branches), so the compare and its branch stay adjacent.
 ;
-; RUN: llc -march=klausscpu -O2 < %s | FileCheck %s
+; RUN: llc -march=klausscpu -verify-machineinstrs -O2 < %s | FileCheck %s
 ;
 ; A/B baseline (spec §7.1): -mcpu=no-sched selects NoSchedModel — the whole M8
 ; transform off — and must still produce correct code.
-; RUN: llc -march=klausscpu -mcpu=no-sched -O2 < %s | FileCheck %s --check-prefix=NOSCHED
+; RUN: llc -march=klausscpu -verify-machineinstrs -mcpu=no-sched -O2 < %s | FileCheck %s --check-prefix=NOSCHED
 
 declare void @sink(ptr)
 

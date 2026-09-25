@@ -206,6 +206,19 @@ class R_inplace<bits<28> op, string asmstr, list<dag> pat = []>
   let Defs        = [FLAGS];   // inc/dec/neg/shift-by-1/sext set flags (over-marked; safe)
 }
 
+// Unary 3-operand form: rd = f(rs1).  ISA v2 encodes rd and rs1 separately
+// ("rd≠rs1 also works, same hardware path" — ISA_ENCODING_V2.md §4), so
+// these are NOT tied; the register allocator only picks rd==rs1 when the
+// source is dead.  The old 1-operand spelling (`incr r1`) stays accepted via
+// InstAlias (see the end of this file).
+class R_unary<bits<28> op, string mnem, list<dag> pat = []>
+    : KCInst32<(outs GPR:$rd), (ins GPR:$rs1), mnem # "\t$rd, $rs1", pat> {
+  bits<4> rd;
+  let Inst{31-4}  = op;
+  let Inst{3-0}   = rd;
+  let Defs        = [FLAGS];   // inc/dec/neg/sext/... set flags (over-marked; safe)
+}
+
 // Input-only R: PUSH, SETSP, JMPR, CALLR
 class R_in<bits<28> op, dag ins, string asmstr, list<dag> pat = []>
     : KCInst32<(outs), ins, asmstr, pat> {
@@ -255,6 +268,18 @@ class RV_2addr<bits<28> op, string asmstr, list<dag> pat = []>
   let Inst{35-32} = rd;
   let Inst{31-0}  = imm;
   let Constraints = "$rd = $rs";
+  let Defs        = [FLAGS];   // addv/minusv set flags (bitwise-imm over-marked; safe)
+}
+
+// 3-operand immediate form: rd = rs op imm32 (untied — see R_unary).
+class RV_imm<bits<28> op, string mnem, list<dag> pat = []>
+    : KCInst64<(outs GPR:$rd), (ins GPR:$rs, simm32:$imm),
+               mnem # "\t$rd, $rs, $imm", pat> {
+  bits<4>  rd;
+  bits<32> imm;
+  let Inst{63-36} = op;
+  let Inst{35-32} = rd;
+  let Inst{31-0}  = imm;
   let Defs        = [FLAGS];   // addv/minusv set flags (bitwise-imm over-marked; safe)
 }
 
@@ -321,30 +346,31 @@ class RRV_st<bits<24> op, string asmstr, list<dag> pat = []>
 // unset here (documentary only, no generated emitter/decoder consumes it).
 //===----------------------------------------------------------------------===//
 
-// Class 4 shift/rotate/bit by embedded constant N (word0[20:15]); 2-address
-// ($rd = $rs1).  The count/position operand is a plain immediate; the encoder
+// Class 4 shift/rotate/bit by embedded constant N (word0[20:15]); 3-operand
+// (rd and rs independent in v2).  The count/position operand is a plain immediate; the encoder
 // masks it to 6 bits.  (v1: these were 8-byte RV_2addr forms.)
-class ShiftImmN<string asmstr, list<dag> pat = []>
-    : KCInst32<(outs GPR:$rd), (ins GPR:$rs, simm32:$imm), asmstr, pat> {
-  let Constraints = "$rd = $rs";
+class ShiftImmN<string mnem, list<dag> pat = []>
+    : KCInst32<(outs GPR:$rd), (ins GPR:$rs, simm32:$imm),
+               mnem # "\t$rd, $rs, $imm", pat> {
   let Defs        = [FLAGS];   // shlv/shrv/rolv/rorv set flags
 }
 
 // Class 4 bit-test by embedded constant N — flag-only, no destination register
 // (Z = ~bit).  (v1: 8-byte RV_cmp form.)
 class BitTestImmN<string asmstr>
-    : KCInst32<(outs), (ins GPR:$rs, simm32:$imm), asmstr>;
+    : KCInst32<(outs), (ins GPR:$rs, simm32:$imm), asmstr> {
+  let Defs = [FLAGS];   // Z = ~bit
+}
 
-// Class 6/7 register-offset indexed 64-bit load/store (v2: 1 word; the offset
-// register number rides in rs2[3:0]).  Modelled with the offset as an
-// immediate register number, matching the v1 assembler-only defs.
+// Class 6/7 register-offset indexed 64-bit load/store (v2: 1 word, EA =
+// rs1 + rs2; the offset register is a real GPR operand in rs2[3:0]).
 class Idx64RegOff_ld<string asmstr>
-    : KCInst32<(outs GPR:$rd), (ins GPR:$base, simm32:$offset), asmstr> {
+    : KCInst32<(outs GPR:$rd), (ins GPR:$base, GPR:$offset), asmstr> {
   let mayLoad = 1;
   let SchedRW = [WriteLoad];
 }
 class Idx64RegOff_st<string asmstr>
-    : KCInst32<(outs), (ins GPR:$rs_data, GPR:$base, simm32:$offset), asmstr> {
+    : KCInst32<(outs), (ins GPR:$rs_data, GPR:$base, GPR:$offset), asmstr> {
   let mayStore = 1;
   let SchedRW  = [WriteStore];
 }
@@ -540,13 +566,19 @@ def MAXUR  : RRR<0x00430, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
 //===----------------------------------------------------------------------===//
 
 // Register copy: rd = rs
+// Pattern-less, so TableGen would otherwise guess hasSideEffects=1 and every
+// post-RA copy would become a scheduling barrier.
+let hasSideEffects = 0, isMoveReg = 1, isAsCheapAsAMove = 1 in
 def COPY_R   : RR1<0x000001, (outs GPR:$rd), (ins GPR:$rs),
                   "copy\t$rd, $rs"> { let SchedRW = [WriteALU]; } // move, not a load
 
 // Compare (flags only): rs1 - rs2, no writeback.
-// hasSideEffects = 1 prevents the optimizer from removing or reordering these
-// instructions away from the conditional branch that consumes the flags.
-def CMPRR_I  : RR0<0x000005, "cmprr\t$rs1, $rs2"> { let hasSideEffects = 1; }
+// No hasSideEffects: the compare→branch pairing is held by glue at isel and by
+// the modelled FLAGS def/use afterwards (every flag-writing instruction
+// declares Defs=[FLAGS], conditional branches Uses=[FLAGS]).  A side-effect
+// flag would only make it a scheduling/LICM barrier for unrelated loads/stores.
+let hasSideEffects = 0 in
+def CMPRR_I  : RR0<0x000005, "cmprr\t$rs1, $rs2">;
 
 // 64-bit load / store via absolute register address
 def MEMGET64 : RR1<0x00007B, (outs GPR:$rd), (ins GPR:$rs),
@@ -586,41 +618,41 @@ def MEMSET32 : RRst<0x000078, "memset32\t$rs_data, $rs_addr">;
 // ALU — single-register in-place (2-address: $rd = $rs1)
 //===----------------------------------------------------------------------===//
 
-def INCR    : R_inplace<0x0000084, "incr\t$rd">;
-def DECR    : R_inplace<0x0000085, "decr\t$rd">;
-def NEGR    : R_inplace<0x000008A, "negr\t$rd",
+def INCR    : R_unary<0x0000084, "incr">;
+def DECR    : R_unary<0x0000085, "decr">;
+def NEGR    : R_unary<0x000008A, "negr",
                 [(set GPR:$rd, (ineg GPR:$rs1))]>;
-def ABSR    : R_inplace<0x000008B, "absr\t$rd",
+def ABSR    : R_unary<0x000008B, "absr",
                 [(set GPR:$rd, (abs GPR:$rs1))]>;
-def SHLR1   : R_inplace<0x000008D, "shlr1\t$rd">;
-def SHRR1   : R_inplace<0x000008E, "shrr1\t$rd">;
-def NOTR    : R_inplace<0x0000098, "notr\t$rd",
+def SHLR1   : R_unary<0x000008D, "shlr1">;
+def SHRR1   : R_unary<0x000008E, "shrr1">;
+def NOTR    : R_unary<0x0000098, "notr",
                 [(set GPR:$rd, (not GPR:$rs1))]>;
-def POPCNT  : R_inplace<0x00000A8, "popcnt\t$rd",
+def POPCNT  : R_unary<0x00000A8, "popcnt",
                 [(set GPR:$rd, (ctpop GPR:$rs1))]>;
-def CLZ     : R_inplace<0x00000A9, "clz\t$rd",
+def CLZ     : R_unary<0x00000A9, "clz",
                 [(set GPR:$rd, (ctlz GPR:$rs1))]>;
-def CTZ     : R_inplace<0x00000AA, "ctz\t$rd",
+def CTZ     : R_unary<0x00000AA, "ctz",
                 [(set GPR:$rd, (cttz GPR:$rs1))]>;
-def BITREV  : R_inplace<0x00000AB, "bitrev\t$rd",
+def BITREV  : R_unary<0x00000AB, "bitrev",
                 [(set GPR:$rd, (bitreverse GPR:$rs1))]>;
-def BSWAP_R : R_inplace<0x0000097, "bswap\t$rd",
+def BSWAP_R : R_unary<0x0000097, "bswap",
                 [(set GPR:$rd, (bswap GPR:$rs1))]>;
 
 // Sign-extend to 64 bits (arch doc §7.2; hardware extends to 64)
-def SEXTB   : R_inplace<0x000008C, "sextb\t$rd",
+def SEXTB   : R_unary<0x000008C, "sextb",
                 [(set GPR:$rd, (sext_inreg GPR:$rs1, i8))]>;
-def SEXTH   : R_inplace<0x0000094, "sexth\t$rd",
+def SEXTH   : R_unary<0x0000094, "sexth",
                 [(set GPR:$rd, (sext_inreg GPR:$rs1, i16))]>;
 
 // Zero-extend to 64 bits
-def ZEXTB   : R_inplace<0x0000095, "zextb\t$rd">;
-def ZEXTH   : R_inplace<0x0000096, "zexth\t$rd">;
+def ZEXTB   : R_unary<0x0000095, "zextb">;
+def ZEXTH   : R_unary<0x0000096, "zexth">;
 
 // Sign/zero-extend 32→64 bits (hardware fixed April 2026)
-def SEXTW   : R_inplace<0x00000F0, "sextw\t$rd",
+def SEXTW   : R_unary<0x00000F0, "sextw",
                 [(set GPR:$rd, (sext_inreg GPR:$rs1, i32))]>;
-def ZEXTW   : R_inplace<0x00000F1, "zextw\t$rd">;
+def ZEXTW   : R_unary<0x00000F1, "zextw">;
 
 //===----------------------------------------------------------------------===//
 // Pseudo-instructions (not emitted to the binary; eliminated by PEI)
@@ -648,14 +680,24 @@ class Pseudo<dag outs, dag ins, list<dag> pattern = []>
 // No tablegen patterns: ISD::CALLSEQ_START/END are matched in
 // KlaussCPUDAGToDAGISel::Select() to avoid i32-type-set inference issues
 // (KlaussCPU has no i32 register class).
+let Defs = [SP], Uses = [SP], hasSideEffects = 1 in {
 def ADJCALLSTACKDOWN : Pseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2)>;
 def ADJCALLSTACKUP   : Pseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2)>;
+}
 
-// SELECT without CMOV: expanded to compare + conditional branches by
-// EmitInstrWithCustomInserter in KlaussCPUInstrInfo.cpp.
-let usesCustomInserter = 1, hasSideEffects = 0 in
-def SELECT_PSEUDO : Pseudo<(outs GPR:$dst),
-                            (ins GPR:$cond, GPR:$trueV, GPR:$falseV)>;
+// SELECT without CMOV: KlaussCPUISD::SELECT_CC (lhs, rhs, cc, t, f) selects
+// to one of these; EmitInstrWithCustomInserter (KlaussCPUISelLowering.cpp)
+// expands it to CMPRR/CMPRV + the conditional jump in $jmp + a PHI.
+// $jmp holds the JMPxx opcode (from KlaussCPUInstrInfo::getCondBranchOpcode).
+// Defs=[FLAGS]: the expansion's compare clobbers the flags.
+let usesCustomInserter = 1, hasSideEffects = 0, Defs = [FLAGS] in {
+def SELECT_CC_RR : Pseudo<(outs GPR:$dst),
+                          (ins GPR:$lhs, GPR:$rhs, i64imm:$jmp,
+                               GPR:$trueV, GPR:$falseV)>;
+def SELECT_CC_RI : Pseudo<(outs GPR:$dst),
+                          (ins GPR:$lhs, simm32:$rhs, i64imm:$jmp,
+                               GPR:$trueV, GPR:$falseV)>;
+}
 
 //===----------------------------------------------------------------------===//
 // Stack management (used by frame lowering; no isel patterns)
@@ -674,9 +716,10 @@ def ADDSP_I : Vsp<0x00004050, "addsp\t$imm">;
 
 // Indirect call / jump via register
 // Defs: all caller-saved GPRs clobbered by the ABI (R0-R3=args, R8-R14=temps+return)
+// plus FLAGS (the callee is free to change them).
 let isCall = 1,
     Uses = [SP],
-    Defs = [R0, R1, R2, R3, R8, R9, R10, R11, R12, R13, R14] in
+    Defs = [R0, R1, R2, R3, R8, R9, R10, R11, R12, R13, R14, FLAGS] in
 def CALLR_R : R_in<0x0000407, (ins GPR:$reg), "callr\t$reg">;
 def JMPR_R  : R_in<0x0000102, (ins GPR:$reg), "jmpr\t$reg"> {
   let isBranch         = 1;
@@ -689,38 +732,47 @@ def JMPR_R  : R_in<0x0000102, (ins GPR:$reg), "jmpr\t$reg"> {
 // RV: register ← immediate  (SETR and in-place RV ops)
 //===----------------------------------------------------------------------===//
 
+// Constant materialisation.  Explicitly side-effect free and rematerializable:
+// SETR64/LEAPC have no isel Pattern, so TableGen would otherwise guess
+// hasSideEffects=1, which blocks MachineLICM hoisting, MachineCSE and remat
+// (a 64-bit constant in a loop would be re-emitted, or spilled, every trip).
+let hasSideEffects = 0, isReMaterializable = 1 in {
 // Load 32-bit immediate (sign-extended to 64 bits)
+let isAsCheapAsAMove = 1, isMoveImm = 1 in
 def SETR    : RV_ld<0x0000080, "setr\t$rd, $imm">;
 
 // Load full 64-bit immediate: rd = (hi32 << 32) | lo32
+let isMoveImm = 1 in
 def SETR64  : V64_ld<0x0000FE, "setr64\t$rd, $lo, $hi">;
+}
 
 // In-place immediate operations (rd op= imm32)
-def ADDV    : RV_2addr<0x0000081, "addv\t$rd, $imm">;
-def MINUSV  : RV_2addr<0x0000082, "minusv\t$rd, $imm">;
-def ANDV    : RV_2addr<0x0000086, "andv\t$rd, $imm">;
-def ORV     : RV_2addr<0x0000087, "orv\t$rd, $imm">;
-def XORV    : RV_2addr<0x0000088, "xorv\t$rd, $imm">;
+def ADDV    : RV_imm<0x0000081, "addv">;
+def MINUSV  : RV_imm<0x0000082, "minusv">;
+def ANDV    : RV_imm<0x0000086, "andv">;
+def ORV     : RV_imm<0x0000087, "orv">;
+def XORV    : RV_imm<0x0000088, "xorv">;
 // Shift by immediate (count = imm[5:0]); v2: single word, count embedded.
-def SHLV    : ShiftImmN<"shlv\t$rd, $imm">;
-def SHRV    : ShiftImmN<"shrv\t$rd, $imm">;
-def SHRAV   : ShiftImmN<"shrav\t$rd, $imm">;
-def MULV    : RV_2addr<0x00000B8, "mulv\t$rd, $imm">;
-def DIVV    : RV_2addr<0x00000B9, "divv\t$rd, $imm">;
-def MODV    : RV_2addr<0x00000BA, "modv\t$rd, $imm">;
+def SHLV    : ShiftImmN<"shlv">;
+def SHRV    : ShiftImmN<"shrv">;
+def SHRAV   : ShiftImmN<"shrav">;
+def MULV    : RV_imm<0x00000B8, "mulv">;
+def DIVV    : RV_imm<0x00000B9, "divv">;
+def MODV    : RV_imm<0x00000BA, "modv">;
 
 // Rotate by immediate (count = imm[5:0]); v2: single word.  Register-amount
 // forms are ROLR/RORR_R.
-def ROLV    : ShiftImmN<"rolv\t$rd, $imm">;
-def RORV    : ShiftImmN<"rorv\t$rd, $imm">;
+def ROLV    : ShiftImmN<"rolv">;
+def RORV    : ShiftImmN<"rorv">;
 
 // reg+imm32 add: rd = rs + sign_extend(imm32). Two distinct regs; sign-extends.
 // Replaces the SETR+ADDR two-instruction sequence for frame-address materialisation.
 // Pattern deferred: simm32_imm is not yet defined here; see isel patterns section.
 def ADDI : RRV_alu<0x000002, "addi\t$rd, $rs, $imm">;
 
-// Compare register to immediate — flags only (same side-effect caveat as CMPRR_I)
-def CMPRV_I : RV_cmp<0x0000083, "cmprv\t$rs, $imm"> { let hasSideEffects = 1; }
+// Compare register to immediate — flags only (see CMPRR_I on side effects)
+let hasSideEffects = 0 in
+def CMPRV_I : RV_cmp<0x0000083, "cmprv\t$rs, $imm">;
 
 //===----------------------------------------------------------------------===//
 // Memory: indexed load / store  (primary frame-slot instructions)
@@ -835,6 +887,12 @@ def : Pat<(rotr GPR:$rs, uimm6:$sh), (RORV GPR:$rs, uimm6:$sh)>;
 let AddedComplexity = 3 in
 def : Pat<(and GPR:$rs, 0xFFFFFFFF), (ZEXTW GPR:$rs)>;
 
+// (x & 0xFF) / (x & 0xFFFF) → single 4-byte ZEXTB/ZEXTH instead of 8-byte ANDV.
+let AddedComplexity = 3 in {
+def : Pat<(and GPR:$rs, 0xFF),   (ZEXTB GPR:$rs)>;
+def : Pat<(and GPR:$rs, 0xFFFF), (ZEXTH GPR:$rs)>;
+}
+
 // INCR/DECR: add ±1 as a single 4-byte op that also sets zero_flag (consumed
 // by the KlaussCPUFlagReuse peephole).  AddedComplexity so they beat ADDV/ADDI.
 let AddedComplexity = 2 in {
@@ -935,7 +993,7 @@ def JMPUGE  : Vbr_cond<0x0000101C, "jmpuge\t$target">;
 
 // Defs: all caller-saved GPRs clobbered by the ABI (R0-R3=args, R8-R14=temps+return)
 let Uses = [SP],
-    Defs = [R0, R1, R2, R3, R8, R9, R10, R11, R12, R13, R14] in
+    Defs = [R0, R1, R2, R3, R8, R9, R10, R11, R12, R13, R14, FLAGS] in
 def CALL_I  : Vcall<0x00001009, "call\t$target">;
 
 //===----------------------------------------------------------------------===//
@@ -969,12 +1027,13 @@ def JMPUGEREL : Vbr_cond<0x00001040, "jmpugerel\t$target">; // !ult_flag
 
 // PC-relative direct call: push PC+8 (return addr), PC += sign_ext(imm32)
 let Uses = [SP],
-    Defs = [R0, R1, R2, R3, R8, R9, R10, R11, R12, R13, R14] in
+    Defs = [R0, R1, R2, R3, R8, R9, R10, R11, R12, R13, R14, FLAGS] in
 def CALLREL : Vcall<0x00001041, "callrel\t$target">;
 
 // LEAPC: rd = PC_of_instruction + sign_ext(imm32)  (address materialisation)
 // Opcode 0x0000099 in RV_ld slot: word0 = (0x099 << 4) | rd, word1 = simm32.
 // The encoder emits FK_KlaussCPU_PCREL32 for symbol references.
+let hasSideEffects = 0, isReMaterializable = 1 in
 def LEAPC   : RV_ld<0x0000099, "leapc\t$rd, $imm">;
 
 //===----------------------------------------------------------------------===//
@@ -1036,19 +1095,19 @@ def BTSTRR : RRR<0x00530, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "btstrr\t$rd
 
 // ── R in-place (rd = f(rd); 2-address) ─────────────────────────────────────
 def SETFR : R_inplace<0x0000089, "setfr\t$rd">;
-def SHLAR : R_inplace<0x000008F, "shlar\t$rd">;
-def SHRAR : R_inplace<0x0000090, "shrar\t$rd">;
-def ROLR1 : R_inplace<0x00000F8, "rolr1\t$rd">;
-def RORR1 : R_inplace<0x00000F9, "rorr1\t$rd">;
-def ROLCR : R_inplace<0x00000FA, "rolcr\t$rd"> { let Uses = [FLAGS]; } // rotate through carry
-def RORCR : R_inplace<0x00000FB, "rorcr\t$rd"> { let Uses = [FLAGS]; } // rotate through carry
+def SHLAR : R_unary<0x000008F, "shlar">;
+def SHRAR : R_unary<0x0000090, "shrar">;
+def ROLR1 : R_unary<0x00000F8, "rolr1">;
+def RORR1 : R_unary<0x00000F9, "rorr1">;
+def ROLCR : R_unary<0x00000FA, "rolcr"> { let Uses = [FLAGS]; } // rotate through carry
+def RORCR : R_unary<0x00000FB, "rorcr"> { let Uses = [FLAGS]; } // rotate through carry
 
 // ── RV 2-address (rd op= imm32) and RV compare (rs, imm32) ──────────────────
 // Bit position / start+len are packed in the immediate (see opcode_select.vh).
 // Bit set/clear/toggle by embedded position N — v2: single word, 2-address.
-def BSET  : ShiftImmN<"bset\t$rd, $imm">;
-def BCLR  : ShiftImmN<"bclr\t$rd, $imm">;
-def BTGL  : ShiftImmN<"btgl\t$rd, $imm">;
+def BSET  : ShiftImmN<"bset">;
+def BCLR  : ShiftImmN<"bclr">;
+def BTGL  : ShiftImmN<"btgl">;
 // Bit-field extract/deposit stay 2 words (params packed in imm32).
 def BEXTR : RV_2addr<0x00000AC, "bextr\t$rd, $imm">;
 def BDEP  : RV_2addr<0x00000AD, "bdep\t$rd, $imm">;
@@ -1066,7 +1125,7 @@ def MEMSETR  : RV_cmp<0x0000720, "memsetr\t$rs, $imm"> { let mayStore = 1; }
 // ── RRV 64-bit indexed: non-aligned (vh LDIDX64/STIDX64 = 0x0C/0x0D) and
 //    register-offset (vh LDIDX64R/STIDX64R).  NOTE: LLVM's ldidx64/stidx64 are
 //    the *force-aligned* 0xFC/0xFD (= vh LDIDX64A/STIDX64A); aliases below.
-//    For the *R variants the offset operand is a register *number* in imm[3:0].
+//    For the *R variants the offset is a second register (EA = base + offset).
 def LDIDX64U : RRV_ld<0x00000C, "ldidx64u\t$rd, $base, $offset">;
 def STIDX64U : RRV_st<0x00000D, "stidx64u\t$rs_data, $base, $offset">;
 // v2: register-offset indexed ops are a single word (offset reg in rs2[3:0]).
@@ -1149,3 +1208,91 @@ def : Pat<(i64 (sextloadi8  (add (i64 GPR:$base), simm32_imm:$off))),
           (LDIDX8_S  GPR:$base, simm32_imm:$off)>;
 def : Pat<(i64 (sextloadi16 (add (i64 GPR:$base), simm32_imm:$off))),
           (LDIDX16_S GPR:$base, simm32_imm:$off)>;
+
+//===----------------------------------------------------------------------===//
+// Legacy 2-address assembler spellings.  The ops above are 3-operand in v2
+// (rd, rs, ...).  Keep the old in-place forms (`incr r1`, `addv r1, 5`,
+// `shlv r1, 3`) assembling as rd == rs so existing hand-written .s / inline
+// asm keeps working.  The printer always emits the 3-operand form.
+//===----------------------------------------------------------------------===//
+def : InstAlias<"shlv\t$rd, $imm", (SHLV GPR:$rd, GPR:$rd, simm32:$imm)>;
+def : InstAlias<"shrv\t$rd, $imm", (SHRV GPR:$rd, GPR:$rd, simm32:$imm)>;
+def : InstAlias<"shrav\t$rd, $imm", (SHRAV GPR:$rd, GPR:$rd, simm32:$imm)>;
+def : InstAlias<"rolv\t$rd, $imm", (ROLV GPR:$rd, GPR:$rd, simm32:$imm)>;
+def : InstAlias<"rorv\t$rd, $imm", (RORV GPR:$rd, GPR:$rd, simm32:$imm)>;
+def : InstAlias<"bset\t$rd, $imm", (BSET GPR:$rd, GPR:$rd, simm32:$imm)>;
+def : InstAlias<"bclr\t$rd, $imm", (BCLR GPR:$rd, GPR:$rd, simm32:$imm)>;
+def : InstAlias<"btgl\t$rd, $imm", (BTGL GPR:$rd, GPR:$rd, simm32:$imm)>;
+def : InstAlias<"incr\t$rd", (INCR GPR:$rd, GPR:$rd)>;
+def : InstAlias<"decr\t$rd", (DECR GPR:$rd, GPR:$rd)>;
+def : InstAlias<"negr\t$rd", (NEGR GPR:$rd, GPR:$rd)>;
+def : InstAlias<"absr\t$rd", (ABSR GPR:$rd, GPR:$rd)>;
+def : InstAlias<"shlr1\t$rd", (SHLR1 GPR:$rd, GPR:$rd)>;
+def : InstAlias<"shrr1\t$rd", (SHRR1 GPR:$rd, GPR:$rd)>;
+def : InstAlias<"notr\t$rd", (NOTR GPR:$rd, GPR:$rd)>;
+def : InstAlias<"popcnt\t$rd", (POPCNT GPR:$rd, GPR:$rd)>;
+def : InstAlias<"clz\t$rd", (CLZ GPR:$rd, GPR:$rd)>;
+def : InstAlias<"ctz\t$rd", (CTZ GPR:$rd, GPR:$rd)>;
+def : InstAlias<"bitrev\t$rd", (BITREV GPR:$rd, GPR:$rd)>;
+def : InstAlias<"bswap\t$rd", (BSWAP_R GPR:$rd, GPR:$rd)>;
+def : InstAlias<"sextb\t$rd", (SEXTB GPR:$rd, GPR:$rd)>;
+def : InstAlias<"sexth\t$rd", (SEXTH GPR:$rd, GPR:$rd)>;
+def : InstAlias<"zextb\t$rd", (ZEXTB GPR:$rd, GPR:$rd)>;
+def : InstAlias<"zexth\t$rd", (ZEXTH GPR:$rd, GPR:$rd)>;
+def : InstAlias<"sextw\t$rd", (SEXTW GPR:$rd, GPR:$rd)>;
+def : InstAlias<"zextw\t$rd", (ZEXTW GPR:$rd, GPR:$rd)>;
+def : InstAlias<"shlar\t$rd", (SHLAR GPR:$rd, GPR:$rd)>;
+def : InstAlias<"shrar\t$rd", (SHRAR GPR:$rd, GPR:$rd)>;
+def : InstAlias<"rolr1\t$rd", (ROLR1 GPR:$rd, GPR:$rd)>;
+def : InstAlias<"rorr1\t$rd", (RORR1 GPR:$rd, GPR:$rd)>;
+def : InstAlias<"rolcr\t$rd", (ROLCR GPR:$rd, GPR:$rd)>;
+def : InstAlias<"rorcr\t$rd", (RORCR GPR:$rd, GPR:$rd)>;
+def : InstAlias<"addv\t$rd, $imm", (ADDV GPR:$rd, GPR:$rd, simm32:$imm)>;
+def : InstAlias<"minusv\t$rd, $imm", (MINUSV GPR:$rd, GPR:$rd, simm32:$imm)>;
+def : InstAlias<"andv\t$rd, $imm", (ANDV GPR:$rd, GPR:$rd, simm32:$imm)>;
+def : InstAlias<"orv\t$rd, $imm", (ORV GPR:$rd, GPR:$rd, simm32:$imm)>;
+def : InstAlias<"xorv\t$rd, $imm", (XORV GPR:$rd, GPR:$rd, simm32:$imm)>;
+def : InstAlias<"mulv\t$rd, $imm", (MULV GPR:$rd, GPR:$rd, simm32:$imm)>;
+def : InstAlias<"divv\t$rd, $imm", (DIVV GPR:$rd, GPR:$rd, simm32:$imm)>;
+def : InstAlias<"modv\t$rd, $imm", (MODV GPR:$rd, GPR:$rd, simm32:$imm)>;
+
+//===----------------------------------------------------------------------===//
+// Bit-manipulation-by-constant patterns (need BSET/BCLR/BTGL defined above)
+//===----------------------------------------------------------------------===//
+
+// Single-bit set / clear / toggle → 4-byte BSET/BCLR/BTGL with the bit
+// position embedded (word0[20:15]).  Beats the 8-byte ORV/ANDV/XORV for bits
+// 0-31, and the 12-byte SETR64 + 4-byte reg-reg op for bits 32-63.
+def BitPosXForm : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(
+      llvm::countr_zero(static_cast<uint64_t>(N->getZExtValue())), SDLoc(N),
+      MVT::i64);
+}]>;
+def ClearBitPosXForm : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(
+      llvm::countr_zero(~static_cast<uint64_t>(N->getZExtValue())), SDLoc(N),
+      MVT::i64);
+}]>;
+def SingleBitImm : ImmLeaf<i64, [{
+  return llvm::isPowerOf2_64(static_cast<uint64_t>(Imm));
+}]>;
+def SingleZeroBitImm : ImmLeaf<i64, [{
+  return llvm::isPowerOf2_64(~static_cast<uint64_t>(Imm));
+}]>;
+let AddedComplexity = 4 in {
+def : Pat<(or  GPR:$rs, SingleBitImm:$b),
+          (BSET GPR:$rs, (BitPosXForm imm:$b))>;
+def : Pat<(xor GPR:$rs, SingleBitImm:$b),
+          (BTGL GPR:$rs, (BitPosXForm imm:$b))>;
+def : Pat<(and GPR:$rs, SingleZeroBitImm:$b),
+          (BCLR GPR:$rs, (ClearBitPosXForm imm:$b))>;
+}
+
+// 64-bit load/store at (base + index register) → 1-word LDIDX64R/STIDX64R
+// instead of ADDR + 2-word LDIDX64/STIDX64 (e.g. `p[i]` after the index
+// shift).  EA is not force-aligned (A=0), which is fine: LLVM never emits an
+// under-aligned i64 access (allowsMisalignedMemoryAccesses() is false).
+def : Pat<(i64 (load (add (i64 GPR:$base), (i64 GPR:$idx)))),
+          (LDIDX64R GPR:$base, GPR:$idx)>;
+def : Pat<(store (i64 GPR:$val), (add (i64 GPR:$base), (i64 GPR:$idx))),
+          (STIDX64R GPR:$val, GPR:$base, GPR:$idx)>;

@@ -235,8 +235,8 @@ uint32_t KlaussCPUMCCodeEmitter::encode32(const MCInst &MI) const {
 
   // Register-offset indexed 64-bit (v2: 1 word; offset register in rs2[3:0]).
   // The .td models the offset as a register *number* immediate (op 2).
-  case KlaussCPU::LDIDX64R: return 0x5B600000u | fRd(MI,0) | fRs1(MI,1) | (getImm32(MI,2) & 0xF);
-  case KlaussCPU::STIDX64R: return 0x5F600000u | fRd(MI,0) | fRs1(MI,1) | (getImm32(MI,2) & 0xF);
+  case KlaussCPU::LDIDX64R: return 0x5B600000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::STIDX64R: return 0x5F600000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
 
   // ── Class 3 flag-setting compare (rs1,rs2 at ops 0,1) ─────────────────────
   case KlaussCPU::CMPRR_I: return 0x4C000000u | fRs1(MI,0) | fRs2(MI,1);

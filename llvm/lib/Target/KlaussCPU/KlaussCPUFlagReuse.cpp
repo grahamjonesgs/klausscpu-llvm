@@ -70,8 +70,8 @@ namespace {
 // operand 0 and (b) is documented to set zero_flag on that result.
 static bool setsZeroFlagAsResult(unsigned Opc) {
   switch (Opc) {
-  case KlaussCPU::INCR:   // rd = rd + 1
-  case KlaussCPU::DECR:   // rd = rd - 1
+  case KlaussCPU::INCR:   // rd = rs1 + 1
+  case KlaussCPU::DECR:   // rd = rs1 - 1
   case KlaussCPU::ADDR:   // rd = rs1 + rs2
   case KlaussCPU::SUBR:   // rd = rs1 - rs2
     return true;
@@ -132,13 +132,26 @@ bool KlaussCPUFlagReuse::runOnMachineFunction(MachineFunction &MF) {
         continue;
       Register Rd = MI.getOperand(0).getReg();
 
-      // The instruction immediately before must be a zero_flag arithmetic op
-      // writing exactly Rd.  Adjacency proves nothing clobbers zero_flag
-      // between the producer and (after deletion) the branch.
-      MachineInstr *Prev = MI.getPrevNode();
-      if (!Prev || Prev->isMetaInstruction())
-        continue;
-      if (!setsZeroFlagAsResult(Prev->getOpcode()))
+      // Find the most recent FLAGS writer before the compare.  It must be a
+      // zero_flag arithmetic op writing exactly Rd, and nothing in between may
+      // redefine Rd.  Instructions in between are known not to touch FLAGS:
+      // every flag-writing instruction declares Defs=[FLAGS] (the same
+      // invariant the schedulers rely on).  Calls and inline asm are treated
+      // as barriers, since what they do to the flags is not modelled.
+      MachineInstr *Prev = nullptr;
+      for (MachineInstr *I = MI.getPrevNode(); I; I = I->getPrevNode()) {
+        if (I->isDebugInstr())
+          continue;
+        if (I->isCall() || I->isInlineAsm())
+          break;
+        if (I->modifiesRegister(KlaussCPU::FLAGS, /*TRI=*/nullptr)) {
+          Prev = I;
+          break;
+        }
+        if (I->modifiesRegister(Rd, /*TRI=*/nullptr))
+          break;
+      }
+      if (!Prev || !setsZeroFlagAsResult(Prev->getOpcode()))
         continue;
       if (Prev->getNumOperands() < 1 || !Prev->getOperand(0).isReg() ||
           Prev->getOperand(0).getReg() != Rd)
@@ -154,6 +167,15 @@ bool KlaussCPUFlagReuse::runOnMachineFunction(MachineFunction &MF) {
       unsigned NewBrOpc = zeroFlagBranchOpc(Br->getOpcode());
       if (!NewBrOpc)
         continue;
+
+      // The producer's FLAGS def is now what the branch reads.  It was
+      // emitted `dead` (nothing read it while the compare sat in between);
+      // leaving that marking would make the branch read an undefined physreg.
+      MachineOperand *FlagDef =
+          Prev->findRegisterDefOperand(KlaussCPU::FLAGS, /*TRI=*/nullptr);
+      if (!FlagDef)
+        continue;
+      FlagDef->setIsDead(false);
 
       // Rewrite the branch to read zero_flag and drop the redundant compare.
       Br->setDesc(TII->get(NewBrOpc));

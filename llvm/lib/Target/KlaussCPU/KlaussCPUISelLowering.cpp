@@ -43,6 +43,13 @@ static cl::opt<unsigned>
                   cl::desc("Preferred loop-header alignment in bytes "
                            "(16 = I-cache line; 0 = off)."));
 
+// Jump tables are off by default (see the BR_JT comment in the constructor).
+// A non-zero value re-enables them with that minimum case count, for A/B
+// testing now that analyzeBranch models JMPR_R blocks correctly.
+static cl::opt<unsigned> MinJumpTableEntries(
+    "klausscpu-min-jump-table-entries", cl::Hidden, cl::init(0),
+    cl::desc("Minimum cases for a jump table (0 = jump tables disabled)."));
+
 // Generated calling convention functions.  Must be included inside namespace
 // llvm because the generated code uses unqualified names (MVT, CCState, etc.).
 namespace llvm {
@@ -74,13 +81,14 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::FMUL,  MVT::f64, Expand);
   setOperationAction(ISD::FDIV,  MVT::f64, Expand);
 
-  // ---- No CMOV: SELECT → Custom (emits SELECT_PSEUDO → branches via
-  //   EmitInstrWithCustomInserter).  SELECT_CC → Expand which lowers to
-  //   SETCC + SELECT; that SELECT then goes through our Custom handler.
-  //   Both SELECT and SELECT_CC must NOT both be Expand — the legalizer
-  //   asserts if SELECT_CC tries to expand via SELECT that is also Expand.
+  // ---- No CMOV: SELECT and SELECT_CC → Custom, both lowered to
+  //   KlaussCPUISD::SELECT_CC (lhs, rhs, cc, t, f).  That selects to the
+  //   SELECT_CC_RR/RI pseudo, which EmitInstrWithCustomInserter expands to
+  //   one CMPRR/CMPRV + JMPcc + PHI.  Folding the compare into the select
+  //   avoids materialising a 0/1 with CMPxxR and re-testing it with
+  //   CMPRV 0 + JMPE (saves 3 words and an ALU op per select).
   setOperationAction(ISD::SELECT,    MVT::i64, Custom);
-  setOperationAction(ISD::SELECT_CC, MVT::i64, Expand);
+  setOperationAction(ISD::SELECT_CC, MVT::i64, Custom);
 
   // ---- Sub-word loads / stores ----
   // Hardware has LDIDX8/16/32 (zero-extending, base+offset) and
@@ -137,9 +145,17 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   // relative pointer, causing encode_uint to write to address 0xFFFFFFFF.
   // Disabling jump tables forces all switch statements to use binary-search
   // comparison chains where the RA correctly inserts reloads on every direct
-  // predecessor edge.  Re-enable once the RA limitation is resolved.
-  setMinimumJumpTableEntries(INT_MAX);
-  setOperationAction(ISD::BR_JT,  MVT::Other, Expand);
+  // predecessor edge.
+  //
+  // That diagnosis was wrong.  The cbprintf failure reproduces with the
+  // pre-2026-09 compiler and is gone after the 2026-09 fixes (analyzeBranch
+  // treated JMPR_R/RET blocks as fall-through; compare flags were emitted
+  // dead; PIC tables were treated as relative) — board-verified with a Zephyr
+  // cbprintf test app.  Still off by default until the default is flipped;
+  // enable with -mllvm -klausscpu-min-jump-table-entries=4.
+  setMinimumJumpTableEntries(MinJumpTableEntries ? MinJumpTableEntries
+                                                 : INT_MAX);
+  setOperationAction(ISD::BR_JT,  MVT::Other, Custom); // LowerBR_JT
   setOperationAction(ISD::BRIND,  MVT::Other, Legal);
   setOperationAction(ISD::BRCOND, MVT::Other, Expand); // expands to BR_CC
   // BR_CC with i64 operands is Legal — handled by KlaussCPUDAGToDAGISel::Select()
@@ -166,6 +182,10 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::UMIN,  MVT::i64, Legal);
   setOperationAction(ISD::UMAX,  MVT::i64, Legal);
   setOperationAction(ISD::SETCC, MVT::i64, Legal);
+  // CMPEQR/CMPLTR/... write exactly 0 or 1.  Without this the DAG assumes the
+  // upper bits of a setcc result are undefined and masks it with ANDV 1
+  // before every use as an integer.
+  setBooleanContents(ZeroOrOneBooleanContent);
 
   // Hardware 64-bit rotate (ROLR/RORR). 32-bit rotates stay Expand: a 64-bit
   // register rotate is not a 32-bit rotate, so promoted i32 rotl/rotr must
@@ -250,6 +270,7 @@ SDValue KlaussCPUTargetLowering::LowerOperation(SDValue Op,
   case ISD::JumpTable:      return LowerJumpTable(Op, DAG);
   case ISD::BR_JT:          return LowerBR_JT(Op, DAG);
   case ISD::SELECT:         return LowerSELECT(Op, DAG);
+  case ISD::SELECT_CC:      return LowerSELECT_CC(Op, DAG);
   case ISD::STACKSAVE:           return LowerSTACKSAVE(Op, DAG);
   case ISD::STACKRESTORE:        return LowerSTACKRESTORE(Op, DAG);
   case ISD::DYNAMIC_STACKALLOC: return LowerDYNAMIC_STACKALLOC(Op, DAG);
@@ -375,13 +396,17 @@ SDValue KlaussCPUTargetLowering::LowerJumpTable(SDValue Op,
                                                   SelectionDAG &DAG) const {
   auto *N = cast<JumpTableSDNode>(Op);
   SDValue TJT = DAG.getTargetJumpTable(N->getIndex(), MVT::i64);
-  return DAG.getNode(KlaussCPUISD::ADDR, SDLoc(N), MVT::i64, TJT);
+  unsigned WrapOp = getTargetMachine().isPositionIndependent()
+                        ? KlaussCPUISD::LEAPC : KlaussCPUISD::ADDR;
+  return DAG.getNode(WrapOp, SDLoc(N), MVT::i64, TJT);
 }
 
 // Jump tables use EK_Custom32: each 4-byte entry holds the absolute 32-bit
 // target address.  The assembler emits R_KLAUSSCPU_ABS32 per entry; the
 // linker fills them in regardless of which ELF section the table lands in.
 // Dispatch: load 4-byte entry (absolute address), zero-extend, BRIND.
+// The entry is used as-is (never added to the table base) — see
+// isJumpTableRelative().  Under -fPIC only the table base is PC-relative.
 SDValue KlaussCPUTargetLowering::LowerBR_JT(SDValue Op,
                                               SelectionDAG &DAG) const {
   SDValue Chain = Op.getOperand(0);
@@ -390,8 +415,10 @@ SDValue KlaussCPUTargetLowering::LowerBR_JT(SDValue Op,
   SDLoc DL(Op);
 
   auto *JT = cast<JumpTableSDNode>(Table);
-  SDValue Base = DAG.getNode(KlaussCPUISD::ADDR, DL, MVT::i64,
-                              DAG.getTargetJumpTable(JT->getIndex(), MVT::i64));
+  unsigned WrapOp = getTargetMachine().isPositionIndependent()
+                        ? KlaussCPUISD::LEAPC : KlaussCPUISD::ADDR;
+  SDValue Base = DAG.getNode(WrapOp, DL, MVT::i64,
+                             DAG.getTargetJumpTable(JT->getIndex(), MVT::i64));
 
   // EntryAddr = Base + Index * 4
   SDValue Scaled = DAG.getNode(ISD::SHL, DL, MVT::i64,
@@ -400,8 +427,10 @@ SDValue KlaussCPUTargetLowering::LowerBR_JT(SDValue Op,
 
   // Load the 4-byte absolute target address from the table (zero-extend).
   // All code addresses fit in 32 bits, so zero-extension is correct.
-  SDValue Target = DAG.getExtLoad(ISD::ZEXTLOAD, DL, MVT::i64, Chain,
-                                   EntryAddr, MachinePointerInfo(), MVT::i32);
+  MachineFunction &MF = DAG.getMachineFunction();
+  SDValue Target =
+      DAG.getExtLoad(ISD::ZEXTLOAD, DL, MVT::i64, Chain, EntryAddr,
+                     MachinePointerInfo::getJumpTable(MF), MVT::i32);
 
   return DAG.getNode(ISD::BRIND, DL, MVT::Other,
                      Target.getValue(1), Target.getValue(0));
@@ -441,8 +470,11 @@ SDValue KlaussCPUTargetLowering::LowerSTACKSAVE(SDValue Op,
   SDValue Chain = Op.getOperand(0);
   // Use GETSP_R directly to avoid CopyFromReg(SP, i32) which fails
   // type legalization (SP has no legal i32 register class path).
-  SDValue SP64 = SDValue(DAG.getMachineNode(KlaussCPU::GETSP_R, DL, MVT::i64), 0);
-  return DAG.getMergeValues({SP64, Chain}, DL);
+  // Chained so it is ordered against SETSP_R/ADDSP and never CSE'd with an
+  // earlier read of a different SP value.
+  SDNode *GetSP = DAG.getMachineNode(KlaussCPU::GETSP_R, DL, MVT::i64,
+                                     MVT::Other, Chain);
+  return DAG.getMergeValues({SDValue(GetSP, 0), SDValue(GetSP, 1)}, DL);
 }
 
 SDValue KlaussCPUTargetLowering::LowerSTACKRESTORE(SDValue Op,
@@ -472,8 +504,14 @@ SDValue KlaussCPUTargetLowering::LowerDYNAMIC_STACKALLOC(SDValue Op,
 
   EVT VT = Op.getValueType(); // i64 (pointer type, result 0)
 
-  // Read current SP via GETSP_R (no chain needed: it's a side-effect-free read).
-  SDValue OldSP = SDValue(DAG.getMachineNode(KlaussCPU::GETSP_R, DL, MVT::i64), 0);
+  // Read current SP via GETSP_R.  It MUST be chained: an unchained GETSP_R
+  // has no operands, so SelectionDAG CSEs every one in the block into a single
+  // node — two VLAs would then both be carved from the same original SP and
+  // overlap.
+  SDNode *GetSP = DAG.getMachineNode(KlaussCPU::GETSP_R, DL, MVT::i64,
+                                     MVT::Other, Chain);
+  SDValue OldSP(GetSP, 0);
+  Chain = SDValue(GetSP, 1);
 
   // NewSP = OldSP - Size  (stack grows downward)
   SDValue NewSP = DAG.getNode(ISD::SUB, DL, VT, OldSP, Size);
@@ -563,7 +601,7 @@ KlaussCPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case KlaussCPUISD::CALL:     return "KlaussCPUISD::CALL";
   case KlaussCPUISD::ADDR:     return "KlaussCPUISD::ADDR";
   case KlaussCPUISD::LEAPC:    return "KlaussCPUISD::LEAPC";
-  case KlaussCPUISD::SELECT:   return "KlaussCPUISD::SELECT";
+  case KlaussCPUISD::SELECT_CC: return "KlaussCPUISD::SELECT_CC";
   default: return nullptr;
   }
 }
@@ -745,7 +783,19 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
   // Use GETSP_R to read the 32-bit SP into an i64 GPR (zero-extends).
   // Avoid getCopyFromReg(SP, i32): the type legalizer cannot promote
   // i32 CopyFromReg nodes for physical-only registers (no i32 reg class).
-  SDValue SP = SDValue(DAG.getMachineNode(KlaussCPU::GETSP_R, DL, PtrVT), 0);
+  // Chained after CALLSEQ_START: when a VLA disables the reserved call frame,
+  // ADJCALLSTACKDOWN becomes an ADDSP and the stack args must be stored
+  // relative to the SP *after* it (an unchained GETSP_R was CSE'd with the
+  // function's first SP read and stored the args above the VLA).
+  // Only emitted when a stack argument needs it: a chained side-effecting
+  // node is never dead-code eliminated.
+  SDValue SP;
+  if (llvm::any_of(ArgLocs, [](const CCValAssign &VA) { return VA.isMemLoc(); })) {
+    SDNode *GetSP = DAG.getMachineNode(KlaussCPU::GETSP_R, DL, PtrVT,
+                                       MVT::Other, Chain);
+    SP = SDValue(GetSP, 0);
+    Chain = SDValue(GetSP, 1);
+  }
 
   for (unsigned I = 0, E = ArgLocs.size(); I != E; ++I) {
     const CCValAssign &VA = ArgLocs[I];
@@ -836,30 +886,63 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
   return Chain;
 }
 
-// SELECT: no hardware CMOV — emit a KlaussCPUISD::SELECT node which is
-// selected to SELECT_PSEUDO and then expanded to branches by
+// SELECT / SELECT_CC: no hardware CMOV.  Both become KlaussCPUISD::SELECT_CC,
+// which is selected to SELECT_CC_RR/RI and expanded to branches by
 // EmitInstrWithCustomInserter below.
-SDValue KlaussCPUTargetLowering::LowerSELECT(SDValue Op,
+SDValue KlaussCPUTargetLowering::buildSelectCC(const SDLoc &DL, SDValue LHS,
+                                               SDValue RHS, ISD::CondCode CC,
+                                               SDValue TrueV, SDValue FalseV,
                                                SelectionDAG &DAG) const {
-  return DAG.getNode(KlaussCPUISD::SELECT, SDLoc(Op), Op.getValueType(),
-                     Op.getOperand(0), Op.getOperand(1), Op.getOperand(2));
+  EVT VT = TrueV.getValueType();
+  if (LHS.getValueType() != MVT::i64 ||
+      !KlaussCPUInstrInfo::getCondBranchOpcode(CC, /*PIC=*/false)) {
+    // No direct jump for this compare: materialise it, then test != 0.
+    LHS = DAG.getSetCC(DL, MVT::i64, LHS, RHS, CC);
+    RHS = DAG.getConstant(0, DL, MVT::i64);
+    CC = ISD::SETNE;
+  }
+  return DAG.getNode(KlaussCPUISD::SELECT_CC, DL, VT, LHS, RHS,
+                     DAG.getCondCode(CC), TrueV, FalseV);
 }
 
-// Expand SELECT_PSEUDO to a diamond with a PHI at the sink:
+SDValue KlaussCPUTargetLowering::LowerSELECT(SDValue Op,
+                                             SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  SDValue Cond = Op.getOperand(0);
+  // select (setcc a, b, cc), t, f  →  SELECT_CC a, b, cc, t, f
+  if (Cond.getOpcode() == ISD::SETCC &&
+      Cond.getOperand(0).getValueType() == MVT::i64)
+    return buildSelectCC(DL, Cond.getOperand(0), Cond.getOperand(1),
+                         cast<CondCodeSDNode>(Cond.getOperand(2))->get(),
+                         Op.getOperand(1), Op.getOperand(2), DAG);
+  return buildSelectCC(DL, Cond, DAG.getConstant(0, DL, MVT::i64),
+                       ISD::SETNE, Op.getOperand(1), Op.getOperand(2), DAG);
+}
+
+SDValue KlaussCPUTargetLowering::LowerSELECT_CC(SDValue Op,
+                                                SelectionDAG &DAG) const {
+  // ISD::SELECT_CC operands: (lhs, rhs, trueV, falseV, cc)
+  return buildSelectCC(SDLoc(Op), Op.getOperand(0), Op.getOperand(1),
+                       cast<CondCodeSDNode>(Op.getOperand(4))->get(),
+                       Op.getOperand(2), Op.getOperand(3), DAG);
+}
+
+// Expand SELECT_CC_RR/RI to a diamond with a PHI at the sink:
 //
-//   TestBB:  CMPRV cond, 0
-//            JMPE  SinkBB      ← cond==0 → false path (directly to sink)
-//            (fall through to TrueBB)
-//   TrueBB:  (empty, falls through to SinkBB)
-//   SinkBB:  DstReg = PHI [ FalseReg, TestBB ], [ TrueReg, TrueBB ]
+//   TestBB:  CMPRR lhs, rhs   (CMPRV lhs, imm for _RI)
+//            JMPcc SinkBB     ← condition true → trueV
+//            (fall through to FalseBB)
+//   FalseBB: (empty, falls through to SinkBB)
+//   SinkBB:  DstReg = PHI [ TrueReg, TestBB ], [ FalseReg, FalseBB ]
 //            ... (rest of original BB) ...
 //
 // This preserves SSA: DstReg has exactly one definition (the PHI).
-// FalseReg and TrueReg are defined in the original BB which dominates all paths.
+// TrueReg and FalseReg are defined in the original BB which dominates all paths.
 MachineBasicBlock *KlaussCPUTargetLowering::EmitInstrWithCustomInserter(
     MachineInstr &MI, MachineBasicBlock *BB) const {
-
-  assert(MI.getOpcode() == KlaussCPU::SELECT_PSEUDO);
+  unsigned Opc = MI.getOpcode();
+  assert((Opc == KlaussCPU::SELECT_CC_RR || Opc == KlaussCPU::SELECT_CC_RI) &&
+         "unexpected custom-inserter instruction");
 
   const KlaussCPUInstrInfo &TII =
       *BB->getParent()->getSubtarget<KlaussCPUSubtarget>().getInstrInfo();
@@ -868,43 +951,48 @@ MachineBasicBlock *KlaussCPUTargetLowering::EmitInstrWithCustomInserter(
   const BasicBlock *LLVMBB = BB->getBasicBlock();
 
   Register DstReg   = MI.getOperand(0).getReg();
-  Register CondReg  = MI.getOperand(1).getReg();
-  Register TrueReg  = MI.getOperand(2).getReg();
-  Register FalseReg = MI.getOperand(3).getReg();
+  Register LHSReg   = MI.getOperand(1).getReg();
+  const MachineOperand &RHS = MI.getOperand(2);
+  unsigned JmpOpc   = MI.getOperand(3).getImm();
+  Register TrueReg  = MI.getOperand(4).getReg();
+  Register FalseReg = MI.getOperand(5).getReg();
 
-  MachineBasicBlock *TrueBB = MF->CreateMachineBasicBlock(LLVMBB);
-  MachineBasicBlock *SinkBB = MF->CreateMachineBasicBlock(LLVMBB);
+  MachineBasicBlock *FalseBB = MF->CreateMachineBasicBlock(LLVMBB);
+  MachineBasicBlock *SinkBB  = MF->CreateMachineBasicBlock(LLVMBB);
 
   MachineFunction::iterator It = ++BB->getIterator();
-  MF->insert(It, TrueBB);
+  MF->insert(It, FalseBB);
   MF->insert(It, SinkBB);
 
-  // Move the tail of BB (after the SELECT_PSEUDO) into SinkBB.
+  // Move the tail of BB (after the pseudo) into SinkBB.
   SinkBB->splice(SinkBB->begin(), BB,
                  std::next(MI.getIterator()), BB->end());
   SinkBB->transferSuccessorsAndUpdatePHIs(BB);
 
-  // TestBB: compare cond with 0; if equal (cond==0) jump to SinkBB (false path),
-  // otherwise fall through to TrueBB.
-  BuildMI(BB, DL, TII.get(KlaussCPU::CMPRV_I)).addReg(CondReg).addImm(0);
-  BuildMI(BB, DL, TII.get(KlaussCPU::JMPE)).addMBB(SinkBB);
-  // Use explicit 50/50 probabilities: addSuccessor() with unknown probability
-  // leaves Probs empty while Successors grows, causing an assertion in any
-  // pass that reads branch probabilities (MachineBlockPlacement, BranchFolder).
-  // addSuccessorWithoutProb: puts the block in "no probability tracking" mode.
-  // Using explicit probabilities would cause the branch folder to crash when
-  // it later calls addSuccessor(Unknown) on the same block, creating a
+  // TestBB: compare, and jump to SinkBB (true value) when the condition holds.
+  if (Opc == KlaussCPU::SELECT_CC_RR)
+    BuildMI(BB, DL, TII.get(KlaussCPU::CMPRR_I))
+        .addReg(LHSReg)
+        .addReg(RHS.getReg());
+  else
+    BuildMI(BB, DL, TII.get(KlaussCPU::CMPRV_I))
+        .addReg(LHSReg)
+        .addImm(RHS.getImm());
+  BuildMI(BB, DL, TII.get(JmpOpc)).addMBB(SinkBB);
+  // addSuccessorWithoutProb puts the blocks in "no probability tracking" mode.
+  // Explicit probabilities would later clash with passes (e.g. BranchFolder)
+  // that call addSuccessor(Unknown) on the same block, creating a
   // Probs.size() != Successors.size() mismatch.
-  BB->addSuccessorWithoutProb(SinkBB); // false path (JMPE taken)
-  BB->addSuccessorWithoutProb(TrueBB); // true path  (fall through)
+  BB->addSuccessorWithoutProb(SinkBB);  // condition true (jump taken)
+  BB->addSuccessorWithoutProb(FalseBB); // condition false (fall through)
 
-  // TrueBB: empty, just falls through to SinkBB.
-  TrueBB->addSuccessorWithoutProb(SinkBB);
+  // FalseBB: empty, just falls through to SinkBB.
+  FalseBB->addSuccessorWithoutProb(SinkBB);
 
   // SinkBB: PHI merges the two incoming values; DstReg has exactly one def.
   BuildMI(*SinkBB, SinkBB->begin(), DL, TII.get(TargetOpcode::PHI), DstReg)
-      .addReg(FalseReg).addMBB(BB)     // from TestBB when JMPE taken (cond==0)
-      .addReg(TrueReg).addMBB(TrueBB); // from TrueBB when cond!=0
+      .addReg(TrueReg).addMBB(BB)
+      .addReg(FalseReg).addMBB(FalseBB);
 
   MI.eraseFromParent();
   return SinkBB;

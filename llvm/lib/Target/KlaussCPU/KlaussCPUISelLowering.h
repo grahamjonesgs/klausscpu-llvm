@@ -28,9 +28,9 @@ enum NodeType : unsigned {
   LEAPC,    // materialise a global address via LEAPC (PIC mode)
             //   (i64) = LEAPC (TargetGlobalAddress/TargetExternalSymbol)
             // Lowered to LEAPC by Select().  Same CSE-safe wrapper as ADDR.
-  SELECT,   // (cond:i64, trueV:i64, falseV:i64) -> i64
-            // Custom ISD node: lowered by Select() to SELECT_PSEUDO, then
-            // expanded to branches by EmitInstrWithCustomInserter.
+  SELECT_CC, // (lhs:i64, rhs:i64, cc:CondCode, trueV:i64, falseV:i64) -> i64
+            // Selected to SELECT_CC_RR/RI, then expanded to compare +
+            // conditional jump + PHI by EmitInstrWithCustomInserter.
 };
 } // namespace KlaussCPUISD
 
@@ -85,6 +85,10 @@ private:
   SDValue LowerSTACKRESTORE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSELECT(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
+  SDValue buildSelectCC(const SDLoc &DL, SDValue LHS, SDValue RHS,
+                        ISD::CondCode CC, SDValue TrueV, SDValue FalseV,
+                        SelectionDAG &DAG) const;
   SDValue LowerVASTART(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVAARG(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerShiftLeftParts(SDValue Op, SelectionDAG &DAG) const;
@@ -97,6 +101,11 @@ public:
                                 StringRef Constraint, MVT VT) const override;
 
   unsigned getJumpTableEncoding() const override;
+
+  // EK_Custom32 entries are ABSOLUTE block addresses, in PIC mode too.  The
+  // default (== isPositionIndependent()) would make BR_JT add the table base
+  // to each entry under -fPIC, jumping to table+target.
+  bool isJumpTableRelative() const override { return false; }
 
   // EK_Custom32: emit each entry as a 4-byte absolute target address.
   // The assembler emits R_KLAUSSCPU_ABS32 for each entry; the linker fills

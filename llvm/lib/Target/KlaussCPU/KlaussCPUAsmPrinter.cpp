@@ -76,6 +76,16 @@ static MCOperand lowerMachineOperand(const MachineOperand &MO,
     return MCOperand::createExpr(MCSymbolRefExpr::create(
         AP.GetExternalSymbolSymbol(MO.getSymbolName()), AP.OutContext));
 
+  case MachineOperand::MO_BlockAddress: {
+    // blockaddress(@f, %bb) — GNU computed goto (`&&label`).
+    const MCExpr *Sym = MCSymbolRefExpr::create(
+        AP.GetBlockAddressSymbol(MO.getBlockAddress()), AP.OutContext);
+    if (int64_t Off = MO.getOffset())
+      Sym = MCBinaryExpr::createAdd(
+          Sym, MCConstantExpr::create(Off, AP.OutContext), AP.OutContext);
+    return MCOperand::createExpr(Sym);
+  }
+
   case MachineOperand::MO_JumpTableIndex:
     return MCOperand::createExpr(MCSymbolRefExpr::create(
         AP.GetJTISymbol(MO.getIndex()), AP.OutContext));

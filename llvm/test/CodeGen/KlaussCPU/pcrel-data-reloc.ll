@@ -1,4 +1,4 @@
-; RUN: llc -march=klausscpu -relocation-model=pic -filetype=obj < %s \
+; RUN: llc -march=klausscpu -verify-machineinstrs -relocation-model=pic -filetype=obj < %s \
 ; RUN:   | llvm-readelf -r - | FileCheck %s
 ;
 ; A cross-section symbol difference (A - B) in read-only data — the exact shape

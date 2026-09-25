@@ -7,6 +7,7 @@
 #ifndef LLVM_LIB_TARGET_KLAUSSCPU_KLAUSSCPUINSTRINFO_H
 #define LLVM_LIB_TARGET_KLAUSSCPU_KLAUSSCPUINSTRINFO_H
 
+#include "llvm/CodeGen/ISDOpcodes.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 
 // GET_INSTRINFO_ENUM must appear before GET_INSTRINFO_HEADER so that the
@@ -28,18 +29,24 @@ public:
   explicit KlaussCPUInstrInfo(const KlaussCPUSubtarget &STI,
                                const KlaussCPURegisterInfo &RI);
 
+  // Conditional jump taken when `lhs CC rhs` holds after CMPRR/CMPRV lhs,rhs
+  // (JMPxxREL in PIC mode).  Returns 0 for a CondCode with no direct jump.
+  static unsigned getCondBranchOpcode(ISD::CondCode CC, bool PIC);
+
   // getCallFrameSetupOpcode / getCallFrameDestroyOpcode are NOT virtual in
   // LLVM 23.  The opcodes are stored in TargetInstrInfo::CallFrameSetupOpcode /
   // CallFrameDestroyOpcode and set via the KlaussCPUGenInstrInfo constructor
   // parameters — see KlaussCPUInstrInfo.cpp.
 
-  // Branch analysis: recognize JMP (unconditional) at the tail of a block.
-  // Conditional branches (CMPRR/CMPRV + JMPxx) return true (not analyzed)
-  // since they are two-instruction sequences.
+  // Branch analysis.  Cond = {Imm(JMPxx opcode)}; the flag-setting compare
+  // is left in place and is never touched by remove/insertBranch.
   bool analyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
                      MachineBasicBlock *&FBB,
                      SmallVectorImpl<MachineOperand> &Cond,
                      bool AllowModify = false) const override;
+
+  bool reverseBranchCondition(
+      SmallVectorImpl<MachineOperand> &Cond) const override;
 
   unsigned removeBranch(MachineBasicBlock &MBB,
                         int *BytesRemoved = nullptr) const override;

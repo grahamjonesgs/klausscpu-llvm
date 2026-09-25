@@ -19,4 +19,9 @@ defm : RemapAllTargetPseudoPointerOperands<GPR>;
 
 def KlaussCPU : Target {
   let InstructionSet = KlaussCPUInstrInfo;
+  // No instruction has hidden register constraints, so post-RA passes
+  // (MachineCopyPropagation, the post-RA scheduler's anti-dependence breaker)
+  // may rename registers.  Without this every instruction is emitted with
+  // ExtraSrc/DefRegAllocReq, which forbids renaming.
+  let AllowRegisterRenaming = 1;
 }

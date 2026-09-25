@@ -9,10 +9,10 @@
 ; The alignment is on by default (16 B) and controlled by -klausscpu-pref-loop-
 ; align for A/B (0 = off), so both states are pinned here.
 ;
-; RUN: llc -march=klausscpu -O2 < %s | FileCheck %s --check-prefixes=CHECK,ALIGN
-; RUN: llc -march=klausscpu -O2 -klausscpu-pref-loop-align=0 < %s \
+; RUN: llc -march=klausscpu -verify-machineinstrs -O2 < %s | FileCheck %s --check-prefixes=CHECK,ALIGN
+; RUN: llc -march=klausscpu -verify-machineinstrs -O2 -klausscpu-pref-loop-align=0 < %s \
 ; RUN:   | FileCheck %s --check-prefixes=CHECK,NOALIGN
-; RUN: llc -march=klausscpu -O2 -klausscpu-pref-loop-align=32 < %s \
+; RUN: llc -march=klausscpu -verify-machineinstrs -O2 -klausscpu-pref-loop-align=32 < %s \
 ; RUN:   | FileCheck %s --check-prefixes=CHECK,ALIGN32
 
 ; A simple counted reduction loop.  The header block gets aligned; the NOALIGN

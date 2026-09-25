@@ -154,8 +154,8 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPUISelLowering.h/.cpp  LowerFormalArguments, LowerReturn, KlaussCPUISD nodes
 ├── KlaussCPUISelDAGToDAG.cpp   SelectionDAGISelLegacy pass; SelectCode() dispatch
 ├── KlaussCPUAsmPrinter.cpp     MachineInstr → MCInst → text assembly
-├── KlaussCPUFlagReuse.cpp      A3a: post-RA peephole, CMPRV Rd,0+JMPE/NE → JMPZ/NZ (opt-in flag)
-├── KlaussCPUTargetTransformInfo.h/.cpp  A4: TTI — no partial/runtime unroll, no peel (fetch-bound)
+├── KlaussCPUFlagReuse.cpp      A3a: post-RA peephole, CMPRV Rd,0+JMPE/NE → JMPZ/NZ (default on)
+├── KlaussCPUTargetTransformInfo.h/.cpp  TTI — M8 unroll budget gated on branch density, no peel
 ├── KlaussCPUSubtarget.h/.cpp   single global subtarget; member init order is critical
 ├── KlaussCPUTargetMachine.h/.cpp CodeGenTargetMachineImpl; PassConfig::addInstSelector + addPreEmitPass + getTargetTransformInfo
 ├── MCTargetDesc/
@@ -903,8 +903,10 @@ and one-instruction signed sub-word loads (`LDIDX8_S`/`LDIDX16_S`).
     addresses — the normal case — 0xFC and 0x0C behave identically.)
   - **Operand conventions worth noting**: bit ops `bset/bclr/btgl/btst` take the
     bit index in the immediate; `bextr/bdep` pack start (imm[4:0]) + len
-    (imm[12:8]); `ldidx64r/stidx64r` take the *offset register number* in the
-    immediate (imm[3:0]). All are 2-address where vh says `rd=rs op …`.
+    (imm[12:8]); `ldidx64r/stidx64r` take the offset as a *register*
+    (`ldidx64r rd, base, idx`, EA = base+idx; Step 37). Unary/imm/shift-by-N
+    ops are 3-operand since Step 37 (`incr rd, rs`); the old 2-address
+    spellings (`incr r1`, `addv r1, 5`) still assemble as rd == rs.
   - *Deliberately skipped (unused in silicon)*: TRAP (0xF014), RESET, TESTMSG,
     SWR, CDCDMR, WAIT, and digit-leading mnemonics (`7seg*` — unparseable).
 - Smoke tests: `smoke.s` (mixed-case, `A`-style regs, `ldidx8_s` alias, `jmpne`)
@@ -1005,6 +1007,50 @@ and one-instruction signed sub-word loads (`LDIDX8_S`/`LDIDX16_S`).
   rotate-through-carry isel patterns for i128 (`FLAG_UNIFICATION_CHANGES` §2.3) —
   touches wolfSSL bignum.  Emulator (`klausscc`), boot-ROM/netboot regen, and
   `klausscpu-runtime` re-validation are out-of-repo (doc §2.5–2.7).
+
+### Step 37 ✅ Review fixes: verifier-clean backend, PIC jump tables, v2 perf forms (2026-09-25)
+All changes run on the board (baremetal suite + a bit-ops/VLA/select check) and
+in `klausscc --emulate` with byte-identical UART output. `-verify-machineinstrs`
+is now on every KlaussCPU codegen test RUN line — keep it there.
+- **Correctness**
+  - `analyzeBranch` rewritten (RISC-V style): blocks ending in RET/JMPR_R were
+    reported as *falling through* (almost every function failed the machine
+    verifier). Added `reverseBranchCondition`; AllowModify now supported.
+  - BR_CC compare is **glued** to its JMPxx: with only a chain edge the
+    compare's `$flags` def was emitted `dead` → branch read an undefined
+    physreg. FlagReuse clears the dead flag on the producer it reuses and now
+    looks back past instructions that write neither FLAGS nor Rd (stops at
+    calls/inline asm). Calls and BTST now declare FLAGS.
+  - GETSP_R reads are **chained** (VLA, STACKSAVE, LowerCall stack-arg base):
+    unchained GETSP_R has no operands and was CSE'd → two VLAs overlapped;
+    stack args after a VLA were stored relative to the pre-VLA SP.
+  - AsmPrinter handles `MO_BlockAddress` (computed goto crashed llc).
+  - **PIC jump tables**: generic BR_JT treats PIC tables as relative and added
+    the table base to the absolute EK_Custom32 entry (→ jump to table+target).
+    Affects the `-fPIC` baremetal builds.  (Zephyr appends `-fno-pic`, so this
+    was NOT the Zephyr cbprintf failure.)  `isJumpTableRelative()=false`,
+    BR_JT → LowerBR_JT (ZEXTLOAD, LEAPC base in PIC).
+  - **Zephyr cbprintf jump-table failure is fixed** (board, 2026-09-25): a
+    cbprintf test app (`printk`/`snprintf` %u/%x/%X/%o/…, -O2,
+    CBPRINTF_COMPLETE+FULL_INTEGRAL, 8 jump tables in cbprintf_complete)
+    **crashes with the pre-Step-37 compiler + jump tables** (jmpr to string
+    bytes on the first `%x`) and passes 23/23 with Step 37, on the board and
+    in the emulator.  Cause is one of the non-PIC fixes above (not bisected);
+    it was never a regalloc limitation.  Jump tables are still off by default
+    (`-mllvm -klausscpu-min-jump-table-entries=4` enables them).
+- **Performance** (emulator dynamic instrs vs. pre-Step-37: queens −18.6%,
+  crypto −8.8%, test_64bit −7.1%, bst −4.1%, expr −2.2%)
+  - Unary / RV-imm / shift-by-N ops **untied** (ISA v2 §4: rd≠rs1 supported) —
+    removes the 2-address COPYs. InstAlias keeps the old 1-/2-operand syntax.
+  - `select` fused with its compare: SELECT/SELECT_CC → `KlaussCPUISD::SELECT_CC`
+    → `SELECT_CC_RR/RI` pseudo → one CMPRR/CMPRV + JMPcc (was CMPxxR + CMPRV 0
+    + JMPE). `KlaussCPUInstrInfo::getCondBranchOpcode` is the shared CC map.
+  - `setBooleanContents(ZeroOrOne)` (drops ANDV 1 after CMPxxR).
+  - 1-word forms: ZEXTB/ZEXTH for `&0xFF/&0xFFFF`, BSET/BCLR/BTGL for
+    single-bit masks, LDIDX64R/STIDX64R for `base+reg` (offset is now a GPR).
+  - SETR/SETR64/LEAPC side-effect free + rematerializable; COPY_R side-effect
+    free; compares no longer `hasSideEffects`; `AllowRegisterRenaming = 1`.
+- `update_llc_test_checks.py` now supports `-march=klausscpu` (asm.py/common.py).
 
 ---
 

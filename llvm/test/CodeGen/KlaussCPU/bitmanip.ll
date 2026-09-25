@@ -1,4 +1,4 @@
-; RUN: llc -march=klausscpu -O1 < %s | FileCheck %s
+; RUN: llc -march=klausscpu -verify-machineinstrs -O1 < %s | FileCheck %s
 
 ; Bit-manipulation ops Rust's core leans on: rotates, abs, popcount,
 ; leading/trailing zeros, byte/bit reverse, high multiply.

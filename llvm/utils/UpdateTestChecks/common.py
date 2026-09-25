@@ -678,6 +678,7 @@ def get_triple_from_march(march):
         "sparc": "sparc",
         "hexagon": "hexagon",
         "ve": "ve",
+        "klausscpu": "klausscpu",
     }
     for prefix, triple in triples.items():
         if march.startswith(prefix):

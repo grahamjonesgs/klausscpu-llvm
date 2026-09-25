@@ -382,49 +382,34 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
     // `<arith Rd>; JMP{Z,NZ}`, where adjacency in the final stream proves no
     // flag-clobbering instruction sits between the producer and the branch.
 
-    // Emit the compare.
+    // Emit the compare, glued to the branch.  The glue is what tells
+    // InstrEmitter that the branch reads the compare's implicit $flags def;
+    // with only a chain edge the def is emitted `dead` and the branch then
+    // reads an undefined physreg (fails -verify-machineinstrs, and lets
+    // post-RA passes treat the flags as free between compare and branch).
+    SDVTList CmpVTs = CurDAG->getVTList(MVT::Other, MVT::Glue);
     SDNode *CmpNode;
     if (auto *C = dyn_cast<ConstantSDNode>(RHS);
         C && isInt<32>(C->getSExtValue())) {
       // Constant RHS that fits in a signed 32-bit field → CMPRV_I.
       SDValue Imm  = CurDAG->getTargetConstant(C->getSExtValue(), DL, MVT::i64);
       SDValue Ops[] = {LHS, Imm, Chain};
-      CmpNode = CurDAG->getMachineNode(KlaussCPU::CMPRV_I, DL, MVT::Other, Ops);
+      CmpNode = CurDAG->getMachineNode(KlaussCPU::CMPRV_I, DL, CmpVTs, Ops);
     } else {
       // Register-register compare.
       SDValue Ops[] = {LHS, RHS, Chain};
-      CmpNode = CurDAG->getMachineNode(KlaussCPU::CMPRR_I, DL, MVT::Other, Ops);
+      CmpNode = CurDAG->getMachineNode(KlaussCPU::CMPRR_I, DL, CmpVTs, Ops);
     }
 
-    // Map ISD::CondCode to the KlaussCPU conditional jump opcode.
-    // Post flag-unification (RTL fbb77d7 / FLAG_UNIFICATION_CHANGES) there is a
-    // single Z/S/C/V flags register: CMP is SUB-without-writeback, and each COND
-    // is DERIVED in hardware (EQ=Z, signed LT=S^V, unsigned ULT=C, ...).  This
-    // mnemonic mapping is unchanged and still correct — the derivations are
-    // bit-identical to the retired equal/less/ult flags for every operand pair.
-    // BORROW POLARITY (x86, NOT ARM): after SUB/CMP, unsigned `<` is C and
-    // unsigned `>=` is ¬C — i.e. C==1 means a borrow occurred (a <u b).
-    // SETULT→JMPULT / SETUGE→JMPUGE already encode this; do NOT invert it in any
-    // future carry-based (ADC/SBC / setcc-from-carry) lowering.
-    // PIC mode uses the PC-relative REL variants; non-PIC uses absolute.
-    bool PIC = TM.isPositionIndependent();
-    unsigned JmpOpc;
-    switch (CC) {
-    case ISD::SETEQ:   JmpOpc = PIC ? KlaussCPU::JMPEREL    : KlaussCPU::JMPE;    break;
-    case ISD::SETNE:   JmpOpc = PIC ? KlaussCPU::JMPNEREL   : KlaussCPU::JMPNE;   break;
-    case ISD::SETLT:   JmpOpc = PIC ? KlaussCPU::JMPLTREL   : KlaussCPU::JMPLT;   break;
-    case ISD::SETLE:   JmpOpc = PIC ? KlaussCPU::JMPLEREL   : KlaussCPU::JMPLE;   break;
-    case ISD::SETGT:   JmpOpc = PIC ? KlaussCPU::JMPGTREL   : KlaussCPU::JMPGT;   break;
-    case ISD::SETGE:   JmpOpc = PIC ? KlaussCPU::JMPGEREL   : KlaussCPU::JMPGE;   break;
-    case ISD::SETULT:  JmpOpc = PIC ? KlaussCPU::JMPULTREL  : KlaussCPU::JMPULT;  break;
-    case ISD::SETULE:  JmpOpc = PIC ? KlaussCPU::JMPULEREL  : KlaussCPU::JMPULE;  break;
-    case ISD::SETUGT:  JmpOpc = PIC ? KlaussCPU::JMPUGTREL  : KlaussCPU::JMPUGT;  break;
-    case ISD::SETUGE:  JmpOpc = PIC ? KlaussCPU::JMPUGEREL  : KlaussCPU::JMPUGE;  break;
-    default:
+    // Map ISD::CondCode to the KlaussCPU conditional jump opcode (see
+    // KlaussCPUInstrInfo::getCondBranchOpcode for the flag derivations).
+    unsigned JmpOpc = KlaussCPUInstrInfo::getCondBranchOpcode(
+        CC, TM.isPositionIndependent());
+    if (!JmpOpc)
       llvm_unreachable("KlaussCPU BR_CC: unhandled CondCode");
-    }
 
-    SDValue JmpOps[] = {Dest, SDValue(CmpNode, 0) /* chain from compare */};
+    SDValue JmpOps[] = {Dest, SDValue(CmpNode, 0) /* chain */,
+                        SDValue(CmpNode, 1) /* glue: reads $flags */};
     SDNode *JmpNode = CurDAG->getMachineNode(JmpOpc, DL, MVT::Other, JmpOps);
     ReplaceNode(N, JmpNode);
     return;
@@ -464,12 +449,27 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
     // Indirect call: fall through to SelectCode() → CALLR_R pattern.
   }
 
-  // ---- KlaussCPUISD::SELECT → SELECT_PSEUDO (custom inserter) -------------
-  if (N->getOpcode() == KlaussCPUISD::SELECT) {
+  // ---- KlaussCPUISD::SELECT_CC → SELECT_CC_RR/RI (custom inserter) --------
+  // (lhs, rhs, cc, trueV, falseV).  The pseudo carries the conditional-jump
+  // opcode directly; the inserter emits CMPRR/CMPRV + that jump.
+  if (N->getOpcode() == KlaussCPUISD::SELECT_CC) {
     SDLoc DL(N);
+    SDValue LHS = N->getOperand(0);
+    SDValue RHS = N->getOperand(1);
+    ISD::CondCode CC = cast<CondCodeSDNode>(N->getOperand(2))->get();
+    unsigned JmpOpc = KlaussCPUInstrInfo::getCondBranchOpcode(
+        CC, TM.isPositionIndependent());
+    assert(JmpOpc && "SELECT_CC with unsupported CondCode");
+    SDValue Jmp = CurDAG->getTargetConstant(JmpOpc, DL, MVT::i64);
+    unsigned Opc = KlaussCPU::SELECT_CC_RR;
+    if (auto *C = dyn_cast<ConstantSDNode>(RHS);
+        C && isInt<32>(C->getSExtValue())) {
+      Opc = KlaussCPU::SELECT_CC_RI;
+      RHS = CurDAG->getTargetConstant(C->getSExtValue(), DL, MVT::i64);
+    }
     SDNode *Res = CurDAG->getMachineNode(
-        KlaussCPU::SELECT_PSEUDO, DL, N->getValueType(0),
-        {N->getOperand(0), N->getOperand(1), N->getOperand(2)});
+        Opc, DL, N->getValueType(0),
+        {LHS, RHS, Jmp, N->getOperand(3), N->getOperand(4)});
     ReplaceNode(N, Res);
     return;
   }

@@ -149,6 +149,14 @@ ASM_FUNCTION_LANAI_RE = re.compile(
     flags=(re.M | re.S),
 )
 
+ASM_FUNCTION_KLAUSSCPU_RE = re.compile(
+    r'^_?(?P<func>[^:]+):[ \t]*#+[ \t]*@"?(?P=func)"?\n'
+    r"(?:[ \t]+.cfi_startproc\n)?"  # drop optional cfi noise
+    r"(?P<body>.*?)\s*"
+    r".Lfunc_end[0-9]+:\n",
+    flags=(re.M | re.S),
+)
+
 ASM_FUNCTION_SPARC_RE = re.compile(
     r'^_?(?P<func>[^:]+):[ \t]*!+[ \t]*@"?(?P=func)"?\n'
     r"(?P<body>.*?)\s*"
@@ -603,6 +611,7 @@ def get_run_handler(triple):
         "riscv32-apple-none-macho": (scrub_asm_riscv, ASM_FUNCTION_RISCV_MACHO_RE),
         "riscv64": (scrub_asm_riscv, ASM_FUNCTION_RISCV_RE),
         "lanai": (scrub_asm_lanai, ASM_FUNCTION_LANAI_RE),
+        "klausscpu": (scrub_asm_lanai, ASM_FUNCTION_KLAUSSCPU_RE),
         "sparc": (scrub_asm_sparc, ASM_FUNCTION_SPARC_RE),
         "spirv": (scrub_asm_spirv, ASM_FUNCTION_SPIRV_RE),
         "spirv32": (scrub_asm_spirv, ASM_FUNCTION_SPIRV_RE),
