@@ -1052,6 +1052,19 @@ is now on every KlaussCPU codegen test RUN line — keep it there.
     free; compares no longer `hasSideEffects`; `AllowRegisterRenaming = 1`.
 - `update_llc_test_checks.py` now supports `-march=klausscpu` (asm.py/common.py).
 
+### Step 38 ✅ `int` zero-extension fixes + ISA proposal (2026-09-28)
+- `isZExtFree` for loads: every sub-i64 load zero-extends, so zero-extending a
+  loaded value is free (lets anyext loads become ZEXTLOADs).
+- Target DAG combine `(and (freeze (extload x)), lowmask) → (freeze (zextload x))`:
+  SelectionDAG freezes the operands of short-circuit `a || b` conditions, which
+  hid the load from the generic ZEXTLOAD fold and left `memget32 rX; zextw rX`
+  in the N-queens inner loop.  queens −4.0% instructions; others unchanged.
+  Test: `int-zext-load.ll`.  Board-verified (queens/crypto/test_64bit).
+- Tried and rejected: DataLayout `n64` instead of `n32:64` (no gain).
+- Remaining `SEXTW`/`ZEXTW` need ISA help (no 32-bit ops) — see
+  `ISA_V3_PROPOSAL.md`, which ranks ISA additions (short 1-word immediate/branch
+  forms, ENTER/LEAVE, fused compare-and-branch, 32-bit ops) from execution traces.
+
 ---
 
 ## Systems built on this backend (current stable state, 2026-05)

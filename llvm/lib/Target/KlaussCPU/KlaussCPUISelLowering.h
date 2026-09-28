@@ -61,6 +61,14 @@ public:
     return false;
   }
 
+  // Every sub-i64 load (LDIDX8/16/32, MEMGET8/16/32) zero-extends into the
+  // 64-bit register, so zero-extending a loaded value costs nothing.  This
+  // lets the combiner turn anyext loads that also feed a zext into ZEXTLOADs
+  // instead of emitting a separate ZEXTW/ZEXTB/ZEXTH.
+  bool isZExtFree(SDValue Val, EVT VT2) const override;
+
+  SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
+
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                 bool IsVarArg,
                                 const SmallVectorImpl<ISD::InputArg> &Ins,

@@ -186,6 +186,9 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   // upper bits of a setcc result are undefined and masks it with ANDV 1
   // before every use as an integer.
   setBooleanContents(ZeroOrOneBooleanContent);
+  // (and (freeze (extload)), lowmask) → (freeze (zextload)); see
+  // PerformDAGCombine.
+  setTargetDAGCombine(ISD::AND);
 
   // Hardware 64-bit rotate (ROLR/RORR). 32-bit rotates stay Expand: a 64-bit
   // register rotate is not a 32-bit rotate, so promoted i32 rotl/rotr must
@@ -282,6 +285,58 @@ SDValue KlaussCPUTargetLowering::LowerOperation(SDValue Op,
   default:
     llvm_unreachable("KlaussCPU: unimplemented LowerOperation opcode");
   }
+}
+
+bool KlaussCPUTargetLowering::isZExtFree(SDValue Val, EVT VT2) const {
+  if (auto *LD = dyn_cast<LoadSDNode>(Val)) {
+    EVT MemVT = LD->getMemoryVT();
+    ISD::LoadExtType ET = LD->getExtensionType();
+    if ((MemVT == MVT::i8 || MemVT == MVT::i16 || MemVT == MVT::i32) &&
+        (ET == ISD::NON_EXTLOAD || ET == ISD::ZEXTLOAD || ET == ISD::EXTLOAD))
+      return true;
+  }
+  return TargetLowering::isZExtFree(Val, VT2);
+}
+
+SDValue KlaussCPUTargetLowering::PerformDAGCombine(SDNode *N,
+                                                   DAGCombinerInfo &DCI) const {
+  SelectionDAG &DAG = DCI.DAG;
+  switch (N->getOpcode()) {
+  case ISD::AND: {
+    // (and (freeze (extload x)), lowmask) -> (freeze (zextload x))
+    //
+    // A promoted `int` compare zero-extends its operands with an AND mask.
+    // The generic combine folds that mask into the load as a ZEXTLOAD (free:
+    // every sub-i64 load zero-extends), but not when a FREEZE sits between
+    // them — and SelectionDAG freezes the operands of short-circuit `a || b`
+    // conditions (select i1 a, i1 b, false).  That left a redundant ZEXTW
+    // after the load in e.g. the N-queens inner loop.  Masking a frozen
+    // anyext load down to the memory width is exactly a frozen zextload.
+    auto *Mask = dyn_cast<ConstantSDNode>(N->getOperand(1));
+    SDValue Fr = N->getOperand(0);
+    if (!Mask || Fr.getOpcode() != ISD::FREEZE)
+      break;
+    auto *LD = dyn_cast<LoadSDNode>(Fr.getOperand(0));
+    if (!LD || LD->getExtensionType() != ISD::EXTLOAD || !LD->isUnindexed() ||
+        !LD->isSimple() || LD->getValueType(0) != MVT::i64)
+      break;
+    EVT MemVT = LD->getMemoryVT();
+    if ((MemVT != MVT::i8 && MemVT != MVT::i16 && MemVT != MVT::i32) ||
+        Mask->getAPIntValue() !=
+            APInt::getLowBitsSet(64, MemVT.getSizeInBits()))
+      break;
+    SDValue ZL = DAG.getExtLoad(ISD::ZEXTLOAD, SDLoc(LD), MVT::i64,
+                                LD->getChain(), LD->getBasePtr(), MemVT,
+                                LD->getMemOperand());
+    // Other users of the anyext load are fine with the zero-extended value
+    // (it is a refinement).  This also rewrites the FREEZE's operand.
+    DAG.ReplaceAllUsesWith(LD, ZL.getNode());
+    return DAG.getFreeze(ZL);
+  }
+  default:
+    break;
+  }
+  return SDValue();
 }
 
 SDValue KlaussCPUTargetLowering::LowerShiftLeftParts(SDValue Op,
