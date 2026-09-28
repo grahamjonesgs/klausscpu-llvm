@@ -48,19 +48,29 @@ its branch).
 **Idea.** Today a 1-word (`LEN=01`) encoding in a normally-2-word class (ALU
 immediate, compare-immediate, indexed load/store, immediate branch) traps. Define
 those combinations as *short forms*: same operation, same attribute bits, with a
-small immediate placed in the register and `x` fields the long form leaves
-unused. The 2-word forms stay as the fallback, so nothing existing changes.
+small immediate in word 0. The 2-word forms stay as the fallback, so nothing
+existing changes.
 
-| Form | Class | Distinguished by | Immediate bits (word 0) | Semantics |
+**Where the immediate goes.** Checked against the v2 table (§5 CSV): bits
+**`[19:12]` are never set by any instruction in classes 2, 3, 6 and 7**. So the
+8-bit immediate goes there, contiguously, and `rd`/`rs1`/`rs2` keep exactly
+their v2 meaning (unused ones still zero). No register field is reused, so
+register-read and hazard logic see the same fields as for the 1-word forms that
+already exist (e.g. `MEMGET*`).
+
+| Form | Class | Distinguished by (verified free in v2) | Immediate | Semantics |
 |---|---|---|---|---|
-| **A1** short branch / jump / call | 8 | `LEN=01`, `RIND=0`, `REL=1` | `[17:0]` signed, in **words** | target = PC + 4·disp (±512 KB) |
-| **A3** short `CMPRV` | 3 | `LEN=01`, `B=0`, `SGN=1` (`CMPRR` has `SGN=0`) | `{x, rd, rs2}` = simm12 | flags ← rs1 − sext(imm12) |
-| **A4** short load/store | 6/7 | `LEN=01`, `MODE=01` | `{x, rs2}` = simm8, **scaled by SIZE** | EA = rs1 + (sext(imm8) << SIZE) |
-| **A5** short ALU-imm / `SETR` | 2 | `LEN=01` | `{x, rs2}` = imm8 (`SETR`: `{x, rs1, rs2}` = imm12) | as the long form; SGN picks sign/zero extension |
+| **A1** short branch / jump / call | 8 | `LEN=01`, `RIND=0` (only `JMPR`/`CALLR`, `RIND=1`, are 1-word today), `REL=1` | `[17:0]` signed, in **words** (COND/INV end at bit 18) | target = PC + 4·disp (±512 KB) |
+| **A3** short `CMPRV` | 3 | `LEN=01`, `B=0`, `SGN=1` (every 1-word class-3 op today has `SGN=0`) | `[19:12]` simm8 | flags ← rs1 − sext(imm8) |
+| **A4** short load/store | 6/7 | `LEN=01`, `MODE=01` (1-word ops today are `MODE=00`/`11`) | `[19:12]` simm8, **scaled by SIZE** | EA = rs1 + (sext(imm8) << SIZE) |
+| **A5** short ALU-imm / `SETR` | 2 | `LEN=01` (class 2 has no 1-word ops today) | `[19:12]` imm8 | as the long form; SGN picks sign/zero extension |
 
 Notes:
 - **A1** covers `JMP` (COND=0), all conditions incl. `INV`, and `CALL`
-  (`LINK=1`). Short forms are always PC-relative, even in non-PIC code.
+  (`LINK=1`, including the conditional calls). Short forms are always
+  PC-relative (`REL=0` with `LEN=01, RIND=0` stays a trap), even in non-PIC code.
+- **A3** needs only 8 bits: 98% of compare immediates fit (12 bits would cover
+  the remaining 2% by also using the unused `rd` field, but isn't worth it).
 - **A4** scaling makes a 64-bit access reach ±1 KB and a 32-bit one ±512 B,
   enough for essentially all frame slots and struct fields. The 64-bit short
   load/store should follow the force-aligned `A=1` behaviour of
@@ -73,16 +83,61 @@ Notes:
 |---|---|---|---|---|---|---|
 | A1 short conditional branch | 6.7% | 11.1% | 8.5% | 8.6% | 8.0% | 8.6% |
 | A1 short `JMPREL`/`CALLREL` | 1.3% | 1.0% | 3.3% | 3.3% | 3.0% | 2.4% |
-| A3 short `CMPRV` | 6.3% | 7.9% | 7.1% | 8.5% | 7.9% | 7.5% |
+| A3 short `CMPRV` | 5.7% | 7.9% | 7.1% | 8.5% | 7.9% | 7.4% |
 | A4 short load/store | 5.1% | 3.8% | 10.5% | 8.7% | 8.9% | 7.4% |
 | A5 short ALU / `SETR` | 4.0% | 5.1% | 4.1% | 3.8% | 4.6% | 4.3% |
-| **All of A** | **23.5%** | **29.0%** | **33.5%** | **32.7%** | **32.5%** | **30.2%** |
+| **All of A** | **22.9%** | **29.0%** | **33.5%** | **32.7%** | **32.5%** | **30.1%** |
 
 (A4 was measured with *unscaled* 8-bit byte offsets, so scaling only improves it.)
 
 **RTL cost.** Decode only: the immediate is extracted from word 0 instead of
 word 1, and the fetch/length logic already handles `LEN=01`. No new ALU,
-memory or flag behaviour.
+memory or flag behaviour. See §3.1 for the places in v2 that assume
+"immediate = word 1" or "branch = 2 words".
+
+### 3.1 Interactions with v2 — things the RTL must get right
+
+Nothing in the v2 encoding blocks A; these are the assumptions to find and
+update:
+
+1. **Strict zero-field check.** v2 traps on non-zero reserved bits. The check
+   must allow `[19:12]` (and `[17:0]` for class 8) only in the new `LEN=01`
+   combinations, and keep trapping everywhere else.
+2. **Immediate source.** Operand selection that takes the immediate from word 1
+   (`w_var1`) must, for `LEN=01`, take it from `[19:12]` (or `[17:0]`), with
+   sign/zero extension per `SGN`, and for A4 shift it by `SIZE`.
+3. **Class 8 `LEN=01` currently implies "register-indirect".** Anything that
+   decodes "1-word branch ⇒ read `rs2`" (register read, hazard/forwarding,
+   target mux) must key on `RIND` instead, or short branches will pick up
+   false `rs2` dependencies and jump to a register.
+4. **Return address and fall-through.** `CALL` pushes PC+8 today (`CALLREL`:
+   "push PC+8"). A short call must push **PC+4**, i.e. PC + 4·LEN. The same
+   applies to any branch fall-through or not-taken path hard-wired to +8.
+5. **Early target computation in fetch.** If the fetch unit/IFB computes or
+   predicts branch targets from word 1, it needs the word-0 displacement path
+   for short branches.
+6. **Sign extension of the short `CMPRV` immediate.** Silicon once zero-extended
+   the `CMPRV` immediate (Fix 6, June 2026), which silently broke `strtol`.
+   Test the short form with negative immediates explicitly.
+7. **Toolchain side** (not v2 issues): `klausscc` golden-model emulator and
+   assembler, the LLVM encoder/relaxation, and a new 18-bit PC-relative
+   relocation in lld and the Zephyr LLEXT loader. Calls to other objects can
+   stay long.
+
+### 3.2 v2 changes worth making at the same time
+
+- **Allow `SGN` on every class-2 op, both lengths.** Today `ANDV`/`ORV`/`XORV`/
+  `ADDV` only zero-extend (`AND` with `SGN=1` is an unassigned combination).
+  Alignment and clear-low-bits masks such as `x & -8` / `x & ~0xF` then need
+  `SETR` + `ANDR` (3 words). With `SGN` allowed, they become one short `ANDI`.
+  Frequency not measured.
+- **Short `ADDSP`** (class 9, `LEN=01`, simm in the free low bits): `ADDSP` is
+  2–4% of fetched words on call-heavy code. It's a cheaper stopgap than
+  `ENTER`/`LEAVE` (§4) and harmless alongside it.
+- **Optional simplification:** since short branches are PC-relative anyway, the
+  absolute `JMPxx`/`CALL` forms (`REL=0`) could be retired in favour of
+  PC-relative everywhere. That halves the branch opcode table and removes the
+  compiler's separate PIC/non-PIC paths. Not required for A.
 
 **Compiler work.**
 - A3/A4/A5: new instruction definitions + patterns preferring the short form
