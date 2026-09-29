@@ -40,6 +40,9 @@ using namespace llvm;
 
 // ISA v3 C: one-word ENTER/LEAVE instead of PUSH R15; GETSP R15; ADDSP -N /
 // SETSP R15; POP R15.
+static cl::opt<bool> EnableLeaveRet(
+    "klausscpu-leaveret", cl::init(true), cl::Hidden,
+    cl::desc("Fold the epilogue LEAVE + RET into LEAVERET"));
 static cl::opt<bool> EnableEnterLeave(
     "klausscpu-enter-leave", cl::init(true), cl::Hidden,
     cl::desc("Use the ISA v3 ENTER/LEAVE frame instructions"));
@@ -120,6 +123,16 @@ void KlaussCPUFrameLowering::emitEpilogue(MachineFunction &MF,
   // LEAVE = SETSP R15; POP R15 (valid whatever the prologue was: both leave
   // R15 pointing at the saved caller R15).
   if (EnableEnterLeave) {
+    // A plain return folds into LEAVERET (IRET / other terminators keep
+    // LEAVE in front of them).
+    if (EnableLeaveRet && MBBI->getOpcode() == KlaussCPU::RET_I) {
+      // Keep RET's implicit uses (the return-value registers) so post-RA
+      // passes still see them live out of this block.
+      BuildMI(MBB, MBBI, DL, TII.get(KlaussCPU::LEAVERET_I))
+          .copyImplicitOps(*MBBI);
+      MBB.erase(MBBI);
+      return;
+    }
     BuildMI(MBB, MBBI, DL, TII.get(KlaussCPU::LEAVE_I));
     return;
   }

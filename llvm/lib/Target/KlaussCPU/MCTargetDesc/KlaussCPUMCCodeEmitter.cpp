@@ -271,6 +271,7 @@ uint32_t KlaussCPUMCCodeEmitter::encode32(
   case KlaussCPU::RET_I:   return 0x65800000u;
   case KlaussCPU::ENTER_I: return 0x66000000u | (getImm32(MI,0) & 0x3FFFFFu); // v3 C
   case KlaussCPU::LEAVE_I: return 0x66400000u;                                // v3 C
+  case KlaussCPU::LEAVERET_I: return 0x66800000u;                             // v3 C
   case KlaussCPU::IRET_I:  return 0x65C00000u;
 
   // ── Class 8 register-target branch / call (target in rs2[3:0]) ────────────

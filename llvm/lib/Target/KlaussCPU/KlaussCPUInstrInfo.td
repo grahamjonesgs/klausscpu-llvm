@@ -729,6 +729,10 @@ let Uses = [SP, R15], Defs = [SP, R15], hasSideEffects = 1, mayStore = 1 in
 def ENTER_I : KCInst32<(outs), (ins i64imm:$n), "enter\t$n">;
 let Uses = [R15], Defs = [SP, R15], hasSideEffects = 1, mayLoad = 1 in
 def LEAVE_I : KCInst32<(outs), (ins), "leave">;
+//   LEAVERET: LEAVE; RET  (R15 = [R15], PC = [R15+8], SP = R15 + 16)
+let isReturn = 1, isTerminator = 1, isBarrier = 1,
+    Uses = [R15], Defs = [SP, R15], hasSideEffects = 1, mayLoad = 1 in
+def LEAVERET_I : KCInst32<(outs), (ins), "leaveret">;
 
 // Indirect call / jump via register
 // Defs: all caller-saved GPRs clobbered by the ABI (R0-R3=args, R8-R14=temps+return)
