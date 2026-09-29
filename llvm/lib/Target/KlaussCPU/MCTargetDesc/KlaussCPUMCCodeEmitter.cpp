@@ -32,6 +32,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "KlaussCPUFixupKinds.h"
+#include "KlaussCPUMCTargetDesc.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
@@ -77,6 +78,17 @@ private:
     return static_cast<uint32_t>(MI.getOperand(OpNo).getImm());
   }
 
+  // ISA v3 short 1-word form of a 2-word template: LEN 10 -> 01, imm8 in
+  // word0[19:12] (already scaled down for loads/stores by the caller).
+  static uint32_t shortForm(uint32_t LongTpl, uint32_t Regs, int64_t Imm8) {
+    return (LongTpl & 0x3FFFFFFFu) | 0x40000000u | Regs |
+           ((static_cast<uint32_t>(Imm8) & 0xFFu) << 12);
+  }
+  // Scaled load/store short-form offset: (int32)imm >> log2(size).
+  static int64_t memOff(const MCInst &MI, unsigned OpNo, unsigned Shift) {
+    return static_cast<int32_t>(getImm32(MI, OpNo)) >> Shift;
+  }
+
   // Emit a 32-bit value little-endian (LSB at lowest address).
   static void emitLE32(uint32_t V, SmallVectorImpl<char> &CB) {
     CB.push_back(static_cast<char>((V >>  0) & 0xFF));
@@ -113,7 +125,7 @@ private:
     return pack2(W0, 0);
   }
 
-  uint32_t encode32(const MCInst &MI) const;
+  uint32_t encode32(const MCInst &MI, SmallVectorImpl<MCFixup> &Fixups) const;
   uint64_t encode64(const MCInst &MI, SmallVectorImpl<MCFixup> &Fixups) const;
 };
 
@@ -123,7 +135,16 @@ private:
 // 4-byte (1-word) instruction dispatch
 //===----------------------------------------------------------------------===//
 
-uint32_t KlaussCPUMCCodeEmitter::encode32(const MCInst &MI) const {
+uint32_t KlaussCPUMCCodeEmitter::encode32(
+    const MCInst &MI, SmallVectorImpl<MCFixup> &Fixups) const {
+  // ISA v3 A1 short PC-relative branch: displacement comes from the PCREL18
+  // fixup at offset 0 (resolved at assembly time, else relaxed to 2 words).
+  if (isKlaussCPUShortBranch(MI.getOpcode())) {
+    Fixups.push_back(MCFixup::create(
+        0, MI.getOperand(0).getExpr(),
+        MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL18), /*PCRel=*/true));
+    return klaussCPUShortBranchWord(MI.getOpcode());
+  }
   switch (MI.getOpcode()) {
 
   // ── Class 1/A/4/3 RRR: rd = rs1 OP rs2  (rd,rs1,rs2 at ops 0,1,2) ─────────
@@ -240,6 +261,7 @@ uint32_t KlaussCPUMCCodeEmitter::encode32(const MCInst &MI) const {
 
   // ── Class 3 flag-setting compare (rs1,rs2 at ops 0,1) ─────────────────────
   case KlaussCPU::CMPRR_I: return 0x4C000000u | fRs1(MI,0) | fRs2(MI,1);
+  case KlaussCPU::CMPRRW_I: return 0x4C080000u | fRs1(MI,0) | fRs2(MI,1); // v3 D2 W
 
   // ── Class 9 stack (single register in its designated field) ───────────────
   case KlaussCPU::PUSH_R:  return 0x64000000u | fRs1(MI,0);
@@ -261,6 +283,29 @@ uint32_t KlaussCPUMCCodeEmitter::encode32(const MCInst &MI) const {
   // ── Class B / C register-source peripherals (source register in rs1[7:4]) ─
   case KlaussCPU::DELAYR:   return 0x6C050000u | fRs1(MI,0);
   case KlaussCPU::LCDDATAR: return 0x71000000u | fRs1(MI,0);
+
+  // ── ISA v3 short 1-word immediate forms (see KlaussCPUMCCompress.cpp) ────
+  case KlaussCPU::SETR_SH:   return shortForm(0x8BD00000u, fRd(MI,0), getImm32(MI,1));
+  case KlaussCPU::ADDI_SH:   return shortForm(0x88300000u, fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
+  case KlaussCPU::CMPRV_SH:  return shortForm(0x8C100000u, fRs1(MI,0), getImm32(MI,1));
+  case KlaussCPU::ADDV_SH:   return shortForm(0x88200000u, fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
+  case KlaussCPU::MINUSV_SH: return shortForm(0x88600000u, fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
+  case KlaussCPU::ANDV_SH:   return shortForm(0x89000000u, fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
+  case KlaussCPU::ORV_SH:    return shortForm(0x89400000u, fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
+  case KlaussCPU::XORV_SH:   return shortForm(0x89800000u, fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
+  case KlaussCPU::LDIDX8_SH:    return shortForm(0x98200000u, fRd(MI,0) | fRs1(MI,1), memOff(MI,2,0));
+  case KlaussCPU::LDIDX8_S_SH:  return shortForm(0x98A00000u, fRd(MI,0) | fRs1(MI,1), memOff(MI,2,0));
+  case KlaussCPU::LDIDX16_SH:   return shortForm(0x99200000u, fRd(MI,0) | fRs1(MI,1), memOff(MI,2,1));
+  case KlaussCPU::LDIDX16_S_SH: return shortForm(0x99A00000u, fRd(MI,0) | fRs1(MI,1), memOff(MI,2,1));
+  case KlaussCPU::LDIDX32_SH:   return shortForm(0x9A200000u, fRd(MI,0) | fRs1(MI,1), memOff(MI,2,2));
+  case KlaussCPU::LDIDX32_S_SH: return shortForm(0x9AA00000u, fRd(MI,0) | fRs1(MI,1), memOff(MI,2,2));
+  case KlaussCPU::LDIDX64_SH:   return shortForm(0x9B300000u, fRd(MI,0) | fRs1(MI,1), memOff(MI,2,3));
+  case KlaussCPU::LDIDX64U_SH:  return shortForm(0x9B200000u, fRd(MI,0) | fRs1(MI,1), memOff(MI,2,3));
+  case KlaussCPU::STIDX8_SH:    return shortForm(0x9C200000u, fRd(MI,0) | fRs1(MI,1), memOff(MI,2,0));
+  case KlaussCPU::STIDX16_SH:   return shortForm(0x9D200000u, fRd(MI,0) | fRs1(MI,1), memOff(MI,2,1));
+  case KlaussCPU::STIDX32_SH:   return shortForm(0x9E200000u, fRd(MI,0) | fRs1(MI,1), memOff(MI,2,2));
+  case KlaussCPU::STIDX64_SH:   return shortForm(0x9F300000u, fRd(MI,0) | fRs1(MI,1), memOff(MI,2,3));
+  case KlaussCPU::STIDX64U_SH:  return shortForm(0x9F200000u, fRd(MI,0) | fRs1(MI,1), memOff(MI,2,3));
 
   // ── RETIRED in v2 (LED / 7-seg / RGB): no v2 encoding — these keep their
   //    v1 opcodes purely so hand-written inline asm still assembles.  Their
@@ -318,6 +363,7 @@ uint64_t KlaussCPUMCCodeEmitter::encode64(
 
   // Class 3 compare register to immediate — flags only (rs1 + imm32).
   case KlaussCPU::CMPRV_I: return pack2(0x8C100000u | fRs1(MI,0), getImm32(MI,1));
+  case KlaussCPU::CMPRVW_I: return pack2(0x8C180000u | fRs1(MI,0), getImm32(MI,1)); // v3 D2 W
 
   // ── Class 6 indexed loads: rd,base at ops 0,1; offset32 at op 2 ───────────
   case KlaussCPU::LDIDX8:    return pack2(0x98200000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
@@ -325,6 +371,7 @@ uint64_t KlaussCPUMCCodeEmitter::encode64(
   case KlaussCPU::LDIDX16:   return pack2(0x99200000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
   case KlaussCPU::LDIDX16_S: return pack2(0x99A00000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
   case KlaussCPU::LDIDX32:   return pack2(0x9A200000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
+  case KlaussCPU::LDIDX32_S: return pack2(0x9AA00000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2)); // v3 D1
   case KlaussCPU::LDIDX64:   return pack2(0x9B300000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2)); // aligned (v2 LDIDX64A)
   case KlaussCPU::LDIDX64U:  return pack2(0x9B200000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2)); // raw (v2 LDIDX64)
 
@@ -445,7 +492,7 @@ void KlaussCPUMCCodeEmitter::encodeInstruction(
 
   unsigned Size = MCII.get(Opcode).getSize();
   if (Size == 4) {
-    emitLE32(encode32(MI), CB);
+    emitLE32(encode32(MI, Fixups), CB);
   } else if (Size == 8) {
     uint64_t Bits = encode64(MI, Fixups);
     emitLE32(static_cast<uint32_t>(Bits >> 32), CB); // word0 (opcode + regs)

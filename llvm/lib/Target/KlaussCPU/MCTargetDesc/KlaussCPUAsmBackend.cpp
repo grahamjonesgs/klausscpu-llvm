@@ -11,12 +11,19 @@
 //     we add 4 back in applyFixup / lld relocate to correct for the hardware
 //     convention where PC origin is instr_addr (not instr_addr+4).
 //
+//   FK_KlaussCPU_PCREL18 — ISA v3 A1 short branch: simm18 word displacement
+//     in word0[17:0], target = PC + 4*disp (fixup at offset 0, IsPCRel, so
+//     Value = target - PC exactly). Resolved at assembly time only: a short
+//     branch that is out of range or not resolvable in-section is RELAXED to
+//     the 2-word PC-relative form, so it never reaches the object writer.
+//
 //   ELF output: ELFCLASS32, ELFDATA2LSB, EM_KLAUSSCPU.
-//   No instruction relaxation.
 //
 //===----------------------------------------------------------------------===//
 
 #include "KlaussCPUFixupKinds.h"
+#include "KlaussCPUMCTargetDesc.h"
+#include "llvm/MC/MCInst.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCContext.h"
@@ -47,6 +54,8 @@ public:
                         bool IsPCRel) const override {
     if (Fixup.getKind() == FK_Data_8)
       return ELF::R_KLAUSSCPU_ABS64;
+    if (Fixup.getKind() == MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL18))
+      report_fatal_error("KlaussCPU: unresolved short branch escaped relaxation");
     if (Fixup.getKind() == MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL32))
       return ELF::R_KLAUSSCPU_PCREL32;
     // A cross-section symbol difference (A - B) reaches us as a PC-relative
@@ -77,6 +86,7 @@ public:
         // Name                    BitOffset  BitSize  Flags
         {"FK_KlaussCPU_ABS32",     0,         32,      0},
         {"FK_KlaussCPU_PCREL32",   0,         32,      0},
+        {"FK_KlaussCPU_PCREL18",   0,         18,      0},
     };
     if (Kind >= FirstTargetFixupKind &&
         Kind < FirstTargetFixupKind + KlaussCPU::NumTargetFixupKinds)
@@ -92,6 +102,21 @@ public:
                   const MCValue &Target, uint8_t *Data,
                   uint64_t Value, bool IsResolved) override {
     MCFixupKind Kind = Fixup.getKind();
+    // FK_KlaussCPU_PCREL18: short branch, word displacement into word0[17:0].
+    // Only ever applied resolved and in range (see fixupNeedsRelaxationAdvanced).
+    if (Kind == MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL18)) {
+      if (!IsResolved) {
+        getContext().reportError(Fixup.getLoc(),
+                                 "short branch target not resolvable");
+        return;
+      }
+      uint32_t Disp = static_cast<uint32_t>(static_cast<int64_t>(Value) >> 2) &
+                      0x3FFFFu;
+      Data[0] |= Disp & 0xFF;
+      Data[1] |= (Disp >> 8) & 0xFF;
+      Data[2] |= (Disp >> 16) & 0x03;
+      return;
+    }
     // FK_Data_8: 8-byte pointer field in .rodata/.data (memp_pools[], struct
     // initializers with pointer members, etc.).  Stored little-endian — the
     // data bus is LE.  All KlaussCPU addresses fit in 32 bits; upper 32 = 0.
@@ -122,6 +147,33 @@ public:
     Data[2] = (Addr >> 16) & 0xFF;
     Data[3] = (Addr >> 24) & 0xFF;
     maybeAddReloc(F, Fixup, Target, Value, IsResolved);
+  }
+
+  // ── ISA v3 A1 short-branch relaxation ─────────────────────────────────────
+
+  bool mayNeedRelaxation(unsigned Opcode, ArrayRef<MCOperand>,
+                         const MCSubtargetInfo &) const override {
+    return isKlaussCPUShortBranch(Opcode);
+  }
+
+  // Stay short only when the target is resolved (same section, local) and
+  // the word displacement fits simm18.
+  bool fixupNeedsRelaxationAdvanced(const MCFragment &, const MCFixup &Fixup,
+                                    const MCValue &, uint64_t Value,
+                                    bool Resolved) const override {
+    if (Fixup.getKind() != MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL18))
+      return !Resolved;
+    if (!Resolved)
+      return true;
+    int64_t V = static_cast<int64_t>(Value);
+    return (V & 3) != 0 || !isInt<18>(V >> 2);
+  }
+
+  void relaxInstruction(MCInst &Inst,
+                        const MCSubtargetInfo &) const override {
+    unsigned Long = relaxKlaussCPUShortBranch(Inst.getOpcode());
+    assert(Long && "relaxing a non-short-branch");
+    Inst.setOpcode(Long);
   }
 
   // ── NOP padding ──────────────────────────────────────────────────────────

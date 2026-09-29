@@ -19,6 +19,12 @@
 
 namespace llvm {
 
+namespace KlaussCPU {
+// ISA v3 D2: set in a SELECT_CC_RR/RI pseudo's $jmp immediate (above any
+// opcode number) to make the custom inserter emit CMPRRW/CMPRVW.
+constexpr unsigned SelectCCW32Flag = 1u << 31;
+} // namespace KlaussCPU
+
 class KlaussCPURegisterInfo;
 class KlaussCPUSubtarget;
 

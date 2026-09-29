@@ -6,6 +6,7 @@
 
 #include "KlaussCPUTargetMachine.h"
 #include "MCTargetDesc/KlaussCPUInstPrinter.h"
+#include "MCTargetDesc/KlaussCPUMCTargetDesc.h"
 #include "TargetInfo/KlaussCPUTargetInfo.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineInstr.h"
@@ -105,6 +106,7 @@ void KlaussCPUAsmPrinter::emitInstruction(const MachineInstr *MI) {
       Inst.addOperand(Op);
   }
 
+  compressKlaussCPUInst(Inst); // ISA v3 short 1-word forms
   EmitToStreamer(*OutStreamer, Inst);
 }
 

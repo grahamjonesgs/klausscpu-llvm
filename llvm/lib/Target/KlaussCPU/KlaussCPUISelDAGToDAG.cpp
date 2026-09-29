@@ -41,6 +41,108 @@ FunctionPass *createKlaussCPUISelDag(KlaussCPUTargetMachine &TM);
 
 using namespace llvm;
 
+#include "llvm/Support/CommandLine.h"
+static cl::opt<bool> EnableW32Compare(
+    "klausscpu-w32-compare", cl::init(true), cl::Hidden,
+    cl::desc("ISA v3 D2: select 32-bit CMPRRW/CMPRVW for compares of "
+             "32-bit-extended values"));
+
+namespace {
+// ISA v3 D2: how a compare operand was extended from 32 bits.
+//   S/Z = its value is the sign/zero extension of its low 32 bits.
+//   Stripped = the extension is an explicit node we can drop (Inner is the
+//   unextended value); otherwise Inner is the operand itself.
+struct Ext32 {
+  enum Kind { None, S, Z } K = None;
+  SDValue Inner;
+  SDNode *Node = nullptr;
+  bool Stripped = false;
+};
+} // namespace
+
+static Ext32 classifyExt32(SDValue V);
+
+/// ISA v3 D2: can this compare use the 32-bit W form?  If so, strip the
+/// explicit extensions from LHS/RHS in place (RHS may stay a constant) and
+/// return true.  Sign-extension preserves both signed and unsigned 32-bit
+/// order, so a sext pair works for any condition; a zext pair only for
+/// EQ/NE and the unsigned conditions.  Only used when an extension
+/// instruction actually disappears.
+static bool tryW32Compare(ISD::CondCode CC, SDValue &LHS, SDValue &RHS) {
+  if (!EnableW32Compare)
+    return false;
+  Ext32 L = classifyExt32(LHS), R = classifyExt32(RHS);
+  auto *RC = dyn_cast<ConstantSDNode>(RHS);
+  bool Unsig = CC == ISD::SETEQ || CC == ISD::SETNE || CC == ISD::SETULT ||
+               CC == ISD::SETULE || CC == ISD::SETUGT || CC == ISD::SETUGE;
+  Ext32::Kind K = Ext32::None;
+  if (RC) {
+    int64_t V = RC->getSExtValue();
+    if (L.K == Ext32::S && isInt<32>(V))
+      K = Ext32::S;
+    else if (L.K == Ext32::Z && isUInt<32>(static_cast<uint64_t>(V)) && Unsig)
+      K = Ext32::Z;
+  } else if (L.K == R.K && L.K != Ext32::None && (L.K == Ext32::S || Unsig)) {
+    K = L.K;
+  }
+  bool Saves = (L.Stripped && L.Node->hasOneUse()) ||
+               (!RC && R.Stripped && R.Node->hasOneUse());
+  if (K == Ext32::None || !Saves)
+    return false;
+  LHS = L.Inner;
+  if (!RC)
+    RHS = R.Inner;
+  return true;
+}
+
+static Ext32 classifyExt32(SDValue V) {
+  Ext32 E;
+  E.Inner = V;
+  E.Node = V.getNode();
+  switch (V.getOpcode()) {
+  case ISD::SIGN_EXTEND_INREG: {
+    EVT VT = cast<VTSDNode>(V.getOperand(1))->getVT();
+    if (VT == MVT::i32) {
+      E.K = Ext32::S; E.Inner = V.getOperand(0); E.Stripped = true;
+    } else if (VT.getSizeInBits() < 32) {
+      E.K = Ext32::S;
+    }
+    break;
+  }
+  case ISD::AND:
+    if (auto *C = dyn_cast<ConstantSDNode>(V.getOperand(1))) {
+      uint64_t M = C->getZExtValue();
+      if (M == 0xFFFFFFFFull) {
+        E.K = Ext32::Z; E.Inner = V.getOperand(0); E.Stripped = true;
+      } else if (M <= 0xFFFFFFFFull) {
+        E.K = Ext32::Z; // narrower mask: already zero-extended from 32
+      }
+    }
+    break;
+  case ISD::AssertSext:
+    if (cast<VTSDNode>(V.getOperand(1))->getVT().getSizeInBits() <= 32)
+      E.K = Ext32::S;
+    break;
+  case ISD::AssertZext:
+    if (cast<VTSDNode>(V.getOperand(1))->getVT().getSizeInBits() <= 32)
+      E.K = Ext32::Z;
+    break;
+  case ISD::LOAD: {
+    auto *LN = cast<LoadSDNode>(V.getNode());
+    if (LN->getMemoryVT().getSizeInBits() <= 32) {
+      if (LN->getExtensionType() == ISD::SEXTLOAD)
+        E.K = Ext32::S;
+      else if (LN->getExtensionType() == ISD::ZEXTLOAD)
+        E.K = Ext32::Z;
+    }
+    break;
+  }
+  default:
+    break;
+  }
+  return E;
+}
+
 //===----------------------------------------------------------------------===//
 // KlaussCPU-specific DAG-to-DAG instruction selector.
 //===----------------------------------------------------------------------===//
@@ -197,13 +299,15 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
         }
       }
 
-      // 8/16-bit sign-extending frame-slot loads → LDIDX8_S/LDIDX16_S.
+      // 8/16/32-bit sign-extending frame-slot loads → LDIDX8_S/16_S/32_S.
       if (LN->getExtensionType() == ISD::SEXTLOAD) {
         unsigned LoadOpc = 0;
         if (LN->getMemoryVT() == MVT::i8)
           LoadOpc = KlaussCPU::LDIDX8_S;
         else if (LN->getMemoryVT() == MVT::i16)
           LoadOpc = KlaussCPU::LDIDX16_S;
+        else if (LN->getMemoryVT() == MVT::i32)
+          LoadOpc = KlaussCPU::LDIDX32_S;
         if (LoadOpc) {
           SDValue Ops[] = {Ptr, Off, LN->getChain()};
           SDNode *Res = CurDAG->getMachineNode(LoadOpc, DL,
@@ -389,6 +493,19 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
     // post-RA passes treat the flags as free between compare and branch).
     SDVTList CmpVTs = CurDAG->getVTList(MVT::Other, MVT::Glue);
     SDNode *CmpNode;
+
+    // ISA v3 D2: 32-bit compare when both operands are 32-bit extended.
+    if (tryW32Compare(CC, LHS, RHS)) {
+      if (auto *C = dyn_cast<ConstantSDNode>(RHS)) {
+        SDValue Imm = CurDAG->getTargetConstant(
+            static_cast<int32_t>(C->getZExtValue()), DL, MVT::i64);
+        SDValue Ops[] = {LHS, Imm, Chain};
+        CmpNode = CurDAG->getMachineNode(KlaussCPU::CMPRVW_I, DL, CmpVTs, Ops);
+      } else {
+        SDValue Ops[] = {LHS, RHS, Chain};
+        CmpNode = CurDAG->getMachineNode(KlaussCPU::CMPRRW_I, DL, CmpVTs, Ops);
+      }
+    } else
     if (auto *C = dyn_cast<ConstantSDNode>(RHS);
         C && isInt<32>(C->getSExtValue())) {
       // Constant RHS that fits in a signed 32-bit field → CMPRV_I.
@@ -460,12 +577,19 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
     unsigned JmpOpc = KlaussCPUInstrInfo::getCondBranchOpcode(
         CC, TM.isPositionIndependent());
     assert(JmpOpc && "SELECT_CC with unsupported CondCode");
-    SDValue Jmp = CurDAG->getTargetConstant(JmpOpc, DL, MVT::i64);
+    // ISA v3 D2: bit 31 of the $jmp immediate asks the inserter for the
+    // 32-bit CMPRRW/CMPRVW compare (operands already stripped).
+    bool W = tryW32Compare(CC, LHS, RHS);
+    SDValue Jmp = CurDAG->getTargetConstant(
+        JmpOpc | (W ? KlaussCPU::SelectCCW32Flag : 0), DL, MVT::i64);
     unsigned Opc = KlaussCPU::SELECT_CC_RR;
     if (auto *C = dyn_cast<ConstantSDNode>(RHS);
-        C && isInt<32>(C->getSExtValue())) {
+        C && (W ? isUInt<32>(C->getZExtValue()) || isInt<32>(C->getSExtValue())
+                : isInt<32>(C->getSExtValue()))) {
       Opc = KlaussCPU::SELECT_CC_RI;
-      RHS = CurDAG->getTargetConstant(C->getSExtValue(), DL, MVT::i64);
+      RHS = CurDAG->getTargetConstant(
+          W ? static_cast<int64_t>(static_cast<int32_t>(C->getZExtValue()))
+            : C->getSExtValue(), DL, MVT::i64);
     }
     SDNode *Res = CurDAG->getMachineNode(
         Opc, DL, N->getValueType(0),

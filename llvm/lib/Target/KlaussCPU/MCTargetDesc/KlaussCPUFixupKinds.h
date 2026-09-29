@@ -20,7 +20,12 @@ namespace KlaussCPU {
 enum Fixups {
   FK_KlaussCPU_ABS32 = FirstTargetFixupKind,
   FK_KlaussCPU_PCREL32,
-  NumTargetFixupKinds = FK_KlaussCPU_PCREL32 + 1 - FirstTargetFixupKind,
+  // ISA v3 A1 short branch: simm18 word displacement in word0[17:0],
+  // target = PC + 4*disp. Always resolved at assembly time — a short branch
+  // whose target is out of range or not in-section is relaxed to the 2-word
+  // PC-relative form (KlaussCPUAsmBackend), so it never becomes a relocation.
+  FK_KlaussCPU_PCREL18,
+  NumTargetFixupKinds = FK_KlaussCPU_PCREL18 + 1 - FirstTargetFixupKind,
 };
 
 } // namespace KlaussCPU

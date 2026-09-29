@@ -95,7 +95,7 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   // LDIDX8_S/LDIDX16_S (sign-extending, base+offset).  No sign-extending i32 load.
   //
   // SEXTLOAD i8/i16 → Legal (LDIDX8_S / LDIDX16_S hardware instructions).
-  // SEXTLOAD i32   → Expand → ZEXTLOAD + SIGN_EXTEND_INREG (SEXTW).
+  // SEXTLOAD i32   → Legal (LDIDX32_S, ISA v3 D1; was ZEXTLOAD + SEXTW).
   // SIGN_EXTEND_INREG i8/i16 → Legal (SEXTB/SEXTH hardware instructions).
   // SIGN_EXTEND_INREG i32 → Legal (SEXTW hardware instruction, fixed April 2026).
   // i1 loads: GlobalOpt at -O1 can shrink a bool-valued global to i1; promote to
@@ -111,6 +111,7 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   }
   setLoadExtAction(ISD::SEXTLOAD, MVT::i64, MVT::i8,  Legal);
   setLoadExtAction(ISD::SEXTLOAD, MVT::i64, MVT::i16, Legal);
+  setLoadExtAction(ISD::SEXTLOAD, MVT::i64, MVT::i32, Legal);
   setTruncStoreAction(MVT::i64, MVT::i8,  Legal);
   setTruncStoreAction(MVT::i64, MVT::i16, Legal);
   setTruncStoreAction(MVT::i64, MVT::i32, Legal);
@@ -1009,6 +1010,9 @@ MachineBasicBlock *KlaussCPUTargetLowering::EmitInstrWithCustomInserter(
   Register LHSReg   = MI.getOperand(1).getReg();
   const MachineOperand &RHS = MI.getOperand(2);
   unsigned JmpOpc   = MI.getOperand(3).getImm();
+  // ISA v3 D2: flag bit → 32-bit W compare (see KlaussCPUDAGToDAGISel).
+  bool W32 = JmpOpc & KlaussCPU::SelectCCW32Flag;
+  JmpOpc &= ~KlaussCPU::SelectCCW32Flag;
   Register TrueReg  = MI.getOperand(4).getReg();
   Register FalseReg = MI.getOperand(5).getReg();
 
@@ -1026,11 +1030,11 @@ MachineBasicBlock *KlaussCPUTargetLowering::EmitInstrWithCustomInserter(
 
   // TestBB: compare, and jump to SinkBB (true value) when the condition holds.
   if (Opc == KlaussCPU::SELECT_CC_RR)
-    BuildMI(BB, DL, TII.get(KlaussCPU::CMPRR_I))
+    BuildMI(BB, DL, TII.get(W32 ? KlaussCPU::CMPRRW_I : KlaussCPU::CMPRR_I))
         .addReg(LHSReg)
         .addReg(RHS.getReg());
   else
-    BuildMI(BB, DL, TII.get(KlaussCPU::CMPRV_I))
+    BuildMI(BB, DL, TII.get(W32 ? KlaussCPU::CMPRVW_I : KlaussCPU::CMPRV_I))
         .addReg(LHSReg)
         .addImm(RHS.getImm());
   BuildMI(BB, DL, TII.get(JmpOpc)).addMBB(SinkBB);

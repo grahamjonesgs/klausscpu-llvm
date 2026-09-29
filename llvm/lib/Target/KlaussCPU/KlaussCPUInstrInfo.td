@@ -579,6 +579,13 @@ def COPY_R   : RR1<0x000001, (outs GPR:$rd), (ins GPR:$rs),
 // flag would only make it a scheduling/LICM barrier for unrelated loads/stores.
 let hasSideEffects = 0 in
 def CMPRR_I  : RR0<0x000005, "cmprr\t$rs1, $rs2">;
+// ISA v3 D2: 32-bit compare of the low halves (class 3 W bit [19]). Flags
+// are exactly those of the 32-bit subtraction; selected by BR_CC when both
+// operands are 32-bit extended (see KlaussCPUDAGToDAGISel::Select).
+let hasSideEffects = 0 in {
+def CMPRRW_I : RR0<0x000006, "cmprrw\t$rs1, $rs2">;
+def CMPRVW_I : RV_cmp<0x0000084, "cmprvw\t$rs, $imm">;
+}
 
 // 64-bit load / store via absolute register address
 def MEMGET64 : RR1<0x00007B, (outs GPR:$rd), (ins GPR:$rs),
@@ -814,12 +821,16 @@ def LDIDX8    : RRV_ld<0x0000C4, "ldidx8\t$rd, $base, $offset">    { let mayLoad
 def STIDX8    : RRV_st<0x0000C5, "stidx8\t$rs_data, $base, $offset">;
 def LDIDX8_S  : RRV_ld<0x0000C6, "ldidx8s\t$rd, $base, $offset">   { let mayLoad = 1; }
 def LDIDX16_S : RRV_ld<0x0000C7, "ldidx16s\t$rd, $base, $offset">  { let mayLoad = 1; }
+// Sign-extending 32-bit indexed load (ISA v3 D1: v2 class 6 SIZE=10 SGN=1
+// MODE=01, a combination the v2 RTL already implements).
+def LDIDX32_S : RRV_ld<0x0000C8, "ldidx32s\t$rd, $base, $offset">  { let mayLoad = 1; }
 
 // Accept the canonical opcode_select.vh spelling of the signed sub-word loads
 // (LDIDX8_S / LDIDX16_S) as assembler aliases for the printed mnemonics.
 // Mnemonics reach the matcher lower-cased, so the alias keys are lower-case.
 def : MnemonicAlias<"ldidx8_s",  "ldidx8s">;
 def : MnemonicAlias<"ldidx16_s", "ldidx16s">;
+def : MnemonicAlias<"ldidx32_s", "ldidx32s">;
 
 //===----------------------------------------------------------------------===//
 // Load / store isel patterns
@@ -1208,6 +1219,64 @@ def : Pat<(i64 (sextloadi8  (add (i64 GPR:$base), simm32_imm:$off))),
           (LDIDX8_S  GPR:$base, simm32_imm:$off)>;
 def : Pat<(i64 (sextloadi16 (add (i64 GPR:$base), simm32_imm:$off))),
           (LDIDX16_S GPR:$base, simm32_imm:$off)>;
+
+// ISA v3 D1: sign-extending 32-bit load (replaces LDIDX32 + SEXTW).
+def : Pat<(i64 (sextloadi32 (i64 GPR:$addr))), (LDIDX32_S GPR:$addr, 0)>;
+def : Pat<(i64 (sextloadi32 (add (i64 GPR:$base), simm32_imm:$off))),
+          (LDIDX32_S GPR:$base, simm32_imm:$off)>;
+
+//===----------------------------------------------------------------------===//
+// ISA v3 short 1-word forms (ISA_V3_PROPOSAL.md §3, A3/A4/A5).
+//
+// Never selected by isel. KlaussCPUMCCompress (MCTargetDesc) rewrites the
+// 2-word form into its short twin at MC emission — from the AsmPrinter and
+// the AsmParser alike — when the immediate fits the 8-bit word-0 field
+// (loads/stores: scaled by the access size). Operand lists and asm text match
+// the long form exactly, so the rewrite is an opcode swap; the encoding is in
+// KlaussCPUMCCodeEmitter. -mllvm -klausscpu-short-forms=false disables it.
+//===----------------------------------------------------------------------===//
+let isCodeGenOnly = 1, hasSideEffects = 0 in {
+def SETR_SH    : KCInst32<(outs GPR:$rd), (ins simm32:$imm), "setr\t$rd, $imm">;
+let Defs = [FLAGS] in {
+def ADDV_SH    : KCInst32<(outs GPR:$rd), (ins GPR:$rs, simm32:$imm), "addv\t$rd, $rs, $imm">;
+def MINUSV_SH  : KCInst32<(outs GPR:$rd), (ins GPR:$rs, simm32:$imm), "minusv\t$rd, $rs, $imm">;
+def ANDV_SH    : KCInst32<(outs GPR:$rd), (ins GPR:$rs, simm32:$imm), "andv\t$rd, $rs, $imm">;
+def ORV_SH     : KCInst32<(outs GPR:$rd), (ins GPR:$rs, simm32:$imm), "orv\t$rd, $rs, $imm">;
+def XORV_SH    : KCInst32<(outs GPR:$rd), (ins GPR:$rs, simm32:$imm), "xorv\t$rd, $rs, $imm">;
+def ADDI_SH    : KCInst32<(outs GPR:$rd), (ins GPR:$rs, simm32:$imm), "addi\t$rd, $rs, $imm">;
+def CMPRV_SH   : KCInst32<(outs), (ins GPR:$rs, simm32:$imm), "cmprv\t$rs, $imm">;
+}
+let mayLoad = 1 in {
+def LDIDX8_SH    : KCInst32<(outs GPR:$rd), (ins GPR:$base, simm32:$offset), "ldidx8\t$rd, $base, $offset">;
+def LDIDX8_S_SH  : KCInst32<(outs GPR:$rd), (ins GPR:$base, simm32:$offset), "ldidx8s\t$rd, $base, $offset">;
+def LDIDX16_SH   : KCInst32<(outs GPR:$rd), (ins GPR:$base, simm32:$offset), "ldidx16\t$rd, $base, $offset">;
+def LDIDX16_S_SH : KCInst32<(outs GPR:$rd), (ins GPR:$base, simm32:$offset), "ldidx16s\t$rd, $base, $offset">;
+def LDIDX32_SH   : KCInst32<(outs GPR:$rd), (ins GPR:$base, simm32:$offset), "ldidx32\t$rd, $base, $offset">;
+def LDIDX32_S_SH : KCInst32<(outs GPR:$rd), (ins GPR:$base, simm32:$offset), "ldidx32s\t$rd, $base, $offset">;
+def LDIDX64_SH   : KCInst32<(outs GPR:$rd), (ins GPR:$base, simm32:$offset), "ldidx64\t$rd, $base, $offset">;
+def LDIDX64U_SH  : KCInst32<(outs GPR:$rd), (ins GPR:$base, simm32:$offset), "ldidx64u\t$rd, $base, $offset">;
+}
+// A1 short PC-relative branches (1 word, simm18 words). Produced by the same
+// compressor for any branch to a symbolic target and relaxed back to the
+// 2-word PC-relative form by the asm backend when out of range / not local.
+let isBranch = 1, isTerminator = 1, Uses = [FLAGS] in {
+foreach c = ["z", "nz", "c", "nc", "o", "no", "s", "ns", "lt", "ge", "le",
+             "gt", "ult", "uge", "ule", "ugt", "e", "ne"] in
+  def JMP # !toupper(c) # _SH : KCInst32<(outs), (ins BrTarget32:$target),
+      // O/NO have no 2-word PC-relative spelling; print the absolute one
+      // (the target address is the same, and it reassembles to this op).
+      !if(!or(!eq(c, "o"), !eq(c, "no")), "jmp" # c, "jmp" # c # "rel") # "\t$target">;
+}
+let isBranch = 1, isTerminator = 1, isBarrier = 1 in
+def JMP_SH : KCInst32<(outs), (ins BrTarget32:$target), "jmprel\t$target">;
+let mayStore = 1 in {
+def STIDX8_SH    : KCInst32<(outs), (ins GPR:$rs_data, GPR:$base, simm32:$offset), "stidx8\t$rs_data, $base, $offset">;
+def STIDX16_SH   : KCInst32<(outs), (ins GPR:$rs_data, GPR:$base, simm32:$offset), "stidx16\t$rs_data, $base, $offset">;
+def STIDX32_SH   : KCInst32<(outs), (ins GPR:$rs_data, GPR:$base, simm32:$offset), "stidx32\t$rs_data, $base, $offset">;
+def STIDX64_SH   : KCInst32<(outs), (ins GPR:$rs_data, GPR:$base, simm32:$offset), "stidx64\t$rs_data, $base, $offset">;
+def STIDX64U_SH  : KCInst32<(outs), (ins GPR:$rs_data, GPR:$base, simm32:$offset), "stidx64u\t$rs_data, $base, $offset">;
+}
+}
 
 //===----------------------------------------------------------------------===//
 // Legacy 2-address assembler spellings.  The ops above are 3-operand in v2

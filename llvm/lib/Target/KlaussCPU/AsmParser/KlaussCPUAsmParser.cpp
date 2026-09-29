@@ -319,6 +319,7 @@ bool KlaussCPUAsmParser::matchAndEmitInstruction(SMLoc IDLoc,
   switch (Result) {
   case Match_Success:
     Inst.setLoc(IDLoc);
+    compressKlaussCPUInst(Inst); // ISA v3 short 1-word forms
     Out.emitInstruction(Inst, getSTI());
     return false;
 

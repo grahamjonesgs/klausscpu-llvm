@@ -3,6 +3,7 @@ add_llvm_component_library(LLVMKlaussCPUDesc
   KlaussCPUInstPrinter.cpp
   KlaussCPUMCAsmInfo.cpp
   KlaussCPUMCCodeEmitter.cpp
+  KlaussCPUMCCompress.cpp
   KlaussCPUMCTargetDesc.cpp
 
   LINK_COMPONENTS
