@@ -9,6 +9,11 @@ or branch target, and nearly all of those values are tiny. Letting the common
 cases fit in one word cuts fetched words by ~30% without changing what any
 instruction does.
 
+**Status (2026-09-29): implemented** — A1/A3/A4/A5, B (resolved in MEM),
+C (ENTER/LEAVE/LEAVERET), D1, D2; D3 not done. Encodings as built, verification
+and board results: `KlaussCPU/ISA_V3_IMPL.md`. Board: calls_fib −33% cycles,
+branchy −13.5%, Dhrystone +10.5%.
+
 ---
 
 ## 1. Recommendation
