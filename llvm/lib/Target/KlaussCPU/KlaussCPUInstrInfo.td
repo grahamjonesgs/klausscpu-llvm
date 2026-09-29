@@ -721,6 +721,15 @@ def SETSP_R : R_in<0x0000404, (ins GPR:$reg), "setsp\t$reg">;
 let Uses = [SP], Defs = [SP], hasSideEffects = 1 in
 def ADDSP_I : Vsp<0x00004050, "addsp\t$imm">;
 
+// ISA v3 C (frame setup/teardown, one word each; no isel patterns — built by
+// KlaussCPUFrameLowering):
+//   ENTER N : push R15; R15 = SP; SP -= 8*N      (N = frame dwords, [21:0])
+//   LEAVE   : SP = R15; pop R15
+let Uses = [SP, R15], Defs = [SP, R15], hasSideEffects = 1, mayStore = 1 in
+def ENTER_I : KCInst32<(outs), (ins i64imm:$n), "enter\t$n">;
+let Uses = [R15], Defs = [SP, R15], hasSideEffects = 1, mayLoad = 1 in
+def LEAVE_I : KCInst32<(outs), (ins), "leave">;
+
 // Indirect call / jump via register
 // Defs: all caller-saved GPRs clobbered by the ABI (R0-R3=args, R8-R14=temps+return)
 // plus FLAGS (the callee is free to change them).

@@ -33,9 +33,21 @@
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
+
+// ISA v3 C: one-word ENTER/LEAVE instead of PUSH R15; GETSP R15; ADDSP -N /
+// SETSP R15; POP R15.
+static cl::opt<bool> EnableEnterLeave(
+    "klausscpu-enter-leave", cl::init(true), cl::Hidden,
+    cl::desc("Use the ISA v3 ENTER/LEAVE frame instructions"));
+
+// ENTER encodes the frame size in 8-byte units in a 22-bit field.
+static bool fitsEnter(uint64_t FrameSize) {
+  return FrameSize % 8 == 0 && (FrameSize / 8) < (uint64_t(1) << 22);
+}
 
 bool KlaussCPUFrameLowering::hasReservedCallFrame(
     const MachineFunction &MF) const {
@@ -76,6 +88,13 @@ void KlaussCPUFrameLowering::emitPrologue(MachineFunction &MF,
   const MachineFrameInfo &MFI = MF.getFrameInfo();
   DebugLoc DL;
 
+  uint64_t FrameSize = MFI.getStackSize();
+  if (EnableEnterLeave && fitsEnter(FrameSize)) {
+    // push R15; R15 = SP; SP -= FrameSize — one word.
+    BuildMI(MBB, MBBI, DL, TII.get(KlaussCPU::ENTER_I)).addImm(FrameSize / 8);
+    return;
+  }
+
   // Save the caller's frame pointer.
   BuildMI(MBB, MBBI, DL, TII.get(KlaussCPU::PUSH_R))
       .addReg(KlaussCPU::R15, RegState::Kill);
@@ -84,7 +103,6 @@ void KlaussCPUFrameLowering::emitPrologue(MachineFunction &MF,
   BuildMI(MBB, MBBI, DL, TII.get(KlaussCPU::GETSP_R), KlaussCPU::R15);
 
   // Allocate stack frame for locals.
-  uint64_t FrameSize = MFI.getStackSize();
   if (FrameSize > 0)
     BuildMI(MBB, MBBI, DL, TII.get(KlaussCPU::ADDSP_I))
         .addImm(-(int64_t)FrameSize);
@@ -98,6 +116,13 @@ void KlaussCPUFrameLowering::emitEpilogue(MachineFunction &MF,
   // Insert epilogue before the return instruction.
   MachineBasicBlock::iterator MBBI = MBB.getLastNonDebugInstr();
   DebugLoc DL = MBBI->getDebugLoc();
+
+  // LEAVE = SETSP R15; POP R15 (valid whatever the prologue was: both leave
+  // R15 pointing at the saved caller R15).
+  if (EnableEnterLeave) {
+    BuildMI(MBB, MBBI, DL, TII.get(KlaussCPU::LEAVE_I));
+    return;
+  }
 
   // Restore SP from frame pointer (discards locals).
   BuildMI(MBB, MBBI, DL, TII.get(KlaussCPU::SETSP_R))
