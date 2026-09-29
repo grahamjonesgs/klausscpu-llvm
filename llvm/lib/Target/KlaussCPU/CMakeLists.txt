@@ -14,6 +14,7 @@ add_public_tablegen_target(KlaussCPUCommonTableGen)
 add_llvm_target(KlaussCPUCodeGen
   KlaussCPUAsmPrinter.cpp
   KlaussCPUFlagReuse.cpp
+  KlaussCPUFuseCmpBr.cpp
   KlaussCPUFrameLowering.cpp
   KlaussCPUInstrInfo.cpp
   KlaussCPUISelDAGToDAG.cpp

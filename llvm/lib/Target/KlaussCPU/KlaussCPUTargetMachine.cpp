@@ -33,6 +33,7 @@
 namespace llvm {
 FunctionPass *createKlaussCPUISelDag(KlaussCPUTargetMachine &TM);
 FunctionPass *createKlaussCPUFlagReusePass();
+FunctionPass *createKlaussCPUFuseCmpBrPass();
 } // namespace llvm
 
 using namespace llvm;
@@ -113,6 +114,8 @@ void KlaussCPUPassConfig::addPreEmitPass() {
   // scheduling) instruction stream so adjacency is meaningful.  No-op unless
   // -klausscpu-arith-flag-reuse is set.
   addPass(createKlaussCPUFlagReusePass());
+  // ISA v3 B — fuse the remaining adjacent compare + conditional branch.
+  addPass(createKlaussCPUFuseCmpBrPass());
 }
 
 TargetTransformInfo

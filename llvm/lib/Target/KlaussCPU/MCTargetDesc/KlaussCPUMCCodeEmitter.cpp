@@ -145,6 +145,19 @@ uint32_t KlaussCPUMCCodeEmitter::encode32(
         MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL18), /*PCRel=*/true));
     return klaussCPUShortBranchWord(MI.getOpcode());
   }
+  // ISA v3 B fused compare-and-branch: class 0xD LEN=01; PRED[25:23]
+  // INV[22] IMM[21] disp13[20:8] (PCREL13 fixup) rs1[7:4] rs2/simm4[3:0].
+  if (MI.getOpcode() == KlaussCPU::FBR_RR || MI.getOpcode() == KlaussCPU::FBR_RI) {
+    bool Imm = MI.getOpcode() == KlaussCPU::FBR_RI;
+    uint32_t CC = getImm32(MI, 2);
+    uint32_t W = 0x74000000u | ((CC & 7) << 23) | (((CC >> 3) & 1) << 22) |
+                 (Imm ? (1u << 21) : 0) | fRs1(MI, 0) |
+                 (Imm ? (getImm32(MI, 1) & 0xF) : fRs2(MI, 1));
+    Fixups.push_back(MCFixup::create(
+        0, MI.getOperand(3).getExpr(),
+        MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL13), /*PCRel=*/true));
+    return W;
+  }
   switch (MI.getOpcode()) {
 
   // ── Class 1/A/4/3 RRR: rd = rs1 OP rs2  (rd,rs1,rs2 at ops 0,1,2) ─────────

@@ -25,7 +25,10 @@ enum Fixups {
   // whose target is out of range or not in-section is relaxed to the 2-word
   // PC-relative form (KlaussCPUAsmBackend), so it never becomes a relocation.
   FK_KlaussCPU_PCREL18,
-  NumTargetFixupKinds = FK_KlaussCPU_PCREL18 + 1 - FirstTargetFixupKind,
+  // ISA v3 B fused branch: simm13 word displacement in word0[20:8]. The
+  // compiler only fuses when the whole function fits, so it always resolves.
+  FK_KlaussCPU_PCREL13,
+  NumTargetFixupKinds = FK_KlaussCPU_PCREL13 + 1 - FirstTargetFixupKind,
 };
 
 } // namespace KlaussCPU

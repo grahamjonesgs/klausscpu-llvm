@@ -54,8 +54,9 @@ public:
                         bool IsPCRel) const override {
     if (Fixup.getKind() == FK_Data_8)
       return ELF::R_KLAUSSCPU_ABS64;
-    if (Fixup.getKind() == MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL18))
-      report_fatal_error("KlaussCPU: unresolved short branch escaped relaxation");
+    if (Fixup.getKind() == MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL18) ||
+        Fixup.getKind() == MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL13))
+      report_fatal_error("KlaussCPU: unresolved short/fused branch fixup");
     if (Fixup.getKind() == MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL32))
       return ELF::R_KLAUSSCPU_PCREL32;
     // A cross-section symbol difference (A - B) reaches us as a PC-relative
@@ -87,6 +88,7 @@ public:
         {"FK_KlaussCPU_ABS32",     0,         32,      0},
         {"FK_KlaussCPU_PCREL32",   0,         32,      0},
         {"FK_KlaussCPU_PCREL18",   0,         18,      0},
+        {"FK_KlaussCPU_PCREL13",   8,         13,      0},
     };
     if (Kind >= FirstTargetFixupKind &&
         Kind < FirstTargetFixupKind + KlaussCPU::NumTargetFixupKinds)
@@ -115,6 +117,19 @@ public:
       Data[0] |= Disp & 0xFF;
       Data[1] |= (Disp >> 8) & 0xFF;
       Data[2] |= (Disp >> 16) & 0x03;
+      return;
+    }
+    // FK_KlaussCPU_PCREL13: fused branch, word displacement into word0[20:8].
+    if (Kind == MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL13)) {
+      int64_t V = static_cast<int64_t>(Value);
+      if (!IsResolved || (V & 3) || !isInt<13>(V >> 2)) {
+        getContext().reportError(Fixup.getLoc(),
+                                 "fused branch target out of range");
+        return;
+      }
+      uint32_t D = static_cast<uint32_t>(V >> 2) & 0x1FFFu;
+      Data[1] |= D & 0xFF;          // word0[15:8]
+      Data[2] |= (D >> 8) & 0x1F;   // word0[20:16]
       return;
     }
     // FK_Data_8: 8-byte pointer field in .rodata/.data (memp_pools[], struct

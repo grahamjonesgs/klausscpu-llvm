@@ -1282,6 +1282,7 @@ foreach c = ["z", "nz", "c", "nc", "o", "no", "s", "ns", "lt", "ge", "le",
 }
 let isBranch = 1, isTerminator = 1, isBarrier = 1 in
 def JMP_SH : KCInst32<(outs), (ins BrTarget32:$target), "jmprel\t$target">;
+
 let mayStore = 1 in {
 def STIDX8_SH    : KCInst32<(outs), (ins GPR:$rs_data, GPR:$base, simm32:$offset), "stidx8\t$rs_data, $base, $offset">;
 def STIDX16_SH   : KCInst32<(outs), (ins GPR:$rs_data, GPR:$base, simm32:$offset), "stidx16\t$rs_data, $base, $offset">;
@@ -1290,6 +1291,16 @@ def STIDX64_SH   : KCInst32<(outs), (ins GPR:$rs_data, GPR:$base, simm32:$offset
 def STIDX64U_SH  : KCInst32<(outs), (ins GPR:$rs_data, GPR:$base, simm32:$offset), "stidx64u\t$rs_data, $base, $offset">;
 }
 }
+// ISA v3 B: fused compare-and-branch (class 0xD, 1 word, flags untouched).
+// $cc = PRED (0 EQ, 1 LT, 2 LE, 3 ULT, 4 ULE) | INV<<3; simm13 word
+// displacement via FK_KlaussCPU_PCREL13. Built only by KlaussCPUFuseCmpBr.
+let isBranch = 1, isTerminator = 1, hasSideEffects = 0 in {
+def FBR_RR : KCInst32<(outs), (ins GPR:$rs1, GPR:$rs2, i64imm:$cc, BrTarget32:$target),
+                      "fbr\t$rs1, $rs2, $cc, $target">;
+def FBR_RI : KCInst32<(outs), (ins GPR:$rs1, i64imm:$imm, i64imm:$cc, BrTarget32:$target),
+                      "fbri\t$rs1, $imm, $cc, $target">;
+}
+
 
 //===----------------------------------------------------------------------===//
 // Legacy 2-address assembler spellings.  The ops above are 3-operand in v2

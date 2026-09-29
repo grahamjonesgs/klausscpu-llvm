@@ -147,6 +147,10 @@ bool KlaussCPUInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
   int NumTerminators = 0;
   for (auto J = I.getReverse(); J != MBB.rend() && isUnpredicatedTerminator(*J);
        ++J) {
+    // ISA v3 B fused branches (pre-emit only) carry their target at
+    // operand 3 and no separate compare: not modelled here.
+    if (J->getOpcode() == KlaussCPU::FBR_RR || J->getOpcode() == KlaussCPU::FBR_RI)
+      return true;
     ++NumTerminators;
     if (J->getDesc().isUnconditionalBranch() ||
         J->getDesc().isIndirectBranch())
