@@ -42,6 +42,10 @@ FunctionPass *createKlaussCPUISelDag(KlaussCPUTargetMachine &TM);
 using namespace llvm;
 
 #include "llvm/Support/CommandLine.h"
+static cl::opt<bool> EnableW32Alu(
+    "klausscpu-w32-alu", cl::init(true), cl::Hidden,
+    cl::desc("ISA v3 D3: select ADDW/SUBW/ADDIW/MULW for sign-extended 32-bit "
+             "add/sub/mul"));
 static cl::opt<bool> EnableW32Compare(
     "klausscpu-w32-compare", cl::init(true), cl::Hidden,
     cl::desc("ISA v3 D2: select 32-bit CMPRRW/CMPRVW for compares of "
@@ -455,6 +459,35 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
                                          MVT::Other, {Target, Chain});
     ReplaceNode(N, Res);
     return;
+  }
+
+  // ---- ISA v3 D3: (sext_inreg (add|sub|mul a, b), i32) → W op -------------
+  // The W form produces the sign-extended low 32 bits directly, dropping the
+  // SEXTW. Only when the inner op has no other use (else it is computed
+  // anyway and the SEXTW is no extra cost).
+  if (EnableW32Alu && N->getOpcode() == ISD::SIGN_EXTEND_INREG &&
+      cast<VTSDNode>(N->getOperand(1))->getVT() == MVT::i32) {
+    SDValue In = N->getOperand(0);
+    unsigned IO = In.getOpcode();
+    if (In.hasOneUse() && (IO == ISD::ADD || IO == ISD::SUB || IO == ISD::MUL)) {
+      SDLoc DL(N);
+      SDValue A = In.getOperand(0), B = In.getOperand(1);
+      SDNode *Res = nullptr;
+      if (IO == ISD::ADD && isa<ConstantSDNode>(B) &&
+          isInt<32>(cast<ConstantSDNode>(B)->getSExtValue())) {
+        SDValue Imm = CurDAG->getTargetConstant(
+            cast<ConstantSDNode>(B)->getSExtValue(), DL, MVT::i64);
+        Res = CurDAG->getMachineNode(KlaussCPU::ADDIW, DL, MVT::i64, A, Imm);
+      } else if (!isa<ConstantSDNode>(B) && !isa<ConstantSDNode>(A)) {
+        unsigned Opc = IO == ISD::ADD ? KlaussCPU::ADDW
+                     : IO == ISD::SUB ? KlaussCPU::SUBW : KlaussCPU::MULW;
+        Res = CurDAG->getMachineNode(Opc, DL, MVT::i64, A, B);
+      }
+      if (Res) {
+        ReplaceNode(N, Res);
+        return;
+      }
+    }
   }
 
   // ---- ISD::BR_CC → CMPRR_I/CMPRV_I + conditional JMP -------------------

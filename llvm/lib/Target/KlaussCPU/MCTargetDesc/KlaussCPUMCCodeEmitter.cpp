@@ -163,6 +163,9 @@ uint32_t KlaussCPUMCCodeEmitter::encode32(
   // ── Class 1/A/4/3 RRR: rd = rs1 OP rs2  (rd,rs1,rs2 at ops 0,1,2) ─────────
   case KlaussCPU::ADDR:  return 0x44200000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
   case KlaussCPU::SUBR:  return 0x44600000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
+  case KlaussCPU::ADDW:  return 0x44280000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2); // v3 D3
+  case KlaussCPU::SUBW:  return 0x44680000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2); // v3 D3
+  case KlaussCPU::MULW:  return 0x68880000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2); // v3 D3
   case KlaussCPU::ADDC:  return 0x44A00000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
   case KlaussCPU::SUBC:  return 0x44E00000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
   case KlaussCPU::ANDR:  return 0x45000000u | fRd(MI,0) | fRs1(MI,1) | fRs2(MI,2);
@@ -360,6 +363,8 @@ uint64_t KlaussCPUMCCodeEmitter::encode64(
   // Class 2 reg+imm add (rd,rs1 independent): rd = rs1 + sext(imm32).
   case KlaussCPU::ADDI:
     return pack2(0x88300000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
+  case KlaussCPU::ADDIW: // v3 D3 (2-word only: the short form's [19:12] is its imm)
+    return pack2(0x88380000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));
 
   // Class 2 in-place ALU-immediate (rd=rs1, tied): imm at op 2.
   case KlaussCPU::ADDV:   return pack2(0x88200000u | fRd(MI,0) | fRs1(MI,1), getImm32(MI,2));

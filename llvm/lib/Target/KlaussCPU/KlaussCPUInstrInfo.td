@@ -464,6 +464,19 @@ def XORR   : RRR<0x00050, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "xorr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (xor GPR:$rs1, GPR:$rs2))]>;
 
+// ISA v3 D3: 32-bit "W" ops — the 64-bit op with its result sign-extended
+// from bit 31 (RV64-style: C `int` arithmetic stays sign-extended without a
+// following SEXTW). Class 1 / class 2 (2-word) / class A with W [19]. Selected
+// in KlaussCPUDAGToDAGISel::Select (-mllvm -klausscpu-w32-alu=false).
+// (No isel Pattern, so side effects are stated explicitly — see SETR64.)
+let hasSideEffects = 0 in {
+def ADDW   : RRR<0x00011, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "addw\t$rd, $rs1, $rs2">;
+def SUBW   : RRR<0x00021, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "subw\t$rd, $rs1, $rs2">;
+def ADDIW  : RRV_alu<0x000003, "addiw\t$rd, $rs, $imm">;
+let SchedRW = [WriteMul] in
+def MULW   : RRR<0x00101, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "mulw\t$rd, $rs1, $rs2">;
+}
+
 // Multiply (EX-serialized, ~5c — M8)
 let SchedRW = [WriteMul] in {
 def MULR   : RRR<0x00100, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
