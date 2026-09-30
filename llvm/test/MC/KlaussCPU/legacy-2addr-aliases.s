@@ -1,4 +1,4 @@
-# RUN: llvm-mc -triple=klausscpu-unknown-elf -show-encoding %s | FileCheck %s
+# RUN: llvm-mc -triple=klausscpu-unknown-elf -show-encoding -klausscpu-short-forms=false %s | FileCheck %s
 #
 # ISA v2 unary / immediate / shift-by-N ops are 3-operand (rd, rs1, ...).
 # The pre-v2 in-place spellings still assemble, as rd == rs1.

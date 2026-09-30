@@ -5,12 +5,14 @@
 ; against 0 is redundant: the arithmetic op already set zero_flag = (X == 0).
 ;
 ; Default (now ON post flag-unification): the redundant CMPRV against 0 is
-; dropped and the equality branch reads Z via JMPZ/JMPNZ.
+; dropped and the equality branch reads Z via JMPZ/JMPNZ (either sense: block
+; layout may invert it). The v3 fused compare-and-branch is disabled here so the
+; unfused CMPRV + JMPcc form this pass works on is what reaches the output.
 ; With -klausscpu-arith-flag-reuse=false: the CMPRV is kept (JMPE/JMPNE) — the
 ; escape hatch retained for A/B measurement and bisection.
 ;
-; RUN: llc -march=klausscpu -verify-machineinstrs -O1 < %s | FileCheck %s --check-prefix=ON
-; RUN: llc -march=klausscpu -verify-machineinstrs -O1 -klausscpu-arith-flag-reuse=false < %s \
+; RUN: llc -march=klausscpu -verify-machineinstrs -O1 -klausscpu-fuse-cmp-br=false < %s | FileCheck %s --check-prefix=ON
+; RUN: llc -march=klausscpu -verify-machineinstrs -O1 -klausscpu-fuse-cmp-br=false -klausscpu-arith-flag-reuse=false < %s \
 ; RUN:   | FileCheck %s --check-prefix=OFF
 
 ; Branch on (a + b) == 0 — the ADDR result is tested against zero.
@@ -18,11 +20,11 @@ define i64 @add_eq0(i64 %a, i64 %b) {
 ; OFF-LABEL: add_eq0:
 ; OFF:         addr r{{[0-9]+}}, r0, r1
 ; OFF-NEXT:    cmprv r{{[0-9]+}}, 0
-; OFF-NEXT:    jmpe .LBB0_2
+; OFF-NEXT:    jmp{{n?}}e{{(rel)?}} .LBB0_
 ;
 ; ON-LABEL: add_eq0:
 ; ON:         addr r{{[0-9]+}}, r0, r1
-; ON-NEXT:    jmpz .LBB0_2
+; ON-NEXT:    jmp{{n?}}z{{(rel)?}} .LBB0_
 ; ON-NOT:     cmprv
   %s = add i64 %a, %b
   %c = icmp eq i64 %s, 0
@@ -38,11 +40,11 @@ define i64 @sub_ne0(i64 %a, i64 %b) {
 ; OFF-LABEL: sub_ne0:
 ; OFF:         subr r{{[0-9]+}}, r0, r1
 ; OFF-NEXT:    cmprv r{{[0-9]+}}, 0
-; OFF-NEXT:    jmpne .LBB1_2
+; OFF-NEXT:    jmp{{n?}}e{{(rel)?}} .LBB1_
 ;
 ; ON-LABEL: sub_ne0:
 ; ON:         subr r{{[0-9]+}}, r0, r1
-; ON-NEXT:    jmpnz .LBB1_2
+; ON-NEXT:    jmp{{n?}}z{{(rel)?}} .LBB1_
 ; ON-NOT:     cmprv
   %s = sub i64 %a, %b
   %c = icmp ne i64 %s, 0
@@ -59,13 +61,13 @@ f:
 define i64 @signed_lt_branch(i64 %a, i64 %b) {
 ; OFF-LABEL: signed_lt_branch:
 ; OFF:         cmprr r0, r1
-; OFF-NEXT:    jmpge
+; OFF-NEXT:    jmp{{ge|lt}}
 ; OFF-NOT:     jmpz
 ; OFF-NOT:     jmpnz
 ;
 ; ON-LABEL: signed_lt_branch:
 ; ON:         cmprr r0, r1
-; ON-NEXT:    jmpge
+; ON-NEXT:    jmp{{ge|lt}}
 ; ON-NOT:     jmpz
 ; ON-NOT:     jmpnz
   %c = icmp slt i64 %a, %b

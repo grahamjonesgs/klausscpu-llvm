@@ -10,13 +10,9 @@ declare void @ext_void()
 define i64 @call_4_args(i64 %a, i64 %b, i64 %c, i64 %d) {
 ; CHECK-LABEL: call_4_args:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
-; CHECK-NEXT:    addsp -24
+; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    call ext
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = call i64 @ext(i64 %a, i64 %b, i64 %c, i64 %d)
   ret i64 %r
 }
@@ -26,16 +22,12 @@ declare i64 @ext5(i64, i64, i64, i64, i64)
 define i64 @call_5_args(i64 %a, i64 %b, i64 %c, i64 %d, i64 %e) {
 ; CHECK-LABEL: call_5_args:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
-; CHECK-NEXT:    addsp -32
+; CHECK-NEXT:    enter 4
 ; CHECK-NEXT:    ldidx64 r12, r15, 40
 ; CHECK-NEXT:    getsp r14
 ; CHECK-NEXT:    stidx64 r12, r14, 24
 ; CHECK-NEXT:    call ext5
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = call i64 @ext5(i64 %a, i64 %b, i64 %c, i64 %d, i64 %e)
   ret i64 %r
 }
@@ -44,17 +36,13 @@ define i64 @call_5_args(i64 %a, i64 %b, i64 %c, i64 %d, i64 %e) {
 define i64 @callee_saved_live_across_call(i64 %x) {
 ; CHECK-LABEL: callee_saved_live_across_call:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
-; CHECK-NEXT:    addsp -32
+; CHECK-NEXT:    enter 4
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    call ext_void
 ; CHECK-NEXT:    addi r12, r4, 3
 ; CHECK-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %saved = add i64 %x, 1
   call void @ext_void()
   %r = add i64 %saved, 2
@@ -65,12 +53,9 @@ define i64 @callee_saved_live_across_call(i64 %x) {
 define i64 @leaf(i64 %a, i64 %b) {
 ; CHECK-LABEL: leaf:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    addr r12, r0, r1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = add i64 %a, %b
   ret i64 %r
 }
@@ -79,12 +64,9 @@ define i64 @leaf(i64 %a, i64 %b) {
 define i64 @return_const() {
 ; CHECK-LABEL: return_const:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r12, 99
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   ret i64 99
 }
 
@@ -92,15 +74,11 @@ define i64 @return_const() {
 define i64 @indirect_call(ptr %fp, i64 %a) {
 ; CHECK-LABEL: indirect_call:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
-; CHECK-NEXT:    addsp -24
+; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    copy r12, r0
 ; CHECK-NEXT:    copy r0, r1
 ; CHECK-NEXT:    callr r12
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = call i64 %fp(i64 %a)
   ret i64 %r
 }

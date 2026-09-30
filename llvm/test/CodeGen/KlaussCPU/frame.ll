@@ -10,14 +10,10 @@ declare i64 @fill(ptr, i64)
 define i64 @with_alloca(i64 %x) {
 ; CHECK-LABEL: with_alloca:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
-; CHECK-NEXT:    addsp -8
+; CHECK-NEXT:    enter 1
 ; CHECK-NEXT:    copy r12, r0
 ; CHECK-NEXT:    stidx64 r0, r15, -8
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %slot = alloca i64
   store i64 %x, ptr %slot
   %v = load i64, ptr %slot
@@ -28,14 +24,10 @@ define i64 @with_alloca(i64 %x) {
 define void @pass_local_addr() {
 ; CHECK-LABEL: pass_local_addr:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
-; CHECK-NEXT:    addsp -32
+; CHECK-NEXT:    enter 4
 ; CHECK-NEXT:    addi r0, r15, -8
 ; CHECK-NEXT:    call use_ptr
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %buf = alloca i64
   call void @use_ptr(ptr %buf)
   ret void
@@ -45,16 +37,12 @@ define void @pass_local_addr() {
 define i64 @stack_array(i64 %i, i64 %v) {
 ; CHECK-LABEL: stack_array:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
-; CHECK-NEXT:    addsp -64
+; CHECK-NEXT:    enter 8
 ; CHECK-NEXT:    shlv r14, r0, 3
 ; CHECK-NEXT:    addi r13, r15, -64
 ; CHECK-NEXT:    copy r12, r1
 ; CHECK-NEXT:    stidx64r r1, r13, r14
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %arr = alloca [8 x i64]
   %p   = getelementptr [8 x i64], ptr %arr, i64 0, i64 %i
   store i64 %v, ptr %p
@@ -67,18 +55,14 @@ define i64 @stack_array(i64 %i, i64 %v) {
 define i64 @spill_across_call(i64 %a) {
 ; CHECK-LABEL: spill_across_call:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
-; CHECK-NEXT:    addsp -32
+; CHECK-NEXT:    enter 4
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    setr r0, 0
 ; CHECK-NEXT:    call use_ptr
 ; CHECK-NEXT:    addi r12, r4, 3
 ; CHECK-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %b = add i64 %a, 1
   call void @use_ptr(ptr null)
   %r = add i64 %b, 2
@@ -89,15 +73,11 @@ define i64 @spill_across_call(i64 %a) {
 define i64 @multi_alloca(i64 %x, i64 %y) {
 ; CHECK-LABEL: multi_alloca:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
-; CHECK-NEXT:    addsp -16
+; CHECK-NEXT:    enter 2
 ; CHECK-NEXT:    addr r12, r0, r1
 ; CHECK-NEXT:    stidx64 r0, r15, -8
 ; CHECK-NEXT:    stidx64 r1, r15, -16
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %sx = alloca i64
   %sy = alloca i64
   store i64 %x, ptr %sx

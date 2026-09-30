@@ -1,4 +1,4 @@
-; RUN: llc -march=klausscpu -verify-machineinstrs -O2 -filetype=obj < %s \
+; RUN: llc -march=klausscpu -verify-machineinstrs -O2 -klausscpu-short-forms=false -klausscpu-enter-leave=false -filetype=obj < %s \
 ; RUN:   | llvm-objdump -s -j .text - | FileCheck %s
 ;
 ; Byte-level regression test for the ISA v2 (flag-day) encoding.  Each CHECK is

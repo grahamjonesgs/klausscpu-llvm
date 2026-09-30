@@ -6,11 +6,11 @@
 ; scheduled into the compare->branch gap.  FLAGS is modeled (Defs on flag-setting
 ; ops, Uses on conditional branches), so the compare and its branch stay adjacent.
 ;
-; RUN: llc -march=klausscpu -verify-machineinstrs -O2 < %s | FileCheck %s
+; RUN: llc -march=klausscpu -verify-machineinstrs -O2 -klausscpu-fuse-cmp-br=false < %s | FileCheck %s
 ;
 ; A/B baseline (spec §7.1): -mcpu=no-sched selects NoSchedModel — the whole M8
 ; transform off — and must still produce correct code.
-; RUN: llc -march=klausscpu -verify-machineinstrs -mcpu=no-sched -O2 < %s | FileCheck %s --check-prefix=NOSCHED
+; RUN: llc -march=klausscpu -verify-machineinstrs -mcpu=no-sched -O2 -klausscpu-fuse-cmp-br=false < %s | FileCheck %s --check-prefix=NOSCHED
 
 declare void @sink(ptr)
 
@@ -23,7 +23,7 @@ define i64 @guard_not_split(i64 %n) {
 ; must be immediately followed by its conditional branch — nothing hoisted between.
 ; CHECK-LABEL: guard_not_split:
 ; CHECK:      cmprv r{{[0-9]+}}, {{[0-9]+}}
-; CHECK-NEXT: jmp{{[gl][te]}} .LBB
+; CHECK-NEXT: jmp{{[gl][te]}}{{(rel)?}} .LBB
 ;
 ; NOSCHED-LABEL: guard_not_split:
 ; NOSCHED:    cmprv r{{[0-9]+}}, {{[0-9]+}}

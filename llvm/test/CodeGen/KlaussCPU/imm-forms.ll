@@ -7,12 +7,9 @@
 define i64 @zext8(i64 %a) {
 ; CHECK-LABEL: zext8:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    zextb r12, r0
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = and i64 %a, 255
   ret i64 %r
 }
@@ -20,12 +17,9 @@ define i64 @zext8(i64 %a) {
 define i64 @zext16(i64 %a) {
 ; CHECK-LABEL: zext16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    zexth r12, r0
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = and i64 %a, 65535
   ret i64 %r
 }
@@ -33,12 +27,9 @@ define i64 @zext16(i64 %a) {
 define i64 @bit_set3(i64 %a) {
 ; CHECK-LABEL: bit_set3:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    bset r12, r0, 3
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = or i64 %a, 8
   ret i64 %r
 }
@@ -46,12 +37,9 @@ define i64 @bit_set3(i64 %a) {
 define i64 @bit_set63(i64 %a) {
 ; CHECK-LABEL: bit_set63:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    bset r12, r0, 63
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = or i64 %a, -9223372036854775808
   ret i64 %r
 }
@@ -59,12 +47,9 @@ define i64 @bit_set63(i64 %a) {
 define i64 @bit_clear40(i64 %a) {
 ; CHECK-LABEL: bit_clear40:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    bclr r12, r0, 40
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = and i64 %a, -1099511627777
   ret i64 %r
 }
@@ -72,12 +57,9 @@ define i64 @bit_clear40(i64 %a) {
 define i64 @bit_toggle32(i64 %a) {
 ; CHECK-LABEL: bit_toggle32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    btgl r12, r0, 32
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = xor i64 %a, 4294967296
   ret i64 %r
 }
@@ -85,13 +67,10 @@ define i64 @bit_toggle32(i64 %a) {
 define i64 @load_idx(ptr %p, i64 %i) {
 ; CHECK-LABEL: load_idx:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    shlv r12, r1, 3
 ; CHECK-NEXT:    ldidx64r r12, r0, r12
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %a = getelementptr i64, ptr %p, i64 %i
   %v = load i64, ptr %a
   ret i64 %v
@@ -100,13 +79,10 @@ define i64 @load_idx(ptr %p, i64 %i) {
 define void @store_idx(ptr %p, i64 %i, i64 %v) {
 ; CHECK-LABEL: store_idx:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    shlv r12, r1, 3
 ; CHECK-NEXT:    stidx64r r2, r0, r12
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %a = getelementptr i64, ptr %p, i64 %i
   store i64 %v, ptr %a
   ret void
@@ -116,14 +92,11 @@ define void @store_idx(ptr %p, i64 %i, i64 %v) {
 define i64 @untied(i64 %a) {
 ; CHECK-LABEL: untied:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    incr r12, r0
 ; CHECK-NEXT:    mulr r12, r0, r12
 ; CHECK-NEXT:    shlv r12, r12, 4
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %b = add i64 %a, 1
   %c = shl i64 %a, 4
   %r = mul i64 %b, %c
@@ -134,12 +107,9 @@ define i64 @untied(i64 %a) {
 define i64 @bool_zext(i64 %a, i64 %b) {
 ; CHECK-LABEL: bool_zext:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmpultr r12, r0, r1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %c = icmp ult i64 %a, %b
   %r = zext i1 %c to i64
   ret i64 %r

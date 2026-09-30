@@ -9,18 +9,14 @@
 define i64 @sum2(i64 %fmt, ...) {
 ; CHECK-LABEL: sum2:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
-; CHECK-NEXT:    addsp -8
+; CHECK-NEXT:    enter 1
 ; CHECK-NEXT:    stidx64 r3, r15, 32
 ; CHECK-NEXT:    stidx64 r2, r15, 24
 ; CHECK-NEXT:    addr r12, r1, r2
 ; CHECK-NEXT:    addi r14, r15, 16
 ; CHECK-NEXT:    stidx64 r1, r15, 16
 ; CHECK-NEXT:    stidx64 r14, r15, -8
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %ap = alloca ptr
   call void @llvm.va_start.p0(ptr %ap)
   %p  = load ptr, ptr %ap
@@ -36,17 +32,13 @@ define i64 @sum2(i64 %fmt, ...) {
 define i64 @sum1_named2(i64 %a, i64 %b, ...) {
 ; CHECK-LABEL: sum1_named2:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
-; CHECK-NEXT:    addsp -8
+; CHECK-NEXT:    enter 1
 ; CHECK-NEXT:    stidx64 r3, r15, 32
 ; CHECK-NEXT:    addr r12, r1, r2
 ; CHECK-NEXT:    addi r14, r15, 24
 ; CHECK-NEXT:    stidx64 r2, r15, 24
 ; CHECK-NEXT:    stidx64 r14, r15, -8
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %ap = alloca ptr
   call void @llvm.va_start.p0(ptr %ap)
   %p  = load ptr, ptr %ap
@@ -60,16 +52,12 @@ define i64 @sum1_named2(i64 %a, i64 %b, ...) {
 define i64 @first_stack_vararg(i64 %a, i64 %b, i64 %c, i64 %d, ...) {
 ; CHECK-LABEL: first_stack_vararg:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
-; CHECK-NEXT:    addsp -8
+; CHECK-NEXT:    enter 1
 ; CHECK-NEXT:    addi r12, r15, 40
 ; CHECK-NEXT:    stidx64 r12, r15, -8
 ; CHECK-NEXT:    ldidx64 r12, r15, 40
 ; CHECK-NEXT:    addr r12, r3, r12
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %ap = alloca ptr
   call void @llvm.va_start.p0(ptr %ap)
   %p  = load ptr, ptr %ap
@@ -86,9 +74,29 @@ define i64 @first_stack_vararg(i64 %a, i64 %b, i64 %c, i64 %d, ...) {
 ; garbles).  shouldReduceLoadWidth() returns false to prevent this.
 define i64 @pick_u32(i64 %n, ...) {
 ; CHECK-LABEL: pick_u32:
-; CHECK-NOT:     memget32
-; CHECK:         ldidx64
-; CHECK-NOT:     memget32
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    enter 1
+; CHECK-NEXT:    addi r12, r15, 16
+; CHECK-NEXT:    addi r12, r12, 15
+; CHECK-NEXT:    setr r14, -8
+; CHECK-NEXT:    andr r12, r12, r14
+; CHECK-NEXT:    stidx64 r3, r15, 32
+; CHECK-NEXT:    addi r13, r12, 15
+; CHECK-NEXT:    stidx64 r2, r15, 24
+; CHECK-NEXT:    andr r14, r13, r14
+; CHECK-NEXT:    addi r13, r12, 8
+; CHECK-NEXT:    stidx64 r1, r15, 16
+; CHECK-NEXT:    stidx64 r13, r15, -8
+; CHECK-NEXT:    addi r13, r14, 8
+; CHECK-NEXT:    ldidx64 r12, r12, 0
+; CHECK-NEXT:    stidx64 r13, r15, -8
+; CHECK-NEXT:    ldidx64 r14, r14, 0
+; CHECK-NEXT:    zextw r13, r1
+; CHECK-NEXT:    zextw r12, r12
+; CHECK-NEXT:    zextw r14, r14
+; CHECK-NEXT:    addr r12, r13, r12
+; CHECK-NEXT:    addr r12, r12, r14
+; CHECK-NEXT:    leaveret
   %ap = alloca ptr
   call void @llvm.va_start.p0(ptr %ap)
   %a = va_arg ptr %ap, i32

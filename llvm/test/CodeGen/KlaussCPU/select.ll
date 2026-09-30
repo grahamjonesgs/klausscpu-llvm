@@ -8,17 +8,13 @@
 define i64 @select_eq(i64 %cond, i64 %t, i64 %f) {
 ; CHECK-LABEL: select_eq:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
-; CHECK-NEXT:    cmprv r0, 0
-; CHECK-NEXT:    jmpe .LBB0_2
+; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    fbri r0, 0, 0, .LBB0_2
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    copy r1, r2
 ; CHECK-NEXT:  .LBB0_2:
 ; CHECK-NEXT:    copy r12, r1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %c = icmp eq i64 %cond, 0
   %r = select i1 %c, i64 %t, i64 %f
   ret i64 %r
@@ -27,17 +23,13 @@ define i64 @select_eq(i64 %cond, i64 %t, i64 %f) {
 define i64 @select_ne(i64 %cond, i64 %t, i64 %f) {
 ; CHECK-LABEL: select_ne:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
-; CHECK-NEXT:    cmprv r0, 0
-; CHECK-NEXT:    jmpne .LBB1_2
+; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    fbri r0, 0, 8, .LBB1_2
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    copy r1, r2
 ; CHECK-NEXT:  .LBB1_2:
 ; CHECK-NEXT:    copy r12, r1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %c = icmp ne i64 %cond, 0
   %r = select i1 %c, i64 %t, i64 %f
   ret i64 %r
@@ -46,17 +38,13 @@ define i64 @select_ne(i64 %cond, i64 %t, i64 %f) {
 define i64 @select_slt(i64 %a, i64 %b, i64 %t, i64 %f) {
 ; CHECK-LABEL: select_slt:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
-; CHECK-NEXT:    cmprr r0, r1
-; CHECK-NEXT:    jmplt .LBB2_2
+; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    fbr r0, r1, 1, .LBB2_2
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    copy r2, r3
 ; CHECK-NEXT:  .LBB2_2:
 ; CHECK-NEXT:    copy r12, r2
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %c = icmp slt i64 %a, %b
   %r = select i1 %c, i64 %t, i64 %f
   ret i64 %r
@@ -66,17 +54,14 @@ define i64 @select_slt(i64 %a, i64 %b, i64 %t, i64 %f) {
 define i64 @select_const(i64 %cond) {
 ; CHECK-LABEL: select_const:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmprv r0, 0
 ; CHECK-NEXT:    setr r12, 100
-; CHECK-NEXT:    jmpgt .LBB3_2
+; CHECK-NEXT:    jmpgtrel .LBB3_2
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    setr r12, 200
 ; CHECK-NEXT:  .LBB3_2:
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %c = icmp sgt i64 %cond, 0
   %r = select i1 %c, i64 100, i64 200
   ret i64 %r
@@ -86,13 +71,10 @@ define i64 @select_const(i64 %cond) {
 define i64 @clamp(i64 %x, i64 %lo, i64 %hi) {
 ; CHECK-LABEL: clamp:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    maxr r12, r0, r1
 ; CHECK-NEXT:    minr r12, r12, r2
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %c1 = icmp slt i64 %x, %lo
   %v1 = select i1 %c1, i64 %lo, i64 %x
   %c2 = icmp sgt i64 %v1, %hi

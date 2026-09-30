@@ -6,12 +6,9 @@
 define i64 @add64(i64 %a, i64 %b) {
 ; CHECK-LABEL: add64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    addr r12, r0, r1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = add i64 %a, %b
   ret i64 %r
 }
@@ -19,12 +16,9 @@ define i64 @add64(i64 %a, i64 %b) {
 define i64 @sub64(i64 %a, i64 %b) {
 ; CHECK-LABEL: sub64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    subr r12, r0, r1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = sub i64 %a, %b
   ret i64 %r
 }
@@ -32,12 +26,9 @@ define i64 @sub64(i64 %a, i64 %b) {
 define i64 @mul64(i64 %a, i64 %b) {
 ; CHECK-LABEL: mul64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    mulr r12, r0, r1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = mul i64 %a, %b
   ret i64 %r
 }
@@ -45,12 +36,9 @@ define i64 @mul64(i64 %a, i64 %b) {
 define i64 @sdiv64(i64 %a, i64 %b) {
 ; CHECK-LABEL: sdiv64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    divr r12, r0, r1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = sdiv i64 %a, %b
   ret i64 %r
 }
@@ -58,12 +46,9 @@ define i64 @sdiv64(i64 %a, i64 %b) {
 define i64 @udiv64(i64 %a, i64 %b) {
 ; CHECK-LABEL: udiv64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    divur r12, r0, r1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = udiv i64 %a, %b
   ret i64 %r
 }
@@ -71,12 +56,9 @@ define i64 @udiv64(i64 %a, i64 %b) {
 define i64 @srem64(i64 %a, i64 %b) {
 ; CHECK-LABEL: srem64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    modr r12, r0, r1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = srem i64 %a, %b
   ret i64 %r
 }
@@ -84,12 +66,9 @@ define i64 @srem64(i64 %a, i64 %b) {
 define i64 @urem64(i64 %a, i64 %b) {
 ; CHECK-LABEL: urem64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    modur r12, r0, r1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = urem i64 %a, %b
   ret i64 %r
 }
@@ -97,12 +76,9 @@ define i64 @urem64(i64 %a, i64 %b) {
 define i64 @and64(i64 %a, i64 %b) {
 ; CHECK-LABEL: and64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    andr r12, r0, r1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = and i64 %a, %b
   ret i64 %r
 }
@@ -110,12 +86,9 @@ define i64 @and64(i64 %a, i64 %b) {
 define i64 @or64(i64 %a, i64 %b) {
 ; CHECK-LABEL: or64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    orr r12, r0, r1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = or i64 %a, %b
   ret i64 %r
 }
@@ -123,12 +96,9 @@ define i64 @or64(i64 %a, i64 %b) {
 define i64 @xor64(i64 %a, i64 %b) {
 ; CHECK-LABEL: xor64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    xorr r12, r0, r1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = xor i64 %a, %b
   ret i64 %r
 }
@@ -136,12 +106,9 @@ define i64 @xor64(i64 %a, i64 %b) {
 define i64 @shl64(i64 %a, i64 %b) {
 ; CHECK-LABEL: shl64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    shlr r12, r0, r1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = shl i64 %a, %b
   ret i64 %r
 }
@@ -149,12 +116,9 @@ define i64 @shl64(i64 %a, i64 %b) {
 define i64 @lshr64(i64 %a, i64 %b) {
 ; CHECK-LABEL: lshr64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    shrr r12, r0, r1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = lshr i64 %a, %b
   ret i64 %r
 }
@@ -162,12 +126,9 @@ define i64 @lshr64(i64 %a, i64 %b) {
 define i64 @ashr64(i64 %a, i64 %b) {
 ; CHECK-LABEL: ashr64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    sarr r12, r0, r1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = ashr i64 %a, %b
   ret i64 %r
 }
@@ -175,12 +136,9 @@ define i64 @ashr64(i64 %a, i64 %b) {
 define i64 @smin64(i64 %a, i64 %b) {
 ; CHECK-LABEL: smin64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    minr r12, r0, r1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = call i64 @llvm.smin.i64(i64 %a, i64 %b)
   ret i64 %r
 }
@@ -188,12 +146,9 @@ define i64 @smin64(i64 %a, i64 %b) {
 define i64 @smax64(i64 %a, i64 %b) {
 ; CHECK-LABEL: smax64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    maxr r12, r0, r1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = call i64 @llvm.smax.i64(i64 %a, i64 %b)
   ret i64 %r
 }
@@ -201,12 +156,9 @@ define i64 @smax64(i64 %a, i64 %b) {
 define i64 @umin64(i64 %a, i64 %b) {
 ; CHECK-LABEL: umin64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    minur r12, r0, r1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = call i64 @llvm.umin.i64(i64 %a, i64 %b)
   ret i64 %r
 }
@@ -214,12 +166,9 @@ define i64 @umin64(i64 %a, i64 %b) {
 define i64 @umax64(i64 %a, i64 %b) {
 ; CHECK-LABEL: umax64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    maxur r12, r0, r1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = call i64 @llvm.umax.i64(i64 %a, i64 %b)
   ret i64 %r
 }
@@ -227,12 +176,9 @@ define i64 @umax64(i64 %a, i64 %b) {
 define i64 @neg64(i64 %a) {
 ; CHECK-LABEL: neg64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    negr r12, r0
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = sub i64 0, %a
   ret i64 %r
 }
@@ -240,12 +186,9 @@ define i64 @neg64(i64 %a) {
 define i64 @not64(i64 %a) {
 ; CHECK-LABEL: not64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    notr r12, r0
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = xor i64 %a, -1
   ret i64 %r
 }
@@ -253,12 +196,9 @@ define i64 @not64(i64 %a) {
 define i64 @add_imm(i64 %a) {
 ; CHECK-LABEL: add_imm:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    addi r12, r0, 42
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %r = add i64 %a, 42
   ret i64 %r
 }
@@ -266,12 +206,9 @@ define i64 @add_imm(i64 %a) {
 define i64 @large_const() {
 ; CHECK-LABEL: large_const:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr64 r12, 705032704, 1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   ret i64 5000000000
 }
 

@@ -7,12 +7,9 @@
 define i64 @slt(i64 %a, i64 %b) {
 ; CHECK-LABEL: slt:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmpltr r12, r0, r1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %c = icmp slt i64 %a, %b
   %r = select i1 %c, i64 1, i64 0
   ret i64 %r
@@ -22,12 +19,9 @@ define i64 @slt(i64 %a, i64 %b) {
 define i64 @sge(i64 %a, i64 %b) {
 ; CHECK-LABEL: sge:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmpger r12, r0, r1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %c = icmp sge i64 %a, %b
   %r = select i1 %c, i64 1, i64 0
   ret i64 %r
@@ -37,12 +31,9 @@ define i64 @sge(i64 %a, i64 %b) {
 define i64 @ult(i64 %a, i64 %b) {
 ; CHECK-LABEL: ult:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmpultr r12, r0, r1
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %c = icmp ult i64 %a, %b
   %r = select i1 %c, i64 1, i64 0
   ret i64 %r
@@ -52,17 +43,14 @@ define i64 @ult(i64 %a, i64 %b) {
 define i64 @eq_zero(i64 %a) {
 ; CHECK-LABEL: eq_zero:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmprv r0, 0
 ; CHECK-NEXT:    setr r12, 10
-; CHECK-NEXT:    jmpe .LBB3_2
+; CHECK-NEXT:    jmperel .LBB3_2
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    setr r12, 20
 ; CHECK-NEXT:  .LBB3_2:
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %c = icmp eq i64 %a, 0
   %r = select i1 %c, i64 10, i64 20
   ret i64 %r
@@ -72,13 +60,10 @@ define i64 @eq_zero(i64 %a) {
 define i64 @ne_const(i64 %a) {
 ; CHECK-LABEL: ne_const:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r12, 42
 ; CHECK-NEXT:    cmpner r12, r0, r12
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %c = icmp ne i64 %a, 42
   %r = select i1 %c, i64 1, i64 0
   ret i64 %r
@@ -88,19 +73,14 @@ define i64 @ne_const(i64 %a) {
 define i64 @if_else(i64 %a, i64 %b) {
 ; CHECK-LABEL: if_else:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
-; CHECK-NEXT:    cmprr r0, r1
-; CHECK-NEXT:    jmple .LBB5_2
+; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    fbr r0, r1, 2, .LBB5_2
 ; CHECK-NEXT:  # %bb.1: # %then
 ; CHECK-NEXT:    incr r12, r0
-; CHECK-NEXT:    jmp .LBB5_3
+; CHECK-NEXT:    leaveret
 ; CHECK-NEXT:  .LBB5_2: # %else
 ; CHECK-NEXT:    decr r12, r1
-; CHECK-NEXT:  .LBB5_3: # %exit
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
   %c = icmp sgt i64 %a, %b
   br i1 %c, label %then, label %else
 then:
@@ -118,19 +98,15 @@ exit:
 define i64 @countdown(i64 %n) {
 ; CHECK-LABEL: countdown:
 ; CHECK:       # %bb.0: # %entry
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    incr r12, r0
 ; CHECK-NEXT:    .p2align 4
 ; CHECK-NEXT:  .LBB6_1: # %loop
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
 ; CHECK-NEXT:    decr r12, r12
-; CHECK-NEXT:    cmprv r12, 0
-; CHECK-NEXT:    jmpgt .LBB6_1
+; CHECK-NEXT:    fbri r12, 0, 10, .LBB6_1
 ; CHECK-NEXT:  # %bb.2: # %exit
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
 entry:
   br label %loop
 loop:
@@ -146,8 +122,7 @@ exit:
 define i64 @sum_loop(i64 %n) {
 ; CHECK-LABEL: sum_loop:
 ; CHECK:       # %bb.0: # %entry
-; CHECK-NEXT:    push r15
-; CHECK-NEXT:    getsp r15
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r12, 0
 ; CHECK-NEXT:    setr r14, 0
 ; CHECK-NEXT:    .p2align 4
@@ -155,12 +130,9 @@ define i64 @sum_loop(i64 %n) {
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
 ; CHECK-NEXT:    addr r12, r12, r14
 ; CHECK-NEXT:    incr r14, r14
-; CHECK-NEXT:    cmprr r14, r0
-; CHECK-NEXT:    jmplt .LBB7_1
+; CHECK-NEXT:    fbr r14, r0, 1, .LBB7_1
 ; CHECK-NEXT:  # %bb.2: # %exit
-; CHECK-NEXT:    setsp r15
-; CHECK-NEXT:    pop r15
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    leaveret
 entry:
   br label %loop
 loop:

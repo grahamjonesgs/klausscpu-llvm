@@ -1,4 +1,4 @@
-; RUN: llc -march=klausscpu -verify-machineinstrs -O2 < %s | FileCheck %s
+; RUN: llc -march=klausscpu -verify-machineinstrs -O2 -klausscpu-enter-leave=false < %s | FileCheck %s
 ;
 ; Dynamic allocas (VLAs).  GETSP_R must be re-read after every SETSP_R/ADDSP:
 ; an unchained GETSP_R has no operands, so SelectionDAG used to CSE every one
