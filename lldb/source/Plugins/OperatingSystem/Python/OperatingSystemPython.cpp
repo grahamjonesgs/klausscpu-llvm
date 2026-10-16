@@ -253,6 +253,14 @@ ThreadSP OperatingSystemPython::CreateThreadFromThreadInfo(
       // operating system threads, clear the thread so we create an operating
       // system thread for this.
       thread_sp.reset();
+    } else {
+      // The plug-in may report a different name, queue or core for the same
+      // thread at each stop (an RTOS task's state is often part of its name,
+      // and only the running task is on a core).
+      thread_sp->SetName(name.str().c_str());
+      thread_sp->SetQueueName(queue.str().c_str());
+      if (core_number >= core_thread_list.GetSize(false))
+        thread_sp->ClearBackingThread();
     }
   }
 

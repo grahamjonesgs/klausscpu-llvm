@@ -171,6 +171,8 @@ public:
     return ThreadMemory::GetName();
   }
 
+  void SetName(const char *name) override { m_name = name ? name : ""; }
+
   ~ThreadMemoryProvidingName() override = default;
 
 private:
@@ -197,8 +199,7 @@ public:
     return ThreadMemory::GetQueueName();
   }
 
-  /// TODO: this method should take into account the queue override.
-  void SetQueueName(const char *name) override { Thread::SetQueueName(name); }
+  void SetQueueName(const char *name) override { m_queue = name ? name : ""; }
 
   /// TODO: this method should take into account the queue override.
   lldb::queue_id_t GetQueueID() override { return Thread::GetQueueID(); }
