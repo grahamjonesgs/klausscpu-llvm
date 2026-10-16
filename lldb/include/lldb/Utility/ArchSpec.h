@@ -237,6 +237,8 @@ public:
 
     eCore_wasm32,
 
+    eCore_klausscpu,
+
     kNumCores,
 
     kCore_invalid,

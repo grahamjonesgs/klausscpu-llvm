@@ -248,6 +248,11 @@ static constexpr const CoreDefinition g_core_definitions[] = {
 
     {eByteOrderLittle, 4, 1, 4, llvm::Triple::wasm32, ArchSpec::eCore_wasm32,
      "wasm32"},
+
+    // 32-bit addresses (ELF32, DWARF address size 4) although GPRs and C
+    // pointers are 64-bit; instructions are 1-3 words.
+    {eByteOrderLittle, 4, 4, 12, llvm::Triple::klausscpu,
+     ArchSpec::eCore_klausscpu, "klausscpu"},
 };
 
 // Ensure that we have an entry in the g_core_definitions for each core. If you
@@ -412,6 +417,7 @@ static const ArchDefinitionEntry g_elf_arch_entries[] = {
     {ArchSpec::eCore_riscv64,         llvm::ELF::EM_RISCV,      ArchSpec::eRISCVSubType_riscv64}, // riscv64
     {ArchSpec::eCore_loongarch32,     llvm::ELF::EM_LOONGARCH,  ArchSpec::eLoongArchSubType_loongarch32}, // loongarch32
     {ArchSpec::eCore_loongarch64,     llvm::ELF::EM_LOONGARCH,  ArchSpec::eLoongArchSubType_loongarch64}, // loongarch64
+    {ArchSpec::eCore_klausscpu,       llvm::ELF::EM_KLAUSSCPU   }, // KlaussCPU
 };
 // clang-format on
 
