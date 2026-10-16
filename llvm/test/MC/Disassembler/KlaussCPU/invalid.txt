@@ -1,0 +1,19 @@
+# RUN: llvm-mc -triple=klausscpu --disassemble %s 2>&1 | FileCheck %s
+
+# LEN = 00: retired v1 opcode / lld's inter-section fill word.
+# CHECK: warning: invalid instruction encoding
+0x00 0x00 0xf0 0x11
+
+# BEXTR with rd (r3) != rs1 (r5): the tied operands have one asm slot.
+# CHECK: warning: invalid instruction encoding
+0x50 0x03 0x00 0x93 0x85 0xff 0xff 0xff
+
+# Non-zero "x" field [15:12] on ADDR: the v2 CPU traps, so it does not decode.
+# CHECK: warning: invalid instruction encoding
+0x01 0x10 0x20 0x44
+
+# Valid instructions still decode after the failures.
+# CHECK: addr r1, r0, r1
+0x01 0x01 0x20 0x44
+# CHECK: trap
+0x00 0x00 0x04 0x6c

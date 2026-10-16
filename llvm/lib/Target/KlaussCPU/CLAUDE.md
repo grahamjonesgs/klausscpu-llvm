@@ -158,6 +158,11 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPUTargetTransformInfo.h/.cpp  TTI — M8 unroll budget gated on branch density, no peel
 ├── KlaussCPUSubtarget.h/.cpp   single global subtarget; member init order is critical
 ├── KlaussCPUTargetMachine.h/.cpp CodeGenTargetMachineImpl; PassConfig::addInstSelector + addPreEmitPass + getTargetTransformInfo
+├── Disassembler/
+│   ├── KlaussCPUDisassembler.cpp   hand-written v2/v3 decoder (table-driven)
+│   ├── KlaussCPUGenDecoderTable.inc GENERATED from KlaussCPUMCCodeEmitter.cpp
+│   ├── gen-decoder-table.py        regenerates the table (run after any encoding change)
+│   └── roundtrip-check.py          disassemble→reassemble every entry; writes the MC test
 ├── MCTargetDesc/
 │   ├── CMakeLists.txt          LLVMKlaussCPUDesc; depends on KlaussCPUCommonTableGen
 │   ├── KlaussCPUMCAsmInfo.h/.cpp  MCAsmInfoELF subclass
@@ -1064,6 +1069,47 @@ is now on every KlaussCPU codegen test RUN line — keep it there.
 - Remaining `SEXTW`/`ZEXTW` need ISA help (no 32-bit ops) — see
   `ISA_V3_PROPOSAL.md`, which ranks ISA additions (short 1-word immediate/branch
   forms, ENTER/LEAVE, fused compare-and-branch, 32-bit ops) from execution traces.
+
+---
+
+### Step 39 ✅ Debug support: CFI, object-file tooling, TRAP, disassembler (2026-10-16)
+DEBUG_PLAN Phase 0 (plan: `klaussCPU/DEBUG_PLAN.md`), branch `debug-support`.
+- **CFI** (`KlaussCPUFrameLowering.cpp`): CIE = `CFA=SP+8, RA(17)=[CFA-8]`
+  (MCAsmInfo factory in `KlaussCPUMCTargetDesc.cpp`); after ENTER or
+  PUSH/GETSP the CFA is `R15+16`, caller R15 at `CFA-16`; CSR spills are
+  FrameSetup-flagged with `.cfi_offset` after them (slot offset − 16);
+  LEAVE / SETSP+POP epilogues go back to `SP+8` and mark R15 + CSRs
+  `same_value`; LEAVERET needs none. CFIFixup is on (`setCFIFixup(true)` +
+  `resetCFIToInitialState`) for blocks laid out after an epilogue.  CFI is
+  only emitted when `needsFrameMoves()` (`-g`, uwtable, or IR without
+  `nounwind`) — clang C code without `-g` is unchanged.
+- **Object tooling**: `EM_KLAUSSCPU` → `Triple::klausscpu` / `elf32-klausscpu`
+  in `ELFObjectFile.h`; `R_KLAUSSCPU_{NONE,ABS32,ABS64,PC32}` in
+  `RelocationResolver.cpp` (llvm-dwarfdump / llvm-symbolizer on `.o`);
+  machine name in llvm-readobj, yaml2obj/obj2yaml, `BinaryFormat/ELF.cpp`.
+- **TRAP** (`0x6C040000`, v2 class B OP 4) defined; `__builtin_debugtrap` →
+  `trap`, `__builtin_trap` stays `halt`.  It is the debugger's software
+  breakpoint.
+- **Disassembler** (`Disassembler/`): the encoder is hand-written, so the
+  decode table is generated from `KlaussCPUMCCodeEmitter.cpp` by
+  `gen-decoder-table.py`, which also rejects ambiguous encodings (special
+  cases such as ROLR1 = ROLV N=1 are ordered first).  **Re-run it, then
+  `roundtrip-check.py`, after any encoding change.**  PC-relative operands
+  decode to the byte displacement (what the encoder takes as an immediate);
+  the printer shows target addresses under `PrintBranchImmAsAddress`
+  (llvm-objdump) and `KlaussCPUMCInstrAnalysis::evaluateBranch` symbolizes
+  them.  The encoder now also accepts immediate targets for short / fused
+  branches.  Tied operands decoded from two fields must match (else invalid).
+  LEN=00 words (retired v1 opcodes, lld's `00 00 f0 11` fill) don't decode.
+- **Verified**: llc asm vs objdump of llc's object for Doom renderer/game +
+  FreeRTOS tasks/queue at -O0/-O1/-O2/PIC: 59,660 instructions, 0 mismatches;
+  all 234 table entries round-trip; ~2.0M instructions across every
+  KlaussCPU ELF in klausscpu-runtime decode, remaining `<unknown>` are lld fill
+  words and string data in `.text`.
+- Tests: `CodeGen/KlaussCPU/{cfi,debugtrap}.ll`,
+  `DebugInfo/KlaussCPU/debug-frame.ll`,
+  `MC/Disassembler/KlaussCPU/{all-instructions,invalid}.txt`,
+  `objdump-branches.s`.
 
 ---
 

@@ -139,11 +139,16 @@ uint32_t KlaussCPUMCCodeEmitter::encode32(
     const MCInst &MI, SmallVectorImpl<MCFixup> &Fixups) const {
   // ISA v3 A1 short PC-relative branch: displacement comes from the PCREL18
   // fixup at offset 0 (resolved at assembly time, else relaxed to 2 words).
+  // An immediate target is the byte displacement (e.g. from disassembly).
   if (isKlaussCPUShortBranch(MI.getOpcode())) {
+    uint32_t W = klaussCPUShortBranchWord(MI.getOpcode());
+    const MCOperand &Target = MI.getOperand(0);
+    if (Target.isImm())
+      return W | (static_cast<uint32_t>(Target.getImm() >> 2) & 0x3FFFFu);
     Fixups.push_back(MCFixup::create(
-        0, MI.getOperand(0).getExpr(),
+        0, Target.getExpr(),
         MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL18), /*PCRel=*/true));
-    return klaussCPUShortBranchWord(MI.getOpcode());
+    return W;
   }
   // ISA v3 B fused compare-and-branch: class 0xD LEN=01; PRED[25:23]
   // INV[22] IMM[21] disp13[20:8] (PCREL13 fixup) rs1[7:4] rs2/simm4[3:0].
@@ -153,8 +158,11 @@ uint32_t KlaussCPUMCCodeEmitter::encode32(
     uint32_t W = 0x74000000u | ((CC & 7) << 23) | (((CC >> 3) & 1) << 22) |
                  (Imm ? (1u << 21) : 0) | fRs1(MI, 0) |
                  (Imm ? (getImm32(MI, 1) & 0xF) : fRs2(MI, 1));
+    const MCOperand &Target = MI.getOperand(3);
+    if (Target.isImm())
+      return W | ((static_cast<uint32_t>(Target.getImm() >> 2) & 0x1FFFu) << 8);
     Fixups.push_back(MCFixup::create(
-        0, MI.getOperand(3).getExpr(),
+        0, Target.getExpr(),
         MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL13), /*PCRel=*/true));
     return W;
   }
@@ -298,6 +306,7 @@ uint32_t KlaussCPUMCCodeEmitter::encode32(
   case KlaussCPU::NOP_I:   return 0x6C000000u;
   case KlaussCPU::HALT_I:  return 0x6C010000u;
   case KlaussCPU::WAIT_I:  return 0x6C020000u;
+  case KlaussCPU::TRAP_I:  return 0x6C040000u;
 
   // ── Class B / C register-source peripherals (source register in rs1[7:4]) ─
   case KlaussCPU::DELAYR:   return 0x6C050000u | fRs1(MI,0);

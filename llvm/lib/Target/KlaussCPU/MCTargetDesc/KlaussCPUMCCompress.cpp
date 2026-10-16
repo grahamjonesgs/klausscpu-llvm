@@ -108,6 +108,26 @@ static const BranchMap *findShortBranch(unsigned Opc) {
   return nullptr;
 }
 
+int llvm::getKlaussCPUPCRelOperand(unsigned Opcode) {
+  switch (Opcode) {
+  case KlaussCPU::FBR_RR:
+  case KlaussCPU::FBR_RI:
+    return 3;
+  case KlaussCPU::LEAPC:
+    return 1;
+  case KlaussCPU::CALLREL:
+    return 0;
+  default:
+    break;
+  }
+  if (isKlaussCPUShortBranch(Opcode))
+    return 0;
+  for (const BranchMap &B : Branches)
+    if (B.LongRel && B.LongRel == Opcode)
+      return 0;
+  return -1;
+}
+
 bool llvm::isKlaussCPUShortBranch(unsigned Opcode) {
   return findShortBranch(Opcode) != nullptr;
 }

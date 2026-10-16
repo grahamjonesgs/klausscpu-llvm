@@ -641,6 +641,14 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
     return;
   }
 
+  // ---- ISD::DEBUGTRAP → TRAP_I (debugger breakpoint) ----------------------
+  if (N->getOpcode() == ISD::DEBUGTRAP) {
+    SDNode *Res = CurDAG->getMachineNode(KlaussCPU::TRAP_I, SDLoc(N),
+                                         MVT::Other, {N->getOperand(0)});
+    ReplaceNode(N, Res);
+    return;
+  }
+
   // Delegate everything else to the tablegen-generated SelectCode().
   SelectCode(N);
 }

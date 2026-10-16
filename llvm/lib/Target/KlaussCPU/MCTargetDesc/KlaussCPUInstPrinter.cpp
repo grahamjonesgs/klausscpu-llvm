@@ -5,6 +5,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "KlaussCPUInstPrinter.h"
+#include "KlaussCPUMCTargetDesc.h"
+#include "llvm/MC/MCInstrInfo.h"
+
+#define GET_INSTRINFO_ENUM
+#include "KlaussCPUGenInstrInfo.inc"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
@@ -26,6 +31,7 @@ void KlaussCPUInstPrinter::printInst(const MCInst *MI, uint64_t Address,
                                       StringRef Annot,
                                       const MCSubtargetInfo & /*STI*/,
                                       raw_ostream &O) {
+  CurAddress = Address;
   printInstruction(MI, Address, O);
   printAnnotation(O, Annot);
 }
@@ -38,6 +44,32 @@ void KlaussCPUInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
     return;
   }
   if (Op.isImm()) {
+    // Branch targets: PC-relative operands hold the byte displacement from
+    // this instruction; absolute JMP/CALL targets hold the address.  With
+    // PrintBranchImmAsAddress (llvm-objdump) both print as the target address.
+    // JMPO/JMPNO have no PC-relative spelling, so their short forms print
+    // with the absolute mnemonic and must always show the target address.
+    if ((MI->getOpcode() == KlaussCPU::JMPO_SH ||
+         MI->getOpcode() == KlaussCPU::JMPNO_SH) && OpNo == 0) {
+      uint64_t Target = uint32_t(CurAddress + Op.getImm());
+      if (PrintBranchImmAsAddress)
+        O << formatHex(Target);
+      else
+        O << Target;
+      return;
+    }
+    if (PrintBranchImmAsAddress) {
+      int PCRelOp = getKlaussCPUPCRelOperand(MI->getOpcode());
+      const MCInstrDesc &Desc = MII.get(MI->getOpcode());
+      if (int(OpNo) == PCRelOp) {
+        O << formatHex(uint64_t(uint32_t(CurAddress + Op.getImm())));
+        return;
+      }
+      if (PCRelOp < 0 && OpNo == 0 && (Desc.isBranch() || Desc.isCall())) {
+        O << formatHex(uint64_t(uint32_t(Op.getImm())));
+        return;
+      }
+    }
     O << Op.getImm();
     return;
   }

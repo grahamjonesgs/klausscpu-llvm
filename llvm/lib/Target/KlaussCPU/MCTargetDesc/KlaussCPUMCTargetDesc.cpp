@@ -16,6 +16,7 @@
 #include "KlaussCPUMCTargetDesc.h"
 #include "TargetInfo/KlaussCPUTargetInfo.h"
 #include "llvm/MC/MCDwarf.h"
+#include "llvm/MC/MCInstrAnalysis.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
@@ -86,6 +87,33 @@ createKlaussCPUMCInstPrinter(const Triple & /*T*/, unsigned SyntaxVariant,
   return nullptr;
 }
 
+namespace {
+// Branch-target evaluation for llvm-objdump symbolization and debuggers.
+class KlaussCPUMCInstrAnalysis : public MCInstrAnalysis {
+public:
+  explicit KlaussCPUMCInstrAnalysis(const MCInstrInfo *Info)
+      : MCInstrAnalysis(Info) {}
+
+  bool evaluateBranch(const MCInst &Inst, uint64_t Addr, uint64_t Size,
+                      uint64_t &Target) const override {
+    const MCInstrDesc &Desc = Info->get(Inst.getOpcode());
+    if (!(Desc.isBranch() || Desc.isCall()))
+      return false; // includes LEAPC, whose PC-relative operand is data
+    int PCRelOp = getKlaussCPUPCRelOperand(Inst.getOpcode());
+    unsigned TargetOp = PCRelOp >= 0 ? PCRelOp : 0;
+    if (Inst.getNumOperands() <= TargetOp || !Inst.getOperand(TargetOp).isImm())
+      return false; // register-indirect (JMPR/CALLR) or symbolic
+    int64_t Imm = Inst.getOperand(TargetOp).getImm();
+    Target = uint32_t(PCRelOp >= 0 ? Addr + Imm : Imm);
+    return true;
+  }
+};
+} // namespace
+
+static MCInstrAnalysis *createKlaussCPUInstrAnalysis(const MCInstrInfo *Info) {
+  return new KlaussCPUMCInstrAnalysis(Info);
+}
+
 extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void
 LLVMInitializeKlaussCPUTargetMC() {
   Target &T = getTheKlaussCPUTarget();
@@ -100,6 +128,7 @@ LLVMInitializeKlaussCPUTargetMC() {
 
   // Text assembly printer.
   TargetRegistry::RegisterMCInstPrinter(T, createKlaussCPUMCInstPrinter);
+  TargetRegistry::RegisterMCInstrAnalysis(T, createKlaussCPUInstrAnalysis);
 
   // Code emitter + assembler backend: enables -filetype=obj ELF output.
   TargetRegistry::RegisterMCCodeEmitter(T, createKlaussCPUMCCodeEmitter);
