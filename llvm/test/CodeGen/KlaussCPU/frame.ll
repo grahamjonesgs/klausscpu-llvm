@@ -11,6 +11,8 @@ define i64 @with_alloca(i64 %x) {
 ; CHECK-LABEL: with_alloca:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 1
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    copy r12, r0
 ; CHECK-NEXT:    stidx64 r0, r15, -8
 ; CHECK-NEXT:    leaveret
@@ -25,6 +27,8 @@ define void @pass_local_addr() {
 ; CHECK-LABEL: pass_local_addr:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 4
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    addi r0, r15, -8
 ; CHECK-NEXT:    call use_ptr
 ; CHECK-NEXT:    leaveret
@@ -38,6 +42,8 @@ define i64 @stack_array(i64 %i, i64 %v) {
 ; CHECK-LABEL: stack_array:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 8
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    shlv r14, r0, 3
 ; CHECK-NEXT:    addi r13, r15, -64
 ; CHECK-NEXT:    copy r12, r1
@@ -56,7 +62,10 @@ define i64 @spill_across_call(i64 %a) {
 ; CHECK-LABEL: spill_across_call:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 4
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
+; CHECK-NEXT:    .cfi_offset r4, -24
 ; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    setr r0, 0
 ; CHECK-NEXT:    call use_ptr
@@ -74,6 +83,8 @@ define i64 @multi_alloca(i64 %x, i64 %y) {
 ; CHECK-LABEL: multi_alloca:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 2
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    addr r12, r0, r1
 ; CHECK-NEXT:    stidx64 r0, r15, -8
 ; CHECK-NEXT:    stidx64 r1, r15, -16

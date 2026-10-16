@@ -42,6 +42,21 @@ public:
       MachineFunction &MF, MachineBasicBlock &MBB,
       MachineBasicBlock::iterator I) const override;
 
+  // Callee-saved spills/reloads flagged FrameSetup/FrameDestroy so the CFI
+  // for them can be placed (see emitPrologue).
+  bool spillCalleeSavedRegisters(MachineBasicBlock &MBB,
+                                 MachineBasicBlock::iterator MI,
+                                 ArrayRef<CalleeSavedInfo> CSI,
+                                 const TargetRegisterInfo *TRI) const override;
+  bool
+  restoreCalleeSavedRegisters(MachineBasicBlock &MBB,
+                              MachineBasicBlock::iterator MI,
+                              MutableArrayRef<CalleeSavedInfo> CSI,
+                              const TargetRegisterInfo *TRI) const override;
+
+  // CFIFixup hook: reset the unwind state to the CIE's (CFA = SP+8).
+  void resetCFIToInitialState(MachineBasicBlock &MBB) const override;
+
   // KlaussCPU always frames (R15 = P is always the frame pointer).
   bool hasFPImpl(const MachineFunction &MF) const override { return true; }
 };

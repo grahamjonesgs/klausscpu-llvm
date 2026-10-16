@@ -10,6 +10,8 @@ define i64 @sum2(i64 %fmt, ...) {
 ; CHECK-LABEL: sum2:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 1
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    stidx64 r3, r15, 32
 ; CHECK-NEXT:    stidx64 r2, r15, 24
 ; CHECK-NEXT:    addr r12, r1, r2
@@ -33,6 +35,8 @@ define i64 @sum1_named2(i64 %a, i64 %b, ...) {
 ; CHECK-LABEL: sum1_named2:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 1
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    stidx64 r3, r15, 32
 ; CHECK-NEXT:    addr r12, r1, r2
 ; CHECK-NEXT:    addi r14, r15, 24
@@ -53,6 +57,8 @@ define i64 @first_stack_vararg(i64 %a, i64 %b, i64 %c, i64 %d, ...) {
 ; CHECK-LABEL: first_stack_vararg:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 1
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    addi r12, r15, 40
 ; CHECK-NEXT:    stidx64 r12, r15, -8
 ; CHECK-NEXT:    ldidx64 r12, r15, 40
@@ -76,6 +82,8 @@ define i64 @pick_u32(i64 %n, ...) {
 ; CHECK-LABEL: pick_u32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 1
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    addi r12, r15, 16
 ; CHECK-NEXT:    addi r12, r12, 15
 ; CHECK-NEXT:    setr r14, -8

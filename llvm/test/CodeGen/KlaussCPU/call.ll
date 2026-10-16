@@ -11,6 +11,8 @@ define i64 @call_4_args(i64 %a, i64 %b, i64 %c, i64 %d) {
 ; CHECK-LABEL: call_4_args:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    call ext
 ; CHECK-NEXT:    leaveret
   %r = call i64 @ext(i64 %a, i64 %b, i64 %c, i64 %d)
@@ -23,6 +25,8 @@ define i64 @call_5_args(i64 %a, i64 %b, i64 %c, i64 %d, i64 %e) {
 ; CHECK-LABEL: call_5_args:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 4
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    ldidx64 r12, r15, 40
 ; CHECK-NEXT:    getsp r14
 ; CHECK-NEXT:    stidx64 r12, r14, 24
@@ -37,7 +41,10 @@ define i64 @callee_saved_live_across_call(i64 %x) {
 ; CHECK-LABEL: callee_saved_live_across_call:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 4
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
+; CHECK-NEXT:    .cfi_offset r4, -24
 ; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    call ext_void
 ; CHECK-NEXT:    addi r12, r4, 3
@@ -54,6 +61,8 @@ define i64 @leaf(i64 %a, i64 %b) {
 ; CHECK-LABEL: leaf:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    addr r12, r0, r1
 ; CHECK-NEXT:    leaveret
   %r = add i64 %a, %b
@@ -65,6 +74,8 @@ define i64 @return_const() {
 ; CHECK-LABEL: return_const:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    setr r12, 99
 ; CHECK-NEXT:    leaveret
   ret i64 99
@@ -75,6 +86,8 @@ define i64 @indirect_call(ptr %fp, i64 %a) {
 ; CHECK-LABEL: indirect_call:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    copy r12, r0
 ; CHECK-NEXT:    copy r0, r1
 ; CHECK-NEXT:    callr r12

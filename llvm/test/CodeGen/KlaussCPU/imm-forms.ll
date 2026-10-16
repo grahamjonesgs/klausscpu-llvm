@@ -8,6 +8,8 @@ define i64 @zext8(i64 %a) {
 ; CHECK-LABEL: zext8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    zextb r12, r0
 ; CHECK-NEXT:    leaveret
   %r = and i64 %a, 255
@@ -18,6 +20,8 @@ define i64 @zext16(i64 %a) {
 ; CHECK-LABEL: zext16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    zexth r12, r0
 ; CHECK-NEXT:    leaveret
   %r = and i64 %a, 65535
@@ -28,6 +32,8 @@ define i64 @bit_set3(i64 %a) {
 ; CHECK-LABEL: bit_set3:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    bset r12, r0, 3
 ; CHECK-NEXT:    leaveret
   %r = or i64 %a, 8
@@ -38,6 +44,8 @@ define i64 @bit_set63(i64 %a) {
 ; CHECK-LABEL: bit_set63:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    bset r12, r0, 63
 ; CHECK-NEXT:    leaveret
   %r = or i64 %a, -9223372036854775808
@@ -48,6 +56,8 @@ define i64 @bit_clear40(i64 %a) {
 ; CHECK-LABEL: bit_clear40:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    bclr r12, r0, 40
 ; CHECK-NEXT:    leaveret
   %r = and i64 %a, -1099511627777
@@ -58,6 +68,8 @@ define i64 @bit_toggle32(i64 %a) {
 ; CHECK-LABEL: bit_toggle32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    btgl r12, r0, 32
 ; CHECK-NEXT:    leaveret
   %r = xor i64 %a, 4294967296
@@ -68,6 +80,8 @@ define i64 @load_idx(ptr %p, i64 %i) {
 ; CHECK-LABEL: load_idx:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    shlv r12, r1, 3
 ; CHECK-NEXT:    ldidx64r r12, r0, r12
 ; CHECK-NEXT:    leaveret
@@ -80,6 +94,8 @@ define void @store_idx(ptr %p, i64 %i, i64 %v) {
 ; CHECK-LABEL: store_idx:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    shlv r12, r1, 3
 ; CHECK-NEXT:    stidx64r r2, r0, r12
 ; CHECK-NEXT:    leaveret
@@ -93,6 +109,8 @@ define i64 @untied(i64 %a) {
 ; CHECK-LABEL: untied:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    incr r12, r0
 ; CHECK-NEXT:    mulr r12, r0, r12
 ; CHECK-NEXT:    shlv r12, r12, 4
@@ -108,6 +126,8 @@ define i64 @bool_zext(i64 %a, i64 %b) {
 ; CHECK-LABEL: bool_zext:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    cmpultr r12, r0, r1
 ; CHECK-NEXT:    leaveret
   %c = icmp ult i64 %a, %b

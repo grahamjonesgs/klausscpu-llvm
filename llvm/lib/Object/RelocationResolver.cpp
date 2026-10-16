@@ -393,6 +393,34 @@ static uint64_t resolveLanai(uint64_t Type, uint64_t Offset, uint64_t S,
   llvm_unreachable("Invalid relocation type");
 }
 
+static bool supportsKlaussCPU(uint64_t Type) {
+  switch (Type) {
+  case ELF::R_KLAUSSCPU_NONE:
+  case ELF::R_KLAUSSCPU_ABS32:
+  case ELF::R_KLAUSSCPU_ABS64:
+  case ELF::R_KLAUSSCPU_PC32:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static uint64_t resolveKlaussCPU(uint64_t Type, uint64_t Offset, uint64_t S,
+                                 uint64_t LocData, int64_t Addend) {
+  switch (Type) {
+  case ELF::R_KLAUSSCPU_NONE:
+    return LocData;
+  case ELF::R_KLAUSSCPU_ABS32:
+    return (S + Addend) & 0xFFFFFFFF;
+  case ELF::R_KLAUSSCPU_ABS64:
+    return S + Addend;
+  case ELF::R_KLAUSSCPU_PC32:
+    return (S + Addend - Offset) & 0xFFFFFFFF;
+  default:
+    llvm_unreachable("Invalid relocation type");
+  }
+}
+
 static bool supportsMips32(uint64_t Type) {
   switch (Type) {
   case ELF::R_MIPS_32:
@@ -858,6 +886,8 @@ getRelocationResolver(const ObjectFile &Obj) {
       return {supportsRISCV, resolveRISCV};
     case Triple::csky:
       return {supportsCSKY, resolveCSKY};
+    case Triple::klausscpu:
+      return {supportsKlaussCPU, resolveKlaussCPU};
     default:
       if (isAMDGPU(Obj))
         return {supportsAmdgpu, resolveAmdgpu};

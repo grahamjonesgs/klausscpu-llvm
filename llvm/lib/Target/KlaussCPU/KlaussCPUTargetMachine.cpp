@@ -70,6 +70,9 @@ KlaussCPUTargetMachine::KlaussCPUTargetMachine(
       Subtarget(TT, getEffectiveCPU(CPU), FS, *this),
       TLOF(std::make_unique<TargetLoweringObjectFileELF>()) {
   initAsmInfo();
+  // Epilogues that end in a plain LEAVE tear the frame down before the block's
+  // terminator; CFIFixup re-establishes the frame CFI for later blocks.
+  setCFIFixup(true);
 }
 
 //===----------------------------------------------------------------------===//

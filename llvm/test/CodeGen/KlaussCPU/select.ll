@@ -9,6 +9,8 @@ define i64 @select_eq(i64 %cond, i64 %t, i64 %f) {
 ; CHECK-LABEL: select_eq:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    fbri r0, 0, 0, .LBB0_2
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    copy r1, r2
@@ -24,6 +26,8 @@ define i64 @select_ne(i64 %cond, i64 %t, i64 %f) {
 ; CHECK-LABEL: select_ne:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    fbri r0, 0, 8, .LBB1_2
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    copy r1, r2
@@ -39,6 +43,8 @@ define i64 @select_slt(i64 %a, i64 %b, i64 %t, i64 %f) {
 ; CHECK-LABEL: select_slt:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    fbr r0, r1, 1, .LBB2_2
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    copy r2, r3
@@ -55,6 +61,8 @@ define i64 @select_const(i64 %cond) {
 ; CHECK-LABEL: select_const:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    cmprv r0, 0
 ; CHECK-NEXT:    setr r12, 100
 ; CHECK-NEXT:    jmpgtrel .LBB3_2
@@ -72,6 +80,8 @@ define i64 @clamp(i64 %x, i64 %lo, i64 %hi) {
 ; CHECK-LABEL: clamp:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    maxr r12, r0, r1
 ; CHECK-NEXT:    minr r12, r12, r2
 ; CHECK-NEXT:    leaveret

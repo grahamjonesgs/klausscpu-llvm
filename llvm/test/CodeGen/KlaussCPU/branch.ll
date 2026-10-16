@@ -8,6 +8,8 @@ define i64 @slt(i64 %a, i64 %b) {
 ; CHECK-LABEL: slt:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    cmpltr r12, r0, r1
 ; CHECK-NEXT:    leaveret
   %c = icmp slt i64 %a, %b
@@ -20,6 +22,8 @@ define i64 @sge(i64 %a, i64 %b) {
 ; CHECK-LABEL: sge:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    cmpger r12, r0, r1
 ; CHECK-NEXT:    leaveret
   %c = icmp sge i64 %a, %b
@@ -32,6 +36,8 @@ define i64 @ult(i64 %a, i64 %b) {
 ; CHECK-LABEL: ult:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    cmpultr r12, r0, r1
 ; CHECK-NEXT:    leaveret
   %c = icmp ult i64 %a, %b
@@ -44,6 +50,8 @@ define i64 @eq_zero(i64 %a) {
 ; CHECK-LABEL: eq_zero:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    cmprv r0, 0
 ; CHECK-NEXT:    setr r12, 10
 ; CHECK-NEXT:    jmperel .LBB3_2
@@ -61,6 +69,8 @@ define i64 @ne_const(i64 %a) {
 ; CHECK-LABEL: ne_const:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    setr r12, 42
 ; CHECK-NEXT:    cmpner r12, r0, r12
 ; CHECK-NEXT:    leaveret
@@ -74,6 +84,8 @@ define i64 @if_else(i64 %a, i64 %b) {
 ; CHECK-LABEL: if_else:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    fbr r0, r1, 2, .LBB5_2
 ; CHECK-NEXT:  # %bb.1: # %then
 ; CHECK-NEXT:    incr r12, r0
@@ -99,6 +111,8 @@ define i64 @countdown(i64 %n) {
 ; CHECK-LABEL: countdown:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    incr r12, r0
 ; CHECK-NEXT:    .p2align 4
 ; CHECK-NEXT:  .LBB6_1: # %loop
@@ -123,6 +137,8 @@ define i64 @sum_loop(i64 %n) {
 ; CHECK-LABEL: sum_loop:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    setr r12, 0
 ; CHECK-NEXT:    setr r14, 0
 ; CHECK-NEXT:    .p2align 4

@@ -7,6 +7,8 @@ define i64 @load_i8_zext(ptr %p) {
 ; CHECK-LABEL: load_i8_zext:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    memget8 r12, r0
 ; CHECK-NEXT:    leaveret
   %v = load i8, ptr %p
@@ -18,6 +20,8 @@ define i64 @load_i8_sext(ptr %p) {
 ; CHECK-LABEL: load_i8_sext:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    ldidx8s r12, r0, 0
 ; CHECK-NEXT:    leaveret
   %v = load i8, ptr %p
@@ -29,6 +33,8 @@ define i64 @load_i16_zext(ptr %p) {
 ; CHECK-LABEL: load_i16_zext:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    memget16 r12, r0
 ; CHECK-NEXT:    leaveret
   %v = load i16, ptr %p
@@ -40,6 +46,8 @@ define i64 @load_i16_sext(ptr %p) {
 ; CHECK-LABEL: load_i16_sext:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    ldidx16s r12, r0, 0
 ; CHECK-NEXT:    leaveret
   %v = load i16, ptr %p
@@ -51,6 +59,8 @@ define i64 @load_i32_zext(ptr %p) {
 ; CHECK-LABEL: load_i32_zext:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    memget32 r12, r0
 ; CHECK-NEXT:    leaveret
   %v = load i32, ptr %p
@@ -62,6 +72,8 @@ define i64 @load_i32_sext(ptr %p) {
 ; CHECK-LABEL: load_i32_sext:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    ldidx32s r12, r0, 0
 ; CHECK-NEXT:    leaveret
   %v = load i32, ptr %p
@@ -73,6 +85,8 @@ define i64 @load_i64(ptr %p) {
 ; CHECK-LABEL: load_i64:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    ldidx64 r12, r0, 0
 ; CHECK-NEXT:    leaveret
   %r = load i64, ptr %p
@@ -83,6 +97,8 @@ define void @store_i8(ptr %p, i64 %v) {
 ; CHECK-LABEL: store_i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    memset8 r1, r0
 ; CHECK-NEXT:    leaveret
   %t = trunc i64 %v to i8
@@ -94,6 +110,8 @@ define void @store_i16(ptr %p, i64 %v) {
 ; CHECK-LABEL: store_i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    memset16 r1, r0
 ; CHECK-NEXT:    leaveret
   %t = trunc i64 %v to i16
@@ -105,6 +123,8 @@ define void @store_i32(ptr %p, i64 %v) {
 ; CHECK-LABEL: store_i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    memset32 r1, r0
 ; CHECK-NEXT:    leaveret
   %t = trunc i64 %v to i32
@@ -116,6 +136,8 @@ define void @store_i64(ptr %p, i64 %v) {
 ; CHECK-LABEL: store_i64:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    stidx64 r1, r0, 0
 ; CHECK-NEXT:    leaveret
   store i64 %v, ptr %p
@@ -127,6 +149,8 @@ define i64 @load_i64_offset(ptr %p) {
 ; CHECK-LABEL: load_i64_offset:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    ldidx64 r12, r0, 24
 ; CHECK-NEXT:    leaveret
   %q = getelementptr i64, ptr %p, i64 3
@@ -138,6 +162,8 @@ define void @store_i64_offset(ptr %p, i64 %v) {
 ; CHECK-LABEL: store_i64_offset:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    stidx64 r1, r0, 24
 ; CHECK-NEXT:    leaveret
   %q = getelementptr i64, ptr %p, i64 3

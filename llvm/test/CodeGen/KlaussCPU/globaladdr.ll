@@ -13,6 +13,8 @@ define i64 @read_global_i64() {
 ; CHECK-LABEL: read_global_i64:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    setr r12, g_i64
 ; CHECK-NEXT:    ldidx64 r12, r12, 0
 ; CHECK-NEXT:    leaveret
@@ -24,6 +26,8 @@ define void @write_global_i64(i64 %v) {
 ; CHECK-LABEL: write_global_i64:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    setr r12, g_i64
 ; CHECK-NEXT:    stidx64 r0, r12, 0
 ; CHECK-NEXT:    leaveret
@@ -35,6 +39,8 @@ define i64 @read_global_i32_zext() {
 ; CHECK-LABEL: read_global_i32_zext:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    setr r12, g_i32
 ; CHECK-NEXT:    memget32 r12, r12
 ; CHECK-NEXT:    leaveret
@@ -48,6 +54,8 @@ define i64 @read_array_elem(i64 %i) {
 ; CHECK-LABEL: read_array_elem:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    shlv r12, r0, 3
 ; CHECK-NEXT:    setr r14, g_arr
 ; CHECK-NEXT:    ldidx64r r12, r14, r12
@@ -62,6 +70,8 @@ define ptr @global_addr() {
 ; CHECK-LABEL: global_addr:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    setr r12, g_i64
 ; CHECK-NEXT:    leaveret
   ret ptr @g_i64
@@ -72,6 +82,8 @@ define i64 @call_ext_and_use() {
 ; CHECK-LABEL: call_ext_and_use:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
+; CHECK-NEXT:    .cfi_def_cfa r15, 16
+; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    call ext
 ; CHECK-NEXT:    setr r12, g_i64
 ; CHECK-NEXT:    ldidx64 r12, r12, 0
