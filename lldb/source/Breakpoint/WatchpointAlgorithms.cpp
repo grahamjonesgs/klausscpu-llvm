@@ -36,10 +36,14 @@ WatchpointAlgorithms::AtomizeWatchpointRequest(
   } else {
     // As a fallback, assume we can watch any power-of-2
     // number of bytes up through the size of an address in the target.
+    // KlaussCPU has 32-bit addresses but 64-bit registers and data, and its
+    // watchpoints cover an aligned doubleword.
+    size_t max_byte_size = arch.GetMachine() == llvm::Triple::klausscpu
+                               ? 8
+                               : arch.GetAddressByteSize();
     entries =
         PowerOf2Watchpoints(addr, size,
-                            /*min_byte_size*/ 1,
-                            /*max_byte_size*/ arch.GetAddressByteSize(),
+                            /*min_byte_size*/ 1, max_byte_size,
                             /*address_byte_size*/ arch.GetAddressByteSize());
   }
 

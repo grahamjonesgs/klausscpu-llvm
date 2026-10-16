@@ -924,7 +924,8 @@ Function *SymbolFileDWARF::ParseFunction(CompileUnit &comp_unit,
           die.GetDIE()->GetAttributeAddressRanges(die.GetCU(),
                                                   /*check_hi_lo_pc=*/true)) {
     for (const auto &range : *die_ranges) {
-      if (range.valid() && range.LowPC < m_first_code_address)
+      if (range.valid() &&
+          IsDeadCodeAddress(range.LowPC, die.GetCU()->GetAddressByteSize()))
         continue;
       if (Address base_addr(range.LowPC, module_sp->GetSectionList());
           base_addr.IsValid() && FixupAddress(base_addr))
@@ -970,6 +971,12 @@ lldb::addr_t SymbolFileDWARF::FixupAddress(lldb::addr_t file_addr) {
   if (debug_map_symfile)
     return debug_map_symfile->LinkOSOFileAddress(this, file_addr);
   return file_addr;
+}
+
+bool SymbolFileDWARF::IsDeadCodeAddress(lldb::addr_t addr,
+                                        uint8_t addr_size) const {
+  return addr < m_first_code_address ||
+         addr == llvm::dwarf::computeTombstoneAddress(addr_size);
 }
 
 bool SymbolFileDWARF::FixupAddress(Address &addr) {
@@ -1260,7 +1267,7 @@ bool SymbolFileDWARF::ParseLineTable(CompileUnit &comp_unit) {
     // All addresses generated in a sequence are incremental so we only need
     // to check the first one of the sequence. Check the comment at the
     // m_first_code_address declaration for more details on this.
-    if (seq.LowPC < m_first_code_address)
+    if (IsDeadCodeAddress(seq.LowPC, dwarf_cu->GetAddressByteSize()))
       continue;
     LineTable::Sequence sequence;
     for (unsigned idx = seq.FirstRowIndex; idx < seq.LastRowIndex; ++idx) {
@@ -1361,7 +1368,8 @@ size_t SymbolFileDWARF::ParseBlocksRecursive(CompileUnit &comp_unit,
                                  decl_line, decl_column, call_file, call_line,
                                  call_column, nullptr)) {
       for (const llvm::DWARFAddressRange &range : ranges) {
-        if (range.valid() && range.LowPC >= m_first_code_address)
+        if (range.valid() &&
+            !IsDeadCodeAddress(range.LowPC, die.GetCU()->GetAddressByteSize()))
           block->AddRange(Block::Range(range.LowPC - function_file_addr,
                                        range.HighPC - range.LowPC));
       }

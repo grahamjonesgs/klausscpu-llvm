@@ -566,6 +566,10 @@ protected:
   /// Try to filter out this debug info by comparing it to the lowest code
   /// address in the module.
   lldb::addr_t m_first_code_address = LLDB_INVALID_ADDRESS;
+  /// True for addresses that describe dead-stripped code: below
+  /// m_first_code_address, or the -1 tombstone that lld writes when told to
+  /// (-z dead-reloc-in-nonalloc) and by default for some targets.
+  bool IsDeadCodeAddress(lldb::addr_t addr, uint8_t addr_size) const;
   StatsDuration m_parse_time;
   std::atomic_flag m_dwo_warning_issued = ATOMIC_FLAG_INIT;
   /// If this DWARF file a .DWO file or a DWARF .o file on mac when
