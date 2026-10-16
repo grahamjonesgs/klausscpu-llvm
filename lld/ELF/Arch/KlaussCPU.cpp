@@ -47,7 +47,9 @@ public:
 } // namespace
 
 KlaussCPU::KlaussCPU(Ctx &ctx) : TargetInfo(ctx) {
-  // HALT instruction: 0x0000F011 big-endian
+  // Fill between input sections: the retired v1 HALT encoding (0x0000F011,
+  // big-endian).  Its LEN field [31:30] of the LE word 0x11F00000 is 00, so
+  // the v2 CPU raises ERR_INV_OPCODE if it is ever executed.
   trapInstr = {0x00, 0x00, 0xF0, 0x11};
 }
 
@@ -72,7 +74,8 @@ void KlaussCPU::relocate(uint8_t *loc, const Relocation &rel,
                           uint64_t val) const {
   switch (rel.type) {
   case R_KLAUSSCPU_ABS32:
-    checkUInt(ctx, loc, val, 32, rel);
+    // Unsigned address, but also accept -1 (the .debug_* tombstone).
+    checkIntUInt(ctx, loc, val, 32, rel);
     write32le(loc, static_cast<uint32_t>(val));
     break;
   case R_KLAUSSCPU_ABS64:

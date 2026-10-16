@@ -1058,6 +1058,10 @@ void InputSection::relocateNonAlloc(Ctx &ctx, uint8_t *buf,
       tombstone = 1;
     else if (name == ".debug_names")
       tombstone = UINT64_MAX; // tombstone value
+    else if (emachine == EM_KLAUSSCPU)
+      // KlaussCPU code starts at 0x20, so a 0 tombstone makes discarded
+      // functions overlap live code; use -1 now (see the TODO below).
+      tombstone = UINT64_MAX;
     else
       tombstone = 0;
   }
