@@ -1,0 +1,99 @@
+; RUN: llc -march=klausscpu -verify-machineinstrs -O1 < %s | FileCheck %s
+;
+; byval arguments.  The callee owns the pointee of a byval pointer and may
+; modify it, so the caller must pass the address of a private copy.  The
+; original object (here a constant in .rodata, a caller-owned pointer, or a
+; global) must never be passed directly.  The copy is made before the call
+; sequence starts: a large copy is itself a memcpy call, and in a function with
+; a VLA the call frame is only allocated (addsp) once the copy is done.
+
+%struct.S = type { i64, i64, i64, i64 }
+%struct.L = type { [40 x i64] }
+
+@cs = internal constant %struct.S { i64 1, i64 2, i64 3, i64 4 }
+@gl = global %struct.L zeroinitializer
+
+declare void @take(ptr byval(%struct.S) align 8)
+declare void @take5(i64, i64, i64, i64, ptr byval(%struct.S) align 8)
+declare void @takel(ptr byval(%struct.L) align 8)
+declare void @use(ptr)
+
+; Copied to a stack object; R0 gets the copy, not @cs.
+define void @pass_const() {
+; CHECK-LABEL: pass_const:
+; CHECK:         enter 7
+; CHECK:         addi r0, r15, -32
+; CHECK-NOT:     setr r0
+; CHECK:         setr r14, cs+16
+; CHECK-NEXT:    stidx64 r12, r0, 24
+; CHECK:         stidx64 r12, r0, 16
+; CHECK:         stidx64 r12, r0, 8
+; CHECK:         stidx64 r12, r15, -32
+; CHECK-NEXT:    call take
+  call void @take(ptr byval(%struct.S) align 8 @cs)
+  ret void
+}
+
+; byval in a stack argument slot: the copy's address is stored to the slot.
+define void @pass_stack_slot(ptr %p) {
+; CHECK-LABEL: pass_stack_slot:
+; CHECK:         enter 8
+; CHECK:         ldidx64 r12, r0, 24
+; CHECK-NEXT:    addi [[COPY:r[0-9]+]], r15, -32
+; CHECK-NEXT:    stidx64 r12, [[COPY]], 24
+; CHECK:         ldidx64 r12, r0, 0
+; CHECK-NEXT:    stidx64 r12, r15, -32
+; CHECK-NEXT:    getsp [[SP:r[0-9]+]]
+; CHECK:         stidx64 [[COPY]], [[SP]], 24
+; CHECK-NEXT:    call take5
+  call void @take5(i64 10, i64 20, i64 30, i64 40, ptr byval(%struct.S) align 8 %p)
+  ret void
+}
+
+; Too large to inline: the copy is a memcpy call made before the call to takel.
+define void @pass_large() {
+; CHECK-LABEL: pass_large:
+; CHECK:         addi [[COPY:r[0-9]+]], r15, -328
+; CHECK-NEXT:    copy r0, [[COPY]]
+; CHECK-NEXT:    setr r1, gl
+; CHECK-NEXT:    setr r2, 320
+; CHECK-NEXT:    call memcpy
+; CHECK-NEXT:    copy r0, [[COPY]]
+; CHECK-NEXT:    call takel
+  call void @takel(ptr byval(%struct.L) align 8 @gl)
+  ret void
+}
+
+; No reserved call frame: the copy is made before ADJCALLSTACKDOWN's addsp.
+define void @pass_vla(i64 %n, ptr %p) {
+; CHECK-LABEL: pass_vla:
+; CHECK:         call use
+; CHECK-NEXT:    addsp 24
+; CHECK-NEXT:    ldidx64 r12, [[P:r[0-9]+]], 24
+; CHECK-NEXT:    addi [[COPY:r[0-9]+]], r15, -40
+; CHECK-NEXT:    stidx64 r12, [[COPY]], 24
+; CHECK:         ldidx64 r12, [[P]], 0
+; CHECK-NEXT:    stidx64 r12, r15, -40
+; CHECK-NEXT:    addsp -32
+; CHECK-NEXT:    getsp [[SP:r[0-9]+]]
+; CHECK:         stidx64 [[COPY]], [[SP]], 24
+; CHECK-NEXT:    call take5
+; CHECK-NEXT:    addsp 32
+  %a = alloca i8, i64 %n, align 8
+  call void @use(ptr %a)
+  call void @take5(i64 10, i64 20, i64 30, i64 40, ptr byval(%struct.S) align 8 %p)
+  ret void
+}
+
+; Callee side: the byval pointer arrives in R0 and is used in place.
+define i64 @callee(ptr byval(%struct.S) align 8 %s) {
+; CHECK-LABEL: callee:
+; CHECK:         setr r12, 7
+; CHECK-NEXT:    stidx64 r12, r0, 0
+; CHECK-NEXT:    ldidx64 r12, r0, 24
+; CHECK-NEXT:    leaveret
+  store i64 7, ptr %s
+  %v = getelementptr i8, ptr %s, i64 24
+  %r = load i64, ptr %v
+  ret i64 %r
+}

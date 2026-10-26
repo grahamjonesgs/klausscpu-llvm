@@ -831,6 +831,32 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
 
   unsigned StackSize = CCInfo.getStackSize(); // ≥ 32
 
+  // ---- Make private copies of byval arguments ----------------------------
+  // A byval argument is passed as a pointer (CC_KlaussCPU treats it as an
+  // ordinary i64), but the callee owns the pointee and may modify it, so the
+  // caller must pass the address of a fresh copy.  The copies are made before
+  // CALLSEQ_START: a large copy becomes a memcpy call, which must not nest
+  // inside this call's sequence or clobber its outgoing stack arguments.
+  SmallVector<SDValue, 4> ByValArgs;
+  for (unsigned I = 0, E = CLI.Outs.size(); I != E; ++I) {
+    ISD::ArgFlagsTy Flags = CLI.Outs[I].Flags;
+    if (!Flags.isByVal())
+      continue;
+
+    unsigned Size = Flags.getByValSize();
+    Align Alignment = Flags.getNonZeroByValAlign();
+    int FI = MF.getFrameInfo().CreateStackObject(Size, Alignment,
+                                                 /*isSpillSlot=*/false);
+    SDValue FIPtr = DAG.getFrameIndex(FI, PtrVT);
+    Chain = DAG.getMemcpy(Chain, DL, FIPtr, CLI.OutVals[I],
+                          DAG.getConstant(Size, DL, PtrVT), Alignment,
+                          /*isVol=*/false, /*AlwaysInline=*/false,
+                          /*CI=*/nullptr, /*OverrideTailCall=*/false,
+                          MachinePointerInfo::getFixedStack(MF, FI),
+                          MachinePointerInfo());
+    ByValArgs.push_back(FIPtr);
+  }
+
   Chain = DAG.getCALLSEQ_START(Chain, StackSize, 0, DL);
 
   // ---- Collect register and memory args ----------------------------------
@@ -854,9 +880,12 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
     Chain = SDValue(GetSP, 1);
   }
 
-  for (unsigned I = 0, E = ArgLocs.size(); I != E; ++I) {
+  for (unsigned I = 0, J = 0, E = ArgLocs.size(); I != E; ++I) {
     const CCValAssign &VA = ArgLocs[I];
     SDValue Arg = CLI.OutVals[I];
+    // Pass the address of the caller-side copy instead of the original.
+    if (CLI.Outs[I].Flags.isByVal())
+      Arg = ByValArgs[J++];
 
     if (VA.isRegLoc()) {
       RegsToPass.push_back({VA.getLocReg(), Arg});
