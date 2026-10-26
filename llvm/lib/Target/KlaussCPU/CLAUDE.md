@@ -506,8 +506,10 @@ SelectionDAGTargetInfo    TSI;
       `Uses = [SP]`; without this regalloc crashed with "using an undefined physical register $r12"
       when a call's return value was used
     - **`applyFixup` missing `maybeAddReloc()`**: every backend must call
-      `maybeAddReloc(F, Fixup, Target, Value, IsResolved)` at the end of `applyFixup` to emit
-      RELA entries; without it, the bytes were zeroed but no `.rela.text` section was generated
+      `maybeAddReloc(F, Fixup, Target, Value, IsResolved)` in `applyFixup` to emit
+      RELA entries; without it, the bytes were zeroed but no `.rela.text` section was generated.
+      Call it *before* writing the field: it zeroes `Value` for RELA, so the addend is not
+      also left in the section contents (review fix 2026-10)
     - **Incremental build fix**: `.ninja_deps` was persistently corrupted from earlier `pkill ninja`
       kills; fixed by deleting `.ninja_deps` + `.ninja_log` and doing one clean rebuild.
       Future builds touching only KlaussCPU `.td` files now take ~20–90 steps, not 1300+.
@@ -1087,7 +1089,7 @@ DEBUG_PLAN Phase 0 (plan: `klaussCPU/DEBUG_PLAN.md`), branch `debug-support`.
   only emitted when `needsFrameMoves()` (`-g`, uwtable, or IR without
   `nounwind`) — clang C code without `-g` is unchanged.
 - **Object tooling**: `EM_KLAUSSCPU` → `Triple::klausscpu` / `elf32-klausscpu`
-  in `ELFObjectFile.h`; `R_KLAUSSCPU_{NONE,ABS32,ABS64,PC32}` in
+  in `ELFObjectFile.h`; `R_KLAUSSCPU_{NONE,ABS32,ABS64,PC32,PC64}` in
   `RelocationResolver.cpp` (llvm-dwarfdump / llvm-symbolizer on `.o`);
   machine name in llvm-readobj, yaml2obj/obj2yaml, `BinaryFormat/ELF.cpp`.
 - **TRAP** (`0x6C040000`, v2 class B OP 4) defined; `__builtin_debugtrap` →

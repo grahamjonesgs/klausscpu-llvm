@@ -114,6 +114,9 @@ private:
 
   // 2-word instruction whose word-1 immediate may be a symbol.  Emits the
   // given fixup at byte offset 4 (word 1) when the operand is an MCExpr.
+  // FK_KlaussCPU_PCREL32 is PC-relative: MC then subtracts the fixup address
+  // and records a relocation for any target it cannot resolve in-section,
+  // including absolute (.set / .equ) symbols.
   uint64_t pack2Sym(uint32_t W0, const MCInst &MI, unsigned ImmOp,
                     KlaussCPU::Fixups FK,
                     SmallVectorImpl<MCFixup> &Fixups) const {
@@ -121,7 +124,8 @@ private:
     if (MO.isImm())
       return pack2(W0, static_cast<uint32_t>(MO.getImm()));
     assert(MO.isExpr() && "operand must be imm or expr");
-    Fixups.push_back(MCFixup::create(4, MO.getExpr(), MCFixupKind(FK)));
+    Fixups.push_back(MCFixup::create(4, MO.getExpr(), MCFixupKind(FK),
+                                     FK == KlaussCPU::FK_KlaussCPU_PCREL32));
     return pack2(W0, 0);
   }
 

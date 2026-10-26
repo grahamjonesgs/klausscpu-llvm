@@ -399,6 +399,7 @@ static bool supportsKlaussCPU(uint64_t Type) {
   case ELF::R_KLAUSSCPU_ABS32:
   case ELF::R_KLAUSSCPU_ABS64:
   case ELF::R_KLAUSSCPU_PC32:
+  case ELF::R_KLAUSSCPU_PC64:
     return true;
   default:
     return false;
@@ -416,6 +417,8 @@ static uint64_t resolveKlaussCPU(uint64_t Type, uint64_t Offset, uint64_t S,
     return S + Addend;
   case ELF::R_KLAUSSCPU_PC32:
     return (S + Addend - Offset) & 0xFFFFFFFF;
+  case ELF::R_KLAUSSCPU_PC64:
+    return S + Addend - Offset;
   default:
     llvm_unreachable("Invalid relocation type");
   }

@@ -20,6 +20,9 @@
 //                             RelLookupTableConverter (`.long str - table`).
 //                             field_value = S + A − P exactly (NO +4: unlike the
 //                             instruction form, the fixup slot IS the PC origin).
+//   R_KLAUSSCPU_PC64   (5) — 64-bit PC-relative data, as PC32 for an 8-byte
+//                             field (`.quad A − B`, e.g. InstrProf's
+//                             __profd_* CounterPtr).
 //
 //===----------------------------------------------------------------------===//
 
@@ -63,6 +66,7 @@ RelExpr KlaussCPU::getRelExpr(RelType type, const Symbol &s,
     return R_ABS;
   case R_KLAUSSCPU_PCREL32:
   case R_KLAUSSCPU_PC32:
+  case R_KLAUSSCPU_PC64:
     return R_PC;
   default:
     Err(ctx) << getErrorLoc(ctx, loc) << "unrecognized relocation " << type;
@@ -94,6 +98,11 @@ void KlaussCPU::relocate(uint8_t *loc, const Relocation &rel,
     // so the field is exactly S + A − P — no instruction "+4" correction.
     checkInt(ctx, loc, static_cast<int64_t>(val), 32, rel);
     write32le(loc, static_cast<uint32_t>(val));
+    break;
+  case R_KLAUSSCPU_PC64:
+    // val is already sign-extended from 32 bits (ELFCLASS32), which is
+    // exactly the 64-bit difference.
+    write64le(loc, val);
     break;
   default:
     llvm_unreachable("unrecognized KlaussCPU relocation");

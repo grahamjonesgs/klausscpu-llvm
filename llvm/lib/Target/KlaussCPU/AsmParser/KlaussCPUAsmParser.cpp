@@ -22,6 +22,7 @@
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSubtargetInfo.h"
+#include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/raw_ostream.h"
@@ -248,8 +249,22 @@ ParseStatus KlaussCPUAsmParser::tryParseRegister(MCRegister &Reg,
 // Operand and instruction parsing
 //===----------------------------------------------------------------------===//
 
+// True if operand number OpIdx (1-based; Operands[0] is the mnemonic) of
+// Mnemonic is a PC-relative target, encoded as a displacement.
+static bool isPCRelOperand(StringRef Mnemonic, unsigned OpIdx) {
+  std::string M = Mnemonic.lower();
+  StringRef Name(M);
+  if (Name == "leapc")
+    return OpIdx == 2;
+  if (Name == "fbr" || Name == "fbri")
+    return OpIdx == 4;
+  if (Name == "callrel" || (Name.starts_with("jmp") && Name.ends_with("rel")))
+    return OpIdx == 1;
+  return false;
+}
+
 ParseStatus KlaussCPUAsmParser::parseOperand(OperandVector &Operands,
-                                              StringRef /*Mnemonic*/) {
+                                              StringRef Mnemonic) {
   SMLoc S = getLexer().getLoc();
 
   // Try register first.
@@ -263,11 +278,38 @@ ParseStatus KlaussCPUAsmParser::parseOperand(OperandVector &Operands,
     }
   }
 
+  // The generic parser substitutes an absolute .set/.equ symbol by its value.
+  // A literal in a PC-relative operand is a displacement, so `callrel ROMFN`
+  // would then branch to PC + ROMFN.  Keep such a reference symbolic: the
+  // PC-relative fixup turns it into a relocation to the absolute address,
+  // the same as when the .set follows the use.
+  MCSymbol *AbsSym = nullptr;
+  int64_t AbsVal = 0;
+  if (getLexer().is(AsmToken::Identifier) &&
+      isPCRelOperand(Mnemonic, Operands.size())) {
+    MCSymbol *Sym =
+        getContext().lookupSymbol(getLexer().getTok().getIdentifier());
+    if (Sym && Sym->isVariable())
+      if (const auto *CE = dyn_cast<MCConstantExpr>(Sym->getVariableValue())) {
+        AbsSym = Sym;
+        AbsVal = CE->getValue();
+      }
+  }
+
   // Otherwise parse as an expression (literal, label, or arithmetic).
   const MCExpr *Expr;
   SMLoc E;
   if (Parser.parseExpression(Expr, E))
     return ParseStatus::Failure;
+
+  int64_t Val;
+  if (AbsSym && Expr->evaluateAsAbsolute(Val)) {
+    Expr = MCSymbolRefExpr::create(AbsSym, getContext());
+    if (Val != AbsVal)
+      Expr = MCBinaryExpr::createAdd(
+          Expr, MCConstantExpr::create(Val - AbsVal, getContext()),
+          getContext());
+  }
 
   Operands.push_back(KlaussCPUOperand::createImm(Expr, S, E));
   return ParseStatus::Success;

@@ -6,16 +6,21 @@
 //     an 8-byte branch/call/SETR instruction (word 1).
 //
 //   FK_KlaussCPU_PCREL32 — 32-bit signed PC-relative offset, LE, same word-1
-//     slot.  field_value = target − PC_of_instruction (option B convention).
-//     LLVM's FKF_IsPCRel causes it to subtract the fixup address (instr+4);
-//     we add 4 back in applyFixup / lld relocate to correct for the hardware
-//     convention where PC origin is instr_addr (not instr_addr+4).
+//     slot.  field_value = target − PC_of_instruction: the hardware adds the
+//     field to the address of the instruction itself (pipeline_core.sv U_LEA
+//     and brel: ex_pc + ex_var1).  The fixup is created PC-relative at offset
+//     4, so MC hands applyFixup target − (instr+4); we add 4 back.  lld does
+//     the same for R_KLAUSSCPU_PCREL32 (S + A − P + 4, P = instr+4).
 //
 //   FK_KlaussCPU_PCREL18 — ISA v3 A1 short branch: simm18 word displacement
 //     in word0[17:0], target = PC + 4*disp (fixup at offset 0, IsPCRel, so
 //     Value = target - PC exactly). Resolved at assembly time only: a short
 //     branch that is out of range or not resolvable in-section is RELAXED to
 //     the 2-word PC-relative form, so it never reaches the object writer.
+//
+//   FK_Data_{1,2,4,8} — data directives.  4- and 8-byte data have absolute
+//     (ABS32/ABS64) and PC-relative (PC32/PC64, no instruction +4) relocations;
+//     1- and 2-byte data must resolve at assembly time.
 //
 //   ELF output: ELFCLASS32, ELFDATA2LSB, EM_KLAUSSCPU.
 //
@@ -52,24 +57,41 @@ public:
 
   unsigned getRelocType(const MCFixup &Fixup, const MCValue &Target,
                         bool IsPCRel) const override {
-    if (Fixup.getKind() == FK_Data_8)
-      return ELF::R_KLAUSSCPU_ABS64;
-    if (Fixup.getKind() == MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL18) ||
-        Fixup.getKind() == MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL13))
-      report_fatal_error("KlaussCPU: unresolved short/fused branch fixup");
-    if (Fixup.getKind() == MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL32))
+    switch (Fixup.getKind()) {
+    case FK_Data_4:
+      // A cross-section symbol difference (A - B) reaches us as a PC-relative
+      // data fixup.  The prime source is the relative lookup tables the
+      // RelLookupTableConverter emits under -fPIC (`.long <str> - <table>`).
+      // These need a *data* PC-relative relocation — value = S + A - P
+      // exactly, WITHOUT the instruction word-1 "+4" of R_KLAUSSCPU_PCREL32.
+      return IsPCRel ? ELF::R_KLAUSSCPU_PC32 : ELF::R_KLAUSSCPU_ABS32;
+    case FK_Data_8:
+      // `.quad A - B` across sections, e.g. InstrProf's __profd_* CounterPtr.
+      return IsPCRel ? ELF::R_KLAUSSCPU_PC64 : ELF::R_KLAUSSCPU_ABS64;
+    case FK_Data_1:
+    case FK_Data_2:
+      reportError(Fixup.getLoc(), Twine(Fixup.getKind() == FK_Data_1 ? 1 : 2) +
+                                      "-byte data relocations not supported");
+      return ELF::R_KLAUSSCPU_NONE;
+    default:
+      break;
+    }
+    switch (unsigned(Fixup.getKind())) {
+    case KlaussCPU::FK_KlaussCPU_ABS32:
+      if (IsPCRel) {
+        // `setr r1, sym - .` etc.: an instruction's absolute word-1 slot has
+        // no PC-relative relocation (use leapc).
+        reportError(Fixup.getLoc(),
+                    "PC-relative expression in an absolute operand");
+        return ELF::R_KLAUSSCPU_NONE;
+      }
+      return ELF::R_KLAUSSCPU_ABS32;
+    case KlaussCPU::FK_KlaussCPU_PCREL32:
       return ELF::R_KLAUSSCPU_PCREL32;
-    // A cross-section symbol difference (A - B) reaches us as a PC-relative
-    // data fixup (FK_Data_4 with IsPCRel).  The prime source is the relative
-    // lookup tables the RelLookupTableConverter emits under -fPIC:
-    //   .long <str> - <table>   accessed via llvm.load.relative.
-    // These need a *data* PC-relative relocation — value = S + A - P exactly,
-    // WITHOUT the instruction word-1 "+4" convention that FK_KlaussCPU_PCREL32
-    // carries.  Emitting ABS32 here (the old fallthrough) silently dropped the
-    // "- B" term and miscompiled the table into absolute addresses.
-    if (IsPCRel)
-      return ELF::R_KLAUSSCPU_PC32;
-    return ELF::R_KLAUSSCPU_ABS32;
+    default:
+      reportError(Fixup.getLoc(), "unsupported relocation type");
+      return ELF::R_KLAUSSCPU_NONE;
+    }
   }
 };
 
@@ -99,7 +121,8 @@ public:
   // ── Fixup application ─────────────────────────────────────────────────────
 
   // Data points to the first byte of the fixup location (byte 4 of the 8-byte
-  // branch/call instruction, as specified by MCFixup offset=4 in the emitter).
+  // instruction for word-1 fixups, as specified by MCFixup offset=4 in the
+  // emitter).
   void applyFixup(const MCFragment &F, const MCFixup &Fixup,
                   const MCValue &Target, uint8_t *Data,
                   uint64_t Value, bool IsResolved) override {
@@ -132,36 +155,67 @@ public:
       Data[2] |= (D >> 8) & 0x1F;   // word0[20:16]
       return;
     }
-    // FK_Data_8: 8-byte pointer field in .rodata/.data (memp_pools[], struct
-    // initializers with pointer members, etc.).  Stored little-endian — the
-    // data bus is LE.  All KlaussCPU addresses fit in 32 bits; upper 32 = 0.
-    if (Kind == FK_Data_8) {
-      for (int i = 0; i < 8; ++i)
-        Data[i] = (Value >> (8 * i)) & 0xFF;
-      maybeAddReloc(F, Fixup, Target, Value, IsResolved);
+
+    // A PC-relative relocation already subtracts P; it cannot subtract a
+    // second symbol (`leapc r1, ext - label`).
+    if (!IsResolved && Fixup.isPCRel() && Target.getSubSym()) {
+      getContext().reportError(Fixup.getLoc(),
+                               "symbol difference in a PC-relative operand");
       return;
     }
-    // FK_KlaussCPU_PCREL32: signed PC-relative offset in word-1 slot.
-    // LLVM 23 has no FKF_IsPCRel, so the assembler passes raw target_addr as
-    // Value without subtracting the PC.  We always defer to the linker which
-    // computes the correct field_value = S + A − instr_addr (with +4 adjust
-    // in KlaussCPU.cpp relocate() for the hardware PC convention).
-    // Write 0 as placeholder; R_KLAUSSCPU_PCREL32 reloc carries the symbol.
-    if (Kind == MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL32)) {
-      Data[0] = Data[1] = Data[2] = Data[3] = 0;
-      maybeAddReloc(F, Fixup, Target, Value, IsResolved);
-      return;
-    }
+
+    // Record the relocation first: for RELA output it zeroes Value, so the
+    // addend lives only in r_addend and not also in the section contents.
+    maybeAddReloc(F, Fixup, Target, Value, IsResolved);
+
+    unsigned NumBytes;
+    switch (unsigned(Kind)) {
+    case FK_Data_1:
+      NumBytes = 1;
+      break;
+    case FK_Data_2:
+      NumBytes = 2;
+      break;
     // FK_KlaussCPU_ABS32 / FK_Data_4: 32-bit LE address — instruction word-1
     // slot (CALL/SETR) or 4-byte data reference (EK_Custom32 jump tables).
-    if (Kind != KlaussCPU::FK_KlaussCPU_ABS32 && Kind != FK_Data_4)
+    case FK_Data_4:
+    case KlaussCPU::FK_KlaussCPU_ABS32:
+      NumBytes = 4;
+      break;
+    // FK_Data_8: 8-byte pointer field in .rodata/.data (memp_pools[], struct
+    // initializers with pointer members, etc.).
+    case FK_Data_8:
+      NumBytes = 8;
+      break;
+    // FK_KlaussCPU_PCREL32: signed offset from the instruction address in the
+    // word-1 slot.  A resolved Value is target − (instr+4) (the fixup is at
+    // offset 4); unresolved, the relocation carries it and Value is 0.
+    case KlaussCPU::FK_KlaussCPU_PCREL32:
+      if (IsResolved) {
+        int64_t Disp = static_cast<int64_t>(Value) + 4;
+        if (!isInt<32>(Disp)) {
+          getContext().reportError(Fixup.getLoc(),
+                                   "PC-relative target out of range");
+          return;
+        }
+        Value = static_cast<uint64_t>(Disp);
+      }
+      NumBytes = 4;
+      break;
+    default:
+      getContext().reportError(Fixup.getLoc(), "unsupported fixup kind");
       return;
-    uint32_t Addr = static_cast<uint32_t>(Value);
-    Data[0] = (Addr >>  0) & 0xFF;
-    Data[1] = (Addr >>  8) & 0xFF;
-    Data[2] = (Addr >> 16) & 0xFF;
-    Data[3] = (Addr >> 24) & 0xFF;
-    maybeAddReloc(F, Fixup, Target, Value, IsResolved);
+    }
+    if (NumBytes < 8 && !isUIntN(NumBytes * 8, Value) &&
+        !isIntN(NumBytes * 8, Value)) {
+      getContext().reportError(Fixup.getLoc(),
+                               "fixup value out of range for " +
+                                   Twine(NumBytes) + "-byte field");
+      return;
+    }
+    // Little-endian, like the data bus and the instruction words.
+    for (unsigned I = 0; I != NumBytes; ++I)
+      Data[I] = static_cast<uint8_t>(Value >> (8 * I));
   }
 
   // ── ISA v3 A1 short-branch relaxation ─────────────────────────────────────
@@ -194,11 +248,12 @@ public:
   // ── NOP padding ──────────────────────────────────────────────────────────
 
   // v2 NOP = 0x6C000000 (4-byte, little-endian: 00 00 00 6C).
-  // KlaussCPU instructions are 4-byte aligned; reject sub-word padding.
+  // Padding that is not a multiple of 4 follows data (.byte, .ascii) in a code
+  // section, so its first Count % 4 bytes can never be executed: zero-fill
+  // them and NOP-fill from the next word boundary, as RISC-V does.
   bool writeNopData(raw_ostream &OS, uint64_t Count,
                     const MCSubtargetInfo *STI) const override {
-    if (Count % 4 != 0)
-      return false;
+    OS.write_zeros(Count % 4);
     for (uint64_t i = 0, n = Count / 4; i < n; ++i)
       OS.write("\x00\x00\x00\x6C", 4);
     return true;
