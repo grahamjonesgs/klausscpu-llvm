@@ -7,6 +7,8 @@
 #   those flags from ADDR instead (FlagReuse) gives the S^V of the add, not of
 #   `d - 0`, and the wrapped-sign test goes wrong; the fused branch (FuseCmpBr)
 #   writes no flags at all.
+# * Without tracked liveness the successor live-in check proves nothing, so
+#   neither pass may touch the compare.
 # * A debug instruction between the compare and the branch must not stop either
 #   rewrite, or -g changes codegen. The DBG_VALUE stays where it is.
 #
@@ -42,6 +44,16 @@
   }
 
   define i64 @dead_flags(i64 %a, i64 %b) {
+    %s = add i64 %a, %b
+    %c = icmp eq i64 %s, 0
+    br i1 %c, label %t, label %f
+  t:
+    ret i64 %s
+  f:
+    ret i64 42
+  }
+
+  define i64 @no_liveness(i64 %a, i64 %b) {
     %s = add i64 %a, %b
     %c = icmp eq i64 %s, 0
     br i1 %c, label %t, label %f
@@ -175,6 +187,37 @@ body:             |
   bb.2.t:
     liveins: $r12
 
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit $r12
+...
+---
+# dead_flags without tracksRegLiveness: block live-ins cannot be trusted, so
+# the compare is kept by both passes.
+# REUSE-LABEL: name: no_liveness
+# REUSE:       CMPRV_I $r12, 0, implicit-def $flags
+# REUSE-NEXT:  JMPE %bb.2, implicit $flags
+#
+# FUSE-LABEL: name: no_liveness
+# FUSE:       CMPRV_I $r12, 0, implicit-def $flags
+# FUSE-NEXT:  JMPE %bb.2, implicit $flags
+# FUSE-NOT:   FBR
+name:            no_liveness
+tracksRegLiveness: false
+liveins:
+  - { reg: '$r0' }
+  - { reg: '$r1' }
+body:             |
+  bb.0 (%ir-block.0):
+    successors: %bb.2, %bb.1
+
+    $r12 = ADDR killed $r0, killed $r1, implicit-def dead $flags
+    CMPRV_I $r12, 0, implicit-def $flags
+    JMPE %bb.2, implicit $flags
+
+  bb.1.f:
+    $r12 = SETR 42
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit $r12
+
+  bb.2.t:
     LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit $r12
 ...
 ---

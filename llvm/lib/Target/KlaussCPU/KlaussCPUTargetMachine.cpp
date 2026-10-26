@@ -122,8 +122,8 @@ bool KlaussCPUPassConfig::addInstSelector() {
 
 void KlaussCPUPassConfig::addPreEmitPass() {
   // A3a — arithmetic zero_flag reuse.  Runs on the final (post-RA, post-
-  // scheduling) instruction stream so adjacency is meaningful.  No-op unless
-  // -klausscpu-arith-flag-reuse is set.
+  // scheduling) instruction stream so adjacency is meaningful.  On by default;
+  // -klausscpu-arith-flag-reuse=false disables it.
   addPass(createKlaussCPUFlagReusePass());
   // ISA v3 B — fuse the remaining adjacent compare + conditional branch.
   addPass(createKlaussCPUFuseCmpBrPass());
