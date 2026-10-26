@@ -148,9 +148,10 @@ bool KlaussCPURegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
       MI.getOperand(FIOperandNum + 1).ChangeToImmediate(Offset);
       return false;
     }
-    // The sum overflows simm32, which an inline asm memory operand can cause
-    // (its folded offset may be any simm32).  Keep the instruction's offset
-    // and put the slot address in a scratch register, as below.
+    // The sum overflows simm32.  Isel folds at most a 512 MiB offset onto a
+    // frame index (SelectInlineAsmMemoryOperand), so this needs a frame over
+    // 1.5 GiB.  Keep the instruction's offset and put the slot address in a
+    // scratch register, as below.
   }
 
   // Non-standard case: FrameIndex used as a plain register operand (e.g. ADDR

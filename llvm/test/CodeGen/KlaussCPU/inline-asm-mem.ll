@@ -138,19 +138,61 @@ define i64 @amod_reg_clobber(ptr %p) nounwind {
   ret i64 %v
 }
 
-; A stack slot plus a folded offset that leaves simm32: the slot address goes
-; into a scratch register and the asm keeps its own offset.  It used to wrap
-; to `r15, -2147483680`, which encodes as +2147483616.
+; A constant is folded onto a stack slot only while |constant| < 512 MiB,
+; so the folded offset cannot leave simm32.  A larger one stays in the address
+; register.  It used to fold any simm32: -2147483648 wrapped to
+; `r15, -2147483680`, which encodes as +2147483616, and with every GPR
+; clobbered by the asm, eliminateFrameIndex could not scavenge a register for
+; the slot address and llc aborted.
+define i64 @mem_stack_fold_limit(i64 %v) nounwind {
+; CHECK-LABEL: mem_stack_fold_limit:
+; CHECK:         #APP
+; CHECK-NEXT:    ldidx64 r{{[0-9]+}}, r15, -5368709{{[0-9][0-9]$}}
+; CHECK:         #NO_APP
+  %x = alloca [4 x i64], align 8
+  call void @use(ptr %x)
+  %a = getelementptr i8, ptr %x, i64 -536870912
+  %r = call i64 asm sideeffect "ldidx64 $0, $1", "=r,*m"(ptr elementtype(i64) %a)
+  ret i64 %r
+}
+
+define i64 @mem_stack_past_limit(i64 %v) nounwind {
+; CHECK-LABEL: mem_stack_past_limit:
+; CHECK:         addi [[A:r[0-9]+]], r{{[0-9]+}}, 536870912
+; CHECK-NEXT:    #APP
+; CHECK-NEXT:    ldidx64 r{{[0-9]+}}, [[A]], 0
+; CHECK:         #NO_APP
+  %x = alloca [4 x i64], align 8
+  call void @use(ptr %x)
+  %a = getelementptr i8, ptr %x, i64 536870912
+  %r = call i64 asm sideeffect "ldidx64 $0, $1", "=r,*m"(ptr elementtype(i64) %a)
+  ret i64 %r
+}
+
 define i64 @mem_stack_far(i64 %v) nounwind {
 ; CHECK-LABEL: mem_stack_far:
 ; CHECK:         call use
-; CHECK-NEXT:    addi [[S:r[0-9]+]], r15, -32
+; CHECK:         addi [[A:r[0-9]+]], r{{[0-9]+}}, -2147483648
 ; CHECK-NEXT:    #APP
-; CHECK-NEXT:    ldidx64 r{{[0-9]+}}, [[S]], -2147483648
+; CHECK-NEXT:    ldidx64 r{{[0-9]+}}, [[A]], 0
 ; CHECK:         #NO_APP
   %x = alloca [4 x i64], align 8
   call void @use(ptr %x)
   %a = getelementptr i8, ptr %x, i64 -2147483648
   %r = call i64 asm sideeffect "ldidx64 $0, $1", "=r,*m"(ptr elementtype(i64) %a)
+  ret i64 %r
+}
+
+define i64 @mem_stack_far_clobber(i64 %v) nounwind {
+; CHECK-LABEL: mem_stack_far_clobber:
+; CHECK:         call use
+; CHECK:         addi [[A:r[0-9]+]], r{{[0-9]+}}, -2147483648
+; CHECK-NEXT:    #APP
+; CHECK-NEXT:    ldidx64 r{{[0-9]+}}, [[A]], 0
+; CHECK:         #NO_APP
+  %x = alloca [4 x i64], align 8
+  call void @use(ptr %x)
+  %a = getelementptr i8, ptr %x, i64 -2147483648
+  %r = call i64 asm sideeffect "ldidx64 $0, $1", "=r,*m,~{r0},~{r1},~{r2},~{r3},~{r4},~{r5},~{r6},~{r7},~{r8},~{r9},~{r10},~{r11},~{r13},~{r14}"(ptr elementtype(i64) %a)
   ret i64 %r
 }

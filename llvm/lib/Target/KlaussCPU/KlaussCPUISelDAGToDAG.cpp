@@ -662,6 +662,13 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
 // the operand syntax of the LDIDX*/STIDX* instructions.  A frame index base
 // stays a TargetFrameIndex followed by its offset, which eliminateFrameIndex
 // rewrites to (FrameReg, slot offset + offset).
+//
+// A constant is folded onto a frame index only while slot offset + constant
+// is sure to fit in simm32: |constant| < 512 MiB, four times the address
+// space, so only a frame over 1.5 GiB could overflow.  Otherwise
+// eliminateFrameIndex would need a scratch register at the asm, where every
+// GPR may be clobbered or used.  A larger constant stays in the address,
+// which the register allocator computes like any other value.
 bool KlaussCPUDAGToDAGISel::SelectInlineAsmMemoryOperand(
     const SDValue &Op, InlineAsm::ConstraintCode ConstraintID,
     std::vector<SDValue> &OutOps) {
@@ -678,7 +685,8 @@ bool KlaussCPUDAGToDAGISel::SelectInlineAsmMemoryOperand(
   int64_t Offset = 0;
   if (CurDAG->isBaseWithConstantOffset(Op)) {
     int64_t C = cast<ConstantSDNode>(Op.getOperand(1))->getSExtValue();
-    if (isInt<32>(C)) {
+    bool FIBase = isa<FrameIndexSDNode>(Op.getOperand(0));
+    if (FIBase ? isInt<30>(C) : isInt<32>(C)) {
       Base = Op.getOperand(0);
       Offset = C;
     }
