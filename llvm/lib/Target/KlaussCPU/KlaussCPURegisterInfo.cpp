@@ -143,9 +143,14 @@ bool KlaussCPURegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   if (FIOperandNum + 1 < MI.getNumOperands() &&
       MI.getOperand(FIOperandNum + 1).isImm()) {
     int64_t Offset = BaseOffset + MI.getOperand(FIOperandNum + 1).getImm();
-    MI.getOperand(FIOperandNum).ChangeToRegister(FrameReg, false);
-    MI.getOperand(FIOperandNum + 1).ChangeToImmediate(Offset);
-    return false;
+    if (isInt<32>(Offset)) {
+      MI.getOperand(FIOperandNum).ChangeToRegister(FrameReg, false);
+      MI.getOperand(FIOperandNum + 1).ChangeToImmediate(Offset);
+      return false;
+    }
+    // The sum overflows simm32, which an inline asm memory operand can cause
+    // (its folded offset may be any simm32).  Keep the instruction's offset
+    // and put the slot address in a scratch register, as below.
   }
 
   // Non-standard case: FrameIndex used as a plain register operand (e.g. ADDR

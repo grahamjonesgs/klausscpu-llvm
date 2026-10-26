@@ -10,6 +10,7 @@
 #include "TargetInfo/KlaussCPUTargetInfo.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCStreamer.h"
@@ -151,12 +152,25 @@ bool KlaussCPUAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI,
                                                  unsigned OpNo,
                                                  const char *ExtraCode,
                                                  raw_ostream &OS) {
-  if (ExtraCode && ExtraCode[0])
-    return true; // Unknown modifier.
+  if (ExtraCode)
+    return AsmPrinter::PrintAsmMemoryOperand(MI, OpNo, ExtraCode, OS);
 
   const MachineOperand &Base = MI->getOperand(OpNo);
+  if (!Base.isReg())
+    return true;
+
+  // The generic '%a' modifier on a register ('r') operand lands here too.
+  // That operand is a lone register with no offset after it (OpNo + 1 is the
+  // next operand's flag word, or past the end), so address it with offset 0.
+  const MachineOperand &FlagMO = MI->getOperand(OpNo - 1);
+  if (!FlagMO.isImm() || !InlineAsm::Flag(FlagMO.getImm()).isMemKind()) {
+    OS << KlaussCPUInstPrinter::getRegisterName(Base.getReg()) << ", 0";
+    return false;
+  }
+
+  assert(MI->getNumOperands() > OpNo + 1 && "Expected offset operand");
   const MachineOperand &Offset = MI->getOperand(OpNo + 1);
-  if (!Base.isReg() || !Offset.isImm())
+  if (!Offset.isImm())
     return true;
   OS << KlaussCPUInstPrinter::getRegisterName(Base.getReg()) << ", "
      << Offset.getImm();

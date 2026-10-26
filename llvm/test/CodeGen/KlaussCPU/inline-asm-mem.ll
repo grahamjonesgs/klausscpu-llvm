@@ -107,3 +107,50 @@ entry:
 target:
   ret void
 }
+
+; The generic '%a' modifier on a register operand prints it as a zero-offset
+; address.  It used to read the next operand's flag word as the offset
+; (silently wrong code), or assert when the register was the last operand.
+define i64 @amod_reg_last(ptr %p) nounwind {
+; CHECK-LABEL: amod_reg_last:
+; CHECK:         #APP
+; CHECK-NEXT:    ldidx64 r{{[0-9]+}}, r0, 0{{$}}
+; CHECK:         #NO_APP
+  %v = call i64 asm sideeffect "ldidx64 $0, ${1:a}", "=r,r"(ptr %p)
+  ret i64 %v
+}
+
+define i64 @amod_reg_mid(ptr %p, i64 %q) nounwind {
+; CHECK-LABEL: amod_reg_mid:
+; CHECK:         #APP
+; CHECK-NEXT:    ldidx64 r{{[0-9]+}}, r0, 0{{$}}
+; CHECK:         #NO_APP
+  %v = call i64 asm sideeffect "ldidx64 $0, ${1:a}", "=r,r,r"(ptr %p, i64 %q)
+  ret i64 %v
+}
+
+define i64 @amod_reg_clobber(ptr %p) nounwind {
+; CHECK-LABEL: amod_reg_clobber:
+; CHECK:         #APP
+; CHECK-NEXT:    ldidx64 r{{[0-9]+}}, r0, 0{{$}}
+; CHECK:         #NO_APP
+  %v = call i64 asm sideeffect "ldidx64 $0, ${1:a}", "=r,r,~{r3}"(ptr %p)
+  ret i64 %v
+}
+
+; A stack slot plus a folded offset that leaves simm32: the slot address goes
+; into a scratch register and the asm keeps its own offset.  It used to wrap
+; to `r15, -2147483680`, which encodes as +2147483616.
+define i64 @mem_stack_far(i64 %v) nounwind {
+; CHECK-LABEL: mem_stack_far:
+; CHECK:         call use
+; CHECK-NEXT:    addi [[S:r[0-9]+]], r15, -32
+; CHECK-NEXT:    #APP
+; CHECK-NEXT:    ldidx64 r{{[0-9]+}}, [[S]], -2147483648
+; CHECK:         #NO_APP
+  %x = alloca [4 x i64], align 8
+  call void @use(ptr %x)
+  %a = getelementptr i8, ptr %x, i64 -2147483648
+  %r = call i64 asm sideeffect "ldidx64 $0, $1", "=r,*m"(ptr elementtype(i64) %a)
+  ret i64 %r
+}
