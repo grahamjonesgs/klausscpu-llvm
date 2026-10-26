@@ -73,7 +73,9 @@ public:
     return false;
   }
 
-  std::string_view getClobbers() const override { return ""; }
+  // Every asm statement may set the condition flags (most ALU ops do), so
+  // treat FLAGS as clobbered by all of them, as x86 does.
+  std::string_view getClobbers() const override { return "~{flags}"; }
 };
 
 } // namespace targets

@@ -104,3 +104,12 @@ def GPR : RegisterClass<"KlaussCPU", [i64], 64, (add
   // Frame pointer (effectively reserved)
   R15                         // P
 )>;
+
+// ---- FLAGS register class ----
+// Never allocated or copied.  It exists so an inline-asm "~{cc}"/"~{flags}"
+// clobber can name FLAGS (KlaussCPUTargetLowering::getRegForInlineAsmConstraint);
+// the INLINEASM then carries an implicit-def of FLAGS the schedulers respect.
+def CCR : RegisterClass<"KlaussCPU", [i32], 32, (add FLAGS)> {
+  let CopyCost = -1;      // don't allow copying of the flags
+  let isAllocatable = 0;
+}

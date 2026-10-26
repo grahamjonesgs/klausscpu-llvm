@@ -528,6 +528,12 @@ KlaussCPUTargetLowering::getRegForInlineAsmConstraint(
       return {0, &KlaussCPU::GPRRegClass};
     }
   }
+  // A "cc"/"flags" clobber (clang adds "~{flags}" to every asm statement) makes
+  // the INLINEASM implicit-def FLAGS, so no compare is scheduled across an asm
+  // that may contain flag-setting instructions.
+  if (Constraint.equals_insensitive("{cc}") ||
+      Constraint.equals_insensitive("{flags}"))
+    return {KlaussCPU::FLAGS, &KlaussCPU::CCRRegClass};
   return TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
 }
 
