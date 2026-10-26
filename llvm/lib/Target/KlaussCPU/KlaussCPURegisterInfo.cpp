@@ -77,11 +77,44 @@ KlaussCPURegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   return Reserved;
 }
 
+bool KlaussCPURegisterInfo::shouldRealignStack(
+    const MachineFunction &MF) const {
+  const Function &F = MF.getFunction();
+  if (F.hasFnAttribute("stackrealign") ||
+      F.hasFnAttribute(Attribute::StackAlignment))
+    return true;
+  // MachineFrameInfo's MaxAlign also counts dynamic allocas, but
+  // LowerDYNAMIC_STACKALLOC aligns SP for those, so only an over-aligned
+  // static object needs the base pointer.
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  Align StackAlign = MF.getSubtarget().getFrameLowering()->getStackAlign();
+  for (int FI = 0, E = MFI.getObjectIndexEnd(); FI != E; ++FI)
+    if (!MFI.isVariableSizedObjectIndex(FI) &&
+        MFI.getObjectAlign(FI) > StackAlign)
+      return true;
+  return false;
+}
+
 bool KlaussCPURegisterInfo::canRealignStack(const MachineFunction &MF) const {
   // Realignment needs the base pointer, which can no longer be reserved once
   // register allocation has started without it.
   return TargetRegisterInfo::canRealignStack(MF) &&
          MF.getRegInfo().canReserveReg(KlaussCPUFrameLowering::getBPReg());
+}
+
+bool KlaussCPURegisterInfo::isAsmClobberable(const MachineFunction &MF,
+                                             MCRegister PhysReg) const {
+  // Warn about clobbering SP, R15 or the base pointer: inline asm that changes
+  // them breaks the frame.
+  return !getReservedRegs(MF).test(PhysReg.id());
+}
+
+bool KlaussCPURegisterInfo::isInlineAsmReadOnlyReg(const MachineFunction &MF,
+                                                   MCRegister PhysReg) const {
+  // An asm operand that writes the frame or base pointer is an error.
+  return PhysReg == KlaussCPU::R15 ||
+         (PhysReg == KlaussCPUFrameLowering::getBPReg().asMCReg() &&
+          MF.getSubtarget<KlaussCPUSubtarget>().getFrameLowering()->hasBP(MF));
 }
 
 bool KlaussCPURegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
@@ -105,8 +138,8 @@ bool KlaussCPURegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
           .getFixed();
 
   // Standard case: load/store instructions have (base, imm_offset) at
-  // [FIOperandNum, FIOperandNum+1].  Replace FI with the frame register (R15)
-  // and fold in the frame-slot offset.
+  // [FIOperandNum, FIOperandNum+1].  Replace FI with FrameReg (R15, or the
+  // base pointer R7) and fold in the frame-slot offset.
   if (FIOperandNum + 1 < MI.getNumOperands() &&
       MI.getOperand(FIOperandNum + 1).isImm()) {
     int64_t Offset = BaseOffset + MI.getOperand(FIOperandNum + 1).getImm();
@@ -116,8 +149,8 @@ bool KlaussCPURegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   }
 
   // Non-standard case: FrameIndex used as a plain register operand (e.g. ADDR
-  // for variable-indexed stack access).  Materialise (R15 + BaseOffset) into a
-  // scratch register with a single ADDI, then replace the FI operand.
+  // for variable-indexed stack access).  Materialise (FrameReg + BaseOffset)
+  // into a scratch register with a single ADDI, then replace the FI operand.
   assert(RS && "Register scavenger required for variable-indexed stack access");
   assert(isInt<32>(BaseOffset) && "Frame offset out of ADDI simm32 range");
 

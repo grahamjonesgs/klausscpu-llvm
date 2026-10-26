@@ -38,9 +38,12 @@
 // A-8 below R15, which the slack covers.  The locals stay below the
 // callee-saved slots, so the two areas never overlap.  Incoming arguments and
 // the callee-saved slots stay R15-relative, SP is not realigned (the outgoing
-// call area only needs 8 bytes; dynamic allocas align themselves), and BP is
-// unaffected by VLAs.  The epilogue is unchanged: LEAVE restores SP from R15,
-// and the CFA stays R15-based.
+// call area only needs 8 bytes; dynamic allocas align themselves, so an
+// over-aligned one alone does not realign the frame), and BP is unaffected by
+// VLAs.  The epilogue is unchanged: LEAVE restores SP from R15, and the CFA
+// stays R15-based.  Inline asm cannot keep BP live, so writing R7 through an
+// asm operand is an error and an R7 clobber draws the reserved-register
+// warning (KlaussCPURegisterInfo).
 //
 // Call frame information (emitted when MF.needsFrameMoves(), i.e. with -g or
 // unwind tables).  CFA = the caller's SP before its CALL.  The CIE (see
@@ -105,7 +108,8 @@ Register KlaussCPUFrameLowering::getBPReg() { return KlaussCPU::R7; }
 
 bool KlaussCPUFrameLowering::hasBP(const MachineFunction &MF) const {
   // Every frame access goes through a register, and SP is not one, so any
-  // realignment needs the base pointer.
+  // realignment needs the base pointer.  Only static objects ask for it
+  // (KlaussCPURegisterInfo::shouldRealignStack).
   return MF.getSubtarget().getRegisterInfo()->hasStackRealignment(MF);
 }
 
@@ -210,7 +214,10 @@ void KlaussCPUFrameLowering::emitPrologue(MachineFunction &MF,
 
   // Set up BP after the spills, which save the caller's value of it.
   if (HasBP) {
-    assert(isUInt<32>(Alignment.value()) && "Stack alignment too large");
+    // IR allows alignments up to 2^32, whose mask would be 0.
+    if (!isUInt<32>(Alignment.value()))
+      reportFatalUsageError("KlaussCPU: stack object alignment exceeds the "
+                            "32-bit address space");
     const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
     // ANDV zero-extends its immediate; addresses are 32-bit.
     BuildMI(MBB, MBBI, DL, TII.get(KlaussCPU::ANDV), getBPReg())

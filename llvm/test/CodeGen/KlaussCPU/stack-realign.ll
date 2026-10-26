@@ -310,3 +310,61 @@ define void @no_realign() nounwind {
   call void @use(ptr %b)
   ret void
 }
+
+; An over-aligned dynamic alloca alone needs no base pointer: the allocation
+; aligns SP itself (andr with -64), so R7 is neither reserved nor saved.
+define void @dyn_align64(i64 %n) nounwind {
+; O1-LABEL: dyn_align64:
+; O1:       # %bb.0:
+; O1-NEXT:    enter 0
+; O1-NEXT:    addi r12, r0, 7
+; O1-NEXT:    setr r14, -8
+; O1-NEXT:    andr r12, r12, r14
+; O1-NEXT:    getsp r14
+; O1-NEXT:    subr r12, r14, r12
+; O1-NEXT:    setr r14, -64
+; O1-NEXT:    andr r0, r12, r14
+; O1-NEXT:    setsp r0
+; O1-NEXT:    addsp -24
+; O1-NEXT:    call use
+; O1-NEXT:    addsp 24
+; O1-NEXT:    leaveret
+;
+; O0-LABEL: dyn_align64:
+; O0:       # %bb.0:
+; O0-NEXT:    enter 0
+; O0-NEXT:    addi r12, r0, 7
+; O0-NEXT:    setr r14, -8
+; O0-NEXT:    andr r14, r12, r14
+; O0-NEXT:    getsp r12
+; O0-NEXT:    subr r12, r12, r14
+; O0-NEXT:    setr r14, -64
+; O0-NEXT:    andr r0, r12, r14
+; O0-NEXT:    setsp r0
+; O0-NEXT:    addsp -24
+; O0-NEXT:    call use
+; O0-NEXT:    addsp 24
+; O0-NEXT:    leaveret
+;
+; PUSH-LABEL: dyn_align64:
+; PUSH:       # %bb.0:
+; PUSH-NEXT:    push r15
+; PUSH-NEXT:    getsp r15
+; PUSH-NEXT:    addi r12, r0, 7
+; PUSH-NEXT:    setr r14, -8
+; PUSH-NEXT:    andr r12, r12, r14
+; PUSH-NEXT:    getsp r14
+; PUSH-NEXT:    subr r12, r14, r12
+; PUSH-NEXT:    setr r14, -64
+; PUSH-NEXT:    andr r0, r12, r14
+; PUSH-NEXT:    setsp r0
+; PUSH-NEXT:    addsp -24
+; PUSH-NEXT:    call use
+; PUSH-NEXT:    addsp 24
+; PUSH-NEXT:    setsp r15
+; PUSH-NEXT:    pop r15
+; PUSH-NEXT:    ret
+  %d = alloca i8, i64 %n, align 64
+  call void @use(ptr %d)
+  ret void
+}

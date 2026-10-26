@@ -26,7 +26,13 @@ public:
 
   BitVector getReservedRegs(const MachineFunction &MF) const override;
 
+  bool shouldRealignStack(const MachineFunction &MF) const override;
   bool canRealignStack(const MachineFunction &MF) const override;
+
+  bool isAsmClobberable(const MachineFunction &MF,
+                        MCRegister PhysReg) const override;
+  bool isInlineAsmReadOnlyReg(const MachineFunction &MF,
+                              MCRegister PhysReg) const override;
 
   // Enable the real register scavenger so eliminateFrameIndex receives a
   // non-null RS for sub-word frame-slot access (MEMGET8/16, MEMSET8/16).
