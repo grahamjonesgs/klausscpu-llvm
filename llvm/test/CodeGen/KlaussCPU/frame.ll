@@ -44,9 +44,9 @@ define i64 @stack_array(i64 %i, i64 %v) {
 ; CHECK-NEXT:    enter 8
 ; CHECK-NEXT:    .cfi_def_cfa r15, 16
 ; CHECK-NEXT:    .cfi_offset r15, -16
+; CHECK-NEXT:    copy r12, r1
 ; CHECK-NEXT:    shlv r14, r0, 3
 ; CHECK-NEXT:    addi r13, r15, -64
-; CHECK-NEXT:    copy r12, r1
 ; CHECK-NEXT:    stidx64r r1, r13, r14
 ; CHECK-NEXT:    leaveret
   %arr = alloca [8 x i64]

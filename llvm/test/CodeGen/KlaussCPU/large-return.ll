@@ -25,8 +25,8 @@ define i64 @call_ret3(i64 %a) nounwind {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 7
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; CHECK-NEXT:    copy r1, r0
 ; CHECK-NEXT:    addi r4, r15, -32
+; CHECK-NEXT:    copy r1, r0
 ; CHECK-NEXT:    copy r0, r4
 ; CHECK-NEXT:    call ret3
 ; CHECK-NEXT:    ldidx64 r12, r4, 16

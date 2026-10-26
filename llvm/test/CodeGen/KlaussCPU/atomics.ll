@@ -119,8 +119,8 @@ define i32 @cas(i32 %expected, i32 %desired) nounwind {
 ; CHECK-LABEL: cas:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 5
-; CHECK-NEXT:    copy r2, r1
 ; CHECK-NEXT:    stidx32 r0, r15, -4
+; CHECK-NEXT:    copy r2, r1
 ; CHECK-NEXT:    getsp r12
 ; CHECK-NEXT:    setr r14, 5
 ; CHECK-NEXT:    addi r1, r15, -4

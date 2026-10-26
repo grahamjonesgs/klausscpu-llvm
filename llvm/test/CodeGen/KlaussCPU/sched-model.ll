@@ -6,6 +6,8 @@
 ; scheduled into the compare->branch gap.  FLAGS is modeled (Defs on flag-setting
 ; ops, Uses on conditional branches), so the compare and its branch stay adjacent.
 ;
+; The post-RA scheduler runs from -O1 (the production level) up, so check both.
+; RUN: llc -march=klausscpu -verify-machineinstrs -O1 -klausscpu-fuse-cmp-br=false < %s | FileCheck %s
 ; RUN: llc -march=klausscpu -verify-machineinstrs -O2 -klausscpu-fuse-cmp-br=false < %s | FileCheck %s
 ;
 ; A/B baseline (spec §7.1): -mcpu=no-sched selects NoSchedModel — the whole M8

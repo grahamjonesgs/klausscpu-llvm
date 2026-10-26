@@ -12,9 +12,9 @@ define void @protected() nounwind sspstrong {
 ; CHECK-NEXT:    enter 7
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    setr r4, __stack_chk_guard
+; CHECK-NEXT:    addi r0, r15, -32
 ; CHECK-NEXT:    ldidx64 r12, r4, 0
 ; CHECK-NEXT:    stidx64 r12, r15, -16
-; CHECK-NEXT:    addi r0, r15, -32
 ; CHECK-NEXT:    call use
 ; CHECK-NEXT:    ldidx64 r12, r4, 0
 ; CHECK-NEXT:    ldidx64 r14, r15, -16

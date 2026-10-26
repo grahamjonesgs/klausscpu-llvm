@@ -61,8 +61,8 @@ define i64 @i128_local() nounwind {
 ; O1-NEXT:    stidx64 r12, r7, -32
 ; O1-NEXT:    ldidx64 r12, r14, 0
 ; O1-NEXT:    ldidx64 r14, r7, -32
-; O1-NEXT:    xorr r12, r12, r14
 ; O1-NEXT:    ldidx64 r7, r15, -8 # 8-byte Folded Reload
+; O1-NEXT:    xorr r12, r12, r14
 ; O1-NEXT:    leaveret
 ;
 ; O0-LABEL: i128_local:
@@ -96,8 +96,8 @@ define i64 @i128_local() nounwind {
 ; PUSH-NEXT:    stidx64 r12, r7, -32
 ; PUSH-NEXT:    ldidx64 r12, r14, 0
 ; PUSH-NEXT:    ldidx64 r14, r7, -32
-; PUSH-NEXT:    xorr r12, r12, r14
 ; PUSH-NEXT:    ldidx64 r7, r15, -8 # 8-byte Folded Reload
+; PUSH-NEXT:    xorr r12, r12, r14
 ; PUSH-NEXT:    setsp r15
 ; PUSH-NEXT:    pop r15
 ; PUSH-NEXT:    ret
@@ -117,11 +117,11 @@ define void @align64_vla(i64 %n) nounwind {
 ; O1-LABEL: align64_vla:
 ; O1:       # %bb.0:
 ; O1-NEXT:    enter 15
-; O1-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; O1-NEXT:    stidx64 r7, r15, -16 # 8-byte Folded Spill
-; O1-NEXT:    andv r7, r15, 4294967232
 ; O1-NEXT:    addi r12, r0, 7
 ; O1-NEXT:    setr r14, -8
+; O1-NEXT:    stidx64 r7, r15, -16 # 8-byte Folded Spill
+; O1-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
+; O1-NEXT:    andv r7, r15, 4294967232
 ; O1-NEXT:    andr r12, r12, r14
 ; O1-NEXT:    getsp r14
 ; O1-NEXT:    subr r4, r14, r12
@@ -166,11 +166,11 @@ define void @align64_vla(i64 %n) nounwind {
 ; PUSH-NEXT:    push r15
 ; PUSH-NEXT:    getsp r15
 ; PUSH-NEXT:    addsp -120
-; PUSH-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; PUSH-NEXT:    stidx64 r7, r15, -16 # 8-byte Folded Spill
-; PUSH-NEXT:    andv r7, r15, 4294967232
 ; PUSH-NEXT:    addi r12, r0, 7
 ; PUSH-NEXT:    setr r14, -8
+; PUSH-NEXT:    stidx64 r7, r15, -16 # 8-byte Folded Spill
+; PUSH-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
+; PUSH-NEXT:    andv r7, r15, 4294967232
 ; PUSH-NEXT:    andr r12, r12, r14
 ; PUSH-NEXT:    getsp r14
 ; PUSH-NEXT:    subr r4, r14, r12
@@ -200,9 +200,9 @@ define i64 @stack_arg(i64 %a, i64 %b, i64 %c, i64 %d, i64 %e) nounwind {
 ; O1-LABEL: stack_arg:
 ; O1:       # %bb.0:
 ; O1-NEXT:    enter 15
-; O1-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; O1-NEXT:    stidx64 r7, r15, -16 # 8-byte Folded Spill
 ; O1-NEXT:    andv r7, r15, 4294967264
+; O1-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; O1-NEXT:    ldidx64 r4, r15, 40
 ; O1-NEXT:    addi r0, r7, -64
 ; O1-NEXT:    call use
@@ -229,9 +229,9 @@ define i64 @stack_arg(i64 %a, i64 %b, i64 %c, i64 %d, i64 %e) nounwind {
 ; PUSH-NEXT:    push r15
 ; PUSH-NEXT:    getsp r15
 ; PUSH-NEXT:    addsp -120
-; PUSH-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; PUSH-NEXT:    stidx64 r7, r15, -16 # 8-byte Folded Spill
 ; PUSH-NEXT:    andv r7, r15, 4294967264
+; PUSH-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; PUSH-NEXT:    ldidx64 r4, r15, 40
 ; PUSH-NEXT:    addi r0, r7, -64
 ; PUSH-NEXT:    call use
@@ -349,9 +349,9 @@ define void @dyn_align64(i64 %n) nounwind {
 ; PUSH-LABEL: dyn_align64:
 ; PUSH:       # %bb.0:
 ; PUSH-NEXT:    push r15
-; PUSH-NEXT:    getsp r15
 ; PUSH-NEXT:    addi r12, r0, 7
 ; PUSH-NEXT:    setr r14, -8
+; PUSH-NEXT:    getsp r15
 ; PUSH-NEXT:    andr r12, r12, r14
 ; PUSH-NEXT:    getsp r14
 ; PUSH-NEXT:    subr r12, r14, r12

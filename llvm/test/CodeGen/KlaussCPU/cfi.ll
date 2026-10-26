@@ -53,8 +53,8 @@ define i64 @csrs(i64 %a, i64 %b) uwtable {
 ; CHECK-NEXT:    .cfi_offset r5, -32
 ; CHECK:         ldidx64 r5, r15, -16
 ; CHECK-NEXT:    ldidx64 r4, r15, -8
-; ENTER-NEXT:    leaveret
-; LEAVE-NEXT:    leave
+; ENTER:         leaveret
+; LEAVE:         leave
 ; LEAVE-NEXT:    .cfi_def_cfa sp, 8
 ; LEAVE-NEXT:    .cfi_same_value r15
 ; LEAVE-NEXT:    .cfi_same_value r4

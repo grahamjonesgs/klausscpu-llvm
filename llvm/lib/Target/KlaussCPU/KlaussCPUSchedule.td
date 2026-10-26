@@ -30,6 +30,8 @@ def KlaussCPUSchedModel : SchedMachineModel {
   // KlaussCPUSubtarget::enableMachineScheduler) does most of the spreading with full
   // freedom; the post-RA pass then catches spills/reloads and frame-address
   // materialisation the pre-RA pass never sees (those appear only after regalloc/PEI).
+  // It runs from -O1 up (KlaussCPUSubtarget::getOptLevelToEnablePostRAScheduler;
+  // the generic threshold is -O2).
   // This was previously forced OFF because the backend had no modeled FLAGS register,
   // so the scheduler could hoist a flag-clobbering frame-address ADDI into a
   // compare->branch gap and break the branch (the -O2 SHA-256 `len==0` guard misfired

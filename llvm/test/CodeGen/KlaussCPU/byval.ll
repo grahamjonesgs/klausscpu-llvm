@@ -24,8 +24,7 @@ define void @pass_const() {
 ; CHECK:         enter 7
 ; CHECK:         addi r0, r15, -32
 ; CHECK-NOT:     setr r0
-; CHECK:         setr r14, cs+16
-; CHECK-NEXT:    stidx64 r12, r0, 24
+; CHECK:         stidx64 r12, r0, 24
 ; CHECK:         stidx64 r12, r0, 16
 ; CHECK:         stidx64 r12, r0, 8
 ; CHECK:         stidx64 r12, r15, -32
@@ -40,9 +39,9 @@ define void @pass_stack_slot(ptr %p) {
 ; CHECK:         enter 8
 ; CHECK:         ldidx64 r12, r0, 24
 ; CHECK-NEXT:    addi [[COPY:r[0-9]+]], r15, -32
-; CHECK-NEXT:    stidx64 r12, [[COPY]], 24
+; CHECK:         stidx64 r12, [[COPY]], 24
 ; CHECK:         ldidx64 r12, r0, 0
-; CHECK-NEXT:    stidx64 r12, r15, -32
+; CHECK:         stidx64 r12, r15, -32
 ; CHECK-NEXT:    getsp [[SP:r[0-9]+]]
 ; CHECK:         stidx64 [[COPY]], [[SP]], 24
 ; CHECK-NEXT:    call take5
@@ -54,10 +53,10 @@ define void @pass_stack_slot(ptr %p) {
 define void @pass_large() {
 ; CHECK-LABEL: pass_large:
 ; CHECK:         addi [[COPY:r[0-9]+]], r15, -328
-; CHECK-NEXT:    copy r0, [[COPY]]
-; CHECK-NEXT:    setr r1, gl
-; CHECK-NEXT:    setr r2, 320
-; CHECK-NEXT:    call memcpy
+; CHECK-DAG:     copy r0, [[COPY]]
+; CHECK-DAG:     setr r1, gl
+; CHECK-DAG:     setr r2, 320
+; CHECK:         call memcpy
 ; CHECK-NEXT:    copy r0, [[COPY]]
 ; CHECK-NEXT:    call takel
   call void @takel(ptr byval(%struct.L) align 8 @gl)
@@ -95,7 +94,8 @@ declare void @take3(ptr byval({ i8, i8, i8 }) align 1)
 define void @pass_odd(ptr %p, ptr %q) {
 ; CHECK-LABEL: pass_odd:
 ; CHECK:         addi r0, r15, [[C13:-[0-9]+]]
-; CHECK-NEXT:    stidx8 {{r[0-9]+}}, r0, 12
+; CHECK-NOT:     {{(copy|addi|setr) r0,}}
+; CHECK:         stidx8 {{r[0-9]+}}, r0, 12
 ; CHECK:         stidx32 {{r[0-9]+}}, r0, 8
 ; CHECK-NOT:     {{(copy|addi|setr) r0,}}
 ; CHECK:         stidx64 {{r[0-9]+}}, r15, [[C13]]
