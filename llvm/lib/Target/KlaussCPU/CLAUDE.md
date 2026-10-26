@@ -74,6 +74,14 @@ stack-arg offset of 24 maps to `CallerSP+24 = incoming_SP+32` on the callee side
 **Prologue:** `PUSH R15 ; GETSP R15 ; ADDSP -N`  (ADDSP omitted if N=0)
 **Epilogue:** `SETSP R15 ; POP R15`  (RET emitted by `KlaussCPURetGlue` pattern)
 
+**Stack realignment:** the ABI stack is only 8-byte aligned.  A function with
+a local aligned to A > 8 (`_Alignas(32)`, an `__int128`) reserves **R7 as a
+base pointer**: the frame grows by A-8, R7 is saved with the other callee-saved
+registers (R15-relative), then `ANDV R7, R15, -A`, and the locals are
+addressed R7-relative (`DW_OP_breg7` in the debug info).  Incoming arguments
+and callee-saved slots stay R15-relative; the epilogue and CFA are unchanged.
+See `KlaussCPUFrameLowering.cpp`.
+
 ---
 
 ## Build

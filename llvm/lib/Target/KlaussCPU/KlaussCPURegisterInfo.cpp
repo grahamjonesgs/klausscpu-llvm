@@ -11,6 +11,7 @@
 // Reserved registers:
 //   SP  — hardware stack pointer, never visible to register allocator
 //   R15 — frame pointer, always active (we always emit a frame pointer)
+//   R7  — base pointer, only in a function that realigns its stack
 //
 //===----------------------------------------------------------------------===//
 
@@ -60,6 +61,11 @@ KlaussCPURegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   BitVector Reserved(getNumRegs());
   Reserved.set(KlaussCPU::SP);    // hardware stack pointer
   Reserved.set(KlaussCPU::R15);   // frame pointer (always active)
+  // Base pointer, only in a function that realigns its stack.
+  const KlaussCPUFrameLowering *TFI =
+      MF.getSubtarget<KlaussCPUSubtarget>().getFrameLowering();
+  if (TFI->hasBP(MF))
+    Reserved.set(TFI->getBPReg());
   // FLAGS is deliberately NOT reserved (it is in no allocatable class, so it is
   // still never allocated).  Reserving it excludes it from the machine
   // scheduler's block-boundary liveness, so a conditional branch's FLAGS use (a
@@ -69,6 +75,13 @@ KlaussCPURegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   // flags (board itoa/printf infinite loop).  Tracking FLAGS as a normal physreg
   // (the X86 EFLAGS model) makes that live range visible so nothing clobbers it.
   return Reserved;
+}
+
+bool KlaussCPURegisterInfo::canRealignStack(const MachineFunction &MF) const {
+  // Realignment needs the base pointer, which can no longer be reserved once
+  // register allocation has started without it.
+  return TargetRegisterInfo::canRealignStack(MF) &&
+         MF.getRegInfo().canReserveReg(KlaussCPUFrameLowering::getBPReg());
 }
 
 bool KlaussCPURegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,

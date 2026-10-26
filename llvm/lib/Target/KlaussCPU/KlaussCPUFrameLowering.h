@@ -2,11 +2,13 @@
 //
 // KlaussCPU LLVM backend — frame lowering class declaration.
 //
-// KlaussCPU always uses a frame pointer (R15 = P).  All frame-slot accesses
-// use P+offset via LDIDX64/STIDX64.  The hardware stack pointer (SP) is only
-// touched in the prologue (GETSP / ADDSP) and epilogue (SETSP / POP P).
+// KlaussCPU always uses a frame pointer (R15 = P).  Frame slots are addressed
+// P+offset via LDIDX64/STIDX64, except in a function that realigns its stack
+// (a local aligned above 8 bytes), whose locals are addressed from a base
+// pointer (R7 = H) holding P rounded down to that alignment.  The hardware
+// stack pointer (SP) is not a GPR: only GETSP / SETSP / ADDSP reach it.
 //
-// Stack grows downward; slots are 8-byte aligned.
+// Stack grows downward; the ABI stack alignment is 8 bytes.
 //
 //===----------------------------------------------------------------------===//
 
@@ -54,11 +56,21 @@ public:
                               MutableArrayRef<CalleeSavedInfo> CSI,
                               const TargetRegisterInfo *TRI) const override;
 
-  // Every frame object is addressed R15-relative.  This is the one place the
-  // offset is computed: eliminateFrameIndex, the CSR CFI and the debug-info
-  // locations (DW_OP_fbreg against DW_AT_frame_base = R15) all use it.
+  // Frame objects are addressed R15-relative, or BP-relative for the locals of
+  // a realigning function.  This is the one place the base and offset are
+  // computed: eliminateFrameIndex, the CSR CFI and the debug-info locations
+  // (DW_OP_fbreg against DW_AT_frame_base = R15, or DW_OP_breg7) all use it.
   StackOffset getFrameIndexReference(const MachineFunction &MF, int FI,
                                      Register &FrameReg) const override;
+
+  // A realigning function also saves and restores the base pointer.
+  void determineCalleeSaves(MachineFunction &MF, BitVector &SavedRegs,
+                            RegScavenger *RS) const override;
+
+  // True if the function realigns its stack, and so reserves the base pointer
+  // (getBPReg) to address its locals.
+  bool hasBP(const MachineFunction &MF) const;
+  static Register getBPReg();
 
   // CFIFixup hook: reset the unwind state to the CIE's (CFA = SP+8).
   void resetCFIToInitialState(MachineBasicBlock &MBB) const override;

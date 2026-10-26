@@ -25,6 +25,23 @@
 //            POP R15       ; restore caller's R15
 //            (RET is emitted by the KlaussCPURetGlue pattern)
 //
+// Stack realignment.  The ABI keeps SP 8-byte aligned, so R15 is only 8-byte
+// aligned.  A function with a local aligned to A > 8 (_Alignas(32), an
+// __int128, an over-aligned byval copy) reserves R7 as a base pointer (BP):
+//
+//            ENTER (N + A - 8) / 8           ; frame plus realignment slack
+//            <callee-saved spills>           ; R15-relative, saves the old BP
+//            ANDV  R7, R15, -A               ; BP = R15 rounded down to A
+//
+// PEI lays every local out at an offset that is a multiple of its alignment
+// below a MaxAlign-aligned top, so BP+offset is aligned, and BP is at most
+// A-8 below R15, which the slack covers.  The locals stay below the
+// callee-saved slots, so the two areas never overlap.  Incoming arguments and
+// the callee-saved slots stay R15-relative, SP is not realigned (the outgoing
+// call area only needs 8 bytes; dynamic allocas align themselves), and BP is
+// unaffected by VLAs.  The epilogue is unchanged: LEAVE restores SP from R15,
+// and the CFA stays R15-based.
+//
 // Call frame information (emitted when MF.needsFrameMoves(), i.e. with -g or
 // unwind tables).  CFA = the caller's SP before its CALL.  The CIE (see
 // createKlaussCPUMCAsmInfo) starts each function at CFA = SP+8 with the return
@@ -77,7 +94,29 @@ KlaussCPUFrameLowering::getFrameIndexReference(const MachineFunction &MF,
   // so their offsets are R15-relative already.
   if (MFI.isFixedObjectIndex(FI))
     Offset += 8;
+  // In a realigning function the locals are BP-relative.  The callee-saved
+  // slots stay R15-relative: they are written before BP is set up.
+  else if (hasBP(MF) && !MFI.isCalleeSavedObjectIndex(FI))
+    FrameReg = getBPReg();
   return StackOffset::getFixed(Offset);
+}
+
+Register KlaussCPUFrameLowering::getBPReg() { return KlaussCPU::R7; }
+
+bool KlaussCPUFrameLowering::hasBP(const MachineFunction &MF) const {
+  // Every frame access goes through a register, and SP is not one, so any
+  // realignment needs the base pointer.
+  return MF.getSubtarget().getRegisterInfo()->hasStackRealignment(MF);
+}
+
+void KlaussCPUFrameLowering::determineCalleeSaves(MachineFunction &MF,
+                                                  BitVector &SavedRegs,
+                                                  RegScavenger *RS) const {
+  TargetFrameLowering::determineCalleeSaves(MF, SavedRegs, RS);
+  // BP is reserved, so the register allocator never marks it modified; the
+  // prologue overwrites it.  A naked function has no prologue.
+  if (hasBP(MF) && !MF.getFunction().hasFnAttribute(Attribute::Naked))
+    SavedRegs.set(getBPReg());
 }
 
 bool KlaussCPUFrameLowering::hasReservedCallFrame(
@@ -116,11 +155,18 @@ void KlaussCPUFrameLowering::emitPrologue(MachineFunction &MF,
   const KlaussCPUInstrInfo &TII =
       *MF.getSubtarget<KlaussCPUSubtarget>().getInstrInfo();
   MachineBasicBlock::iterator MBBI = MBB.begin();
-  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  MachineFrameInfo &MFI = MF.getFrameInfo();
   DebugLoc DL;
 
   bool NeedsCFI = MF.needsFrameMoves();
   CFIInstBuilder CFIBuilder(MBB, MBBI, MachineInstr::FrameSetup);
+
+  // A realigning function addresses its locals from BP = R15 & -Alignment,
+  // up to Alignment-8 bytes below R15: allocate that much more.
+  bool HasBP = hasBP(MF);
+  Align Alignment = std::max(MFI.getMaxAlign(), getStackAlign());
+  if (HasBP)
+    MFI.setStackSize(MFI.getStackSize() + Alignment.value() - 8);
 
   uint64_t FrameSize = MFI.getStackSize();
   if (EnableEnterLeave && fitsEnter(FrameSize)) {
@@ -155,20 +201,37 @@ void KlaussCPUFrameLowering::emitPrologue(MachineFunction &MF,
           .setMIFlag(MachineInstr::FrameSetup);
   }
 
+  if (!HasBP && !NeedsCFI)
+    return;
+
+  // Callee-saved spills (spillCalleeSavedRegisters) follow the prologue.
+  while (MBBI != MBB.end() && MBBI->getFlag(MachineInstr::FrameSetup))
+    ++MBBI;
+
+  // Set up BP after the spills, which save the caller's value of it.
+  if (HasBP) {
+    assert(isUInt<32>(Alignment.value()) && "Stack alignment too large");
+    const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+    // ANDV zero-extends its immediate; addresses are 32-bit.
+    BuildMI(MBB, MBBI, DL, TII.get(KlaussCPU::ANDV), getBPReg())
+        .addReg(KlaussCPU::R15)
+        .addImm(Lo_32(-Alignment.value()))
+        .setMIFlag(MachineInstr::FrameSetup)
+        ->addRegisterDead(KlaussCPU::FLAGS, TRI);
+  }
+
   if (!NeedsCFI)
     return;
 
-  // Callee-saved spills (spillCalleeSavedRegisters) follow the prologue; place
-  // their .cfi_offset rules after the stores.  Spill slots are R15-relative
-  // (getFrameIndexReference), and R15 = CFA-16.
-  const std::vector<CalleeSavedInfo> &CSI = MFI.getCalleeSavedInfo();
-  while (MBBI != MBB.end() && MBBI->getFlag(MachineInstr::FrameSetup))
-    ++MBBI;
+  // Place the .cfi_offset rules for the callee-saved registers after the
+  // spills.  Spill slots are R15-relative (getFrameIndexReference), and
+  // R15 = CFA-16.
   CFIBuilder.setInsertPoint(MBBI);
-  for (const CalleeSavedInfo &CS : CSI) {
+  for (const CalleeSavedInfo &CS : MFI.getCalleeSavedInfo()) {
     Register FrameReg;
     StackOffset Offset =
         getFrameIndexReference(MF, CS.getFrameIdx(), FrameReg);
+    assert(FrameReg == KlaussCPU::R15 && "Callee-saved slot not R15-relative");
     CFIBuilder.buildOffset(CS.getReg(), Offset.getFixed() - 16);
   }
 }

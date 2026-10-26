@@ -39,7 +39,7 @@ public:
 
   const KlaussCPURegisterInfo  *getRegisterInfo()  const override { return &RI;  }
   const KlaussCPUInstrInfo     *getInstrInfo()      const override { return &II;  }
-  const TargetFrameLowering    *getFrameLowering()  const override { return &FL;  }
+  const KlaussCPUFrameLowering *getFrameLowering()  const override { return &FL;  }
   const KlaussCPUTargetLowering*getTargetLowering() const override { return &TLI; }
   const SelectionDAGTargetInfo *getSelectionDAGInfo()const override { return &TSI; }
 

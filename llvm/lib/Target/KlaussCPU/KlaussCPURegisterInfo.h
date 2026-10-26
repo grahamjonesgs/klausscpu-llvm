@@ -26,6 +26,8 @@ public:
 
   BitVector getReservedRegs(const MachineFunction &MF) const override;
 
+  bool canRealignStack(const MachineFunction &MF) const override;
+
   // Enable the real register scavenger so eliminateFrameIndex receives a
   // non-null RS for sub-word frame-slot access (MEMGET8/16, MEMSET8/16).
   // requiresFrameIndexScavenging must remain false (the default) — returning
