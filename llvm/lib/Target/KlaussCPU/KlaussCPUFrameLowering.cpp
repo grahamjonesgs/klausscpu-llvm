@@ -64,6 +64,22 @@ static bool fitsEnter(uint64_t FrameSize) {
   return FrameSize % 8 == 0 && (FrameSize / 8) < (uint64_t(1) << 22);
 }
 
+StackOffset
+KlaussCPUFrameLowering::getFrameIndexReference(const MachineFunction &MF,
+                                               int FI,
+                                               Register &FrameReg) const {
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  FrameReg = KlaussCPU::R15;
+  int64_t Offset = MFI.getObjectOffset(FI);
+  // Fixed objects (incoming stack args, vararg register save slots) have
+  // offsets relative to the incoming SP; R15 = incoming SP - 8 (the prologue
+  // pushes the caller's R15 first).  Locals are laid out below the saved R15,
+  // so their offsets are R15-relative already.
+  if (MFI.isFixedObjectIndex(FI))
+    Offset += 8;
+  return StackOffset::getFixed(Offset);
+}
+
 bool KlaussCPUFrameLowering::hasReservedCallFrame(
     const MachineFunction &MF) const {
   // Reserve space for outgoing call frames in the prologue so that
@@ -144,14 +160,17 @@ void KlaussCPUFrameLowering::emitPrologue(MachineFunction &MF,
 
   // Callee-saved spills (spillCalleeSavedRegisters) follow the prologue; place
   // their .cfi_offset rules after the stores.  Spill slots are R15-relative
-  // (eliminateFrameIndex), and R15 = CFA-16.
+  // (getFrameIndexReference), and R15 = CFA-16.
   const std::vector<CalleeSavedInfo> &CSI = MFI.getCalleeSavedInfo();
   while (MBBI != MBB.end() && MBBI->getFlag(MachineInstr::FrameSetup))
     ++MBBI;
   CFIBuilder.setInsertPoint(MBBI);
-  for (const CalleeSavedInfo &CS : CSI)
-    CFIBuilder.buildOffset(CS.getReg(),
-                           MFI.getObjectOffset(CS.getFrameIdx()) - 16);
+  for (const CalleeSavedInfo &CS : CSI) {
+    Register FrameReg;
+    StackOffset Offset =
+        getFrameIndexReference(MF, CS.getFrameIdx(), FrameReg);
+    CFIBuilder.buildOffset(CS.getReg(), Offset.getFixed() - 16);
+  }
 }
 
 // Once the frame is gone, R15 and the callee-saved registers hold the

@@ -54,6 +54,12 @@ public:
                               MutableArrayRef<CalleeSavedInfo> CSI,
                               const TargetRegisterInfo *TRI) const override;
 
+  // Every frame object is addressed R15-relative.  This is the one place the
+  // offset is computed: eliminateFrameIndex, the CSR CFI and the debug-info
+  // locations (DW_OP_fbreg against DW_AT_frame_base = R15) all use it.
+  StackOffset getFrameIndexReference(const MachineFunction &MF, int FI,
+                                     Register &FrameReg) const override;
+
   // CFIFixup hook: reset the unwind state to the CIE's (CFA = SP+8).
   void resetCFIToInitialState(MachineBasicBlock &MBB) const override;
 

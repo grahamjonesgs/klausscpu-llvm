@@ -79,25 +79,25 @@ bool KlaussCPURegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   MachineInstr &MI = *II;
   MachineBasicBlock &MBB = *MI.getParent();
   MachineFunction &MF = *MBB.getParent();
-  const MachineFrameInfo &MFI = MF.getFrameInfo();
   const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
 
+  // The frame-slot offset comes from getFrameIndexReference, which the debug
+  // info (DW_OP_fbreg) uses too, so the two cannot disagree.
   int FrameIndex = MI.getOperand(FIOperandNum).getIndex();
-  int64_t BaseOffset = MFI.getObjectOffset(FrameIndex);
-
-  // Fixed objects (FrameIndex < 0) store incoming-SP-relative offsets.
-  // R15 = incoming_SP - 8 (PUSH R15 in prologue), so add 8 to convert.
-  // Non-fixed (local) objects have R15-relative offsets already (set by PEI).
-  if (MFI.isFixedObjectIndex(FrameIndex))
-    BaseOffset += 8;
+  Register FrameReg;
+  int64_t BaseOffset =
+      MF.getSubtarget()
+          .getFrameLowering()
+          ->getFrameIndexReference(MF, FrameIndex, FrameReg)
+          .getFixed();
 
   // Standard case: load/store instructions have (base, imm_offset) at
-  // [FIOperandNum, FIOperandNum+1].  Replace FI with R15 and fold in the
-  // frame-slot offset.
+  // [FIOperandNum, FIOperandNum+1].  Replace FI with the frame register (R15)
+  // and fold in the frame-slot offset.
   if (FIOperandNum + 1 < MI.getNumOperands() &&
       MI.getOperand(FIOperandNum + 1).isImm()) {
     int64_t Offset = BaseOffset + MI.getOperand(FIOperandNum + 1).getImm();
-    MI.getOperand(FIOperandNum).ChangeToRegister(KlaussCPU::R15, false);
+    MI.getOperand(FIOperandNum).ChangeToRegister(FrameReg, false);
     MI.getOperand(FIOperandNum + 1).ChangeToImmediate(Offset);
     return false;
   }
@@ -113,7 +113,7 @@ bool KlaussCPURegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
       KlaussCPU::GPRRegClass, II, /*RestoreAfter=*/false, SPAdj);
 
   BuildMI(MBB, II, DL, TII.get(KlaussCPU::ADDI), Scratch)
-      .addReg(KlaussCPU::R15)
+      .addReg(FrameReg)
       .addImm(BaseOffset);
 
   MI.getOperand(FIOperandNum).ChangeToRegister(Scratch, /*isDef=*/false,
