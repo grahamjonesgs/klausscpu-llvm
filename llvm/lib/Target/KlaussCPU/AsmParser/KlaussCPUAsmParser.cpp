@@ -25,6 +25,8 @@
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/MathExtras.h"
+#include "llvm/Support/SaveAndRestore.h"
 #include "llvm/Support/raw_ostream.h"
 
 // Register and instruction enums — referenced by KlaussCPUGenAsmMatcher.inc.
@@ -79,6 +81,26 @@ public:
   bool isReg()   const override { return Kind == Register; }
   bool isMem()   const override { return false; }
   bool isImm()   const override { return Kind == Immediate; }
+
+  bool isConstantImm(int64_t &Val) const {
+    if (!isImm())
+      return false;
+    const auto *CE = dyn_cast<MCConstantExpr>(ImmVal);
+    if (!CE)
+      return false;
+    Val = CE->getValue();
+    return true;
+  }
+
+  bool isUImm4() const {
+    int64_t Val;
+    return isConstantImm(Val) && isUInt<4>(Val);
+  }
+
+  bool isSImm4() const {
+    int64_t Val;
+    return isConstantImm(Val) && isInt<4>(Val);
+  }
 
   MCRegister getReg() const override {
     assert(isReg() && "not a register operand");
@@ -148,6 +170,12 @@ class KlaussCPUAsmParser : public MCTargetAsmParser {
   // of reference type would make that dereference ill-formed.
   MCAsmParser &Parser;
 
+  // Set while parsing a PC-relative target operand; PCRelAbsSym is the first
+  // absolute .set/.equ symbol it names (see parsePCRelTarget).
+  bool InPCRelTarget = false;
+  MCSymbol *PCRelAbsSym = nullptr;
+  int64_t PCRelAbsVal = 0;
+
   AsmLexer    &getLexer() { return Parser.getLexer(); }
 
   // TableGen-generated: ComputeAvailableFeatures, convertToMCInst,
@@ -157,6 +185,7 @@ class KlaussCPUAsmParser : public MCTargetAsmParser {
 
   MCRegister matchRegisterByName(StringRef Name);
   ParseStatus parseOperand(OperandVector &Operands, StringRef Mnemonic);
+  ParseStatus parsePCRelTarget(OperandVector &Operands);
 
 public:
   KlaussCPUAsmParser(const MCSubtargetInfo &STI, MCAsmParser &Parser,
@@ -173,6 +202,7 @@ public:
   bool parseInstruction(ParseInstructionInfo &Info, StringRef Name,
                          SMLoc NameLoc, OperandVector &Operands) override;
   bool ParseDirective(AsmToken DirectiveID) override { return true; }
+  bool parsePrimaryExpr(const MCExpr *&Res, SMLoc &EndLoc) override;
   bool matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
                                 OperandVector &Operands, MCStreamer &Out,
                                 uint64_t &ErrorInfo,
@@ -249,22 +279,13 @@ ParseStatus KlaussCPUAsmParser::tryParseRegister(MCRegister &Reg,
 // Operand and instruction parsing
 //===----------------------------------------------------------------------===//
 
-// True if operand number OpIdx (1-based; Operands[0] is the mnemonic) of
-// Mnemonic is a PC-relative target, encoded as a displacement.
-static bool isPCRelOperand(StringRef Mnemonic, unsigned OpIdx) {
-  std::string M = Mnemonic.lower();
-  StringRef Name(M);
-  if (Name == "leapc")
-    return OpIdx == 2;
-  if (Name == "fbr" || Name == "fbri")
-    return OpIdx == 4;
-  if (Name == "callrel" || (Name.starts_with("jmp") && Name.ends_with("rel")))
-    return OpIdx == 1;
-  return false;
-}
-
 ParseStatus KlaussCPUAsmParser::parseOperand(OperandVector &Operands,
                                               StringRef Mnemonic) {
+  // Operand classes with a ParserMethod in the .td (PC-relative targets).
+  ParseStatus Res = MatchOperandParserImpl(Operands, Mnemonic);
+  if (!Res.isNoMatch())
+    return Res;
+
   SMLoc S = getLexer().getLoc();
 
   // Try register first.
@@ -278,41 +299,90 @@ ParseStatus KlaussCPUAsmParser::parseOperand(OperandVector &Operands,
     }
   }
 
-  // The generic parser substitutes an absolute .set/.equ symbol by its value.
-  // A literal in a PC-relative operand is a displacement, so `callrel ROMFN`
-  // would then branch to PC + ROMFN.  Keep such a reference symbolic: the
-  // PC-relative fixup turns it into a relocation to the absolute address,
-  // the same as when the .set follows the use.
-  MCSymbol *AbsSym = nullptr;
-  int64_t AbsVal = 0;
-  if (getLexer().is(AsmToken::Identifier) &&
-      isPCRelOperand(Mnemonic, Operands.size())) {
-    MCSymbol *Sym =
-        getContext().lookupSymbol(getLexer().getTok().getIdentifier());
-    if (Sym && Sym->isVariable())
-      if (const auto *CE = dyn_cast<MCConstantExpr>(Sym->getVariableValue())) {
-        AbsSym = Sym;
-        AbsVal = CE->getValue();
-      }
-  }
-
   // Otherwise parse as an expression (literal, label, or arithmetic).
   const MCExpr *Expr;
   SMLoc E;
   if (Parser.parseExpression(Expr, E))
     return ParseStatus::Failure;
 
-  int64_t Val;
-  if (AbsSym && Expr->evaluateAsAbsolute(Val)) {
-    Expr = MCSymbolRefExpr::create(AbsSym, getContext());
-    if (Val != AbsVal)
+  Operands.push_back(KlaussCPUOperand::createImm(Expr, S, E));
+  return ParseStatus::Success;
+}
+
+// A PC-relative target (PCRelTargetAsmOperand): a bare number is the
+// displacement from the instruction, as the disassembler prints it, and an
+// operand that names a symbol is the target address, which the PC-relative
+// fixup turns into a displacement or a relocation.  The generic parser folds
+// an absolute .set/.equ symbol into a plain number, so `callrel ROMFN` would
+// read as PC + ROMFN.  parsePrimaryExpr notes such a symbol, and a folded
+// result is rebuilt as SYM + (value - SYM): the same target as when the .set
+// follows the use, in every spelling (`(SYM)`, `4+SYM`, `-SYM`).
+ParseStatus KlaussCPUAsmParser::parsePCRelTarget(OperandVector &Operands) {
+  if (getLexer().is(AsmToken::Identifier) &&
+      matchRegisterByName(getLexer().getTok().getString()))
+    return ParseStatus::NoMatch;
+
+  SMLoc S = getLexer().getLoc();
+  SaveAndRestore InTarget(InPCRelTarget, true);
+  SaveAndRestore<MCSymbol *> AbsSym(PCRelAbsSym, nullptr);
+  const MCExpr *Expr;
+  SMLoc E;
+  if (Parser.parseExpression(Expr, E))
+    return ParseStatus::Failure;
+
+  if (const auto *CE = dyn_cast<MCConstantExpr>(Expr); CE && PCRelAbsSym) {
+    Expr = MCSymbolRefExpr::create(PCRelAbsSym, getContext(), S);
+    if (CE->getValue() != PCRelAbsVal)
       Expr = MCBinaryExpr::createAdd(
-          Expr, MCConstantExpr::create(Val - AbsVal, getContext()),
-          getContext());
+          Expr, MCConstantExpr::create(CE->getValue() - PCRelAbsVal,
+                                       getContext()),
+          getContext(), S);
   }
 
   Operands.push_back(KlaussCPUOperand::createImm(Expr, S, E));
   return ParseStatus::Success;
+}
+
+bool KlaussCPUAsmParser::parsePrimaryExpr(const MCExpr *&Res, SMLoc &EndLoc) {
+  if (!InPCRelTarget)
+    return MCTargetAsmParser::parsePrimaryExpr(Res, EndLoc);
+
+  // The generic parser parses a unary operator's operand itself, without
+  // coming back here, so handle those to see the symbol in `-SYM`.
+  SMLoc S = getLexer().getLoc();
+  MCUnaryExpr::Opcode Op;
+  switch (getLexer().getKind()) {
+  case AsmToken::Minus:
+    Op = MCUnaryExpr::Minus;
+    break;
+  case AsmToken::Plus:
+    Op = MCUnaryExpr::Plus;
+    break;
+  case AsmToken::Tilde:
+    Op = MCUnaryExpr::Not;
+    break;
+  case AsmToken::Exclaim:
+    Op = MCUnaryExpr::LNot;
+    break;
+  case AsmToken::Identifier:
+    if (!PCRelAbsSym)
+      if (MCSymbol *Sym = getContext().lookupSymbol(
+              getLexer().getTok().getIdentifier()))
+        if (Sym->isVariable())
+          if (const auto *CE =
+                  dyn_cast<MCConstantExpr>(Sym->getVariableValue())) {
+            PCRelAbsSym = Sym;
+            PCRelAbsVal = CE->getValue();
+          }
+    [[fallthrough]];
+  default:
+    return MCTargetAsmParser::parsePrimaryExpr(Res, EndLoc);
+  }
+  Parser.Lex();
+  if (parsePrimaryExpr(Res, EndLoc))
+    return true;
+  Res = MCUnaryExpr::create(Op, Res, getContext(), S);
+  return false;
 }
 
 bool KlaussCPUAsmParser::parseInstruction(ParseInstructionInfo & /*Info*/,
@@ -323,13 +393,16 @@ bool KlaussCPUAsmParser::parseInstruction(ParseInstructionInfo & /*Info*/,
   // assembly written in either case (ADDR / addr / AddR) matches.  Registers
   // are already case-folded in matchRegisterByName().
   Operands.push_back(KlaussCPUOperand::createToken(Name.lower(), NameLoc));
+  // The match tables (and so MatchOperandParserImpl) use the lower-case name.
+  StringRef Mnemonic =
+      static_cast<KlaussCPUOperand &>(*Operands[0]).getToken();
 
   if (getLexer().is(AsmToken::EndOfStatement) ||
       getLexer().is(AsmToken::Eof))
     return false;
 
   while (true) {
-    if (parseOperand(Operands, Name).isFailure())
+    if (parseOperand(Operands, Mnemonic).isFailure())
       return Error(getLexer().getLoc(), "failed to parse operand");
 
     if (getLexer().is(AsmToken::EndOfStatement) ||

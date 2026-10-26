@@ -56,6 +56,31 @@ func:
 loc:
         leapc   r3, func
         ret
+## Any spelling that names the symbol is a target, not only a leading name.
+# CHECK-NEXT:  6c: callrel 0x6c
+# CHECK-NEXT:        00000070: R_KLAUSSCPU_PCREL32 *ABS*+0x1000
+        callrel (BEFORE)
+# CHECK-NEXT:  74: callrel 0x74
+# CHECK-NEXT:        00000078: R_KLAUSSCPU_PCREL32 *ABS*+0x1004
+        callrel 4+BEFORE
+# CHECK-NEXT:  7c: leapc r4, 0x7c
+# CHECK-NEXT:        00000080: R_KLAUSSCPU_PCREL32 *ABS*-0x1000
+        leapc   r4, -BEFORE
+## A redefined symbol keeps its value at each use.
+        .set REDEF, 0x3000
+# CHECK-NEXT:  84: callrel 0x84
+# CHECK-NEXT:        00000088: R_KLAUSSCPU_PCREL32 *ABS*+0x3000
+        callrel REDEF
+        .set REDEF, 0x4000
+# CHECK-NEXT:  8c: callrel 0x8c
+# CHECK-NEXT:        00000090: R_KLAUSSCPU_PCREL32 *ABS*+0x4000
+        callrel REDEF
+## A bare number is the displacement.
+# CHECK-NEXT:  94: callrel 0xb4
+# CHECK-NEXT:  9c: leapc r5, 0x9c
+        callrel 0x20
+        leapc   r5, 0
+# CHECK-NOT: {{.}}
 
         .set AFTER, 0x2000
 

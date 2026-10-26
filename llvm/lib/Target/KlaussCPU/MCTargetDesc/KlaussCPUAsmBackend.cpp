@@ -164,6 +164,17 @@ public:
       return;
     }
 
+    // ELF32 r_addend is a signed 32-bit field.  A 32-bit field only needs the
+    // addend modulo 2^32; an 8-byte one sign-extends it.
+    if (!IsResolved) {
+      int64_t Addend = Target.getConstant();
+      if (!isInt<32>(Addend) && (Kind == FK_Data_8 || !isUInt<32>(Addend))) {
+        getContext().reportError(Fixup.getLoc(),
+                                 "relocation addend out of range");
+        return;
+      }
+    }
+
     // Record the relocation first: for RELA output it zeroes Value, so the
     // addend lives only in r_addend and not also in the section contents.
     maybeAddReloc(F, Fixup, Target, Value, IsResolved);

@@ -24,8 +24,27 @@
         call    HUGE
 # CHECK-DAG: [[#@LINE+1]]:25: error: symbol difference in a PC-relative operand
         leapc   r1, ext - small
+## A fused branch reaches only +-16 KiB, so it cannot name an absolute symbol.
+        .set    LOW, 0x1000
+# CHECK-DAG: [[#@LINE+1]]:28: error: fused branch target out of range
+        fbr     r1, r2, 0, LOW
+# CHECK-DAG: [[#@LINE+1]]:27: error: fused branch target out of range
+        fbri    r1, 3, 0, -LOW
+## ELF32 r_addend is 32 bits: a wider addend must not be truncated.
+# CHECK-DAG: [[#@LINE+1]]:17: error: relocation addend out of range
+        callrel HUGE
+# CHECK-DAG: [[#@LINE+1]]:25: error: relocation addend out of range
+        leapc   r1, ext + 0x100000000
+# CHECK-DAG: [[#@LINE+1]]:21: error: relocation addend out of range
+        call    ext + 0x100000000
 small:
         .fill   0x10000, 1, 0
 big:
 
         .set    HUGE, 0x100000000
+
+        .data
+## 32-bit fields need the addend only modulo 2^32; 8-byte ones sign-extend it.
+        .long   ext + 0x80000000
+# CHECK-DAG: [[#@LINE+1]]:21: error: relocation addend out of range
+        .quad   ext + 0x80000000

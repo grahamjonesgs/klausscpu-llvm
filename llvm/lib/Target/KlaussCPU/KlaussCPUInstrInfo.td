@@ -60,6 +60,30 @@ def BrTargetAsmOperand : AsmOperandClass {
   let RenderMethod    = "addImmOperands";
 }
 
+// PC-relative target (jmp*rel, callrel, leapc, short and fused branches).  A
+// bare number is the displacement from the instruction, as the disassembler
+// prints it; an operand that names a symbol is the target address
+// (KlaussCPUAsmParser::parsePCRelTarget).
+def PCRelTargetAsmOperand : AsmOperandClass {
+  let Name            = "PCRelTarget";
+  let PredicateMethod = "isImm";
+  let RenderMethod    = "addImmOperands";
+  let ParserMethod    = "parsePCRelTarget";
+}
+
+// Constant-only small immediates: an expression here cannot be encoded.
+def UImm4AsmOperand : AsmOperandClass {
+  let Name            = "UImm4";
+  let PredicateMethod = "isUImm4";
+  let RenderMethod    = "addImmOperands";
+}
+
+def SImm4AsmOperand : AsmOperandClass {
+  let Name            = "SImm4";
+  let PredicateMethod = "isSImm4";
+  let RenderMethod    = "addImmOperands";
+}
+
 //===----------------------------------------------------------------------===//
 // Operand types
 //===----------------------------------------------------------------------===//
@@ -83,6 +107,31 @@ def BrTarget32 : Operand<OtherVT> {
 def CallTarget32 : Operand<i64> {
   let EncoderMethod    = "encodeBrTarget";
   let ParserMatchClass = BrTargetAsmOperand;
+}
+
+// PC-relative branch/call target and LEAPC offset (encoded as a displacement).
+def PCRelTarget32 : Operand<OtherVT> {
+  let EncoderMethod    = "encodeBrTarget";
+  let ParserMatchClass = PCRelTargetAsmOperand;
+}
+
+def PCRelCallTarget32 : Operand<i64> {
+  let EncoderMethod    = "encodeBrTarget";
+  let ParserMatchClass = PCRelTargetAsmOperand;
+}
+
+def pcrel_simm32 : Operand<i64> {
+  let DecoderMethod    = "decodeSimm32";
+  let ParserMatchClass = PCRelTargetAsmOperand;
+}
+
+// Fused-branch condition (PRED | INV << 3) and register-immediate operand.
+def fbr_cc : Operand<i64> {
+  let ParserMatchClass = UImm4AsmOperand;
+}
+
+def fbr_simm4 : Operand<i64> {
+  let ParserMatchClass = SImm4AsmOperand;
 }
 
 //===----------------------------------------------------------------------===//
@@ -250,8 +299,9 @@ class I0<bits<32> op, dag outs, dag ins, string asmstr, list<dag> pat = []>
 //===----------------------------------------------------------------------===//
 
 // Load immediate into register: rd = imm32
-class RV_ld<bits<28> op, string asmstr, list<dag> pat = []>
-    : KCInst64<(outs GPR:$rd), (ins simm32:$imm), asmstr, pat> {
+class RV_ld<bits<28> op, string asmstr, list<dag> pat = [],
+            Operand immop = simm32>
+    : KCInst64<(outs GPR:$rd), (ins immop:$imm), asmstr, pat> {
   bits<4>  rd;
   bits<32> imm;
   let Inst{63-36} = op;
@@ -381,8 +431,9 @@ class Idx64RegOff_st<string asmstr>
 //===----------------------------------------------------------------------===//
 
 // Unconditional branch
-class Vbr_uncond<bits<32> op, string asmstr, list<dag> pat = []>
-    : KCInst64<(outs), (ins BrTarget32:$target), asmstr, pat> {
+class Vbr_uncond<bits<32> op, string asmstr, list<dag> pat = [],
+                 Operand tgt = BrTarget32>
+    : KCInst64<(outs), (ins tgt:$target), asmstr, pat> {
   bits<32> target;
   let Inst{63-32}            = op;
   let Inst{31-0}             = target;
@@ -393,8 +444,8 @@ class Vbr_uncond<bits<32> op, string asmstr, list<dag> pat = []>
 }
 
 // Conditional branch (flags set by preceding CMPRR/CMPRV)
-class Vbr_cond<bits<32> op, string asmstr>
-    : KCInst64<(outs), (ins BrTarget32:$target), asmstr> {
+class Vbr_cond<bits<32> op, string asmstr, Operand tgt = BrTarget32>
+    : KCInst64<(outs), (ins tgt:$target), asmstr> {
   bits<32> target;
   let Inst{63-32} = op;
   let Inst{31-0}  = target;
@@ -404,9 +455,13 @@ class Vbr_cond<bits<32> op, string asmstr>
   let Uses        = [FLAGS];   // conditional branch reads the flags a compare set
 }
 
+// PC-relative conditional branch
+class Vbr_relcond<bits<32> op, string asmstr>
+    : Vbr_cond<op, asmstr, PCRelTarget32>;
+
 // Direct call
-class Vcall<bits<32> op, string asmstr>
-    : KCInst64<(outs), (ins CallTarget32:$target), asmstr> {
+class Vcall<bits<32> op, string asmstr, Operand tgt = CallTarget32>
+    : KCInst64<(outs), (ins tgt:$target), asmstr> {
   bits<32> target;
   let Inst{63-32} = op;
   let Inst{31-0}  = target;
@@ -1042,36 +1097,37 @@ def CALL_I  : Vcall<0x00001009, "call\t$target">;
 //===----------------------------------------------------------------------===//
 
 // PC-relative unconditional branch
-def JMPREL   : Vbr_uncond<0x00001030, "jmprel\t$target">;
+def JMPREL   : Vbr_uncond<0x00001030, "jmprel\t$target", [],
+                          PCRelTarget32>;
 
 // PC-relative conditional branches — flag sources same as absolute counterparts
-def JMPZREL   : Vbr_cond<0x00001031, "jmpzrel\t$target">;   // zero_flag
-def JMPNZREL  : Vbr_cond<0x00001032, "jmpnzrel\t$target">;  // !zero_flag
-def JMPEREL   : Vbr_cond<0x00001033, "jmperel\t$target">;   // equal_flag
-def JMPNEREL  : Vbr_cond<0x00001034, "jmpnerel\t$target">;  // !equal_flag
-def JMPCREL   : Vbr_cond<0x00001035, "jmpcrel\t$target">;   // carry_flag
-def JMPNCREL  : Vbr_cond<0x00001036, "jmpncrel\t$target">;  // !carry_flag
-def JMPSREL   : Vbr_cond<0x00001037, "jmpsrel\t$target">;   // sign_flag
-def JMPNSREL  : Vbr_cond<0x00001038, "jmpnsrel\t$target">;  // !sign_flag
-def JMPLTREL  : Vbr_cond<0x00001039, "jmpltrel\t$target">;  // less_flag
-def JMPLEREL  : Vbr_cond<0x0000103A, "jmplerel\t$target">;  // less|equal
-def JMPGTREL  : Vbr_cond<0x0000103B, "jmpgtrel\t$target">;  // !less&!equal
-def JMPGEREL  : Vbr_cond<0x0000103C, "jmpgerel\t$target">;  // !less_flag
-def JMPULTREL : Vbr_cond<0x0000103D, "jmpultrel\t$target">; // ult_flag
-def JMPULEREL : Vbr_cond<0x0000103E, "jmpulerel\t$target">; // ult|equal
-def JMPUGTREL : Vbr_cond<0x0000103F, "jmpugtrel\t$target">; // !ult&!equal
-def JMPUGEREL : Vbr_cond<0x00001040, "jmpugerel\t$target">; // !ult_flag
+def JMPZREL   : Vbr_relcond<0x00001031, "jmpzrel\t$target">;   // zero_flag
+def JMPNZREL  : Vbr_relcond<0x00001032, "jmpnzrel\t$target">;  // !zero_flag
+def JMPEREL   : Vbr_relcond<0x00001033, "jmperel\t$target">;   // equal_flag
+def JMPNEREL  : Vbr_relcond<0x00001034, "jmpnerel\t$target">;  // !equal_flag
+def JMPCREL   : Vbr_relcond<0x00001035, "jmpcrel\t$target">;   // carry_flag
+def JMPNCREL  : Vbr_relcond<0x00001036, "jmpncrel\t$target">;  // !carry_flag
+def JMPSREL   : Vbr_relcond<0x00001037, "jmpsrel\t$target">;   // sign_flag
+def JMPNSREL  : Vbr_relcond<0x00001038, "jmpnsrel\t$target">;  // !sign_flag
+def JMPLTREL  : Vbr_relcond<0x00001039, "jmpltrel\t$target">;  // less_flag
+def JMPLEREL  : Vbr_relcond<0x0000103A, "jmplerel\t$target">;  // less|equal
+def JMPGTREL  : Vbr_relcond<0x0000103B, "jmpgtrel\t$target">;  // !less&!equal
+def JMPGEREL  : Vbr_relcond<0x0000103C, "jmpgerel\t$target">;  // !less_flag
+def JMPULTREL : Vbr_relcond<0x0000103D, "jmpultrel\t$target">; // ult_flag
+def JMPULEREL : Vbr_relcond<0x0000103E, "jmpulerel\t$target">; // ult|equal
+def JMPUGTREL : Vbr_relcond<0x0000103F, "jmpugtrel\t$target">; // !ult&!equal
+def JMPUGEREL : Vbr_relcond<0x00001040, "jmpugerel\t$target">; // !ult_flag
 
 // PC-relative direct call: push PC+8 (return addr), PC += sign_ext(imm32)
 let Uses = [SP],
     Defs = [R0, R1, R2, R3, R8, R9, R10, R11, R12, R13, R14, FLAGS] in
-def CALLREL : Vcall<0x00001041, "callrel\t$target">;
+def CALLREL : Vcall<0x00001041, "callrel\t$target", PCRelCallTarget32>;
 
 // LEAPC: rd = PC_of_instruction + sign_ext(imm32)  (address materialisation)
 // Opcode 0x0000099 in RV_ld slot: word0 = (0x099 << 4) | rd, word1 = simm32.
 // The encoder emits FK_KlaussCPU_PCREL32 for symbol references.
 let hasSideEffects = 0, isReMaterializable = 1 in
-def LEAPC   : RV_ld<0x0000099, "leapc\t$rd, $imm">;
+def LEAPC   : RV_ld<0x0000099, "leapc\t$rd, $imm", [], pcrel_simm32>;
 
 //===----------------------------------------------------------------------===//
 // Special / system
@@ -1294,13 +1350,16 @@ def LDIDX64U_SH  : KCInst32<(outs GPR:$rd), (ins GPR:$base, simm32:$offset), "ld
 let isBranch = 1, isTerminator = 1, Uses = [FLAGS] in {
 foreach c = ["z", "nz", "c", "nc", "o", "no", "s", "ns", "lt", "ge", "le",
              "gt", "ult", "uge", "ule", "ugt", "e", "ne"] in
-  def JMP # !toupper(c) # _SH : KCInst32<(outs), (ins BrTarget32:$target),
+  def JMP # !toupper(c) # _SH : KCInst32<(outs),
+      // jmpo/jmpno share their spelling with the absolute forms (below).
+      (ins !if(!or(!eq(c, "o"), !eq(c, "no")), BrTarget32,
+               PCRelTarget32):$target),
       // O/NO have no 2-word PC-relative spelling; print the absolute one
       // (the target address is the same, and it reassembles to this op).
       !if(!or(!eq(c, "o"), !eq(c, "no")), "jmp" # c, "jmp" # c # "rel") # "\t$target">;
 }
 let isBranch = 1, isTerminator = 1, isBarrier = 1 in
-def JMP_SH : KCInst32<(outs), (ins BrTarget32:$target), "jmprel\t$target">;
+def JMP_SH : KCInst32<(outs), (ins PCRelTarget32:$target), "jmprel\t$target">;
 
 let mayStore = 1 in {
 def STIDX8_SH    : KCInst32<(outs), (ins GPR:$rs_data, GPR:$base, simm32:$offset), "stidx8\t$rs_data, $base, $offset">;
@@ -1314,9 +1373,13 @@ def STIDX64U_SH  : KCInst32<(outs), (ins GPR:$rs_data, GPR:$base, simm32:$offset
 // $cc = PRED (0 EQ, 1 LT, 2 LE, 3 ULT, 4 ULE) | INV<<3; simm13 word
 // displacement via FK_KlaussCPU_PCREL13. Built only by KlaussCPUFuseCmpBr.
 let isBranch = 1, isTerminator = 1, hasSideEffects = 0 in {
-def FBR_RR : KCInst32<(outs), (ins GPR:$rs1, GPR:$rs2, i64imm:$cc, BrTarget32:$target),
+def FBR_RR : KCInst32<(outs),
+                      (ins GPR:$rs1, GPR:$rs2, fbr_cc:$cc,
+                           PCRelTarget32:$target),
                       "fbr\t$rs1, $rs2, $cc, $target">;
-def FBR_RI : KCInst32<(outs), (ins GPR:$rs1, i64imm:$imm, i64imm:$cc, BrTarget32:$target),
+def FBR_RI : KCInst32<(outs),
+                      (ins GPR:$rs1, fbr_simm4:$imm, fbr_cc:$cc,
+                           PCRelTarget32:$target),
                       "fbri\t$rs1, $imm, $cc, $target">;
 }
 
