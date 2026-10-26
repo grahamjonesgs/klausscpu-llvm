@@ -18,17 +18,23 @@ declare void @take5(i64, i64, i64, i64, ptr byval(%struct.S) align 8)
 declare void @takel(ptr byval(%struct.L) align 8)
 declare void @use(ptr)
 
-; Copied to a stack object; R0 gets the copy, not @cs.
+; Copied to a stack object; R0 gets the copy, not @cs.  The copy reads @cs
+; (in whatever order the scheduler picks) and R0 is never overwritten.
 define void @pass_const() {
 ; CHECK-LABEL: pass_const:
 ; CHECK:         enter 7
-; CHECK:         addi r0, r15, -32
-; CHECK-NOT:     setr r0
-; CHECK:         stidx64 r12, r0, 24
-; CHECK:         stidx64 r12, r0, 16
-; CHECK:         stidx64 r12, r0, 8
-; CHECK:         stidx64 r12, r15, -32
-; CHECK-NEXT:    call take
+; CHECK-NOT:     {{(setr|copy) r0,}}
+; CHECK-DAG:     setr {{r([1-9]|1[0-5])}}, cs+24
+; CHECK-DAG:     setr {{r([1-9]|1[0-5])}}, cs+16
+; CHECK-DAG:     setr {{r([1-9]|1[0-5])}}, cs+8
+; CHECK-DAG:     setr {{r([1-9]|1[0-5])}}, cs{{$}}
+; CHECK-DAG:     addi r0, r15, -32
+; CHECK-DAG:     stidx64 r12, r0, 24
+; CHECK-DAG:     stidx64 r12, r0, 16
+; CHECK-DAG:     stidx64 r12, r0, 8
+; CHECK-DAG:     stidx64 r12, r15, -32
+; CHECK-NOT:     {{(setr|copy) r0,}}
+; CHECK:         call take
   call void @take(ptr byval(%struct.S) align 8 @cs)
   ret void
 }

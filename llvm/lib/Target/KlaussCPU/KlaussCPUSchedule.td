@@ -40,14 +40,14 @@ def KlaussCPUSchedModel : SchedMachineModel {
   // Uses=[FLAGS] on conditional branches (and ADC/SBC/rotate-through-carry).  That
   // makes the hazard a real scheduling dependency the post-RA scheduler respects, so
   // the original blocker is gone.  Escape hatch if a regression appears:
-  // -enable-post-ra-scheduler=false (or revert this to 0).
+  // `-mllvm -post-RA-scheduler=false` (or `-mcpu=no-sched`, or revert this to 0).
   let PostRAScheduler   = 1;
 }
 
 // SchedWrites referenced from KlaussCPUInstrInfo.td (must precede its include).
 // Shift/compare fold into WriteALU (identical latency); no WriteFlags — the
-// backend has no modeled flag register (flag->branch order is held by the
-// explicit CMP's hasSideEffects), so there is nothing to attach it to.
+// compare->branch order comes from the FLAGS def/use (and glue at isel), not
+// from a latency, so a separate flags write class would add nothing.
 def WriteALU    : SchedWrite;  // single-cycle integer op / shift / compare / move
 def WriteLoad   : SchedWrite;  // memory load
 def WriteStore  : SchedWrite;  // memory store (no GPR result)
