@@ -695,7 +695,8 @@ SDValue KlaussCPUTargetLowering::LowerFormalArguments(
     } else {
       assert(VA.isMemLoc() && "Unexpected CCValAssign loc type");
       // Offset is relative to incoming SP (≥ 32 due to pre-reserve).
-      // eliminateFrameIndex adds 8 for fixed objects (R15 = incoming_SP - 8).
+      // getFrameIndexReference adds 8 for fixed objects
+      // (R15 = incoming_SP - 8).
       int FI = MF.getFrameInfo().CreateFixedObject(8, VA.getLocMemOffset(),
                                                     /*isImmutable=*/true);
       SDValue FIN = DAG.getFrameIndex(FI, getPointerTy(DAG.getDataLayout()));
@@ -721,8 +722,8 @@ SDValue KlaussCPUTargetLowering::LowerFormalArguments(
     // We save R_{FirstVaReg}..R3 there so they are contiguous with stack args at
     // [incoming_SP+32..], allowing va_arg to advance a plain pointer through all args.
     //
-    // eliminateFrameIndex adds 8 for fixed objects (R15 = incoming_SP - 8), so
-    // CreateFixedObject with offset F yields the correct R15-relative offset F+8.
+    // getFrameIndexReference adds 8 for fixed objects (R15 = incoming_SP - 8),
+    // so CreateFixedObject with offset F yields the R15-relative offset F+8.
 
     std::optional<int> VaArgFI;
     SmallVector<SDValue, 4> Stores;

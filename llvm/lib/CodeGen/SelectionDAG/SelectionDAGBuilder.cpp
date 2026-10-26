@@ -6330,8 +6330,14 @@ bool SelectionDAGBuilder::EmitFuncArgumentDbgValue(
     SDValue LCandidate = peekThroughBitcasts(N);
     if (LoadSDNode *LNode = dyn_cast<LoadSDNode>(LCandidate.getNode()))
       if (FrameIndexSDNode *FINode =
-          dyn_cast<FrameIndexSDNode>(LNode->getBasePtr().getNode()))
+          dyn_cast<FrameIndexSDNode>(LNode->getBasePtr().getNode())) {
         Op = MachineOperand::CreateFI(FINode->getIndex());
+        // The stack slot holds the argument's value.  For a dbg.declare that
+        // value is the variable's address (e.g. a byval argument passed as a
+        // pointer to a caller-made copy), so the variable lives at *slot.
+        if (Kind != FuncArgumentDbgValueKind::Value)
+          Expr = DIExpression::prepend(Expr, DIExpression::DerefBefore);
+      }
   }
 
   if (!Op) {
