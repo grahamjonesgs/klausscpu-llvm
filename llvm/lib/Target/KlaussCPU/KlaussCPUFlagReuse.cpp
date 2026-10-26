@@ -35,7 +35,9 @@
 // compare; it fires only when the producer is an arithmetic op whose Z is
 // exactly `(result == 0)`.  (Before unification JMPE read a *separate*
 // equal_flag that arithmetic did not set — which is why this was gated OFF;
-// that hazard no longer exists.)
+// that hazard no longer exists.)  Only Z matches: the arithmetic op's C and V
+// are not those of `CMP Rd, 0`, so the pass also requires that no instruction
+// after the branch, here or in a successor, reads the compare's flags.
 //
 //===----------------------------------------------------------------------===//
 
@@ -51,12 +53,18 @@
 using namespace llvm;
 
 #define DEBUG_TYPE "klausscpu-flag-reuse"
+#define PASS_NAME "KlaussCPU arithmetic zero_flag reuse"
+
+namespace llvm {
+void initializeKlaussCPUFlagReusePass(PassRegistry &);
+} // namespace llvm
 
 // Default ON since the flag unification (RTL fbb77d7 / FLAG_UNIFICATION_CHANGES):
 // equality is now the single Z flag for both arithmetic ops and CMP, so dropping
-// the redundant `CMPRV Rd,0` and reading Z is unconditionally safe — the old
-// "which hardware flag does the branch read" hazard is gone.  Kept as an escape
-// hatch (`-klausscpu-arith-flag-reuse=false`) for A/B measurement and bisection.
+// the redundant `CMPRV Rd,0` and reading Z is safe whenever the equality branch
+// is the only reader of the compare's flags — the old "which hardware flag does
+// the branch read" hazard is gone.  Kept as an escape hatch
+// (`-klausscpu-arith-flag-reuse=false`) for A/B measurement and bisection.
 static cl::opt<bool> EnableArithFlagReuse(
     "klausscpu-arith-flag-reuse", cl::Hidden, cl::init(true),
     cl::desc("KlaussCPU: reuse the arithmetic Z flag for (X==0)/(X!=0) "
@@ -100,7 +108,7 @@ public:
   bool runOnMachineFunction(MachineFunction &MF) override;
 
   StringRef getPassName() const override {
-    return "KlaussCPU arithmetic zero_flag reuse";
+    return PASS_NAME;
   }
 
   MachineFunctionProperties getRequiredProperties() const override {
@@ -113,6 +121,8 @@ public:
 } // end anonymous namespace
 
 char KlaussCPUFlagReuse::ID = 0;
+
+INITIALIZE_PASS(KlaussCPUFlagReuse, DEBUG_TYPE, PASS_NAME, false, false)
 
 bool KlaussCPUFlagReuse::runOnMachineFunction(MachineFunction &MF) {
   if (!EnableArithFlagReuse)
@@ -157,15 +167,24 @@ bool KlaussCPUFlagReuse::runOnMachineFunction(MachineFunction &MF) {
           Prev->getOperand(0).getReg() != Rd)
         continue;
 
-      // The instruction immediately after must be the conditional branch that
-      // consumes this compare's Z flag (JMPE/JMPNE — equality).  It is the
-      // compare's only flag consumer: each BR_CC emits its own compare, and the branch
-      // is a terminator so control leaves the block after it.
-      MachineInstr *Br = MI.getNextNode();
-      if (!Br || Br->isMetaInstruction())
+      // The next instruction must be the conditional branch that consumes
+      // this compare's Z flag (JMPE/JMPNE — equality).  Debug instructions
+      // in between are skipped (they never read FLAGS), so -g does not
+      // change codegen.
+      auto BrIt = next_nodbg(MachineBasicBlock::iterator(MI), MBB.end());
+      if (BrIt == MBB.end())
         continue;
+      MachineInstr *Br = &*BrIt;
       unsigned NewBrOpc = zeroFlagBranchOpc(Br->getOpcode());
       if (!NewBrOpc)
+        continue;
+
+      // The branch must be the compare's only flag consumer.  It is not when
+      // MachineCSE dropped an identical compare from a successor, leaving
+      // e.g. a JMPLT there that reads these flags: the arithmetic op's C and
+      // V differ from CMP's (CMP Rd,0 always clears V; ADDR sets it on
+      // signed overflow), so only Z may be taken from the arithmetic op.
+      if (!KlaussCPUInstrInfo::flagsDeadAfter(*Br))
         continue;
 
       // The producer's FLAGS def is now what the branch reads.  It was

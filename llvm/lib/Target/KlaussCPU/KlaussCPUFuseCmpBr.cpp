@@ -10,7 +10,8 @@
 // EX on the boolean-compare path and redirects from MEM.
 //
 // Conditions, all checked here on the final (post-RA, pre-emit) stream:
-//  * the compare and the branch are adjacent;
+//  * the compare and the branch are adjacent (debug instructions in between
+//    are ignored, so -g does not change codegen; they stay where they are);
 //  * the condition maps onto a class-3 predicate: EQ/NE (incl. Z/NZ),
 //    signed LT/GE/LE/GT, unsigned LT/GE/LE/GT (incl. C/NC);
 //  * the flags are dead after the branch (no later reader in the block, not
@@ -30,6 +31,13 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/Support/CommandLine.h"
+
+#define DEBUG_TYPE "klausscpu-fuse-cmp-br"
+#define PASS_NAME "KlaussCPU fused compare-and-branch (ISA v3 B)"
+
+namespace llvm {
+void initializeKlaussCPUFuseCmpBrPass(PassRegistry &);
+} // namespace llvm
 
 using namespace llvm;
 
@@ -62,27 +70,13 @@ bool branchPred(unsigned Opc, unsigned &Pred, bool &Inv) {
   }
 }
 
-bool flagsDeadAfter(MachineInstr &Br) {
-  MachineBasicBlock &MBB = *Br.getParent();
-  for (auto I = std::next(Br.getIterator()); I != MBB.end(); ++I) {
-    if (I->readsRegister(KlaussCPU::FLAGS, /*TRI=*/nullptr))
-      return false;
-    if (I->modifiesRegister(KlaussCPU::FLAGS, /*TRI=*/nullptr))
-      return true;
-  }
-  for (MachineBasicBlock *S : MBB.successors())
-    if (S->isLiveIn(KlaussCPU::FLAGS))
-      return false;
-  return true;
-}
-
 class KlaussCPUFuseCmpBr : public MachineFunctionPass {
 public:
   static char ID;
   KlaussCPUFuseCmpBr() : MachineFunctionPass(ID) {}
   bool runOnMachineFunction(MachineFunction &MF) override;
   StringRef getPassName() const override {
-    return "KlaussCPU fused compare-and-branch (ISA v3 B)";
+    return PASS_NAME;
   }
   MachineFunctionProperties getRequiredProperties() const override {
     return MachineFunctionProperties().set(
@@ -93,6 +87,8 @@ public:
 } // namespace
 
 char KlaussCPUFuseCmpBr::ID = 0;
+
+INITIALIZE_PASS(KlaussCPUFuseCmpBr, DEBUG_TYPE, PASS_NAME, false, false)
 
 bool KlaussCPUFuseCmpBr::runOnMachineFunction(MachineFunction &MF) {
   if (!EnableFuseCmpBr)
@@ -117,8 +113,13 @@ bool KlaussCPUFuseCmpBr::runOnMachineFunction(MachineFunction &MF) {
       unsigned CO = Cmp.getOpcode();
       if (CO != KlaussCPU::CMPRR_I && CO != KlaussCPU::CMPRV_I)
         continue;
-      MachineInstr *Br = Cmp.getNextNode();
-      if (!Br || !Br->isConditionalBranch() || Br->getNumOperands() < 1 ||
+      // A debug instruction never reads FLAGS or changes a register, so it
+      // does not separate the pair.
+      auto BrIt = next_nodbg(MachineBasicBlock::iterator(Cmp), MBB.end());
+      if (BrIt == MBB.end())
+        continue;
+      MachineInstr *Br = &*BrIt;
+      if (!Br->isConditionalBranch() || Br->getNumOperands() < 1 ||
           !Br->getOperand(0).isMBB())
         continue;
       unsigned Pred;
@@ -129,7 +130,7 @@ bool KlaussCPUFuseCmpBr::runOnMachineFunction(MachineFunction &MF) {
           (!Cmp.getOperand(1).isImm() || Cmp.getOperand(1).getImm() < -8 ||
            Cmp.getOperand(1).getImm() > 7))
         continue;
-      if (!flagsDeadAfter(*Br))
+      if (!KlaussCPUInstrInfo::flagsDeadAfter(*Br))
         continue;
 
       int64_t CC = Pred | (Inv ? 8 : 0);

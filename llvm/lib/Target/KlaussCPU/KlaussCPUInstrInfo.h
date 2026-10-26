@@ -39,6 +39,14 @@ public:
   // (JMPxxREL in PIC mode).  Returns 0 for a CondCode with no direct jump.
   static unsigned getCondBranchOpcode(ISD::CondCode CC, bool PIC);
 
+  // True if no instruction can read the FLAGS value live at the conditional
+  // branch Br once it is taken or falls through: nothing later in Br's block
+  // reads FLAGS before redefining it, and FLAGS is not live into any
+  // successor.  Post-RA passes that delete or replace the compare feeding Br
+  // (FlagReuse, FuseCmpBr) must check this, since MachineCSE can leave a
+  // successor's branch reading the same compare.
+  static bool flagsDeadAfter(const MachineInstr &Br);
+
   // getCallFrameSetupOpcode / getCallFrameDestroyOpcode are NOT virtual in
   // LLVM 23.  The opcodes are stored in TargetInstrInfo::CallFrameSetupOpcode /
   // CallFrameDestroyOpcode and set via the KlaussCPUGenInstrInfo constructor

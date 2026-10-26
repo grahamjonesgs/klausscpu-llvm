@@ -1,0 +1,253 @@
+# The two post-RA compare/branch peepholes (KlaussCPUFlagReuse, then
+# KlaussCPUFuseCmpBr) both delete the compare that feeds a conditional branch.
+#
+# * They may do so only if that branch is the compare's last FLAGS reader.
+#   MachineCSE drops the second identical `CMPRV d, 0` of an if/else-if chain,
+#   so a successor's JMPLT can read FLAGS live-in from the first compare. Taking
+#   those flags from ADDR instead (FlagReuse) gives the S^V of the add, not of
+#   `d - 0`, and the wrapped-sign test goes wrong; the fused branch (FuseCmpBr)
+#   writes no flags at all.
+# * A debug instruction between the compare and the branch must not stop either
+#   rewrite, or -g changes codegen. The DBG_VALUE stays where it is.
+#
+# RUN: llc -march=klausscpu -run-pass=klausscpu-flag-reuse -verify-machineinstrs \
+# RUN:   %s -o - | FileCheck %s --check-prefix=REUSE
+# RUN: llc -march=klausscpu -run-pass=klausscpu-fuse-cmp-br -verify-machineinstrs \
+# RUN:   %s -o - | FileCheck %s --check-prefix=FUSE
+
+--- |
+  target triple = "klausscpu-unknown-elf"
+
+  ; d = a + b (wrapping); if (d == 0) *p = 1; else if (d >= 0) p[1] = 2;
+  ; else p[2] = 3;
+  define void @live_flags(i64 %a, i64 %b, ptr %p) {
+  entry:
+    %d = add i64 %a, %b
+    %z = icmp eq i64 %d, 0
+    br i1 %z, label %iszero, label %nz
+  iszero:
+    store volatile i64 1, ptr %p
+    ret void
+  nz:
+    %n = icmp sge i64 %d, 0
+    br i1 %n, label %pos, label %neg
+  pos:
+    %p1 = getelementptr i64, ptr %p, i64 1
+    store volatile i64 2, ptr %p1
+    ret void
+  neg:
+    %p2 = getelementptr i64, ptr %p, i64 2
+    store volatile i64 3, ptr %p2
+    ret void
+  }
+
+  define i64 @dead_flags(i64 %a, i64 %b) {
+    %s = add i64 %a, %b
+    %c = icmp eq i64 %s, 0
+    br i1 %c, label %t, label %f
+  t:
+    ret i64 %s
+  f:
+    ret i64 42
+  }
+
+  define i64 @reuse_dbg_between(i64 %a, i64 %b) !dbg !4 {
+    %s = add i64 %a, %b
+    %c = icmp eq i64 %s, 0
+    br i1 %c, label %t, label %f
+  t:
+    ret i64 %s
+  f:
+    ret i64 42
+  }
+
+  define i64 @fuse_dbg_between(i64 %a, i64 %b) !dbg !10 {
+    %c = icmp slt i64 %a, %b
+    br i1 %c, label %t, label %f
+  t:
+    ret i64 %a
+  f:
+    ret i64 42
+  }
+
+  !llvm.dbg.cu = !{!0}
+  !llvm.module.flags = !{!3}
+  !0 = distinct !DICompileUnit(language: DW_LANG_C11, file: !1, isOptimized: true, runtimeVersion: 0, emissionKind: FullDebug)
+  !1 = !DIFile(filename: "t.c", directory: "/")
+  !2 = !{}
+  !3 = !{i32 2, !"Debug Info Version", i32 3}
+  !4 = distinct !DISubprogram(name: "reuse_dbg_between", scope: !1, file: !1, line: 1, type: !6, scopeLine: 1, spFlags: DISPFlagDefinition | DISPFlagOptimized, unit: !0, retainedNodes: !13)
+  !6 = !DISubroutineType(types: !2)
+  !7 = !DILocalVariable(name: "a", arg: 1, scope: !4, file: !1, line: 1, type: !8)
+  !8 = !DIBasicType(name: "long", size: 64, encoding: DW_ATE_signed)
+  !9 = !DILocation(line: 0, scope: !4)
+  !10 = distinct !DISubprogram(name: "fuse_dbg_between", scope: !1, file: !1, line: 5, type: !6, scopeLine: 5, spFlags: DISPFlagDefinition | DISPFlagOptimized, unit: !0, retainedNodes: !14)
+  !11 = !DILocalVariable(name: "a", arg: 1, scope: !10, file: !1, line: 5, type: !8)
+  !12 = !DILocation(line: 0, scope: !10)
+  !13 = !{!7}
+  !14 = !{!11}
+...
+---
+# FLAGS is live into %bb.1, whose JMPLT reads the CMPRV's S^V: neither pass may
+# touch the compare.
+# REUSE-LABEL: name: live_flags
+# REUSE:       $r12 = ADDR killed $r0, killed $r1, implicit-def dead $flags
+# REUSE-NEXT:  CMPRV_I killed $r12, 0, implicit-def $flags
+# REUSE-NEXT:  JMPE %bb.3, implicit $flags
+# REUSE:       bb.1.nz:
+# REUSE:       JMPLT %bb.4, implicit $flags
+#
+# FUSE-LABEL: name: live_flags
+# FUSE:       CMPRV_I killed $r12, 0, implicit-def $flags
+# FUSE-NEXT:  JMPE %bb.3, implicit $flags
+# FUSE-NOT:   FBR
+name:            live_flags
+tracksRegLiveness: true
+liveins:
+  - { reg: '$r0' }
+  - { reg: '$r1' }
+  - { reg: '$r2' }
+body:             |
+  bb.0.entry:
+    successors: %bb.3, %bb.1
+    liveins: $r0, $r1, $r2
+
+    $r12 = ADDR killed $r0, killed $r1, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.3, implicit $flags
+
+  bb.1.nz:
+    successors: %bb.2, %bb.4
+    liveins: $flags, $r2
+
+    JMPLT %bb.4, implicit $flags
+
+  bb.2.pos:
+    liveins: $r2
+
+    $r12 = SETR 2
+    STIDX64 killed $r12, killed $r2, 8 :: (volatile store (s64) into %ir.p1)
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15
+
+  bb.3.iszero:
+    liveins: $r2
+
+    $r12 = SETR 1
+    STIDX64 killed $r12, killed $r2, 0 :: (volatile store (s64) into %ir.p)
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15
+
+  bb.4.neg:
+    liveins: $r2
+
+    $r12 = SETR 3
+    STIDX64 killed $r12, killed $r2, 16 :: (volatile store (s64) into %ir.p2)
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15
+...
+---
+# Control: the branch is the only FLAGS reader, so the compare goes.
+# REUSE-LABEL: name: dead_flags
+# REUSE:       $r12 = ADDR killed $r0, killed $r1, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.2, implicit $flags
+# REUSE-NOT:   CMPRV_I
+#
+# FUSE-LABEL: name: dead_flags
+# FUSE:       $r12 = ADDR killed $r0, killed $r1, implicit-def dead $flags
+# FUSE-NEXT:  FBR_RI $r12, 0, 0, %bb.2
+# FUSE-NOT:   CMPRV_I
+name:            dead_flags
+tracksRegLiveness: true
+liveins:
+  - { reg: '$r0' }
+  - { reg: '$r1' }
+body:             |
+  bb.0 (%ir-block.0):
+    successors: %bb.2, %bb.1
+    liveins: $r0, $r1
+
+    $r12 = ADDR killed $r0, killed $r1, implicit-def dead $flags
+    CMPRV_I $r12, 0, implicit-def $flags
+    JMPE %bb.2, implicit $flags
+
+  bb.1.f:
+    $r12 = SETR 42
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit $r12
+
+  bb.2.t:
+    liveins: $r12
+
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit $r12
+...
+---
+# A DBG_VALUE between the compare and the branch: same result as dead_flags,
+# and the DBG_VALUE is kept.
+# REUSE-LABEL: name: reuse_dbg_between
+# REUSE:       $r12 = ADDR $r0, killed $r1, implicit-def $flags
+# REUSE-NEXT:  DBG_VALUE $r0, $noreg,
+# REUSE-NEXT:  JMPZ %bb.2, implicit $flags
+# REUSE-NOT:   CMPRV_I
+#
+# FUSE-LABEL: name: reuse_dbg_between
+# FUSE:       $r12 = ADDR $r0, killed $r1, implicit-def dead $flags
+# FUSE-NEXT:  DBG_VALUE $r0, $noreg,
+# FUSE-NEXT:  FBR_RI $r12, 0, 0, %bb.2
+# FUSE-NOT:   CMPRV_I
+name:            reuse_dbg_between
+tracksRegLiveness: true
+liveins:
+  - { reg: '$r0' }
+  - { reg: '$r1' }
+body:             |
+  bb.0 (%ir-block.0):
+    successors: %bb.2, %bb.1
+    liveins: $r0, $r1
+
+    $r12 = ADDR $r0, killed $r1, implicit-def dead $flags
+    CMPRV_I $r12, 0, implicit-def $flags
+    DBG_VALUE $r0, $noreg, !7, !DIExpression(), debug-location !9
+    JMPE %bb.2, implicit $flags
+
+  bb.1.f:
+    $r12 = SETR 42
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit $r12
+
+  bb.2.t:
+    liveins: $r12
+
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit $r12
+...
+---
+# FuseCmpBr: CMPRR + DBG_VALUE + JMPGE still fuses (GE = LT inverted, CC 9).
+# REUSE-LABEL: name: fuse_dbg_between
+# REUSE:       CMPRR_I $r0, killed $r1, implicit-def $flags
+# REUSE-NEXT:  DBG_VALUE $r0, $noreg,
+# REUSE-NEXT:  JMPGE %bb.2, implicit $flags
+#
+# FUSE-LABEL: name: fuse_dbg_between
+# FUSE:       DBG_VALUE $r0, $noreg,
+# FUSE-NEXT:  FBR_RR $r0, $r1, 9, %bb.2
+# FUSE-NOT:   CMPRR_I
+# FUSE-NOT:   JMPGE
+name:            fuse_dbg_between
+tracksRegLiveness: true
+liveins:
+  - { reg: '$r0' }
+  - { reg: '$r1' }
+body:             |
+  bb.0 (%ir-block.0):
+    successors: %bb.1, %bb.2
+    liveins: $r0, $r1
+
+    CMPRR_I $r0, killed $r1, implicit-def $flags
+    DBG_VALUE $r0, $noreg, !11, !DIExpression(), debug-location !12
+    JMPGE %bb.2, implicit $flags
+
+  bb.1.t:
+    liveins: $r0
+
+    $r12 = COPY_R killed $r0
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit killed $r12
+
+  bb.2.f:
+    $r12 = SETR 42
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit killed $r12
+...

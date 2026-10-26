@@ -995,7 +995,10 @@ and one-instruction signed sub-word loads (`LDIDX8_S`/`LDIDX16_S`).
 - **A3a flag-reuse promoted to default-ON** (`KlaussCPUFlagReuse.cpp`,
   `cl::init(false)`→`cl::init(true)`).  Its only hazard was a branch reading a
   *different* HW flag (zero vs equal); equality is now a single `Z`, so dropping
-  the redundant `CMPRV Rd,0` before an equality branch is unconditionally safe.
+  the redundant `CMPRV Rd,0` before an equality branch is safe — provided that
+  branch is the compare's last FLAGS reader. MachineCSE can leave a successor's
+  relational branch reading the same compare (FLAGS live-in), so FlagReuse, like
+  FuseCmpBr, checks `KlaussCPUInstrInfo::flagsDeadAfter` (review fix 2026-10).
   Escape hatch `-klausscpu-arith-flag-reuse=false` retained for A/B + bisection.
   Scope stays equality-only — reusing arithmetic flags for a *relational* branch
   is unsafe under overflow (`V` differs), so relational branches keep their CMP.

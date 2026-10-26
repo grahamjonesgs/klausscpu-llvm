@@ -26,6 +26,7 @@
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/PassRegistry.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Target/TargetOptions.h"
 #include <optional>
@@ -34,6 +35,8 @@ namespace llvm {
 FunctionPass *createKlaussCPUISelDag(KlaussCPUTargetMachine &TM);
 FunctionPass *createKlaussCPUFlagReusePass();
 FunctionPass *createKlaussCPUFuseCmpBrPass();
+void initializeKlaussCPUFlagReusePass(PassRegistry &);
+void initializeKlaussCPUFuseCmpBrPass(PassRegistry &);
 } // namespace llvm
 
 using namespace llvm;
@@ -45,6 +48,11 @@ static const char KlaussCPUDataLayout[] =
 extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void
 LLVMInitializeKlaussCPUTarget() {
   RegisterTargetMachine<KlaussCPUTargetMachine> X(getTheKlaussCPUTarget());
+  // Register the target's MachineFunction passes so MIR tests can run them
+  // with -run-pass.
+  PassRegistry &PR = *PassRegistry::getPassRegistry();
+  initializeKlaussCPUFlagReusePass(PR);
+  initializeKlaussCPUFuseCmpBrPass(PR);
 }
 
 static Reloc::Model getEffectiveRelocModel(std::optional<Reloc::Model> RM) {

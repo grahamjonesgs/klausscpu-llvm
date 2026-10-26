@@ -14,6 +14,7 @@
 ; RUN: llc -march=klausscpu -verify-machineinstrs -O1 -klausscpu-fuse-cmp-br=false < %s | FileCheck %s --check-prefix=ON
 ; RUN: llc -march=klausscpu -verify-machineinstrs -O1 -klausscpu-fuse-cmp-br=false -klausscpu-arith-flag-reuse=false < %s \
 ; RUN:   | FileCheck %s --check-prefix=OFF
+; RUN: llc -march=klausscpu -verify-machineinstrs -O1 < %s | FileCheck %s --check-prefix=FUSE
 
 ; Branch on (a + b) == 0 — the ADDR result is tested against zero.
 define i64 @add_eq0(i64 %a, i64 %b) {
@@ -76,4 +77,51 @@ t:
   ret i64 %a
 f:
   ret i64 42
+}
+
+; Negative: if (d == 0) ... else if (d >= 0) ... else ...  MachineCSE drops the
+; second `cmprv d, 0`, so the %nz block's jmplt reads the first compare's flags
+; (FLAGS live-in). Dropping that compare would make jmplt read ADDR's S^V, which
+; differs when the add wraps (d = 2^62 + 2^62 would take the d >= 0 path). The
+; compare must stay.
+define void @flags_live_into_successor(i64 %a, i64 %b, ptr %p) {
+; OFF-LABEL: flags_live_into_successor:
+; OFF:         addr r12, r0, r1
+; OFF-NEXT:    cmprv r12, 0
+; OFF-NEXT:    jmpe{{(rel)?}} .LBB3_
+; OFF-NEXT:  # %bb.1:
+; OFF-NEXT:    jmplt{{(rel)?}} .LBB3_
+;
+; ON-LABEL: flags_live_into_successor:
+; ON:         addr r12, r0, r1
+; ON-NEXT:    cmprv r12, 0
+; ON-NEXT:    jmpe{{(rel)?}} .LBB3_
+; ON-NEXT:  # %bb.1:
+; ON-NEXT:    jmplt{{(rel)?}} .LBB3_
+;
+; With fusion on the pair is not fused either: the fused branch writes no flags.
+; FUSE-LABEL: flags_live_into_successor:
+; FUSE:         addr r12, r0, r1
+; FUSE-NEXT:    cmprv r12, 0
+; FUSE-NEXT:    jmpe{{(rel)?}} .LBB3_
+; FUSE-NEXT:  # %bb.1:
+; FUSE-NEXT:    jmplt{{(rel)?}} .LBB3_
+entry:
+  %d = add i64 %a, %b
+  %z = icmp eq i64 %d, 0
+  br i1 %z, label %iszero, label %nz
+iszero:
+  store volatile i64 1, ptr %p
+  ret void
+nz:
+  %n = icmp sge i64 %d, 0
+  br i1 %n, label %pos, label %neg
+pos:
+  %p1 = getelementptr i64, ptr %p, i64 1
+  store volatile i64 2, ptr %p1
+  ret void
+neg:
+  %p2 = getelementptr i64, ptr %p, i64 2
+  store volatile i64 3, ptr %p2
+  ret void
 }

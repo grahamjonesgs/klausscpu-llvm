@@ -10,6 +10,7 @@
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 
 #define GET_INSTRINFO_CTOR_DTOR
 #include "KlaussCPUGenInstrInfo.inc"
@@ -66,6 +67,23 @@ void KlaussCPUInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
       .addImm(0)
       .addMemOperand(MMO)
       .setMIFlag(Flags);
+}
+
+bool KlaussCPUInstrInfo::flagsDeadAfter(const MachineInstr &Br) {
+  const MachineBasicBlock &MBB = *Br.getParent();
+  // Without block live-ins the successor check below proves nothing.
+  if (!MBB.getParent()->getRegInfo().tracksLiveness())
+    return false;
+  for (auto I = std::next(Br.getIterator()); I != MBB.end(); ++I) {
+    if (I->readsRegister(KlaussCPU::FLAGS, /*TRI=*/nullptr))
+      return false;
+    if (I->modifiesRegister(KlaussCPU::FLAGS, /*TRI=*/nullptr))
+      return true;
+  }
+  for (const MachineBasicBlock *S : MBB.successors())
+    if (S->isLiveIn(KlaussCPU::FLAGS))
+      return false;
+  return true;
 }
 
 unsigned KlaussCPUInstrInfo::getCondBranchOpcode(ISD::CondCode CC, bool PIC) {
