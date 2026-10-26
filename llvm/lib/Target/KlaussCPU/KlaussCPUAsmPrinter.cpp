@@ -39,6 +39,8 @@ public:
   // Inline asm operand substitution: called for each $N in an asm string.
   bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
                        const char *ExtraCode, raw_ostream &OS) override;
+  bool PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
+                             const char *ExtraCode, raw_ostream &OS) override;
 
   static char ID;
 };
@@ -117,7 +119,7 @@ bool KlaussCPUAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
   if (ExtraCode && ExtraCode[0])
     return AsmPrinter::PrintAsmOperand(MI, OpNo, ExtraCode, OS);
 
-  // No modifier: print the raw register name or immediate value.
+  // No modifier: print the register name, immediate value or symbol.
   const MachineOperand &MO = MI->getOperand(OpNo);
   switch (MO.getType()) {
   case MachineOperand::MO_Register:
@@ -126,9 +128,39 @@ bool KlaussCPUAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
   case MachineOperand::MO_Immediate:
     OS << MO.getImm();
     return false;
+  case MachineOperand::MO_GlobalAddress:
+    PrintSymbolOperand(MO, OS);
+    return false;
+  case MachineOperand::MO_ExternalSymbol:
+    GetExternalSymbolSymbol(MO.getSymbolName())->print(OS, MAI);
+    printOffset(MO.getOffset(), OS);
+    return false;
+  case MachineOperand::MO_BlockAddress:
+    GetBlockAddressSymbol(MO.getBlockAddress())->print(OS, MAI);
+    printOffset(MO.getOffset(), OS);
+    return false;
   default:
     return true;
   }
+}
+
+// Inline asm memory operand ('m', 'o'): the (base register, offset) pair from
+// KlaussCPUDAGToDAGISel::SelectInlineAsmMemoryOperand, printed as
+// `base, offset` so that `ldidx64 $0, $1` expands to `ldidx64 rd, base, off`.
+bool KlaussCPUAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI,
+                                                 unsigned OpNo,
+                                                 const char *ExtraCode,
+                                                 raw_ostream &OS) {
+  if (ExtraCode && ExtraCode[0])
+    return true; // Unknown modifier.
+
+  const MachineOperand &Base = MI->getOperand(OpNo);
+  const MachineOperand &Offset = MI->getOperand(OpNo + 1);
+  if (!Base.isReg() || !Offset.isImm())
+    return true;
+  OS << KlaussCPUInstPrinter::getRegisterName(Base.getReg()) << ", "
+     << Offset.getImm();
+  return false;
 }
 
 extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void

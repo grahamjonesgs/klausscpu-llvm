@@ -159,6 +159,10 @@ public:
 
   void Select(SDNode *N) override;
 
+  bool SelectInlineAsmMemoryOperand(const SDValue &Op,
+                                    InlineAsm::ConstraintCode ConstraintID,
+                                    std::vector<SDValue> &OutOps) override;
+
   // Auto-generated tablegen instruction selection tables.
 #include "KlaussCPUGenDAGISel.inc"
 };
@@ -651,6 +655,40 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
 
   // Delegate everything else to the tablegen-generated SelectCode().
   SelectCode(N);
+}
+
+// Inline asm memory operands ('m', 'o') become a (base, simm32 offset) pair,
+// printed by KlaussCPUAsmPrinter::PrintAsmMemoryOperand as `base, offset` --
+// the operand syntax of the LDIDX*/STIDX* instructions.  A frame index base
+// stays a TargetFrameIndex followed by its offset, which eliminateFrameIndex
+// rewrites to (FrameReg, slot offset + offset).
+bool KlaussCPUDAGToDAGISel::SelectInlineAsmMemoryOperand(
+    const SDValue &Op, InlineAsm::ConstraintCode ConstraintID,
+    std::vector<SDValue> &OutOps) {
+  switch (ConstraintID) {
+  case InlineAsm::ConstraintCode::o:
+  case InlineAsm::ConstraintCode::m:
+    break;
+  default:
+    return true;
+  }
+
+  SDLoc DL(Op);
+  SDValue Base = Op;
+  int64_t Offset = 0;
+  if (CurDAG->isBaseWithConstantOffset(Op)) {
+    int64_t C = cast<ConstantSDNode>(Op.getOperand(1))->getSExtValue();
+    if (isInt<32>(C)) {
+      Base = Op.getOperand(0);
+      Offset = C;
+    }
+  }
+  if (auto *FIN = dyn_cast<FrameIndexSDNode>(Base))
+    Base = CurDAG->getTargetFrameIndex(FIN->getIndex(), MVT::i64);
+
+  OutOps.push_back(Base);
+  OutOps.push_back(CurDAG->getTargetConstant(Offset, DL, MVT::i64));
+  return false;
 }
 
 // Factory function called from KlaussCPUPassConfig::addInstSelector().
