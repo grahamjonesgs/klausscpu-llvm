@@ -85,6 +85,31 @@ define void @pass_vla(i64 %n, ptr %p) {
   ret void
 }
 
+; Odd-size, align-1 byval: inlined as byte loads from the original and
+; stores into the copy, and R0 gets the copy's frame address.  The final
+; byte (offset 12 or 2) goes through R0 and the first word is stored through
+; R15 at the same offset as the addi, so both prove the copy is what is passed.
+declare void @take13(ptr byval([13 x i8]) align 1)
+declare void @take3(ptr byval({ i8, i8, i8 }) align 1)
+
+define void @pass_odd(ptr %p, ptr %q) {
+; CHECK-LABEL: pass_odd:
+; CHECK:         addi r0, r15, [[C13:-[0-9]+]]
+; CHECK-NEXT:    stidx8 {{r[0-9]+}}, r0, 12
+; CHECK:         stidx32 {{r[0-9]+}}, r0, 8
+; CHECK-NOT:     {{(copy|addi|setr) r0,}}
+; CHECK:         stidx64 {{r[0-9]+}}, r15, [[C13]]
+; CHECK-NEXT:    call take13
+; CHECK:         addi r0, r15, [[C3:-[0-9]+]]
+; CHECK-NEXT:    stidx8 {{r[0-9]+}}, r0, 2
+; CHECK-NOT:     {{(copy|addi|setr) r0,}}
+; CHECK:         stidx16 {{r[0-9]+}}, r15, [[C3]]
+; CHECK-NEXT:    call take3
+  call void @take13(ptr byval([13 x i8]) align 1 %p)
+  call void @take3(ptr byval({ i8, i8, i8 }) align 1 %q)
+  ret void
+}
+
 ; Zero-size byval (GNU C `struct E {}`, or `struct { int a[0]; }`, both of
 ; which clang passes byval): nothing to copy, so the original pointer is
 ; passed and no stack object is created.
