@@ -85,6 +85,25 @@ define void @pass_vla(i64 %n, ptr %p) {
   ret void
 }
 
+; Zero-size byval (GNU C `struct E {}`, or `struct { int a[0]; }`, both of
+; which clang passes byval): nothing to copy, so the original pointer is
+; passed and no stack object is created.
+declare void @take_empty(ptr byval({}) align 1)
+declare void @take_zla(ptr byval([0 x i32]) align 4)
+
+define void @pass_empty(ptr %p, ptr %q) {
+; CHECK-LABEL: pass_empty:
+; CHECK:         enter 4
+; CHECK-NOT:     addi
+; CHECK:         copy r4, r1
+; CHECK-NEXT:    call take_empty
+; CHECK-NEXT:    copy r0, r4
+; CHECK-NEXT:    call take_zla
+  call void @take_empty(ptr byval({}) align 1 %p)
+  call void @take_zla(ptr byval([0 x i32]) align 4 %q)
+  ret void
+}
+
 ; Callee side: the byval pointer arrives in R0 and is used in place.
 define i64 @callee(ptr byval(%struct.S) align 8 %s) {
 ; CHECK-LABEL: callee:

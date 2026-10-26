@@ -843,7 +843,16 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
     if (!Flags.isByVal())
       continue;
 
+    // Clang's DefaultABIInfo passes empty records (GNU C `struct {}`, or a
+    // struct holding only a zero-length array) byval.  The callee can read
+    // no bytes, so pass the original pointer; a zero-size stack object
+    // is not allowed.
     unsigned Size = Flags.getByValSize();
+    if (Size == 0) {
+      ByValArgs.push_back(CLI.OutVals[I]);
+      continue;
+    }
+
     Align Alignment = Flags.getNonZeroByValAlign();
     int FI = MF.getFrameInfo().CreateStackObject(Size, Alignment,
                                                  /*isSpillSlot=*/false);
