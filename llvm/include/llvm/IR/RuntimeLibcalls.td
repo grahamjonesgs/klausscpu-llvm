@@ -3445,7 +3445,8 @@ def XCoreSystemLibrary
 
 def isKlaussCPU : RuntimeLibcallPredicate<"TT.getArch() == Triple::klausscpu">;
 def KlaussCPUSystemLibrary
-    : SystemRuntimeLibrary<isKlaussCPU, (add DefaultLibcallImpls64)>;
+    : SystemRuntimeLibrary<isKlaussCPU,
+                           (add DefaultLibcallImpls64, DefaultStackProtector)>;
 
 //===----------------------------------------------------------------------===//
 // ZOS Runtime Libcalls

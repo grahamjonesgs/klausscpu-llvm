@@ -97,6 +97,7 @@ public:
     return getTM<KlaussCPUTargetMachine>();
   }
 
+  void addIRPasses() override;
   bool addInstSelector() override;
   void addPreEmitPass() override;
 };
@@ -113,6 +114,13 @@ KlaussCPUTargetMachine::createMachineFunctionInfo(BumpPtrAllocator &Allocator,
                                                    const TargetSubtargetInfo *STI) const {
   return KlaussCPUMachineFunctionInfo::create<KlaussCPUMachineFunctionInfo>(
       Allocator, F, STI);
+}
+
+void KlaussCPUPassConfig::addIRPasses() {
+  // There are no atomic instructions (MaxAtomicSizeInBitsSupported is 0):
+  // turn atomic loads, stores, RMWs and cmpxchgs into __atomic_* libcalls.
+  addPass(createAtomicExpandLegacyPass());
+  TargetPassConfig::addIRPasses();
 }
 
 bool KlaussCPUPassConfig::addInstSelector() {

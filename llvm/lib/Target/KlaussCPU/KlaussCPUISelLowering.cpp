@@ -5,7 +5,8 @@
 // Key architecture constraints:
 //   - No hardware FP               → soft-float
 //   - No CMOV                      → SELECT must be expanded
-//   - No atomics                   → setMaxAtomicSizeInBitsSupported(0)
+//   - No atomics                   → setMaxAtomicSizeInBitsSupported(0);
+//                                    AtomicExpand makes __atomic_* libcalls
 //   - No sign-extending loads      → SEXTLOAD i8/i16/i32 → Expand
 //   - Hardware integer ops         → div, mul-high, min/max, setcc are Legal
 //
@@ -29,6 +30,7 @@
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/IR/CallingConv.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <optional>
@@ -121,7 +123,11 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i32, Legal);
 
   // ---- No atomics ----
+  // AtomicExpandPass (KlaussCPUPassConfig::addIRPasses) turns every atomic
+  // load/store/RMW/cmpxchg into an __atomic_* libcall.  Fences reach the DAG
+  // and are only compiler barriers (LowerATOMIC_FENCE).
   setMaxAtomicSizeInBitsSupported(0);
+  setOperationAction(ISD::ATOMIC_FENCE, MVT::Other, Custom);
 
   // ---- Stack operations ----
   setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i64, Custom);
@@ -229,6 +235,10 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::TRAP, MVT::Other, Legal);
   setOperationAction(ISD::DEBUGTRAP, MVT::Other, Legal);
 
+  // __builtin_frame_address / __builtin_return_address walk the R15 chain.
+  setOperationAction(ISD::FRAMEADDR,  MVT::i64, Custom);
+  setOperationAction(ISD::RETURNADDR, MVT::i64, Custom);
+
   // ---- Varargs ----
   // VASTART stores the address of the first variadic argument into the va_list.
   // VAARG/VACOPY/VAEND are handled inline by Clang for VoidPtrBuiltinVaList.
@@ -284,8 +294,11 @@ SDValue KlaussCPUTargetLowering::LowerOperation(SDValue Op,
   case ISD::SHL_PARTS:      return LowerShiftLeftParts(Op, DAG);
   case ISD::SRL_PARTS:      return LowerShiftRightParts(Op, DAG, /*IsSRA=*/false);
   case ISD::SRA_PARTS:      return LowerShiftRightParts(Op, DAG, /*IsSRA=*/true);
+  case ISD::ATOMIC_FENCE:   return LowerATOMIC_FENCE(Op, DAG);
+  case ISD::FRAMEADDR:      return LowerFRAMEADDR(Op, DAG);
+  case ISD::RETURNADDR:     return LowerRETURNADDR(Op, DAG);
   default:
-    llvm_unreachable("KlaussCPU: unimplemented LowerOperation opcode");
+    report_fatal_error("KlaussCPU: unimplemented LowerOperation opcode");
   }
 }
 
@@ -590,6 +603,50 @@ SDValue KlaussCPUTargetLowering::LowerDYNAMIC_STACKALLOC(SDValue Op,
   return DAG.getMergeValues({NewSP, SDValue(SetSP, 0)}, DL);
 }
 
+// The core is in-order and single-issue, so its own loads and stores already
+// take effect in program order (also as seen by its interrupt handlers): a
+// fence only has to stop the compiler moving memory accesses across it.  It
+// does NOT make stores visible to the second (AMP) core, whose view of DDR
+// bypasses core 1's write-back D-cache; cross-core hand-offs need an explicit
+// CACHE_CTRL FLUSH (MMIO_MAP.md) before the doorbell/flag write.
+SDValue KlaussCPUTargetLowering::LowerATOMIC_FENCE(SDValue Op,
+                                                     SelectionDAG &DAG) const {
+  // MEMBARRIER is a compiler barrier; it codegens to a no-op.
+  return DAG.getNode(ISD::MEMBARRIER, SDLoc(Op), MVT::Other,
+                     Op.getOperand(0));
+}
+
+// Every function has a frame (hasFP is always true): R15 points at the saved
+// caller R15, and the return address is the slot above it, so
+//   frameaddress(0)  = R15
+//   frameaddress(N)  = [frameaddress(N-1)]
+//   returnaddress(N) = [frameaddress(N) + 8]
+SDValue KlaussCPUTargetLowering::LowerFRAMEADDR(SDValue Op,
+                                                  SelectionDAG &DAG) const {
+  MachineFunction &MF = DAG.getMachineFunction();
+  MF.getFrameInfo().setFrameAddressIsTaken(true);
+  EVT VT = Op.getValueType();
+  SDLoc DL(Op);
+  SDValue FrameAddr =
+      DAG.getCopyFromReg(DAG.getEntryNode(), DL, KlaussCPU::R15, VT);
+  unsigned Depth = Op.getConstantOperandVal(0);
+  while (Depth--)
+    FrameAddr = DAG.getLoad(VT, DL, DAG.getEntryNode(), FrameAddr,
+                            MachinePointerInfo());
+  return FrameAddr;
+}
+
+SDValue KlaussCPUTargetLowering::LowerRETURNADDR(SDValue Op,
+                                                   SelectionDAG &DAG) const {
+  DAG.getMachineFunction().getFrameInfo().setReturnAddressIsTaken(true);
+  EVT VT = Op.getValueType();
+  SDLoc DL(Op);
+  SDValue FrameAddr = LowerFRAMEADDR(Op, DAG);
+  SDValue Ptr = DAG.getNode(ISD::ADD, DL, VT, FrameAddr,
+                            DAG.getConstant(8, DL, VT));
+  return DAG.getLoad(VT, DL, DAG.getEntryNode(), Ptr, MachinePointerInfo());
+}
+
 // va_start(ap, last_named) — store the address of the first variadic argument
 // into *ap.  With VoidPtrBuiltinVaList, ap is just a void * that va_arg bumps.
 SDValue KlaussCPUTargetLowering::LowerVASTART(SDValue Op,
@@ -706,8 +763,6 @@ SDValue KlaussCPUTargetLowering::LowerFormalArguments(
   }
 
   if (IsVarArg) {
-    // Argument registers R0–R3.  C requires at least one named parameter before
-    // '...', so the first unallocated register is R1 at the earliest.
     static const MCPhysReg ArgRegs[] = {
         KlaussCPU::R0, KlaussCPU::R1, KlaussCPU::R2, KlaussCPU::R3};
     constexpr unsigned NumArgRegs = 4;
@@ -715,6 +770,18 @@ SDValue KlaussCPUTargetLowering::LowerFormalArguments(
     // Index of the first unallocated (= first potential vararg) register.
     unsigned FirstVaReg =
         CCInfo.getFirstUnallocated(ArrayRef<MCPhysReg>(ArgRegs, NumArgRegs));
+
+    // The caller reserves home slots for R1–R3 only: R0's would be
+    // [incoming_SP+0], the return address.  So a function with no named
+    // parameter (C23 `f(...)`, or IR) cannot spill R0 next to the others.
+    if (FirstVaReg == 0) {
+      DAG.getContext()->diagnose(DiagnosticInfoUnsupported(
+          MF.getFunction(),
+          "variadic functions without a named parameter are not supported "
+          "by the KlaussCPU calling convention",
+          DL.getDebugLoc()));
+      FirstVaReg = 1;
+    }
 
     auto &MFI = MF.getFrameInfo();
 
@@ -756,6 +823,17 @@ SDValue KlaussCPUTargetLowering::LowerFormalArguments(
 //===----------------------------------------------------------------------===//
 // Return — copy result to R12 and emit RET_GLUE
 //===----------------------------------------------------------------------===//
+
+// A return value that does not fit in R12/R11 is demoted to an sret pointer
+// argument by SelectionDAG.
+bool KlaussCPUTargetLowering::CanLowerReturn(
+    CallingConv::ID CallConv, MachineFunction &MF, bool IsVarArg,
+    const SmallVectorImpl<ISD::OutputArg> &Outs, LLVMContext &Context,
+    const Type *RetTy) const {
+  SmallVector<CCValAssign, 4> RVLocs;
+  CCState CCInfo(CallConv, IsVarArg, MF, RVLocs, Context);
+  return CCInfo.CheckReturn(Outs, RetCC_KlaussCPU);
+}
 
 SDValue KlaussCPUTargetLowering::LowerReturn(
     SDValue Chain, CallingConv::ID CallConv, bool IsVarArg,
@@ -1062,6 +1140,12 @@ MachineBasicBlock *KlaussCPUTargetLowering::EmitInstrWithCustomInserter(
   MachineFunction::iterator It = ++BB->getIterator();
   MF->insert(It, FalseBB);
   MF->insert(It, SinkBB);
+
+  // The select may sit inside a call sequence (a call argument); the new
+  // blocks start with the same call frame set up.
+  unsigned CallFrameSize = TII.getCallFrameSizeAt(MI);
+  FalseBB->setCallFrameSize(CallFrameSize);
+  SinkBB->setCallFrameSize(CallFrameSize);
 
   // Move the tail of BB (after the pseudo) into SinkBB.
   SinkBB->splice(SinkBB->begin(), BB,
