@@ -6,9 +6,10 @@
 # FLAGS, so both go in front of the compare whose flags the branch reads.
 # An instruction of the dispatch block the two read (a COPY of the index)
 # moves with them; one that cannot move (a load) keeps its user there.
-# Nothing moves when the dispatch block has a second predecessor, or when
-# the branch reads FLAGS that come from another block (no FLAGS-free slot
-# for the SHLV).
+# Nothing moves when the dispatch block has a second predecessor, when
+# the branch reads FLAGS that come from another block, or when the header's
+# last FLAGS writer also reads FLAGS (an ADDC whose carry-in the SHLV would
+# clobber): no FLAGS-free slot for the SHLV.
 
 --- |
   define void @hoist() { ret void }
@@ -16,6 +17,7 @@
   define void @load_index() { ret void }
   define void @two_preds() { ret void }
   define void @flags_from_pred() { ret void }
+  define void @flags_reader() { ret void }
 ...
 ---
 name:            hoist
@@ -247,6 +249,52 @@ body:             |
     RET_I implicit $r12
 
   bb.5:
+    $r12 = SETR 3
+    RET_I implicit $r12
+...
+---
+name:            flags_reader
+tracksRegLiveness: true
+jumpTable:
+  kind:            custom32
+  entries:
+    - id:              0
+      blocks:          [ '%bb.2', '%bb.3' ]
+body:             |
+  ; CHECK-LABEL: name: flags_reader
+  ; CHECK:       bb.0:
+  ; CHECK:         CMPRV_I
+  ; CHECK-NEXT:    ADDC
+  ; CHECK-NEXT:    JMPUGT %bb.4, implicit $flags
+  ; CHECK:       bb.1:
+  ; CHECK:         SHLV
+  ; CHECK-NEXT:    SETRU %jump-table.0
+  ; CHECK-NEXT:    LDIDX32R
+  bb.0:
+    successors: %bb.4, %bb.1
+    liveins: $r0, $r1
+    %0:gpr = COPY $r0
+    %4:gpr = COPY $r1
+    CMPRV_I %0, 1, implicit-def $flags
+    %5:gpr = ADDC %4, %4, implicit-def $flags, implicit $flags
+    JMPUGT %bb.4, implicit $flags
+
+  bb.1:
+    successors: %bb.2, %bb.3
+    %1:gpr = SHLV %0, 2, implicit-def dead $flags
+    %2:gpr = SETRU %jump-table.0
+    %3:gpr = LDIDX32R killed %2, killed %1 :: (load (s32) from jump-table)
+    JMPR_R killed %3
+
+  bb.2:
+    $r12 = SETR 1
+    RET_I implicit $r12
+
+  bb.3:
+    $r12 = SETR 2
+    RET_I implicit $r12
+
+  bb.4:
     $r12 = SETR 3
     RET_I implicit $r12
 ...

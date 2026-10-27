@@ -255,7 +255,10 @@ counters avoids the cost today.
   already fused into one compare+branch by the compiler, and the remaining
   benefit can't be sized from these traces.
 - **Jump tables:** measured neutral on this core (the `JMPR` redirect and table
-  load cancel the saving). Nothing needed.
+  load cancel the saving). Nothing needed.  (Superseded 2026-10: with the
+  table base and entry offset computed in the range-check block, a table
+  beats the compare tree from about 12 dense cases, and the backend builds
+  one from 12 cases at 40% density; see `CLAUDE.md`, Switches.)
 - **More callee-saved registers:** recursive code spills because only R4–R7
   are callee-saved. That's an ABI choice, not an ISA change; it can be
   evaluated separately.

@@ -28,9 +28,11 @@
 // Only side-effect-free instructions move (with what they read from the
 // dispatch block itself, such as a COPY of the index, up to three each),
 // whose register operands are all virtual and available at the insertion
-// point, and only into the dispatch block's single predecessor.  An instruction that clobbers FLAGS (SHLV
-// writes them, dead) goes in front of the compare that sets the flags the
-// header's branch reads.
+// point, and only into the dispatch block's single predecessor.  An
+// instruction that clobbers FLAGS (SHLV writes them, dead) goes in front of
+// the compare that sets the flags the header's branch reads; nothing moves
+// when that FLAGS writer also reads FLAGS (add with carry), or when the
+// header has none and its flags come from another block.
 //
 // -mllvm -klausscpu-hoist-jt-addr=false disables it.
 //
