@@ -1,13 +1,10 @@
 # RUN: llvm-mc -triple=klausscpu --disassemble %s | FileCheck %s
 
-# One word per decode-table entry (KlaussCPUGenDecoderTable.inc), with
-# distinct field values: rd = rs1 = r3 (tied forms need them equal), rs2 = r7,
+# One word per decodable instruction, with distinct field values: rd = rs1 = r3 (tied forms need them equal), rs2 = r7,
 # negative / high-bit immediates.  Every line also reassembles to the same
 # bytes (or, for a short branch with a numeric target, to the equivalent
 # 2-word form).  PC-relative targets print as the byte displacement; JMPO /
 # JMPNO short forms print the absolute target (no PC-relative spelling).
-# Regenerated (and checked) by lib/Target/KlaussCPU/Disassembler/
-# roundtrip-check.py after an encoding change.
 
 # RET_I
 # CHECK: ret
@@ -938,10 +935,10 @@
 0x2a 0x00 0x00 0x66
 
 # FBR_RR
-# CHECK: fbr r3, r7, 13, -16
-0x37 0xfc 0xdf 0x76
+# CHECK: fbr r3, r7, 12, -16
+0x37 0xfc 0x5f 0x76
 
 # FBR_RI
-# CHECK: fbri r3, -3, 13, -16
-0x3d 0xfc 0xff 0x76
+# CHECK: fbri r3, -3, 12, -16
+0x3d 0xfc 0x7f 0x76
 

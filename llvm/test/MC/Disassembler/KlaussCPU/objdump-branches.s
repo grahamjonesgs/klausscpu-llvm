@@ -7,7 +7,7 @@
 
 # CHECK-LABEL: <start>:
 # CHECK-NEXT:  0: jmpzrel 0x10 <target>
-# CHECK-NEXT:  4: fbr r1, r2, 5, 0x10 <target>
+# CHECK-NEXT:  4: fbr r1, r2, 4, 0x10 <target>
 # CHECK-NEXT:  8: fbri r1, -3, 2, 0x10 <target>
 # CHECK-NEXT:  c: nop
 # CHECK-LABEL: <target>:
@@ -17,7 +17,7 @@
         .text
 start:
         jmpzrel target
-        fbr     r1, r2, 5, target
+        fbr     r1, r2, 4, target
         fbri    r1, -3, 2, target
         nop
 target:

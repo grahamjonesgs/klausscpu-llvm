@@ -1,13 +1,11 @@
 //===-- KlaussCPUDisassembler.cpp - Disassembler for KlaussCPU -----------===//
 //
-// Decodes ISA encoding v2/v3 instruction words (see KlaussCPUInstrInfo.td
-// for the layout).  The decode table (KlaussCPUGenDecoderTable.inc) is
-// generated from the .td `Inst` fields by gen-decoder-table.py rather than by
-// -gen-disassembler.
+// Decodes ISA encoding v2/v3 instructions with the tables TableGen generates
+// from the .td `Inst` fields (KlaussCPUGenDisassemblerTables.inc).
 //
 // Instructions are 1–3 little-endian 32-bit words; LEN = word0[31:30]
-// (01 = 1 word, 10 = 2, 11 = 3).  LEN = 00 (retired v1 opcodes, data) does
-// not decode.
+// (01 = 1 word, 10 = 2, 11 = 3) selects the table.  LEN = 00 (retired v1
+// opcodes, data) does not decode.
 //
 // PC-relative branch operands (short A1 branches, fused compare-and-branch,
 // the 2-word *REL forms, LEAPC) decode to the byte displacement from the
@@ -20,16 +18,16 @@
 #include "MCTargetDesc/KlaussCPUMCTargetDesc.h"
 #include "TargetInfo/KlaussCPUTargetInfo.h"
 #include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCDecoder.h"
 #include "llvm/MC/MCDecoderOps.h"
 #include "llvm/MC/MCDisassembler/MCDisassembler.h"
 #include "llvm/MC/MCInst.h"
-#include "llvm/MC/MCInstrInfo.h"
-#include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/MathExtras.h"
+#include <bitset>
 
 #define GET_INSTRINFO_ENUM
 #include "KlaussCPUGenInstrInfo.inc"
@@ -38,6 +36,7 @@
 #include "KlaussCPUGenRegisterInfo.inc"
 
 using namespace llvm;
+using namespace llvm::MCD;
 
 #define DEBUG_TYPE "klausscpu-disassembler"
 
@@ -45,60 +44,10 @@ typedef MCDisassembler::DecodeStatus DecodeStatus;
 
 namespace {
 
-// Operand field kinds (see gen-decoder-table.py).
-enum FieldKind : uint8_t {
-  F_RD,       // word0[11:8]  register
-  F_RS1,      // word0[7:4]   register
-  F_RS2,      // word0[3:0]   register
-  F_N6,       // word0[20:15] unsigned shift / bit index
-  F_ENTER22,  // word0[21:0]  ENTER frame size in 8-byte units
-  F_IMM4,     // word0[3:0]   fused-branch signed immediate
-  F_FBRCC,    // word0[25:22] fused-branch condition: PRED[25:23] | INV[22]<<3
-  F_PC13,     // word0[20:8]  fused-branch signed word displacement
-  F_PC18,     // word0[17:0]  short-branch signed word displacement
-  F_SH_S,     // word0[19:12] short-form signed imm8
-  F_SH_Z,     // word0[19:12] short-form unsigned imm8
-  F_SH_M0,    // word0[19:12] short-form signed imm8, memory offset << 0
-  F_SH_M1,    //                                          ... << 1
-  F_SH_M2,    //                                          ... << 2
-  F_SH_M3,    //                                          ... << 3
-  F_W1S,      // word1 signed imm32
-  F_W1U,      // word1 unsigned imm32 (absolute address)
-  F_W1PC,     // word1 signed PC-relative byte displacement
-  F_W2S,      // word2 signed imm32 (high half of a 64-bit immediate)
-};
-
-struct Field {
-  FieldKind Kind;
-  uint8_t OpIdx;
-};
-
-struct DecodeEntry {
-  unsigned Opcode;
-  uint8_t Words;
-  uint32_t Template;
-  uint32_t Mask;
-  uint8_t NumFields;
-  Field Fields[4];
-};
-
-const DecodeEntry DecodeTable[] = {
-#include "KlaussCPUGenDecoderTable.inc"
-};
-
-const MCPhysReg GPRs[16] = {
-    KlaussCPU::R0,  KlaussCPU::R1,  KlaussCPU::R2,  KlaussCPU::R3,
-    KlaussCPU::R4,  KlaussCPU::R5,  KlaussCPU::R6,  KlaussCPU::R7,
-    KlaussCPU::R8,  KlaussCPU::R9,  KlaussCPU::R10, KlaussCPU::R11,
-    KlaussCPU::R12, KlaussCPU::R13, KlaussCPU::R14, KlaussCPU::R15};
-
 class KlaussCPUDisassembler : public MCDisassembler {
-  std::unique_ptr<const MCInstrInfo> MCII;
-
 public:
-  KlaussCPUDisassembler(const MCSubtargetInfo &STI, MCContext &Ctx,
-                        const MCInstrInfo *MCII)
-      : MCDisassembler(STI, Ctx), MCII(MCII) {}
+  KlaussCPUDisassembler(const MCSubtargetInfo &STI, MCContext &Ctx)
+      : MCDisassembler(STI, Ctx) {}
 
   DecodeStatus getInstruction(MCInst &MI, uint64_t &Size,
                               ArrayRef<uint8_t> Bytes, uint64_t Address,
@@ -110,7 +59,7 @@ public:
 static MCDisassembler *createKlaussCPUDisassembler(const Target &T,
                                                    const MCSubtargetInfo &STI,
                                                    MCContext &Ctx) {
-  return new KlaussCPUDisassembler(STI, Ctx, T.createMCInstrInfo());
+  return new KlaussCPUDisassembler(STI, Ctx);
 }
 
 extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void
@@ -119,110 +68,102 @@ LLVMInitializeKlaussCPUDisassembler() {
                                          createKlaussCPUDisassembler);
 }
 
-static MCOperand decodeField(FieldKind Kind, uint32_t W0, uint32_t W1,
-                             uint32_t W2) {
-  switch (Kind) {
-  case F_RD:
-    return MCOperand::createReg(GPRs[(W0 >> 8) & 0xF]);
-  case F_RS1:
-    return MCOperand::createReg(GPRs[(W0 >> 4) & 0xF]);
-  case F_RS2:
-    return MCOperand::createReg(GPRs[W0 & 0xF]);
-  case F_N6:
-    return MCOperand::createImm((W0 >> 15) & 0x3F);
-  case F_ENTER22:
-    return MCOperand::createImm(W0 & 0x3FFFFF);
-  case F_IMM4:
-    return MCOperand::createImm(SignExtend64<4>(W0 & 0xF));
-  case F_FBRCC:
-    return MCOperand::createImm(((W0 >> 23) & 7) | (((W0 >> 22) & 1) << 3));
-  case F_PC13:
-    return MCOperand::createImm(SignExtend64<13>((W0 >> 8) & 0x1FFF) * 4);
-  case F_PC18:
-    return MCOperand::createImm(SignExtend64<18>(W0 & 0x3FFFF) * 4);
-  case F_SH_S:
-    return MCOperand::createImm(SignExtend64<8>((W0 >> 12) & 0xFF));
-  case F_SH_Z:
-    return MCOperand::createImm((W0 >> 12) & 0xFF);
-  case F_SH_M0:
-  case F_SH_M1:
-  case F_SH_M2:
-  case F_SH_M3:
-    return MCOperand::createImm(SignExtend64<8>((W0 >> 12) & 0xFF)
-                                << (Kind - F_SH_M0));
-  case F_W1S:
-  case F_W1PC:
-    return MCOperand::createImm(SignExtend64<32>(W1));
-  case F_W1U:
-    return MCOperand::createImm(W1);
-  case F_W2S:
-    return MCOperand::createImm(SignExtend64<32>(W2));
-  }
-  llvm_unreachable("unknown field kind");
+static DecodeStatus DecodeGPRRegisterClass(MCInst &Inst, uint32_t RegNo,
+                                           uint64_t Address,
+                                           const MCDisassembler *Decoder) {
+  assert(RegNo < 16 && "register field is 4 bits");
+  Inst.addOperand(MCOperand::createReg(KlaussCPU::R0 + RegNo));
+  return MCDisassembler::Success;
 }
+
+template <unsigned N>
+static DecodeStatus decodeUImmOperand(MCInst &Inst, uint64_t Imm,
+                                      int64_t Address,
+                                      const MCDisassembler *Decoder) {
+  assert(isUInt<N>(Imm) && "Invalid immediate");
+  Inst.addOperand(MCOperand::createImm(Imm));
+  return MCDisassembler::Success;
+}
+
+template <unsigned N>
+static DecodeStatus decodeSImmOperand(MCInst &Inst, uint64_t Imm,
+                                      int64_t Address,
+                                      const MCDisassembler *Decoder) {
+  assert(isUInt<N>(Imm) && "Invalid immediate");
+  Inst.addOperand(MCOperand::createImm(SignExtend64<N>(Imm)));
+  return MCDisassembler::Success;
+}
+
+// Fused-branch condition PRED | INV << 3: the CPU implements PRED 0..4
+// (EQ, LT, LE, ULT, ULE) and traps on 5..7.
+static DecodeStatus decodeFBRCondOperand(MCInst &Inst, uint64_t Imm,
+                                         int64_t Address,
+                                         const MCDisassembler *Decoder) {
+  assert(isUInt<4>(Imm) && "Invalid immediate");
+  if ((Imm & 7) > 4)
+    return MCDisassembler::Fail;
+  Inst.addOperand(MCOperand::createImm(Imm));
+  return MCDisassembler::Success;
+}
+
+// BEXTR / BDEP: $rd is tied to $rs, but both rd [11:8] and rs1 [7:4] are
+// encoded, so only words with rd == rs1 have an assembly spelling.
+static DecodeStatus decodeTiedRdRsImm32(MCInst &Inst, uint64_t Insn,
+                                        uint64_t Address,
+                                        const MCDisassembler *Decoder) {
+  uint32_t Rd = fieldFromInstruction(Insn, 8, 4);
+  if (fieldFromInstruction(Insn, 4, 4) != Rd)
+    return MCDisassembler::Fail;
+  DecodeGPRRegisterClass(Inst, Rd, Address, Decoder);
+  DecodeGPRRegisterClass(Inst, Rd, Address, Decoder);
+  return decodeSImmOperand<32>(Inst, fieldFromInstruction(Insn, 32, 32),
+                               Address, Decoder);
+}
+
+#include "KlaussCPUGenDisassemblerTables.inc"
+
+namespace {
+// Define bitwidths for the types used to instantiate the decoder.
+template <> constexpr uint32_t InsnBitWidth<uint32_t> = 32;
+template <> constexpr uint32_t InsnBitWidth<uint64_t> = 64;
+template <> constexpr uint32_t InsnBitWidth<std::bitset<96>> = 96;
+} // namespace
 
 DecodeStatus KlaussCPUDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
                                                    ArrayRef<uint8_t> Bytes,
                                                    uint64_t Address,
                                                    raw_ostream &CS) const {
+  using namespace support;
   Size = 0;
   if (Bytes.size() < 4)
-    return Fail;
-  uint32_t W0 = support::endian::read32le(Bytes.data());
+    return MCDisassembler::Fail;
+  uint32_t W0 = endian::read32le(Bytes.data());
   unsigned Words = W0 >> 30;
   if (Words == 0) {
     // Retired v1 opcode or data: consume one word so disassembly continues.
     Size = 4;
-    return Fail;
+    return MCDisassembler::Fail;
   }
   if (Bytes.size() < Words * 4) {
     Size = Bytes.size() & ~uint64_t(3);
-    return Fail;
+    return MCDisassembler::Fail;
   }
   // Every result below, including failures, consumes the whole instruction
   // so disassembly stays word-aligned.
   Size = Words * 4;
-  uint32_t W1 = Words > 1 ? support::endian::read32le(Bytes.data() + 4) : 0;
-  uint32_t W2 = Words > 2 ? support::endian::read32le(Bytes.data() + 8) : 0;
-
-  for (const DecodeEntry &E : DecodeTable) {
-    if (E.Words != Words || (W0 & E.Mask) != E.Template)
-      continue;
-
-    // Place each field at its .td operand index, then fill tied operands
-    // (e.g. SETFR's $rs1 tied to $rd) from the operand they are tied to.
-    const MCInstrDesc &Desc = MCII->get(E.Opcode);
-    unsigned NumOps = Desc.getNumOperands();
-    SmallVector<MCOperand, 6> Ops(NumOps);
-    SmallVector<bool, 6> Set(NumOps, false);
-    for (unsigned I = 0; I < E.NumFields; ++I) {
-      const Field &F = E.Fields[I];
-      if (F.OpIdx >= NumOps)
-        return Fail;
-      Ops[F.OpIdx] = decodeField(F.Kind, W0, W1, W2);
-      Set[F.OpIdx] = true;
-    }
-    // Tied operands decoded from two fields must agree: the assembly syntax
-    // has one slot for them, so a word with rd != rs1 is not representable.
-    for (unsigned I = 0; I < NumOps; ++I) {
-      int Tied = Desc.getOperandConstraint(I, MCOI::TIED_TO);
-      if (Set[I]) {
-        if (Tied >= 0 && Set[Tied] && Ops[I].isReg() &&
-            Ops[I].getReg() != Ops[Tied].getReg())
-          return Fail;
-        continue;
-      }
-      if (Tied < 0 || !Set[Tied])
-        return Fail;
-      Ops[I] = Ops[Tied];
-    }
-
-    MI.clear();
-    MI.setOpcode(E.Opcode);
-    for (const MCOperand &Op : Ops)
-      MI.addOperand(Op);
-    return Success;
+  switch (Words) {
+  case 1:
+    return decodeInstruction(DecoderTableKlaussCPU32, MI, W0, Address, this,
+                             STI);
+  case 2:
+    return decodeInstruction(DecoderTableKlaussCPU64, MI,
+                             endian::read64le(Bytes.data()), Address, this,
+                             STI);
+  default: {
+    std::bitset<96> Insn(endian::read64le(Bytes.data()));
+    Insn |= std::bitset<96>(endian::read32le(Bytes.data() + 8)) << 64;
+    return decodeInstruction(DecoderTableKlaussCPU96, MI, Insn, Address, this,
+                             STI);
   }
-
-  return Fail;
+  }
 }

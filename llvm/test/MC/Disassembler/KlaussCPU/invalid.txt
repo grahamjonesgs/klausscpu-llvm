@@ -12,6 +12,24 @@
 # CHECK: warning: invalid instruction encoding
 0x01 0x10 0x20 0x44
 
+# Fused branch with PRED 5..7 (cc 5..7, 13..15): the CPU traps on them.
+# CHECK: warning: invalid instruction encoding
+0x12 0x10 0x80 0x76
+# CHECK: warning: invalid instruction encoding
+0x12 0x10 0x00 0x77
+# CHECK: warning: invalid instruction encoding
+0x12 0x10 0xc0 0x77
+# CHECK: warning: invalid instruction encoding
+0x1d 0x10 0xa0 0x76
+# CHECK: warning: invalid instruction encoding
+0x1d 0x10 0xe0 0x77
+
+# PRED 4 (ULE), plain and inverted, is the last legal condition.
+# CHECK: fbr r1, r2, 4, 64
+0x12 0x10 0x00 0x76
+# CHECK: fbri r1, -3, 12, 64
+0x1d 0x10 0x60 0x76
+
 # Valid instructions still decode after the failures.
 # CHECK: addr r1, r0, r1
 0x01 0x01 0x20 0x44

@@ -9,7 +9,7 @@
 # word 1 (offset 4); the short-branch PCREL18 and fused-branch PCREL13 fields
 # are in word 0 (offset 0).  A symbol keeps setr/memreadr/memsetr long.
 
-## simm32_abs (SETR, MEMREADR, MEMSETR) -> FK_KlaussCPU_ABS32 at 4
+## simm32_abs (SETR), uimm32_abs (MEMREADR, MEMSETR) -> FK_KlaussCPU_ABS32 at 4
 # CHECK:      setr r1, sym # encoding: [0x00,0x01,0xd0,0x8b,A,A,A,A]
 # CHECK-NEXT: fixup A - offset: 4, value: sym, kind: FK_KlaussCPU_ABS32
         setr     r1, sym

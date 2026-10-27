@@ -6,8 +6,8 @@
 # fbri immediate a signed 4-bit constant.  Anything else is rejected by the
 # matcher; an expression there used to reach the encoder and assert.
 
-# CHECK: fbr r1, r2, 15, lab  # encoding: [0x12,A,0b110AAAAA,0x77]
-        fbr     r1, r2, 15, lab
+# CHECK: fbr r1, r2, 12, lab  # encoding: [0x12,A,0b010AAAAA,0x76]
+        fbr     r1, r2, 12, lab
 # CHECK: fbri r1, -8, 0, lab  # encoding: [0x18,A,0b001AAAAA,0x74]
         fbri    r1, -8, 0, lab
 # CHECK: fbri r1, 7, 8, lab   # encoding: [0x17,A,0b011AAAAA,0x74]

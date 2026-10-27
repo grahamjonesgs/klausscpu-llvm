@@ -172,10 +172,7 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPUSubtarget.h/.cpp   single global subtarget; member init order is critical
 ├── KlaussCPUTargetMachine.h/.cpp CodeGenTargetMachineImpl; PassConfig::addInstSelector + addPreEmitPass + getTargetTransformInfo
 ├── Disassembler/
-│   ├── KlaussCPUDisassembler.cpp   hand-written v2/v3 decoder (table-driven)
-│   ├── KlaussCPUGenDecoderTable.inc GENERATED from the .td Inst fields (llvm-tblgen --dump-json)
-│   ├── gen-decoder-table.py        regenerates the table (run after any encoding change)
-│   └── roundtrip-check.py          disassemble→reassemble every entry; writes the MC test
+│   └── KlaussCPUDisassembler.cpp   reads LEN, runs the -gen-disassembler table for 32/64/96 bits; operand DecoderMethods
 ├── MCTargetDesc/
 │   ├── CMakeLists.txt          LLVMKlaussCPUDesc; depends on KlaussCPUCommonTableGen
 │   ├── KlaussCPUMCAsmInfo.h/.cpp  MCAsmInfoELF subclass
@@ -1109,17 +1106,19 @@ DEBUG_PLAN Phase 0 (plan: `klaussCPU/DEBUG_PLAN.md`), branch `debug-support`.
 - **TRAP** (`0x6C040000`, v2 class B OP 4) defined; `__builtin_debugtrap` →
   `trap`, `__builtin_trap` stays `halt`.  It is the debugger's software
   breakpoint.
-- **Disassembler** (`Disassembler/`): the decode table is generated from
-  the .td `Inst` fields (`llvm-tblgen --dump-json`; originally from the
-  hand-written emitter, replaced by -gen-emitter in phase 2) by
-  `gen-decoder-table.py`, which also rejects ambiguous encodings (special
-  cases such as ROLR1 = ROLV N=1 are ordered first).  **Re-run it, then
-  `roundtrip-check.py`, after any encoding change.**  PC-relative operands
+- **Disassembler** (`Disassembler/`): TableGen's `-gen-disassembler`
+  builds one decode table per instruction width (32/64/96 bits) from the .td
+  `Inst` fields; `getInstruction` picks it from LEN.  Operand types name
+  their `DecoderMethod` (signed vs unsigned imm32 follows the CPU's SGN
+  extension; FBR cc rejects PRED 5..7).  Short forms are decoded but kept out
+  of the asm matcher with `AsmVariantName = "NoMatch"`; SHLAR (= SHLR1) and
+  the retired v1 ops are `isAsmParserOnly`.  More specific encodings (ROLR1 =
+  ROLV N=1) are tried first by the generated table.  PC-relative operands
   decode to the byte displacement (what the encoder takes as an immediate);
   the printer shows target addresses under `PrintBranchImmAsAddress`
   (llvm-objdump) and `KlaussCPUMCInstrAnalysis::evaluateBranch` symbolizes
   them.  The encoder now also accepts immediate targets for short / fused
-  branches.  Tied operands decoded from two fields must match (else invalid).
+  branches.  BEXTR/BDEP's tied rd/rs1 must match (`decodeTiedRdRsImm32`).
   LEN=00 words (retired v1 opcodes, lld's `00 00 f0 11` fill) don't decode.
 - **Verified**: llc asm vs objdump of llc's object for Doom renderer/game +
   FreeRTOS tasks/queue at -O0/-O1/-O2/PIC: 59,660 instructions, 0 mismatches;

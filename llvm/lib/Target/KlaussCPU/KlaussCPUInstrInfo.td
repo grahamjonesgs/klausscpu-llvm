@@ -83,34 +83,46 @@ def SImm4AsmOperand : AsmOperandClass {
 //
 // Operands that may name a symbol have an EncoderMethod that emits the fixup
 // (KlaussCPUMCCodeEmitter); everything else is a plain register or constant.
+// The DecoderMethod (KlaussCPUDisassembler) extends the field the way the CPU
+// does: a constant operand of a zero-extending op (ISA_ENCODING_V2_MAP §2,
+// SGN=0) and an absolute address decode unsigned, everything else signed.
+// PC-relative operands decode to the byte displacement from the instruction.
 //===----------------------------------------------------------------------===//
 
 def simm32 : Operand<i64> {
-  let DecoderMethod    = "decodeSimm32";
+  let DecoderMethod    = "decodeSImmOperand<32>";
   let ParserMatchClass = AnyImmAsmOperand;
 }
 
 def uimm32 : Operand<i64> {
-  let DecoderMethod    = "decodeUimm32";
+  let DecoderMethod    = "decodeUImmOperand<32>";
   let ParserMatchClass = AnyImmAsmOperand;
 }
 
-// Word-1 immediate that may also be a symbol's address (SETR, MEMREADR,
-// MEMSETR): FK_KlaussCPU_ABS32.
+// Word-1 immediate that may also be a symbol's address: FK_KlaussCPU_ABS32.
+// SETR sign-extends it; MEMREADR / MEMSETR take an unsigned address.
 def simm32_abs : Operand<i64> {
   let EncoderMethod    = "getAbs32OpValue";
-  let DecoderMethod    = "decodeSimm32";
+  let DecoderMethod    = "decodeSImmOperand<32>";
+  let ParserMatchClass = AnyImmAsmOperand;
+}
+
+def uimm32_abs : Operand<i64> {
+  let EncoderMethod    = "getAbs32OpValue";
+  let DecoderMethod    = "decodeUImmOperand<32>";
   let ParserMatchClass = AnyImmAsmOperand;
 }
 
 // 32-bit absolute branch/call target address (word 1, FK_KlaussCPU_ABS32).
 def BrTarget32 : Operand<OtherVT> {
   let EncoderMethod    = "getAbs32OpValue";
+  let DecoderMethod    = "decodeUImmOperand<32>";
   let ParserMatchClass = BrTargetAsmOperand;
 }
 
 def CallTarget32 : Operand<i64> {
   let EncoderMethod    = "getAbs32OpValue";
+  let DecoderMethod    = "decodeUImmOperand<32>";
   let ParserMatchClass = BrTargetAsmOperand;
 }
 
@@ -118,17 +130,19 @@ def CallTarget32 : Operand<i64> {
 // displacement from the instruction in word 1 (FK_KlaussCPU_PCREL32).
 def PCRelTarget32 : Operand<OtherVT> {
   let EncoderMethod    = "getPCRel32OpValue";
+  let DecoderMethod    = "decodeSImmOperand<32>";
   let ParserMatchClass = PCRelTargetAsmOperand;
 }
 
 def PCRelCallTarget32 : Operand<i64> {
   let EncoderMethod    = "getPCRel32OpValue";
+  let DecoderMethod    = "decodeSImmOperand<32>";
   let ParserMatchClass = PCRelTargetAsmOperand;
 }
 
 def pcrel_simm32 : Operand<i64> {
   let EncoderMethod    = "getPCRel32OpValue";
-  let DecoderMethod    = "decodeSimm32";
+  let DecoderMethod    = "decodeSImmOperand<32>";
   let ParserMatchClass = PCRelTargetAsmOperand;
 }
 
@@ -136,6 +150,7 @@ def pcrel_simm32 : Operand<i64> {
 // displacement in word0[17:0] (FK_KlaussCPU_PCREL18).
 def PCRelTarget18 : Operand<OtherVT> {
   let EncoderMethod    = "getPCRel18OpValue";
+  let DecoderMethod    = "decodeSImmOperand<20>";
   let ParserMatchClass = PCRelTargetAsmOperand;
 }
 
@@ -143,15 +158,19 @@ def PCRelTarget18 : Operand<OtherVT> {
 // displacement in word0[20:8] (FK_KlaussCPU_PCREL13).
 def PCRelTarget13 : Operand<OtherVT> {
   let EncoderMethod    = "getPCRel13OpValue";
+  let DecoderMethod    = "decodeSImmOperand<15>";
   let ParserMatchClass = PCRelTargetAsmOperand;
 }
 
 // Fused-branch condition (PRED | INV << 3) and register-immediate operand.
+// The CPU traps on PRED 5..7, so those do not decode.
 def fbr_cc : Operand<i64> {
+  let DecoderMethod    = "decodeFBRCondOperand";
   let ParserMatchClass = UImm4AsmOperand;
 }
 
 def fbr_simm4 : Operand<i64> {
+  let DecoderMethod    = "decodeSImmOperand<4>";
   let ParserMatchClass = SImm4AsmOperand;
 }
 
@@ -174,8 +193,10 @@ class KCInst<int size, bits<32> word0, dag outs, dag ins, string asmstr,
   // from their 2-word twin's.
   bits<32> Word0 = word0;
   // Retired v1 peripheral opcodes keep their v1 word (LEN=00, which the v2
-  // CPU traps on); every other template's LEN must match Size.
+  // CPU traps on); every other template's LEN must match Size.  They do not
+  // disassemble.
   bit isRetiredV1 = 0;
+  let isAsmParserOnly = isRetiredV1;
 }
 
 class KCInst32<bits<32> word0, dag outs, dag ins, string asmstr,
@@ -399,7 +420,7 @@ class RV_ld<bits<32> word0, string asmstr, list<dag> pat = [],
 // Store a register to an absolute address: data in rd, address in word 1.
 // No Defs: stores leave FLAGS alone (class-7 decode sets no fmask).
 class RV_st<bits<32> word0, string asmstr>
-    : KCInst64<word0, (outs), (ins GPR:$rs_data, simm32_abs:$addr), asmstr> {
+    : KCInst64<word0, (outs), (ins GPR:$rs_data, uimm32_abs:$addr), asmstr> {
   bits<4>  rs_data;
   bits<32> addr;
   let Inst{63-32} = addr;
@@ -418,12 +439,15 @@ class RV_2addr<bits<32> word0, string asmstr, list<dag> pat = []>
   let Inst{7-4}   = rs;
   let Constraints = "$rd = $rs";
   let Defs        = [FLAGS];   // addv/minusv set flags (bitwise-imm over-marked; safe)
+  // The generated decoder would merge the two tied register fields; this one
+  // rejects a word with rd != rs1, which the one asm slot cannot express.
+  let DecoderMethod = "decodeTiedRdRsImm32";
 }
 
 // 3-operand immediate form: rd = rs op imm32 (untied — see R_unary).
-class RV_imm<bits<32> word0, string mnem, list<dag> pat = []>
-    : KCInst64<word0, (outs GPR:$rd), (ins GPR:$rs, simm32:$imm),
-               mnem # "\t$rd, $rs, $imm", pat> {
+class RV_imm<bits<32> word0, string mnem, Operand immop = simm32>
+    : KCInst64<word0, (outs GPR:$rd), (ins GPR:$rs, immop:$imm),
+               mnem # "\t$rd, $rs, $imm"> {
   bits<4>  rd;
   bits<4>  rs;
   bits<32> imm;
@@ -529,8 +553,8 @@ class Vcall<bits<32> word0, string asmstr, Operand tgt = CallTarget32>
 }
 
 // SP adjustment (ADDSP), push and peripheral immediates
-class Vsp<bits<32> word0, string asmstr>
-    : KCInst64<word0, (outs), (ins simm32:$imm), asmstr> {
+class Vsp<bits<32> word0, string asmstr, Operand immop = simm32>
+    : KCInst64<word0, (outs), (ins immop:$imm), asmstr> {
   bits<32> imm;
   let Inst{63-32} = imm;
   let SchedRW     = [WriteSP];
@@ -903,12 +927,13 @@ let isMoveImm = 1 in
 def SETR64  : V64_ld<0xCBC00000, "setr64\t$rd, $lo, $hi">;
 }
 
-// In-place immediate operations (rd op= imm32)
-def ADDV    : RV_imm<0x88200000, "addv">;
-def MINUSV  : RV_imm<0x88600000, "minusv">;
-def ANDV    : RV_imm<0x89000000, "andv">;
-def ORV     : RV_imm<0x89400000, "orv">;
-def XORV    : RV_imm<0x89800000, "xorv">;
+// In-place immediate operations (rd op= imm32); the CPU zero-extends the
+// imm32 of ADDV/MINUSV/ANDV/ORV/XORV and sign-extends the MULV/DIVV/MODV one.
+def ADDV    : RV_imm<0x88200000, "addv", uimm32>;
+def MINUSV  : RV_imm<0x88600000, "minusv", uimm32>;
+def ANDV    : RV_imm<0x89000000, "andv", uimm32>;
+def ORV     : RV_imm<0x89400000, "orv", uimm32>;
+def XORV    : RV_imm<0x89800000, "xorv", uimm32>;
 // Shift by immediate (count = imm[5:0]); v2: single word, count embedded.
 def SHLV    : ShiftImmN<0x50204000, "shlv">;
 def SHRV    : ShiftImmN<0x50604000, "shrv">;
@@ -1253,6 +1278,8 @@ def BTSTRR : RRR<0x52C00000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "btstrr\t
 
 // ── R in-place (rd = f(rd); 2-address) ─────────────────────────────────────
 def SETFR : R_inplace<0x57000000, "setfr\t$rd">;
+// Same encoding as SHLR1, which is the spelling the disassembler prints.
+let isAsmParserOnly = 1 in
 def SHLAR : R_unary<0x50208000, "shlar">;
 def SHRAR : R_unary<0x50A08000, "shrar">;
 def ROLR1 : R_unary<0x50E0C000, "rolr1">;
@@ -1277,7 +1304,7 @@ def MEMREADRR  : RR1<0x5B000000, (outs GPR:$rd), (ins GPR:$rs), "memreadrr\t$rd,
 def MEMSET64RR : RRst<0x5F000000, "memset64rr\t$rs_data, $rs_addr">;
 
 // ── RV absolute memory access (rd/rs, address-imm32) — symbol-capable ───────
-def MEMREADR : RV_ld<0x9B400000, "memreadr\t$rd, $imm", [], simm32_abs> { let mayLoad = 1; }
+def MEMREADR : RV_ld<0x9B400000, "memreadr\t$rd, $imm", [], uimm32_abs> { let mayLoad = 1; }
 def MEMSETR  : RV_st<0x9F400000, "memsetr\t$rs_data, $addr"> { let mayStore = 1; }
 
 // ── RRV 64-bit indexed: non-aligned (vh LDIDX64/STIDX64 = 0x0C/0x0D) and
@@ -1291,7 +1318,7 @@ def LDIDX64R : Idx64RegOff_ld<0x5B600000, "ldidx64r\t$rd, $base, $offset">;
 def STIDX64R : Idx64RegOff_st<0x5F600000, "stidx64r\t$rs_data, $base, $offset">;
 
 // ── V (fixed op32 + imm32/address) — push / conditional jumps ───────────────
-def PUSHV : Vsp<0xA4400000, "pushv\t$imm"> { let mayStore = 1; }
+def PUSHV : Vsp<0xA4400000, "pushv\t$imm", uimm32> { let mayStore = 1; }
 def JMPO  : Vbr_cond<0xA0180000, "jmpo\t$target">;
 def JMPNO : Vbr_cond<0xA01C0000, "jmpno\t$target">;
 
@@ -1380,12 +1407,29 @@ def : Pat<(i64 (sextloadi32 (add (i64 GPR:$base), simm32_imm:$off))),
 // by the access size (1 << shift).
 //===----------------------------------------------------------------------===//
 
+// The imm8 operands: signed or unsigned as the long twin extends its imm32.
+// A load/store offset is a byte offset: simm8_lslN is bits [N+7:N] of an
+// (N+8)-bit signed offset whose low N bits are zero.
+class ShortImmOperand<string decoder> : Operand<i64> {
+  let DecoderMethod    = decoder;
+  let ParserMatchClass = AnyImmAsmOperand;
+}
+def uimm8 : ShortImmOperand<"decodeUImmOperand<8>">;
+foreach shift = 0-3 in
+def simm8_lsl # shift
+    : ShortImmOperand<"decodeSImmOperand<" # !add(8, shift) # ">">;
+
+// The short forms are decoded and printed like any instruction, but the
+// assembler never matches them (their asm string is the long form's, which
+// the matcher picks): AsmVariantName names no parser variant.
 class ShortForm<KCInst64 long, dag outs, dag ins, string asmstr>
-    : KCInst32<{0b01, long.Word0{29-0}}, outs, ins, asmstr>;
+    : KCInst32<{0b01, long.Word0{29-0}}, outs, ins, asmstr> {
+  let AsmVariantName = "NoMatch";
+}
 
 // rd = imm8 (SETR)
 class ShortRdImm<KCInst64 long, string asmstr>
-    : ShortForm<long, (outs GPR:$rd), (ins simm32:$imm), asmstr> {
+    : ShortForm<long, (outs GPR:$rd), (ins simm8_lsl0:$imm), asmstr> {
   bits<4> rd;
   bits<8> imm;
   let Inst{19-12} = imm;
@@ -1393,8 +1437,8 @@ class ShortRdImm<KCInst64 long, string asmstr>
 }
 
 // rd = rs op imm8
-class ShortRdRsImm<KCInst64 long, string asmstr>
-    : ShortForm<long, (outs GPR:$rd), (ins GPR:$rs, simm32:$imm), asmstr> {
+class ShortRdRsImm<KCInst64 long, string asmstr, Operand immop = simm8_lsl0>
+    : ShortForm<long, (outs GPR:$rd), (ins GPR:$rs, immop:$imm), asmstr> {
   bits<4> rd;
   bits<4> rs;
   bits<8> imm;
@@ -1405,7 +1449,7 @@ class ShortRdRsImm<KCInst64 long, string asmstr>
 
 // Compare rs with imm8 (flags only)
 class ShortRsImm<KCInst64 long, string asmstr>
-    : ShortForm<long, (outs), (ins GPR:$rs, simm32:$imm), asmstr> {
+    : ShortForm<long, (outs), (ins GPR:$rs, simm8_lsl0:$imm), asmstr> {
   bits<4> rs;
   bits<8> imm;
   let Inst{19-12} = imm;
@@ -1413,7 +1457,8 @@ class ShortRsImm<KCInst64 long, string asmstr>
 }
 
 class ShortLoad<KCInst64 long, int shift, string asmstr>
-    : ShortForm<long, (outs GPR:$rd), (ins GPR:$base, simm32:$offset),
+    : ShortForm<long, (outs GPR:$rd),
+                (ins GPR:$base, !cast<Operand>("simm8_lsl" # shift):$offset),
                 asmstr> {
   bits<4>  rd;
   bits<4>  base;
@@ -1428,7 +1473,9 @@ class ShortLoad<KCInst64 long, int shift, string asmstr>
 }
 
 class ShortStore<KCInst64 long, int shift, string asmstr>
-    : ShortForm<long, (outs), (ins GPR:$rs_data, GPR:$base, simm32:$offset),
+    : ShortForm<long, (outs),
+                (ins GPR:$rs_data, GPR:$base,
+                     !cast<Operand>("simm8_lsl" # shift):$offset),
                 asmstr> {
   bits<4>  rs_data;
   bits<4>  base;
@@ -1451,16 +1498,17 @@ class ShortBranch<KCInst64 long, string asmstr>
                (outs), (ins PCRelTarget18:$target), asmstr> {
   bits<20> target;
   let Inst{17-0} = target{19-2};
+  let AsmVariantName = "NoMatch";
 }
 
-let isCodeGenOnly = 1, hasSideEffects = 0 in {
+let hasSideEffects = 0 in {
 def SETR_SH    : ShortRdImm<SETR, "setr\t$rd, $imm">;
 let Defs = [FLAGS] in {
-def ADDV_SH    : ShortRdRsImm<ADDV, "addv\t$rd, $rs, $imm">;
-def MINUSV_SH  : ShortRdRsImm<MINUSV, "minusv\t$rd, $rs, $imm">;
-def ANDV_SH    : ShortRdRsImm<ANDV, "andv\t$rd, $rs, $imm">;
-def ORV_SH     : ShortRdRsImm<ORV, "orv\t$rd, $rs, $imm">;
-def XORV_SH    : ShortRdRsImm<XORV, "xorv\t$rd, $rs, $imm">;
+def ADDV_SH    : ShortRdRsImm<ADDV, "addv\t$rd, $rs, $imm", uimm8>;
+def MINUSV_SH  : ShortRdRsImm<MINUSV, "minusv\t$rd, $rs, $imm", uimm8>;
+def ANDV_SH    : ShortRdRsImm<ANDV, "andv\t$rd, $rs, $imm", uimm8>;
+def ORV_SH     : ShortRdRsImm<ORV, "orv\t$rd, $rs, $imm", uimm8>;
+def XORV_SH    : ShortRdRsImm<XORV, "xorv\t$rd, $rs, $imm", uimm8>;
 def ADDI_SH    : ShortRdRsImm<ADDI, "addi\t$rd, $rs, $imm">;
 def CMPRV_SH   : ShortRsImm<CMPRV_I, "cmprv\t$rs, $imm">;
 }
@@ -1571,11 +1619,11 @@ def : InstAlias<"rolr1\t$rd", (ROLR1 GPR:$rd, GPR:$rd)>;
 def : InstAlias<"rorr1\t$rd", (RORR1 GPR:$rd, GPR:$rd)>;
 def : InstAlias<"rolcr\t$rd", (ROLCR GPR:$rd, GPR:$rd)>;
 def : InstAlias<"rorcr\t$rd", (RORCR GPR:$rd, GPR:$rd)>;
-def : InstAlias<"addv\t$rd, $imm", (ADDV GPR:$rd, GPR:$rd, simm32:$imm)>;
-def : InstAlias<"minusv\t$rd, $imm", (MINUSV GPR:$rd, GPR:$rd, simm32:$imm)>;
-def : InstAlias<"andv\t$rd, $imm", (ANDV GPR:$rd, GPR:$rd, simm32:$imm)>;
-def : InstAlias<"orv\t$rd, $imm", (ORV GPR:$rd, GPR:$rd, simm32:$imm)>;
-def : InstAlias<"xorv\t$rd, $imm", (XORV GPR:$rd, GPR:$rd, simm32:$imm)>;
+def : InstAlias<"addv\t$rd, $imm", (ADDV GPR:$rd, GPR:$rd, uimm32:$imm)>;
+def : InstAlias<"minusv\t$rd, $imm", (MINUSV GPR:$rd, GPR:$rd, uimm32:$imm)>;
+def : InstAlias<"andv\t$rd, $imm", (ANDV GPR:$rd, GPR:$rd, uimm32:$imm)>;
+def : InstAlias<"orv\t$rd, $imm", (ORV GPR:$rd, GPR:$rd, uimm32:$imm)>;
+def : InstAlias<"xorv\t$rd, $imm", (XORV GPR:$rd, GPR:$rd, uimm32:$imm)>;
 def : InstAlias<"mulv\t$rd, $imm", (MULV GPR:$rd, GPR:$rd, simm32:$imm)>;
 def : InstAlias<"divv\t$rd, $imm", (DIVV GPR:$rd, GPR:$rd, simm32:$imm)>;
 def : InstAlias<"modv\t$rd, $imm", (MODV GPR:$rd, GPR:$rd, simm32:$imm)>;
