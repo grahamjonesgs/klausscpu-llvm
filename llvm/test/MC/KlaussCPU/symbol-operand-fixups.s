@@ -7,9 +7,11 @@
 # (KlaussCPUInstrInfo.td operand types, KlaussCPUMCCodeEmitter): the field is
 # zero and the fixup has the right kind and byte offset.  ABS32/PCREL32 cover
 # word 1 (offset 4); the short-branch PCREL18, short-call CALL18 and
-# fused-branch PCREL13 fields are in word 0 (offset 0).  A symbol keeps setr/memreadr/memsetr long.
+# fused-branch PCREL13 fields are in word 0 (offset 0).  A symbol keeps setr
+# and the absolute loads/stores long.
 
-## simm32_abs (SETR), uimm32_abs (MEMREADR, MEMSETR) -> FK_KlaussCPU_ABS32 at 4
+## simm32_abs (SETR), uimm32_abs (MEMREADR, MEMSETR, LDABSn, STABSn) ->
+## FK_KlaussCPU_ABS32 at 4
 # CHECK:      setr r1, sym # encoding: [0x00,0x01,0xd0,0x8b,A,A,A,A]
 # CHECK-NEXT: fixup A - offset: 4, value: sym, kind: FK_KlaussCPU_ABS32
         setr     r1, sym
@@ -19,6 +21,12 @@
 # CHECK:      memsetr r3, sym+8 # encoding: [0x00,0x03,0x40,0x9f,A,A,A,A]
 # CHECK-NEXT: fixup A - offset: 4, value: sym+8, kind: FK_KlaussCPU_ABS32
         memsetr  r3, sym+8
+# CHECK:      ldabs16s r4, sym+2 # encoding: [0x00,0x04,0xc0,0x99,A,A,A,A]
+# CHECK-NEXT: fixup A - offset: 4, value: sym+2, kind: FK_KlaussCPU_ABS32
+        ldabs16s r4, sym+2
+# CHECK:      stabs8 r5, sym # encoding: [0x00,0x05,0x40,0x9c,A,A,A,A]
+# CHECK-NEXT: fixup A - offset: 4, value: sym, kind: FK_KlaussCPU_ABS32
+        stabs8   r5, sym
 
 ## A call to a symbol starts as the short call (CallTarget18,
 ## FK_KlaussCPU_CALL18 at 0); without short forms it keeps CallTarget32

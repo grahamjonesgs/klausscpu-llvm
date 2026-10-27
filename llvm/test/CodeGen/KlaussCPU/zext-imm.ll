@@ -90,20 +90,19 @@ define i64 @const_64() nounwind {
   ret i64 4294967296
 }
 
-; An MMIO register at 0xF0010000.
+; An MMIO register at 0xF0010000: a zero-extended imm32, the address of the
+; absolute load (mmio-abs.ll).
 define i32 @mmio_read() nounwind {
 ; CHECK-LABEL: mmio_read:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    setru r12, 4026597376
-; CHECK-NEXT:    memget32 r12, r12
+; CHECK-NEXT:    ldabs32 r12, 4026597376
 ; CHECK-NEXT:    leaveret
 ;
 ; PIC-LABEL: mmio_read:
 ; PIC:       # %bb.0:
 ; PIC-NEXT:    enter 0
-; PIC-NEXT:    setru r12, 4026597376
-; PIC-NEXT:    memget32 r12, r12
+; PIC-NEXT:    ldabs32 r12, 4026597376
 ; PIC-NEXT:    leaveret
   %v = load volatile i32, ptr inttoptr (i64 4026597376 to ptr)
   ret i32 %v

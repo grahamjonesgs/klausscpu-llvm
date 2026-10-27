@@ -213,28 +213,32 @@ static bool isExtended(Register Reg, unsigned Bits, bool ZExt,
     int64_t Imm;
     switch (Opc) {
     case KlaussCPU::LDIDX8: case KlaussCPU::LDIDX8R: case KlaussCPU::MEMGET8:
+    case KlaussCPU::LDABS8:
       if (Extends(8, true))
         continue;
       return false;
     case KlaussCPU::LDIDX16: case KlaussCPU::LDIDX16R:
-    case KlaussCPU::MEMGET16:
+    case KlaussCPU::MEMGET16: case KlaussCPU::LDABS16:
       if (Extends(16, true))
         continue;
       return false;
     case KlaussCPU::LDIDX32: case KlaussCPU::LDIDX32R:
-    case KlaussCPU::MEMGET32:
+    case KlaussCPU::MEMGET32: case KlaussCPU::LDABS32:
       if (Extends(32, true))
         continue;
       return false;
     case KlaussCPU::LDIDX8_S: case KlaussCPU::LDIDX8_SR:
+    case KlaussCPU::LDABS8_S:
       if (Extends(8, false))
         continue;
       return false;
     case KlaussCPU::LDIDX16_S: case KlaussCPU::LDIDX16_SR:
+    case KlaussCPU::LDABS16_S:
       if (Extends(16, false))
         continue;
       return false;
     case KlaussCPU::LDIDX32_S: case KlaussCPU::LDIDX32_SR:
+    case KlaussCPU::LDABS32_S:
     case KlaussCPU::ADDW: case KlaussCPU::SUBW: case KlaussCPU::MULW:
     case KlaussCPU::ADDIW:
       if (Extends(32, false))

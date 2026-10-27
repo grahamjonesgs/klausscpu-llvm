@@ -44,9 +44,12 @@
 # CHECK: setr r0, sym               # encoding: [0x00,0x00,0xd0,0x8b,A,A,A,A]
         setr    r0, sym
 
-# UImm32Sym: absolute addresses (MEMREADR/MEMSETR, JMP/CALL targets).
+# UImm32Sym: absolute addresses (MEMREADR/MEMSETR, LDABSn/STABSn, JMP/CALL
+# targets).
 # CHECK: memreadr r1, 4294967295    # encoding: [0x00,0x01,0x40,0x9b,0xff,0xff,0xff,0xff]
         memreadr r1, 0xFFFFFFFF
+# CHECK: stabs32 r1, 4294967292     # encoding: [0x00,0x01,0x40,0x9e,0xfc,0xff,0xff,0xff]
+        stabs32 r1, 0xFFFFFFFC
 # CHECK: call 0                     # encoding: [0x00,0x00,0x00,0xa2,0x00,0x00,0x00,0x00]
         call    0
 # CHECK: jmp sym                    # encoding: [0x00,0x00,0x00,0xa0,A,A,A,A]
@@ -105,6 +108,8 @@
         setr    r1, -2147483649
 # ERR: [[#@LINE+1]]:22: error: immediate must be an integer in the range [0, 4294967295] or a symbol
         memreadr r1, -4
+# ERR: [[#@LINE+1]]:22: error: immediate must be an integer in the range [0, 4294967295] or a symbol
+        ldabs8   r1, 0x100000000
 # ERR: [[#@LINE+1]]:17: error: immediate must be an integer in the range [0, 4294967295] or a symbol
         call    0x100000000
 # ERR: [[#@LINE+1]]:17: error: immediate must be an integer in the range [-2147483648, 2147483647] or a symbol

@@ -38,12 +38,14 @@
 namespace llvm {
 FunctionPass *createKlaussCPUISelDag(KlaussCPUTargetMachine &TM);
 FunctionPass *createKlaussCPUCalleeSavedCFIPass();
+FunctionPass *createKlaussCPUConstAddrBasePass();
 FunctionPass *createKlaussCPUEarlyIVIncPass();
 FunctionPass *createKlaussCPUFlagReusePass();
 FunctionPass *createKlaussCPUFuseCmpBrPass(bool LoopConstsOnly = false);
 FunctionPass *createKlaussCPUJumpTableHoistPass();
 FunctionPass *createKlaussCPUOptExtensionsPass();
 void initializeKlaussCPUCalleeSavedCFIPass(PassRegistry &);
+void initializeKlaussCPUConstAddrBasePass(PassRegistry &);
 void initializeKlaussCPUDAGToDAGISelLegacyPass(PassRegistry &);
 void initializeKlaussCPUEarlyIVIncPass(PassRegistry &);
 void initializeKlaussCPUFlagReusePass(PassRegistry &);
@@ -61,6 +63,7 @@ LLVMInitializeKlaussCPUTarget() {
   // with -run-pass.
   PassRegistry &PR = *PassRegistry::getPassRegistry();
   initializeKlaussCPUCalleeSavedCFIPass(PR);
+  initializeKlaussCPUConstAddrBasePass(PR);
   initializeKlaussCPUDAGToDAGISelLegacyPass(PR);
   initializeKlaussCPUEarlyIVIncPass(PR);
   initializeKlaussCPUFlagReusePass(PR);
@@ -154,6 +157,7 @@ public:
   bool addPreISel() override;
   bool addInstSelector() override;
   void addMachineSSAOptimization() override;
+  bool addILPOpts() override;
   void addPreRegAlloc() override;
   void addPreSched2() override;
   void addPreEmitPass() override;
@@ -203,6 +207,13 @@ void KlaussCPUPassConfig::addMachineSSAOptimization() {
   TargetPassConfig::addMachineSSAOptimization();
   // Extensions made redundant across blocks (KlaussCPUOptExtensions.cpp).
   addPass(createKlaussCPUOptExtensionsPass());
+}
+
+bool KlaussCPUPassConfig::addILPOpts() {
+  // One base register for constant-address accesses near each other,
+  // before MachineLICM takes it out of loops (KlaussCPUConstAddrBase.cpp).
+  addPass(createKlaussCPUConstAddrBasePass());
+  return true;
 }
 
 void KlaussCPUPassConfig::addPreRegAlloc() {

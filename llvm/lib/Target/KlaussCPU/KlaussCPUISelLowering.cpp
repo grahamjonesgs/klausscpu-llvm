@@ -378,22 +378,34 @@ bool KlaussCPUTargetLowering::isZExtFree(SDValue Val, EVT VT2) const {
 }
 
 // The load/store addressing modes of KlaussCPUInstrInfo.td: [r] and
-// r + simm32 at every width (MEMGETn/MEMSETn, LDIDXn/STIDXn), and r + r with
-// no displacement (LDIDXnR/STIDXnR, MODE=11).  There is no scaled index, and
-// no absolute or symbol address: a global or a constant address is a SETRU /
-// SETR into a register first.  An access wider than a register is split into
-// 8-byte pieces at base + 8k, which r + r does not reach.  (The default
-// claims r + r for every size, a bare constant address and 2*r, and caps the
-// offset at simm16.)
+// r + simm32 at every width (MEMGETn/MEMSETn, LDIDXn/STIDXn), r + r with
+// no displacement (LDIDXnR/STIDXnR, MODE=11), and a constant address that
+// SETR or SETRU reaches, naturally aligned (LDABSn/STABSn, MEMREADR/MEMSETR,
+// MODE=10).  There is no scaled index, and no symbol address: a global is a
+// SETRU / LEAPC into a register first.  An access wider than a register is
+// split into 8-byte pieces at base + 8k, which r + r does not reach.  (The
+// default claims r + r for every size, any bare constant address and 2*r,
+// and caps the offset at simm16.)
 bool KlaussCPUTargetLowering::isLegalAddressingMode(const DataLayout &DL,
                                                     const AddrMode &AM,
                                                     Type *Ty, unsigned AS,
                                                     Instruction *I) const {
-  if (AM.BaseGV || AM.ScalableOffset || !isInt<32>(AM.BaseOffs))
+  if (AM.BaseGV || AM.ScalableOffset)
+    return false;
+
+  if (AM.Scale == 0 && !AM.HasBaseReg) { // a bare "i"
+    uint64_t Bytes =
+        Ty->isSized()
+            ? std::min<uint64_t>(DL.getTypeStoreSize(Ty).getKnownMinValue(), 8)
+            : 8;
+    return (isInt<32>(AM.BaseOffs) || isUInt<32>(AM.BaseOffs)) &&
+           isPowerOf2_64(Bytes) && AM.BaseOffs % Bytes == 0;
+  }
+  if (!isInt<32>(AM.BaseOffs))
     return false;
 
   switch (AM.Scale) {
-  case 0: // "r + i"; a bare "i" needs a register.
+  case 0: // "r + i"
     return AM.HasBaseReg;
   case 1:
     if (!AM.HasBaseReg) // "r + i"

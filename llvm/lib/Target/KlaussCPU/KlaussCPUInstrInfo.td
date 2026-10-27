@@ -1635,8 +1635,72 @@ def MEMREADRR  : RR1<0x5B000000, (outs GPR:$rd), (ins GPR:$rs), "memreadrr\t$rd,
 def MEMSET64RR : RRst<0x5F000000, "memset64rr\t$rs_data, $rs_addr">;
 
 // ── RV absolute memory access (rd/rs, address-imm32) — symbol-capable ───────
-def MEMREADR : RV_ld<0x9B400000, "memreadr\t$rd, $imm", [], uimm32_abs> { let mayLoad = 1; }
-def MEMSETR  : RV_st<0x9F400000, "memsetr\t$rs_data, $addr"> { let mayStore = 1; }
+// MODE=10, EA = imm32 (2 words, no short form), at every width: the ISA map
+// names only the 64-bit pair (A=0); the sub-word ones are its word-0 layout
+// with SIZE [25:24] and, for loads, SGN [23] (CPU_ARCHITECTURE.md §8.1;
+// pipeline_core.sv:549-570 decodes LEN=10 MODE=10 with rs1/rs2 = 0 at every
+// SIZE, EA = ex_var1 at :1003, the 16/32-bit forms align it down at
+// :1105-1113 and :1186-1188 as LDIDX16/32 do, the load extends per SGN at
+// :1371-1373).  Selected for a load or store at a constant address (the
+// AbsAddr patterns below).
+let hasSideEffects = 0, mayLoad = 1, mayStore = 0, SchedRW = [WriteLoad] in {
+def MEMREADR  : RV_ld<0x9B400000, "memreadr\t$rd, $imm", [], uimm32_abs>;
+def LDABS8    : RV_ld<0x98400000, "ldabs8\t$rd, $imm", [], uimm32_abs>;
+def LDABS16   : RV_ld<0x99400000, "ldabs16\t$rd, $imm", [], uimm32_abs>;
+def LDABS32   : RV_ld<0x9A400000, "ldabs32\t$rd, $imm", [], uimm32_abs>;
+def LDABS8_S  : RV_ld<0x98C00000, "ldabs8s\t$rd, $imm", [], uimm32_abs>;
+def LDABS16_S : RV_ld<0x99C00000, "ldabs16s\t$rd, $imm", [], uimm32_abs>;
+def LDABS32_S : RV_ld<0x9AC00000, "ldabs32s\t$rd, $imm", [], uimm32_abs>;
+}
+let hasSideEffects = 0, mayLoad = 0, mayStore = 1, SchedRW = [WriteStore] in {
+def MEMSETR  : RV_st<0x9F400000, "memsetr\t$rs_data, $addr">;
+def STABS8   : RV_st<0x9C400000, "stabs8\t$rs_data, $addr">;
+def STABS16  : RV_st<0x9D400000, "stabs16\t$rs_data, $addr">;
+def STABS32  : RV_st<0x9E400000, "stabs32\t$rs_data, $addr">;
+}
+
+// A load or store at a constant address (MMIO registers, `*(T *)0x...`) is
+// one absolute access instead of SETRU/SETR + MEMGETn/MEMSETn: one
+// instruction and 2 words instead of 2 and 3, and no address register.  The
+// CPU uses only bits [31:0] of a register address (pipeline_core.sv:1001-1004),
+// so a constant that SETR sign-extends is the same address as its low half.
+// Only a naturally aligned constant: the 16/32-bit absolute forms align the
+// EA down where MEMGET32 does not, and an i64 one is A=0 where LDIDX64 is
+// A=1, which agree only on an aligned address.
+class AbsAddr<int bytes>
+    : ImmLeaf<i64, "return (isInt<32>(Imm) || isUInt<32>(Imm)) && "
+                   "(Imm & " # !sub(bytes, 1) # ") == 0;">;
+def AbsAddr8  : AbsAddr<1>;
+def AbsAddr16 : AbsAddr<2>;
+def AbsAddr32 : AbsAddr<4>;
+def AbsAddr64 : AbsAddr<8>;
+def AbsAddrXForm : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(N->getZExtValue() & 0xFFFFFFFF, SDLoc(N),
+                                   MVT::i64);
+}]>;
+multiclass AbsLoadPat<PatFrags ld, ImmLeaf addr, Instruction Inst> {
+  def : Pat<(i64 (ld addr:$a)), (Inst (AbsAddrXForm imm:$a))>;
+}
+multiclass AbsStorePat<PatFrags st, ImmLeaf addr, Instruction Inst> {
+  def : Pat<(st (i64 GPR:$val), addr:$a),
+            (Inst GPR:$val, (AbsAddrXForm imm:$a))>;
+}
+let AddedComplexity = 10 in {
+defm : AbsLoadPat<load,        AbsAddr64, MEMREADR>;
+defm : AbsLoadPat<zextloadi32, AbsAddr32, LDABS32>;
+defm : AbsLoadPat<extloadi32,  AbsAddr32, LDABS32>;
+defm : AbsLoadPat<sextloadi32, AbsAddr32, LDABS32_S>;
+defm : AbsLoadPat<zextloadi16, AbsAddr16, LDABS16>;
+defm : AbsLoadPat<extloadi16,  AbsAddr16, LDABS16>;
+defm : AbsLoadPat<sextloadi16, AbsAddr16, LDABS16_S>;
+defm : AbsLoadPat<zextloadi8,  AbsAddr8,  LDABS8>;
+defm : AbsLoadPat<extloadi8,   AbsAddr8,  LDABS8>;
+defm : AbsLoadPat<sextloadi8,  AbsAddr8,  LDABS8_S>;
+defm : AbsStorePat<store,         AbsAddr64, MEMSETR>;
+defm : AbsStorePat<truncstorei32, AbsAddr32, STABS32>;
+defm : AbsStorePat<truncstorei16, AbsAddr16, STABS16>;
+defm : AbsStorePat<truncstorei8,  AbsAddr8,  STABS8>;
+}
 
 // ── RRV 64-bit indexed: non-aligned (ISA map LDIDX64/STIDX64, A=0) and
 //    register-offset (LDIDX64R/STIDX64R).  NOTE: LLVM's ldidx64/stidx64 are
@@ -2227,3 +2291,17 @@ defm : AtomicStorePat<atomic_store_64, STIDX64, STIDX64R>;
 defm : AtomicStorePat<atomic_store_32, STIDX32, STIDX32R>;
 defm : AtomicStorePat<atomic_store_16, STIDX16, STIDX16R>;
 defm : AtomicStorePat<atomic_store_8,  STIDX8,  STIDX8R>;
+// And at a constant address, the absolute forms.
+let AddedComplexity = 10 in {
+defm : AbsLoadPat<atomic_load_nonext_64, AbsAddr64, MEMREADR>;
+defm : AbsLoadPat<atomic_load_azext_32,  AbsAddr32, LDABS32>;
+defm : AbsLoadPat<atomic_load_sext_32,   AbsAddr32, LDABS32_S>;
+defm : AbsLoadPat<atomic_load_azext_16,  AbsAddr16, LDABS16>;
+defm : AbsLoadPat<atomic_load_sext_16,   AbsAddr16, LDABS16_S>;
+defm : AbsLoadPat<atomic_load_azext_8,   AbsAddr8,  LDABS8>;
+defm : AbsLoadPat<atomic_load_sext_8,    AbsAddr8,  LDABS8_S>;
+defm : AbsStorePat<atomic_store_64, AbsAddr64, MEMSETR>;
+defm : AbsStorePat<atomic_store_32, AbsAddr32, STABS32>;
+defm : AbsStorePat<atomic_store_16, AbsAddr16, STABS16>;
+defm : AbsStorePat<atomic_store_8,  AbsAddr8,  STABS8>;
+}

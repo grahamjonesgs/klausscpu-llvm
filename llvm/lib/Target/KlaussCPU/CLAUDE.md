@@ -25,7 +25,7 @@ describe earlier states of the backend and are superseded by this file.
 | CMOV | none — `select` becomes a `SELECT_CC_RR/RI` pseudo, expanded to compare + branch; a run of selects on the same condition shares one compare/branch (one PHI each) |
 | Atomics | no instructions — "forced atomics" (as RISC-V `+forced-atomics`), **atomic within one core only**: an aligned atomic load/store of 1/2/4/8 bytes is the plain access (patterns), a fence a compiler barrier, every RMW / cmpxchg a `__sync_*_N` libcall (LibCall actions) that the runtime's `src/atomic.c` runs with `INT_MASK` saved/zeroed/restored; FP / `uinc_wrap` / `udec_wrap` / `usub_*` RMWs are cmpxchg loops (`shouldExpandAtomicRMWInIR`); wider or misaligned atomics are `__atomic_*` libcalls (not provided).  Sub-word libcall values go in any-extended and come back zero-extended.  Clang inlines atomics up to 64 bits (`MaxAtomicInlineWidth`).  Nothing makes them atomic against core 2 (AMP), whose DDR view also bypasses core 1's D-cache |
 | Sign-extending loads | i8/i16/i32: hardware (`LDIDX8_S`/`LDIDX16_S`/`LDIDX32_S`) |
-| Load/store addressing | `[r]` (`MEMGETn`/`MEMSETn`), `r + simm32` (`LDIDXn`/`STIDXn`, 1-word short form for a small scaled offset), `r + r` at every width (`LDIDXnR`/`LDIDXn_SR`/`STIDXnR`, MODE=11); 16/32-bit forms other than `MEMGET32` force-align the EA |
+| Load/store addressing | `[r]` (`MEMGETn`/`MEMSETn`), `r + simm32` (`LDIDXn`/`STIDXn`, 1-word short form for a small scaled offset), `r + r` at every width (`LDIDXnR`/`LDIDXn_SR`/`STIDXnR`, MODE=11), an absolute imm32 at every width (`LDABSn`/`LDABSn_S`/`STABSn`, `MEMREADR`/`MEMSETR`, MODE=10, 2 words) for a naturally aligned constant address such as an MMIO register; 16/32-bit forms other than `MEMGET32` force-align the EA |
 | 32-bit ops | `ADDW`/`SUBW`/`ADDIW`/`MULW`, `CMPRRW`/`CMPRVW`, boolean `CMPxxRW`/`CMPxxVW` (ISA v3 D2/D3) |
 | Immediates | each class 2/3 op exists with a sign- and a zero-extended imm32 (SGN bit); isel picks the one that holds the constant: `SETR`/`SETRU` (MOV), `ADDI`/`ADDV`/`MINUSV`, `ANDI`/`ANDV` (and OR/XOR), `CMPRV`/`CMPRVU`; boolean compares (`setcc` as a value) `CMPxxV` with a simm32; `SETR64` only for a value neither reaches.  An add of -255..-129 (a frame address too) is `MINUSV` of the negation, whose short form reaches it |
 | Multiply by a constant | `MULV` (simm32; EX-serialised, `WriteMul`); a constant 2^N+1, 2^N-1 or 1-2^N that is not a simm32 becomes `SHLV` + `ADDR`/`SUBR` (`decomposeMulByConstant`); for a simm32 one only with `-klausscpu-mul-imm-shift-add` (one more instruction than `MULV`, fewer cycles) |
@@ -301,6 +301,17 @@ when clobbered.
   block in front of its compare, where they fill bubbles; the dispatch block
   is left with the dependent `LDIDX32R` + `JMPR` (`jump-table-hoist.ll`,
   `.mir`).  It runs after MachineSink, which would sink them back.
+- In the machine SSA optimisations, before MachineLICM (`addILPOpts`, -O1
+  and up): `KlaussCPUConstAddrBase` gives three or more absolute accesses
+  within short-form reach of one of them (simm8 scaled by the access size)
+  one base register (`SETRU`/`SETR`) at their nearest common dominator and
+  makes them 1-word `LDIDXn`/`STIDXn` base + offset accesses, e.g. a
+  driver's accesses to one device's registers; one or two accesses stay
+  absolute.  The base is never live across a call: a group with a call in
+  the way is split (the accesses behind the dominator's last call, the runs
+  between calls, the dominator-tree subtrees), and none is set in a loop
+  that holds a call, out of which MachineLICM would take it
+  (`const-addr-base.ll`).
 - Before instruction selection (-O1 and up): GlobalMerge merges the internal
   (static) globals of a module, up to 1016 bytes (the reach of a 64-bit
   short-form access), so neighbouring statics share one `LEAPC`/`SETRU`
@@ -328,8 +339,9 @@ when clobbered.
   turns both off (generic register-first order) for A/B.
   `isLegalAddressingMode` (in `KlaussCPUISelLowering.cpp`) is exactly what
   isel selects: r + simm32,
-  r + r (no displacement, accesses up to 8 bytes), no scaled index, no
-  absolute address; `isLegalAddImmediate` / `isLegalICmpImmediate` are the
+  r + r (no displacement, accesses up to 8 bytes), a naturally aligned
+  constant address that SETR or SETRU reaches, no scaled index, no symbol
+  address; `isLegalAddImmediate` / `isLegalICmpImmediate` are the
   imm32 forms (ADDI/ADDV/MINUSV, branch compares CMPRV/CMPRVU; a value setcc
   above INT32_MAX still needs SETRU + CMPxxR).  So array loops share one
   byte-offset IV across their r + r accesses.
@@ -368,6 +380,7 @@ when clobbered.
 | `-klausscpu-min-jump-table-entries` | 12 | jump tables from N cases (0 = none) |
 | `-klausscpu-jump-table-density` | 40 | minimum % of a jump table's entries that are cases |
 | `-klausscpu-hoist-jt-addr` | on | KlaussCPUJumpTableHoist |
+| `-klausscpu-const-addr-base` / `-klausscpu-const-addr-base-min` | on / 3 | KlaussCPUConstAddrBase; fewest absolute accesses that share a base |
 | `-klausscpu-pref-loop-align` | 16 | loop-header alignment in bytes |
 | `-klausscpu-mul-imm-shift-add` | off | multiply by a simm32 2^N±1 / 1-2^N as shift + add/sub when the schedule model rates MULV slower |
 | `-klausscpu-unroll-branch-density-gate` | on | scale the unroll budget for branchy loops |
@@ -476,12 +489,13 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPUEarlyIVInc.cpp     IR, after LSR: loop counter counts from Init - C so its increment can issue early
 ├── KlaussCPUFlagReuse.cpp      pre-emit: CMPRV Rd,0 + JMPE/NE → JMPZ/NZ (default on)
 ├── KlaussCPUJumpTableHoist.cpp pre-RA: jump-table base and entry offset into the range-check block
+├── KlaussCPUConstAddrBase.cpp  pre-RA (SSA, before MachineLICM): one base register for nearby constant-address accesses
 ├── KlaussCPUOptExtensions.cpp  pre-RA (SSA): redundant sign/zero extensions
 ├── KlaussCPUFuseCmpBr.cpp      pre-emit: compare + branch → ISA v3 FBR (default on); pre-sched2 instance: loop constants
 ├── KlaussCPUCalleeSavedCFI.cpp pre-emit: a callee-saved register's .cfi_offset behind its scheduled spill
 ├── KlaussCPUTargetTransformInfo.h/.cpp  TTI — M8 unroll budget gated on branch density, no peel; LSR cost order, register count
 ├── KlaussCPUSubtarget.h/.cpp   single subtarget; member init order is critical
-├── KlaussCPUTargetMachine.h/.cpp CodeGenTargetMachineImpl; pass config (AtomicExpand, EarlyIVInc, isel, pre-RA, pre-sched2 and pre-emit passes); pre-RA scheduler compare/branch pairing
+├── KlaussCPUTargetMachine.h/.cpp CodeGenTargetMachineImpl; pass config (AtomicExpand, EarlyIVInc, isel, ILP-opts, pre-RA, pre-sched2 and pre-emit passes); pre-RA scheduler compare/branch pairing
 ├── AsmParser/
 │   └── KlaussCPUAsmParser.cpp  -gen-asm-matcher driver; registers vs symbols, PC-relative targets
 ├── Disassembler/
