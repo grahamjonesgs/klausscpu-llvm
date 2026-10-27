@@ -217,6 +217,156 @@ b:
   ret void
 }
 
+; A loop that holds a call, with a run of three accesses behind it: no
+; base, since MachineLICM would take one set behind the call out of the loop
+; and it would live across the call in a callee-saved register, which costs
+; about as much as it saves.
+define void @loop_call_run(i32 %n) nounwind {
+; CHECK-LABEL: loop_call_run:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    enter 5
+; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
+; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
+; CHECK-NEXT:    copy r4, r0
+; CHECK-NEXT:    setr r5, 0
+; CHECK-NEXT:    .p2align 4
+; CHECK-NEXT:  .LBB5_1: # %loop
+; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
+; CHECK-NEXT:    callrel f
+; CHECK-NEXT:    stabs32 r5, 4026531840
+; CHECK-NEXT:    incr r5, r5
+; CHECK-NEXT:    ldabs32 r12, 4026531848
+; CHECK-NEXT:    cmprrw r4, r5
+; CHECK-NEXT:    stabs32 r12, 4026531856
+; CHECK-NEXT:    jmpnerel .LBB5_1
+; CHECK-NEXT:  # %bb.2: # %exit
+; CHECK-NEXT:    ldidx64 r5, r15, -16 # 8-byte Folded Reload
+; CHECK-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
+; CHECK-NEXT:    leaveret
+;
+; OFF-LABEL: loop_call_run:
+; OFF:       # %bb.0: # %entry
+; OFF-NEXT:    enter 5
+; OFF-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
+; OFF-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
+; OFF-NEXT:    copy r4, r0
+; OFF-NEXT:    setr r5, 0
+; OFF-NEXT:    .p2align 4
+; OFF-NEXT:  .LBB5_1: # %loop
+; OFF-NEXT:    # =>This Inner Loop Header: Depth=1
+; OFF-NEXT:    callrel f
+; OFF-NEXT:    stabs32 r5, 4026531840
+; OFF-NEXT:    incr r5, r5
+; OFF-NEXT:    ldabs32 r12, 4026531848
+; OFF-NEXT:    cmprrw r4, r5
+; OFF-NEXT:    stabs32 r12, 4026531856
+; OFF-NEXT:    jmpnerel .LBB5_1
+; OFF-NEXT:  # %bb.2: # %exit
+; OFF-NEXT:    ldidx64 r5, r15, -16 # 8-byte Folded Reload
+; OFF-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
+; OFF-NEXT:    leaveret
+entry:
+  br label %loop
+loop:
+  %i = phi i32 [ 0, %entry ], [ %i.next, %loop ]
+  call void @f()
+  store volatile i32 %i, ptr inttoptr (i64 4026531840 to ptr)
+  %a = load volatile i32, ptr inttoptr (i64 4026531848 to ptr)
+  store volatile i32 %a, ptr inttoptr (i64 4026531856 to ptr)
+  %i.next = add i32 %i, 1
+  %c = icmp ne i32 %i.next, %n
+  br i1 %c, label %loop, label %exit
+exit:
+  ret void
+}
+
+; Six accesses in a loop that holds calls (-klausscpu-const-addr-base-loop-
+; call-min), here two runs of three between the calls: one base, set in the
+; preheader, lives across the calls.  The three accesses behind the loop
+; get a base of their own.
+define void @loop_with_calls(i32 %n) nounwind {
+; CHECK-LABEL: loop_with_calls:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    enter 6
+; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
+; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
+; CHECK-NEXT:    stidx64 r6, r15, -24 # 8-byte Folded Spill
+; CHECK-NEXT:    copy r4, r0
+; CHECK-NEXT:    setr r6, 0
+; CHECK-NEXT:    setru r5, 4026531840
+; CHECK-NEXT:    .p2align 4
+; CHECK-NEXT:  .LBB6_1: # %loop
+; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
+; CHECK-NEXT:    callrel f
+; CHECK-NEXT:    stidx32 r6, r5, 0
+; CHECK-NEXT:    ldidx32 r12, r5, 8
+; CHECK-NEXT:    stidx32 r12, r5, 16
+; CHECK-NEXT:    callrel f
+; CHECK-NEXT:    stidx32 r6, r5, 0
+; CHECK-NEXT:    incr r6, r6
+; CHECK-NEXT:    ldidx32 r12, r5, 8
+; CHECK-NEXT:    cmprrw r4, r6
+; CHECK-NEXT:    stidx32 r12, r5, 16
+; CHECK-NEXT:    jmpnerel .LBB6_1
+; CHECK-NEXT:  # %bb.2: # %exit
+; CHECK-NEXT:    stidx32 r4, r5, 0
+; CHECK-NEXT:    ldidx32 r12, r5, 8
+; CHECK-NEXT:    stidx32 r12, r5, 16
+; CHECK-NEXT:    ldidx64 r6, r15, -24 # 8-byte Folded Reload
+; CHECK-NEXT:    ldidx64 r5, r15, -16 # 8-byte Folded Reload
+; CHECK-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
+; CHECK-NEXT:    leaveret
+;
+; OFF-LABEL: loop_with_calls:
+; OFF:       # %bb.0: # %entry
+; OFF-NEXT:    enter 5
+; OFF-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
+; OFF-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
+; OFF-NEXT:    copy r4, r0
+; OFF-NEXT:    setr r5, 0
+; OFF-NEXT:    .p2align 4
+; OFF-NEXT:  .LBB6_1: # %loop
+; OFF-NEXT:    # =>This Inner Loop Header: Depth=1
+; OFF-NEXT:    callrel f
+; OFF-NEXT:    stabs32 r5, 4026531840
+; OFF-NEXT:    ldabs32 r12, 4026531848
+; OFF-NEXT:    stabs32 r12, 4026531856
+; OFF-NEXT:    callrel f
+; OFF-NEXT:    stabs32 r5, 4026531840
+; OFF-NEXT:    incr r5, r5
+; OFF-NEXT:    ldabs32 r12, 4026531848
+; OFF-NEXT:    cmprrw r4, r5
+; OFF-NEXT:    stabs32 r12, 4026531856
+; OFF-NEXT:    jmpnerel .LBB6_1
+; OFF-NEXT:  # %bb.2: # %exit
+; OFF-NEXT:    stabs32 r4, 4026531840
+; OFF-NEXT:    ldabs32 r12, 4026531848
+; OFF-NEXT:    stabs32 r12, 4026531856
+; OFF-NEXT:    ldidx64 r5, r15, -16 # 8-byte Folded Reload
+; OFF-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
+; OFF-NEXT:    leaveret
+entry:
+  br label %loop
+loop:
+  %i = phi i32 [ 0, %entry ], [ %i.next, %loop ]
+  call void @f()
+  store volatile i32 %i, ptr inttoptr (i64 4026531840 to ptr)
+  %a = load volatile i32, ptr inttoptr (i64 4026531848 to ptr)
+  store volatile i32 %a, ptr inttoptr (i64 4026531856 to ptr)
+  call void @f()
+  store volatile i32 %i, ptr inttoptr (i64 4026531840 to ptr)
+  %b = load volatile i32, ptr inttoptr (i64 4026531848 to ptr)
+  store volatile i32 %b, ptr inttoptr (i64 4026531856 to ptr)
+  %i.next = add i32 %i, 1
+  %c = icmp ne i32 %i.next, %n
+  br i1 %c, label %loop, label %exit
+exit:
+  store volatile i32 %n, ptr inttoptr (i64 4026531840 to ptr)
+  %d = load volatile i32, ptr inttoptr (i64 4026531848 to ptr)
+  store volatile i32 %d, ptr inttoptr (i64 4026531856 to ptr)
+  ret void
+}
+
 ; Two devices 64 KiB apart, beyond short-form reach of each other: one base
 ; for the three SD accesses, the two UART ones stay absolute.
 define void @two_devices(i32 %v) nounwind {

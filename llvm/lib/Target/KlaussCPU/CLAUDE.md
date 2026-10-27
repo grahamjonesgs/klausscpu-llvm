@@ -307,11 +307,18 @@ when clobbered.
   one base register (`SETRU`/`SETR`) at their nearest common dominator and
   makes them 1-word `LDIDXn`/`STIDXn` base + offset accesses, e.g. a
   driver's accesses to one device's registers; one or two accesses stay
-  absolute.  The base is never live across a call: a group with a call in
-  the way is split (the accesses behind the dominator's last call, the runs
-  between calls, the dominator-tree subtrees), and none is set in a loop
-  that holds a call, out of which MachineLICM would take it
-  (`const-addr-base.ll`).
+  absolute.  Outside loops the base is not live across a call: a group with
+  a call in the way is split (the accesses behind the dominator's last
+  call, the runs between calls, the dominator-tree subtrees).  In a loop
+  nest that holds a call, MachineLICM would take any base out of the loop,
+  so the pass sets one in the preheader, live across the calls (a
+  callee-saved register, or rematerialised), only for at least
+  `-klausscpu-const-addr-base-loop-call-min` (6) accesses in the nest;
+  fewer stay absolute (`const-addr-base.ll`).  The trade is size for
+  instructions: outside a loop a group costs one more instruction (the
+  SETRU) and saves N-2 words.  Over the bare-metal corpus the pass saves
+  0.4-0.5% of `.text` at -O1/-O2, with no measurable change in the
+  emulator's instruction count.
 - Before instruction selection (-O1 and up): GlobalMerge merges the internal
   (static) globals of a module, up to 1016 bytes (the reach of a 64-bit
   short-form access), so neighbouring statics share one `LEAPC`/`SETRU`
@@ -381,6 +388,7 @@ when clobbered.
 | `-klausscpu-jump-table-density` | 40 | minimum % of a jump table's entries that are cases |
 | `-klausscpu-hoist-jt-addr` | on | KlaussCPUJumpTableHoist |
 | `-klausscpu-const-addr-base` / `-klausscpu-const-addr-base-min` | on / 3 | KlaussCPUConstAddrBase; fewest absolute accesses that share a base |
+| `-klausscpu-const-addr-base-loop-call-min` | 6 | fewest absolute accesses in a loop nest that holds a call that share a base set in its preheader |
 | `-klausscpu-pref-loop-align` | 16 | loop-header alignment in bytes |
 | `-klausscpu-mul-imm-shift-add` | off | multiply by a simm32 2^N±1 / 1-2^N as shift + add/sub when the schedule model rates MULV slower |
 | `-klausscpu-unroll-branch-density-gate` | on | scale the unroll budget for branchy loops |

@@ -30,7 +30,12 @@
 // otherwise the accesses in the dominator itself form the runs between its
 // calls, and the others are tried again by the dominator's child (in the
 // dominator tree) whose subtree holds them.  Every part needs the minimum
-// count again.
+// count again.  In a loop nest that holds a call, MachineLICM would take
+// any base out of the loop, so it would live across the call anyway: there
+// the accesses share one base set in front of the loop only when the nest
+// holds at least -klausscpu-const-addr-base-loop-call-min of them (6: the
+// base's SETRU and a callee-saved register's spill and reload are about 4
+// words), and otherwise stay absolute.
 //
 // Runs on SSA machine code from -O1 up, before MachineLICM (addILPOpts),
 // only with the short forms (otherwise nothing gets smaller).
@@ -78,6 +83,11 @@ static cl::opt<unsigned> ConstAddrBaseMin(
     "klausscpu-const-addr-base-min", cl::Hidden, cl::init(3),
     cl::desc("Fewest constant-address accesses that share a base register"));
 
+static cl::opt<unsigned> ConstAddrBaseLoopCallMin(
+    "klausscpu-const-addr-base-loop-call-min", cl::Hidden, cl::init(6),
+    cl::desc("Fewest constant-address accesses in a loop nest that holds a "
+             "call that share a base register set in front of the loop"));
+
 namespace {
 
 struct Access {
@@ -118,6 +128,7 @@ private:
   MachineDominatorTree *MDT = nullptr;
   MachineLoopInfo *MLI = nullptr;
 
+  MachineLoop *getLoopWithCall(MachineBasicBlock *MBB) const;
   bool reachesWithoutCall(MachineBasicBlock *Dom,
                           MachineBasicBlock::iterator IP,
                           ArrayRef<const Access *> Group) const;
@@ -171,19 +182,32 @@ getInsertPoint(MachineBasicBlock &MBB, ArrayRef<const Access *> Group) {
   return MBB.getFirstTerminator();
 }
 
+// The outermost loop around MBB if that loop nest holds a call, or null.
+// MachineLICM takes a base set anywhere in such a nest out of it (SETR /
+// SETRU depend on nothing), and the base then lives across the call.
+MachineLoop *
+KlaussCPUConstAddrBase::getLoopWithCall(MachineBasicBlock *MBB) const {
+  MachineLoop *L = MLI->getLoopFor(MBB);
+  if (!L)
+    return nullptr;
+  L = L->getOutermostLoop();
+  for (MachineBasicBlock *LoopMBB : L->blocks())
+    for (const MachineInstr &MI : *LoopMBB)
+      if (MI.isCall())
+        return L;
+  return nullptr;
+}
+
 // Whether no call lies between IP in Dom, which dominates every access of
 // Group, and any of the accesses: none in Dom after IP, nor in a block on a
 // path from Dom to an access.  (A call in Dom before IP does not count:
 // every path through it to an access passes IP, which sets the base anew.)
-// Nor in a loop around Dom, out of which MachineLICM would take the base.
+// Nor in a loop around Dom (getLoopWithCall).
 bool KlaussCPUConstAddrBase::reachesWithoutCall(
     MachineBasicBlock *Dom, MachineBasicBlock::iterator IP,
     ArrayRef<const Access *> Group) const {
-  if (MachineLoop *L = MLI->getLoopFor(Dom))
-    for (MachineBasicBlock *MBB : L->getOutermostLoop()->blocks())
-      for (const MachineInstr &MI : *MBB)
-        if (MI.isCall())
-          return false;
+  if (getLoopWithCall(Dom))
+    return false;
   SmallPtrSet<MachineBasicBlock *, 16> Region;
   SmallVector<MachineBasicBlock *, 16> Worklist;
   for (const Access *A : Group)
@@ -220,10 +244,31 @@ bool KlaussCPUConstAddrBase::place(ArrayRef<const Access *> Group,
     return true;
   }
 
+  // In a loop nest that holds a call, the base goes in front of the loop
+  // (where MachineLICM would take it anyway) and lives across the calls, in
+  // a callee-saved register or set again behind them by the register
+  // allocator (SETR / SETRU are rematerialisable).  That only pays for
+  // enough accesses in the nest; the others are tried again on their own.
+  if (MachineLoop *L = getLoopWithCall(Dom)) {
+    SmallVector<const Access *, 16> InLoop, Outside;
+    for (const Access *A : Group)
+      (L->contains(A->MI->getParent()) ? InLoop : Outside).push_back(A);
+    MachineBasicBlock *Preheader = L->getLoopPreheader();
+    if (Preheader && InLoop.size() >= ConstAddrBaseLoopCallMin) {
+      rebase(InLoop, Base, *Preheader, Preheader->getFirstTerminator());
+      place(Outside, Base);
+      return true;
+    }
+  }
+
   // The accesses in Dom, by the number of calls in front of them, as runs
-  // with no call in between.
+  // with no call in between.  None in a loop that holds a call (fewer than
+  // the minimum above), since a base set between its calls would be taken
+  // out of the loop too.
   bool Changed = false;
   auto PlaceRuns = [&](ArrayRef<const Access *> InDom) {
+    if (getLoopWithCall(Dom))
+      return;
     std::map<unsigned, SmallVector<const Access *, 8>> Runs;
     for (const Access *A : InDom)
       Runs[A->CallsBefore].push_back(A);
