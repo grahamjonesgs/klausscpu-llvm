@@ -271,7 +271,9 @@ when clobbered.
   renames registers to break anti-dependencies on the critical path
   (`getAntiDepBreakMode`, `ANTIDEP_CRITICAL`).  An inline memcpy is
   lowered as groups of four loads then four stores
-  (`MaxGluedStoresPerMemcpy`), so no store directly follows its load.  `-mcpu=no-sched` is the A/B baseline without either scheduler.
+  (`MaxGluedStoresPerMemcpy`), so no store directly follows its load.
+  `-mcpu=no-sched` is the A/B baseline without either scheduler (and
+  without `KlaussCPUEarlyIVInc` or the TTI unrolling, which serve them).
 - Before the post-RA scheduler: FuseCmpBr's loop constants; pre-emit passes:
   FlagReuse, then FuseCmpBr (see Flags).
 - TTI (`KlaussCPUTargetTransformInfo.cpp`): moderate partial/runtime
@@ -297,7 +299,10 @@ when clobbered.
   Only with constant Init and N (the new constants still 32-bit, still
   simm4 for FBR_RI if N was), no other use of `%i.next`, and every other
   in-loop use of the counter waiting at least as long for another operand
-  (so not a load index or GEP).
+  (so not a load index or GEP).  Not for `-mcpu=no-sched`.  The counter
+  keeps its debug location: its dbg_values move to the new add, with a
+  copy as the new PHI + C at the top of the loop, and the old increment's
+  become the new add + C (`DebugInfo/KlaussCPU/early-iv-inc.ll`).
 
 ### Hidden options (`-mllvm`)
 

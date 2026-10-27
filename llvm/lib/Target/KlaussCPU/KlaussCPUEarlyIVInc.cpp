@@ -29,13 +29,20 @@
 // is ready no earlier than the increment's result (so waiting for %i costs
 // nothing).  A load address or a GEP of %i fails that test.
 //
-// Runs after loop strength reduction (addIRPasses), from -O1 up;
-// -mllvm -klausscpu-early-iv-inc=false disables it.
+// Runs after loop strength reduction (addIRPasses), from -O1 up, for a CPU
+// with a scheduling model (not -mcpu=no-sched, the A/B baseline without the
+// schedulers this pass exists for); -mllvm -klausscpu-early-iv-inc=false
+// disables it.  The counter keeps its debug location: %i's debug values move
+// to the new add, with a copy as %i.prev + C ahead of it at the top of the
+// block, and %i.next's become the new add + C.
 //
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/LoopInfo.h"
+#include "llvm/CodeGen/TargetPassConfig.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
@@ -45,6 +52,8 @@
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/Transforms/Utils/Local.h"
 
 #define DEBUG_TYPE "klausscpu-iv-inc"
 #define PASS_NAME "KlaussCPU early loop counter increment"
@@ -99,6 +108,7 @@ public:
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesCFG();
     AU.addRequired<LoopInfoWrapperPass>();
+    AU.addRequired<TargetPassConfig>();
     AU.addPreserved<LoopInfoWrapperPass>();
     AU.addPreserved<DominatorTreeWrapperPass>();
   }
@@ -113,6 +123,7 @@ char KlaussCPUEarlyIVInc::ID = 0;
 
 INITIALIZE_PASS_BEGIN(KlaussCPUEarlyIVInc, DEBUG_TYPE, PASS_NAME, false, false)
 INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(TargetPassConfig)
 INITIALIZE_PASS_END(KlaussCPUEarlyIVInc, DEBUG_TYPE, PASS_NAME, false, false)
 
 bool KlaussCPUEarlyIVInc::rewriteLoop(Loop &L) {
@@ -212,17 +223,42 @@ bool KlaussCPUEarlyIVInc::rewriteLoop(Loop &L) {
   Cmp->setOperand(IncOp, NewInc);
   Cmp->setOperand(1 - IncOp, ConstantInt::get(Ty, NewN));
 
-  // %i's value is the new add's: replace it everywhere but the old increment,
-  // then drop the old PHI and increment, which now only feed each other.
-  IV->replaceUsesWithIf(NewInc, [&](Use &U) { return U.getUser() != Inc; });
-  Inc->replaceAllUsesWith(PoisonValue::get(Ty));
-  Inc->eraseFromParent();
+  // Until the new add, %i is %i.prev + C: repeat %i's debug values at the
+  // top of the block (where the old PHI's stood) in that form, so the
+  // variable has a location before the schedulers' choice of slot for the
+  // add, too.
+  if (C->getSignificantBits() <= 64) {
+    SmallVector<DbgVariableRecord *> DVRs;
+    findDbgValues(IV, DVRs);
+    for (DbgVariableRecord *DVR : DVRs) {
+      if (DVR->hasArgList() ||
+          DVR->getMarker()->MarkedInstr != NewInc->getNextNode())
+        continue;
+      DbgVariableRecord *Copy = DVR->clone();
+      Copy->replaceVariableLocationOp(IV, Prev);
+      Copy->setExpression(DIExpression::prepend(
+          Copy->getExpression(), DIExpression::StackValue, C->getSExtValue()));
+      BB->insertDbgRecordBefore(Copy, NewInc->getIterator());
+    }
+  }
+
+  // %i's value is the new add's: replace it everywhere, debug values
+  // included (the old increment now reads the new add and computes the next
+  // iteration's value).  The old increment's debug values become the new
+  // add + C; then drop the old PHI and increment, which only feed each other.
+  IV->replaceAllUsesWith(NewInc);
+  salvageDebugInfo(*Inc);
   IV->eraseFromParent();
+  Inc->eraseFromParent();
   return true;
 }
 
 bool KlaussCPUEarlyIVInc::runOnFunction(Function &F) {
   if (!EnableEarlyIVInc || skipFunction(F))
+    return false;
+  const TargetMachine &TM =
+      getAnalysis<TargetPassConfig>().getTM<TargetMachine>();
+  if (!TM.getSubtargetImpl(F)->getSchedModel().hasInstrSchedModel())
     return false;
   LoopInfo &LI = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
   bool Changed = false;
