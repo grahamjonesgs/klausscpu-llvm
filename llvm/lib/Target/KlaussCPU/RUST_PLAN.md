@@ -368,6 +368,11 @@ Direct Rust port of `mmio.h` (MMIO bus at `0xF000_0000`, device id in
 
 ### 5.3 The UART/builtin shim (bare metal only)
 
+> **Superseded:** the UART is memory-mapped and the UART / LED / 7-segment
+> opcodes and `__builtin_klausscpu_*` builtins no longer exist; plain
+> volatile MMIO (5.2) covers all of them.  The text below is the original
+> plan.
+
 `TXR/TXCHARMEMR/TXSTRMEMR/RXRB/DELAYV/LEDR/SEG7R` are *opcodes*, reachable
 from C via `__builtin_klausscpu_*`. Rust cannot call clang builtins and the
 target has no `asm!` yet, so:

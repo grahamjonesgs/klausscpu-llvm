@@ -1,6 +1,8 @@
 # Flag-model unification — cross-repo change spec (LLVM / assembler / emulator / runtime)
 
 **Status:** RTL side DONE on branch `feat/core-pipeline` (commit `fbb77d7`).
+LLVM side DONE (backend `HISTORY.md` step 36: flag reuse default-on, branch
+mapping pinned by `cmp-branch.ll`); the §2.3 ADC/SBC isel patterns are not.
 **Owner of this doc:** CPU/RTL. **Action owner for everything below:** toolchain
 (LLVM fork + `klausscc` emulator + assembler) — the user. This is the "document
 the LLVM/assembler changes, I'll handle them separately" deliverable.

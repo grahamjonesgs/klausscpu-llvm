@@ -431,7 +431,7 @@ class R_inplace<bits<32> word0, string asmstr, list<dag> pat = []>
 }
 
 // Unary 3-operand form: rd = f(rs1).  ISA v2 encodes rd and rs1 separately
-// ("rd≠rs1 also works, same hardware path" — ISA_ENCODING_V2.md §4), so
+// ("rd≠rs1 also works, same hardware path" — ISA_ENCODING_V2_MAP.md §4), so
 // these are NOT tied; the register allocator only picks rd==rs1 when the
 // source is dead.  The old 1-operand spelling (`incr r1`) stays accepted via
 // InstAlias (see the end of this file).

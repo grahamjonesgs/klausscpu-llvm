@@ -8,6 +8,11 @@ backend) and `KlaussCPU/POST_P41_BASELINE.md` (the numbers below).
 
 ## STATUS — implemented 2026-07-03 (this tree, built + llc-verified)
 
+> **Since superseded** (see `CLAUDE.md`): A3a flag reuse is default-ON since
+> the flag unification (one Z/S/C/V set), and the TTI does moderate
+> partial/runtime unrolling under the M8 scheduling model.  The A3a/A4
+> entries below describe the 2026-07-03 state.
+
 - **A4 (TTI): DONE, default-on.** `KlaussCPUTargetTransformInfo.{h,cpp}` added
   and registered via `TargetMachine::getTargetTransformInfo`. Disables
   partial/runtime unrolling + unroll-and-jam + loop peeling (keeps full-unroll

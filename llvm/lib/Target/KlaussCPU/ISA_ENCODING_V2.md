@@ -1,5 +1,14 @@
 # ISA Encoding v2 — Opcode Number Map (flag-day renumbering)
 
+> **Historical snapshot — not authoritative.**  This is a copy of the v2
+> checkpoint map from when the backend was moved to v2.  The ISA is now
+> defined by the hardware repo's `klaussCPU/ISA_ENCODING_V2_MAP.md` (plus
+> `ISA_V3_IMPL.md`), which also has the ISA v3 additions this copy lacks:
+> short 1-word forms, the fused compare-and-branch (class 0xD, listed as
+> illegal below), ENTER/LEAVE/LEAVERET and the 32-bit W ops.  The backend's
+> encodings are the `Inst` fields of `KlaussCPUInstrInfo.td`, checked against
+> that map by `llvm/test/MC/KlaussCPU/encoding-coverage.s`.
+
 Companion to `ISA_ENCODING_PLAN`. This is the **authoritative symbol → number
 map** for the v2 re-encode, used by the CPU RTL (branch `isa-encoding-v2`),
 LLVM, the assembler and any other tool. The CPU implements exactly the

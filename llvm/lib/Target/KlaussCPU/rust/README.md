@@ -5,7 +5,7 @@ directory:
 
 | Path | What it is |
 |---|---|
-| `klausscpu-unknown-none-elf.json` | rustc target spec (data layout must byte-match `KlaussCPUTargetMachine.cpp`) |
+| `klausscpu-unknown-none-elf.json` | rustc target spec (data layout must byte-match `llvm/lib/TargetParser/TargetDataLayout.cpp`) |
 | `rustc-patches/0001-*.patch`, `0002-*.patch` | the complete rustc fork delta (callconv module, `rustc_llvm` wiring, llvm-wrapper guard fixes) |
 | `rustc-patches/bootstrap.toml` | rustc bootstrap config template (edit the `llvm-config` path) |
 | `hello-smoke/` | bare-metal MMIO smoke test (M1 artifact; no C runtime at all) |
