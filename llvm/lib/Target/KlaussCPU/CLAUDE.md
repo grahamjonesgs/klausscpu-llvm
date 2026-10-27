@@ -206,17 +206,18 @@ when clobbered.
 - Instruction selection is the generated `SelectCode` from the `.td`
   patterns; `KlaussCPUISelDAGToDAG.cpp` keeps only BR_CC / `SELECT_CC`
   (glued compare, 32-bit W-compare choice).  A frame index, or a frame index
-  plus a constant below 2^29 (`add` or disjoint `or`), is the `AddrFI` /
-  `AddrFIMem` ComplexPattern `(TargetFrameIndex, offset)`: one
+  plus a constant in [-2^29, 2^29) (`add` or disjoint `or`), is the
+  `AddrFI` / `AddrFIMem` ComplexPattern `(TargetFrameIndex, offset)`: one
   `ADDI rd, FI, offset` as a value, or the base and offset of an
   `LDIDXn`/`STIDXn` frame access.  The constant is folded when the access is
   likely to stay in 1-word short-form reach of R15 (estimated from the locals
-  laid out before the slot) or the slot has at most two accesses in the
-  block; otherwise the slot address is computed once and the accesses use
-  small offsets from it (`selectFrameAddr`).  `eliminateFrameIndex` adds the
-  slot offset to the folded offset; a frame index anywhere else (or a sum
-  that overflows simm32) gets the slot address in a scavenged register
-  (`ADDI`, which clobbers FLAGS).
+  laid out before the slot, as running sums computed once per function) or
+  the slot has at most two accesses in the block; otherwise the slot address
+  is computed once and the accesses use small offsets from it
+  (`selectFrameAddr`).  `eliminateFrameIndex` adds the slot offset to the
+  folded offset; a frame index anywhere else (or a sum that overflows
+  simm32) gets the slot address in a scavenged register (`ADDI`, which
+  clobbers FLAGS).
 - Scheduling: the M8 model (`KlaussCPUSchedule.td`, CPU `generic`, the
   default) drives the machine scheduler and the post-RA scheduler, which runs
   from **-O1** up (`getOptLevelToEnablePostRAScheduler`).  `-mcpu=no-sched`

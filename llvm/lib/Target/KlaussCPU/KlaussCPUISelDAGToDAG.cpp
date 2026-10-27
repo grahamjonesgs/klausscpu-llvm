@@ -161,6 +161,11 @@ public:
   explicit KlaussCPUDAGToDAGISel(KlaussCPUTargetMachine &TM)
       : SelectionDAGISel(TM) {}
 
+  bool runOnMachineFunction(MachineFunction &MF) override {
+    LocalDist.clear();
+    return SelectionDAGISel::runOnMachineFunction(MF);
+  }
+
   void Select(SDNode *N) override;
 
   bool SelectAddrFI(SDValue Addr, SDValue &Base, SDValue &Offset) {
@@ -173,7 +178,7 @@ public:
   }
   bool selectFrameAddr(SDValue Addr, unsigned Scale, SDValue &Base,
                        SDValue &Offset);
-  bool frameOffsetFitsShortForm(int FI, int64_t C, unsigned Scale) const;
+  bool frameOffsetFitsShortForm(int FI, int64_t C, unsigned Scale);
 
   bool SelectInlineAsmMemoryOperand(const SDValue &Op,
                                     InlineAsm::ConstraintCode ConstraintID,
@@ -181,6 +186,11 @@ public:
 
   // Auto-generated tablegen instruction selection tables.
 #include "KlaussCPUGenDAGISel.inc"
+
+private:
+  // frameOffsetFitsShortForm: LocalDist[I] bounds how far below the frame
+  // register local I can start.  Filled lazily, once per function.
+  SmallVector<int64_t, 0> LocalDist;
 };
 
 class KlaussCPUDAGToDAGISelLegacy : public SelectionDAGISelLegacy {
@@ -322,9 +332,9 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
 }
 
 // A constant is folded onto a frame index only while slot offset + constant
-// is sure to fit in simm32: |constant| < 512 MiB, four times the address
-// space, so only a frame over 1.5 GiB could overflow (eliminateFrameIndex
-// copes with that too, except at an inline asm).
+// is sure to fit in simm32: -512 MiB <= constant < 512 MiB, four times the
+// address space, so only a frame over 1.5 GiB could overflow
+// (eliminateFrameIndex copes with that too, except at an inline asm).
 static bool isFrameIndexOffset(int64_t C) { return isInt<30>(C); }
 
 // Would frame object FI + C be in reach of the 1-word short form (a signed
@@ -334,9 +344,11 @@ static bool isFrameIndexOffset(int64_t C) { return isInt<30>(C); }
 // nearest the frame register, then the locals in index order and the spill
 // slots, which are created later, below them: the local is no further away
 // than the callee-saved area plus the size of every local up to and
-// including it.  This is only a size estimate; any offset is correct.
+// including it.  These running sums are computed once per function (an
+// object created or realigned later in isel is seen as it was then); this is
+// only a size estimate, and any offset is correct.
 bool KlaussCPUDAGToDAGISel::frameOffsetFitsShortForm(int FI, int64_t C,
-                                                     unsigned Scale) const {
+                                                     unsigned Scale) {
   const MachineFrameInfo &MFI = MF->getFrameInfo();
   int64_t Lo = -128 * int64_t(Scale), Hi = 127 * int64_t(Scale);
   if (MFI.isFixedObjectIndex(FI)) {
@@ -344,11 +356,14 @@ bool KlaussCPUDAGToDAGISel::frameOffsetFitsShortForm(int FI, int64_t C,
     int64_t Off = MFI.getObjectOffset(FI) + 8 + C;
     return Off >= Lo && Off <= Hi;
   }
-  int64_t Dist = 4 * 8;
-  for (int I = 0; I <= FI; ++I)
+  for (int I = LocalDist.size(); I <= FI; ++I) {
+    int64_t Dist = LocalDist.empty() ? 4 * 8 : LocalDist.back();
     if (!MFI.isDeadObjectIndex(I) && !MFI.isVariableSizedObjectIndex(I))
       Dist += MFI.getObjectSize(I) + MFI.getObjectAlign(I).value() - 1;
+    LocalDist.push_back(Dist);
+  }
   // The slot starts somewhere in [R15 - Dist, R15 - 1].
+  int64_t Dist = LocalDist[FI];
   return C - Dist >= Lo && C - 1 <= Hi;
 }
 
@@ -382,9 +397,9 @@ bool KlaussCPUDAGToDAGISel::selectFrameAddr(SDValue Addr, unsigned Scale,
                            U->getOperand(0).getNode() == FIN &&
                            CurDAG->isBaseWithConstantOffset(UV);
         Accesses += FIPlusConst ? U->use_size() : 1;
+        if (Accesses > 2)
+          return false;
       }
-      if (Accesses > 2)
-        return false;
     }
     Addr = Addr.getOperand(0);
   }

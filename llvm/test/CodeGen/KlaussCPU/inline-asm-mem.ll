@@ -138,9 +138,9 @@ define i64 @amod_reg_clobber(ptr %p) nounwind {
   ret i64 %v
 }
 
-; A constant is folded onto a stack slot only while |constant| < 512 MiB,
-; so the folded offset cannot leave simm32.  A larger one stays in the address
-; register.  It used to fold any simm32: -2147483648 wrapped to
+; A constant is folded onto a stack slot only while -512 MiB <= constant <
+; 512 MiB, so the folded offset cannot leave simm32.  A larger one stays in
+; the address register.  It used to fold any simm32: -2147483648 wrapped to
 ; `r15, -2147483680`, which encodes as +2147483616, and with every GPR
 ; clobbered by the asm, eliminateFrameIndex could not scavenge a register for
 ; the slot address and llc aborted.

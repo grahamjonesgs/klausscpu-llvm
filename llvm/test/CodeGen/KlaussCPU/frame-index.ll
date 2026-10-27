@@ -259,6 +259,35 @@ define void @far_few(i64 %v) nounwind {
   ret void
 }
 
+; The short-form estimate is per function: after far_few, a slot behind only
+; a small local is in reach again, so all four accesses are folded.
+define void @near_after_far(i64 %v) nounwind {
+; CHECK-LABEL: near_after_far:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    enter 12
+; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
+; CHECK-NEXT:    copy r4, r0
+; CHECK-NEXT:    addi r0, r15, -40
+; CHECK-NEXT:    call use
+; CHECK-NEXT:    stidx64 r4, r15, -72
+; CHECK-NEXT:    stidx64 r4, r15, -64
+; CHECK-NEXT:    stidx64 r4, r15, -56
+; CHECK-NEXT:    stidx64 r4, r15, -48
+; CHECK-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
+; CHECK-NEXT:    leaveret
+  %pad = alloca [4 x i64]
+  %s = alloca [4 x i64]
+  call void @use(ptr %pad)
+  %p1 = getelementptr inbounds i8, ptr %s, i64 8
+  %p2 = getelementptr inbounds i8, ptr %s, i64 16
+  %p3 = getelementptr inbounds i8, ptr %s, i64 24
+  store volatile i64 %v, ptr %s
+  store volatile i64 %v, ptr %p1
+  store volatile i64 %v, ptr %p2
+  store volatile i64 %v, ptr %p3
+  ret void
+}
+
 ; A realigned frame: the slot is addressed off the base pointer R7 with the
 ; constant folded in.
 define i64 @realigned(i64 %v) nounwind {
