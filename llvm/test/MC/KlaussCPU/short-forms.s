@@ -11,10 +11,23 @@
 # RUN:   | FileCheck %s --check-prefixes=LONGIMM,LONGBR
 # RUN: llvm-mc -triple=klausscpu-unknown-elf -filetype=obj --defsym=RELAX=1 %s -o %t.o
 # RUN: llvm-objdump -dr %t.o | FileCheck %s --check-prefix=RELAX
+# RUN: llvm-mc -triple=klausscpu-unknown-elf -filetype=obj -mc-relax-all %s \
+# RUN:   -o %t.all.o
+# RUN: llvm-objdump -dr %t.all.o | FileCheck %s --check-prefix=RELAXALL
 
 # The short-forms / short-branches subtarget features gate the CompressPats
 # (KlaussCPUInstrInfo.td); -klausscpu-short-forms / -klausscpu-short-branches
 # override them, and turning the short forms off turns the branches off too.
+
+# -mc-relax-all relaxes every short branch, and only those: a short form
+# with a literal immediate has no fixup and is never relaxable.
+# RELAXALL:      0: 00 51 d0 4b setr r1, 5
+# RELAXALL-NEXT: 4: 20 81 2c 48 addv r1, r2, 200
+# RELAXALL-NEXT: 8: 20 01 28 59 ldidx16 r1, r2, -256
+# RELAXALL-NEXT: c: 00 00 08 a1 18 00 00 00 jmpzrel 0x24 <foo>
+# RELAXALL-NEXT: 14: 00 00 00 a1 10 00 00 00 jmprel 0x24 <foo>
+# RELAXALL-NEXT: 1c: 00 00 18 a0 00 00 00 00 jmpo
+# RELAXALL-NEXT: R_KLAUSSCPU_ABS32 .text+0x24
 
 .ifndef RELAX
 # SHIMM:   setr r1, 5 # encoding: [0x00,0x51,0xd0,0x4b]

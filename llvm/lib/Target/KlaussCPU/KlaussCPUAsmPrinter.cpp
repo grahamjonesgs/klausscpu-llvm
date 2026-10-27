@@ -100,6 +100,9 @@ static MCOperand lowerMachineOperand(const MachineOperand &MO,
 }
 
 void KlaussCPUAsmPrinter::emitInstruction(const MachineInstr *MI) {
+  KlaussCPU_MC::verifyInstructionPredicates(
+      MI->getOpcode(), getSubtargetInfo().getFeatureBits());
+
   MCInst Inst;
   Inst.setOpcode(MI->getOpcode());
 

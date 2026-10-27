@@ -46,4 +46,8 @@ bool uncompress(MCInst &OutInst, const MCInst &MI,
 #define GET_SUBTARGETINFO_ENUM
 #include "KlaussCPUGenSubtargetInfo.inc"
 
+// Declares KlaussCPU_MC::verifyInstructionPredicates.
+#define GET_INSTRINFO_MC_HELPER_DECLS
+#include "KlaussCPUGenInstrInfo.inc"
+
 #endif // LLVM_LIB_TARGET_KLAUSSCPU_MCTARGETDESC_KLAUSSCPUMCTARGETDESC_H

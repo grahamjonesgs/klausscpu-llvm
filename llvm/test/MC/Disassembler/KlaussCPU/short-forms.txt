@@ -1,0 +1,32 @@
+# RUN: llvm-mc -triple=klausscpu --disassemble %s | FileCheck %s
+# RUN: llvm-mc -triple=klausscpu --disassemble -mattr=-short-branches %s \
+# RUN:   2>%t.br.err | FileCheck %s --check-prefix=NOBR
+# RUN: FileCheck %s --check-prefix=ERRBR < %t.br.err
+# RUN: llvm-mc -triple=klausscpu --disassemble -mattr=-short-forms %s \
+# RUN:   2>%t.imm.err | FileCheck %s --check-prefix=NOIMM
+# RUN: FileCheck %s --check-prefix=ERRIMM < %t.imm.err
+
+# The short forms decode only with their subtarget feature (on in every CPU),
+# like RISC-V's compressed instructions; the 2-word forms always decode.
+
+# CHECK:      setr r1, 5
+# CHECK-NEXT: jmpzrel 0
+# CHECK-NEXT: jmpzrel 16
+
+# NOBR:      setr r1, 5
+# NOBR-NEXT: jmpzrel 16
+# ERRBR:     warning: invalid instruction encoding
+# ERRBR-NEXT: 0x00 0x00 0x08 0x61
+# ERRBR-NOT: warning
+
+# NOIMM:      jmpzrel 16
+# NOIMM-NOT:  {{.}}
+# ERRIMM:      warning: invalid instruction encoding
+# ERRIMM-NEXT: 0x00 0x51 0xd0 0x4b
+# ERRIMM:      warning: invalid instruction encoding
+# ERRIMM-NEXT: 0x00 0x00 0x08 0x61
+# ERRIMM-NOT:  warning
+
+0x00 0x51 0xd0 0x4b
+0x00 0x00 0x08 0x61
+0x00 0x00 0x08 0xa1 0x10 0x00 0x00 0x00

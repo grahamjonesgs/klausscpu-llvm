@@ -177,6 +177,9 @@ def uimm32_abs : Operand<i64> {
 }
 
 // 32-bit absolute branch/call target address (word 1, FK_KlaussCPU_ABS32).
+// The MCOperandPredicate is required of an operand a short branch expands
+// into (JMPO/JMPNO); as PCRelTarget18 is symbolic, it always takes the isExpr
+// path there.
 def BrTarget32 : Operand<OtherVT> {
   let EncoderMethod    = "getAbs32OpValue";
   let DecoderMethod    = "decodeUImmOperand<32>";
@@ -197,6 +200,7 @@ def CallTarget32 : Operand<i64> {
 
 // PC-relative branch/call target and LEAPC offset: a 32-bit byte
 // displacement from the instruction in word 1 (FK_KlaussCPU_PCREL32).
+// MCOperandPredicate: as BrTarget32 (the JMP*REL a short branch expands into).
 def PCRelTarget32 : Operand<OtherVT> {
   let EncoderMethod    = "getPCRel32OpValue";
   let DecoderMethod    = "decodeSImmOperand<32>";
@@ -1515,10 +1519,13 @@ def simm8_lsl # shift
 
 // The short forms are decoded and printed like any instruction, but the
 // assembler never matches them (their asm string is the long form's, which
-// the matcher picks): AsmVariantName names no parser variant.
+// the matcher picks): AsmVariantName names no parser variant.  They exist
+// only with FeatureShortForms: the disassembler does not decode one without
+// it, and the MC predicate verifier rejects one reaching the encoder.
 class ShortForm<KCInst64 long, dag outs, dag ins, string asmstr>
     : KCInst32<{0b01, long.Word0{29-0}}, outs, ins, asmstr> {
   let AsmVariantName = "NoMatch";
+  let Predicates = [HasShortForms];
 }
 
 // rd = imm8 (SETR)
@@ -1593,6 +1600,7 @@ class ShortBranch<KCInst64 long, string asmstr>
   bits<20> target;
   let Inst{17-0} = target{19-2};
   let AsmVariantName = "NoMatch";
+  let Predicates = [HasShortBranches];
 }
 
 let hasSideEffects = 0 in {

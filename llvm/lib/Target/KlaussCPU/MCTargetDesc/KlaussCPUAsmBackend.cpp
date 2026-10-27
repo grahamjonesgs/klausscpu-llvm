@@ -28,12 +28,13 @@
 
 #include "KlaussCPUFixupKinds.h"
 #include "KlaussCPUMCTargetDesc.h"
-#include "llvm/MC/MCInst.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCELFObjectWriter.h"
 #include "llvm/MC/MCFixup.h"
+#include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCValue.h"
@@ -232,9 +233,13 @@ public:
   // ── ISA v3 A1 short-branch relaxation ─────────────────────────────────────
 
   // The short branches are the instructions whose CompressPat expands back
-  // (KlaussCPUInstrInfo.td); relaxing one is that expansion.
+  // (KlaussCPUInstrInfo.td); relaxing one is that expansion.  Only a symbolic
+  // operand has a fixup that can end up out of range, so an instruction
+  // without one is final whatever its patterns say.
   bool mayNeedRelaxation(unsigned Opcode, ArrayRef<MCOperand> Operands,
                          const MCSubtargetInfo &STI) const override {
+    if (none_of(Operands, [](const MCOperand &Op) { return Op.isExpr(); }))
+      return false;
     MCInst Inst, Long;
     Inst.setOpcode(Opcode);
     for (const MCOperand &Op : Operands)

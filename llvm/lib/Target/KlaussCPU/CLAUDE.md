@@ -36,16 +36,20 @@ immediate fits, or when a branch target is a symbol; the asm backend relaxes
 a short branch by expanding its pattern again (`KlaussCPU::uncompress`).  The
 `short-forms` / `short-branches` subtarget features gate this; every CPU has
 them, and `-mllvm -klausscpu-short-forms=false` /
-`-klausscpu-short-branches=false` turn them off.  Operands that may be symbols carry an
-`EncoderMethod` that creates the fixup.  Every immediate operand has a
-range-checked `AsmOperandClass` (`KCImmAsmOperand`): the assembler rejects
-an out-of-range constant, and a symbol where no fixup exists, with the
-class's `DiagnosticString`.  Registers have no prefix, so a lone register
-name is the register in a register slot and the symbol of that name in an
-immediate/target slot (`KlaussCPUAsmParser.cpp` header) — so a typo such as
-`call r1` for `callr r1` is an undefined symbol at link time, not an
-assembler error.  SETR accepts [-2^31, 2^32) and the CPU sign-extends the
-imm32: `setr rX, 0xFFFFFFFF` loads -1 (kept for the runtime's
+`-klausscpu-short-branches=false` turn them off (overriding `-mattr`).  The
+short instructions carry the same predicates, so without the feature the
+disassembler does not decode them and the AsmPrinter's predicate verifier
+rejects one.  Since the target has a feature table, an unknown `-mattr`
+feature draws LLVM's "not a recognized feature" warning.  Operands that may
+be symbols carry an `EncoderMethod` that creates the fixup.  Every immediate
+operand has a range-checked `AsmOperandClass` (`KCImmAsmOperand`): the
+assembler rejects an out-of-range constant, and a symbol where no fixup
+exists, with the class's `DiagnosticString`.  Registers have no prefix, so
+a lone register name is the register in a register slot and the symbol of
+that name in an immediate/target slot (`KlaussCPUAsmParser.cpp` header) — so
+a typo such as `call r1` for `callr r1` is an undefined symbol at link time,
+not an assembler error.  SETR accepts [-2^31, 2^32) and the CPU sign-extends
+the imm32: `setr rX, 0xFFFFFFFF` loads -1 (kept for the runtime's
 `setr r0, 0xF00F0000` MMIO idiom).
 
 ### Flag sets — NEVER MIX

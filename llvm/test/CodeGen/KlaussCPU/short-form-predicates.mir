@@ -1,0 +1,43 @@
+# REQUIRES: asserts
+# RUN: llc -mtriple=klausscpu -start-after=patchable-function %s -o - \
+# RUN:   | FileCheck %s
+# RUN: not --crash llc -mtriple=klausscpu -mattr=-short-forms \
+# RUN:   -start-after=patchable-function %s -o /dev/null 2>&1 \
+# RUN:   | FileCheck %s --check-prefix=NOSHORT
+# RUN: not --crash llc -mtriple=klausscpu -klausscpu-short-branches=false \
+# RUN:   -start-after=patchable-function %s -o /dev/null 2>&1 \
+# RUN:   | FileCheck %s --check-prefix=NOBRANCH
+
+# The short forms carry Predicates = [HasShortForms] / [HasShortBranches]
+# (KlaussCPUInstrInfo.td), so the AsmPrinter's instruction-predicate verifier
+# rejects one that reaches emission while its feature is off; only the
+# CompressPats may produce them.
+
+# CHECK-LABEL: short_imm:
+# CHECK:         setr r1, 5
+# NOSHORT: LLVM ERROR: Attempting to emit SETR_SH instruction but the Feature_HasShortForms predicate(s) are not met
+
+# CHECK-LABEL: short_branch:
+# CHECK:         jmprel .LBB1_1
+# NOBRANCH: LLVM ERROR: Attempting to emit JMP_SH instruction but the Feature_HasShortBranches predicate(s) are not met
+
+--- |
+  define void @short_imm() { ret void }
+  define void @short_branch() { ret void }
+...
+---
+name: short_imm
+body: |
+  bb.0:
+    $r1 = SETR_SH 5
+    RET_I
+...
+---
+name: short_branch
+body: |
+  bb.0:
+    successors: %bb.1
+    JMP_SH %bb.1
+  bb.1:
+    RET_I
+...
