@@ -383,6 +383,20 @@ SDValue KlaussCPUTargetLowering::PerformDAGCombine(SDNode *N,
     DAG.ReplaceAllUsesWith(LD, ZL.getNode());
     return DAG.getFreeze(ZL);
   }
+  case KlaussCPUISD::SELECT_CC: {
+    // A condition that became constant after lowering (e.g. bit 6 of an
+    // i128 shift amount, known only once the *_PARTS node is expanded)
+    // would otherwise still be a compare of two constants and a branch.
+    SDValue TrueV = N->getOperand(3), FalseV = N->getOperand(4);
+    if (TrueV == FalseV)
+      return TrueV;
+    auto CC = cast<CondCodeSDNode>(N->getOperand(2))->get();
+    if (SDValue C = DAG.FoldSetCC(MVT::i64, N->getOperand(0), N->getOperand(1),
+                                  CC, SDLoc(N));
+        C && isa<ConstantSDNode>(C))
+      return C->getAsZExtVal() ? TrueV : FalseV;
+    break;
+  }
   default:
     break;
   }
@@ -390,9 +404,11 @@ SDValue KlaussCPUTargetLowering::PerformDAGCombine(SDNode *N,
 }
 
 // The halves of a 128-bit shift by Shamt in [0, 128).  Bit 6 of Shamt picks
-// the case; the shifts themselves only see Shamt[5:0] (the shamt pattern
-// drops the `& 127` of a promoted amount and the CPU masks the rest), so
-// Shamt - 64 shifts by the same amount as Shamt, and 63 - Shamt is ~Shamt.
+// the case.  The CPU only uses Shamt[5:0], so the shamt pattern turns the
+// `Shamt - 64` of the >= 64 arm back into Shamt and `63 ^ Shamt` into ~Shamt.
+// The DAG must still see an in-range amount in each arm: a shift by Shamt
+// itself in the >= 64 arm is poison there, and once the combiner can prove
+// Shamt >= 64 it folds that shift to 0 (KnownBits of an over-wide shift).
 static SDValue getShiftPartsCond(SDValue Shamt, const SDLoc &DL,
                                  SelectionDAG &DAG) {
   EVT VT = Shamt.getValueType();
@@ -414,19 +430,21 @@ SDValue KlaussCPUTargetLowering::LowerShiftLeftParts(SDValue Op,
   //   new_Hi = (Hi << Shamt) | ((Lo >> 1) >> (63 ^ Shamt))
   // else:
   //   new_Lo = 0
-  //   new_Hi = Lo << Shamt   (Shamt[5:0] = Shamt - 64)
+  //   new_Hi = Lo << (Shamt - 64)
 
   SDValue Zero       = DAG.getConstant(0, DL, VT);
   SDValue One        = DAG.getConstant(1, DL, VT);
   SDValue SixtyThree = DAG.getConstant(63, DL, VT);
   SDValue SixtyThreeMShamt = DAG.getNode(ISD::XOR, DL, VT, Shamt, SixtyThree);
+  SDValue ShamtMinus64 =
+      DAG.getNode(ISD::ADD, DL, VT, Shamt, DAG.getSignedConstant(-64, DL, VT));
 
   SDValue LoTrue       = DAG.getNode(ISD::SHL, DL, VT, Lo, Shamt);
   SDValue ShiftRight1Lo = DAG.getNode(ISD::SRL, DL, VT, Lo, One);
   SDValue ShiftRightLo  = DAG.getNode(ISD::SRL, DL, VT, ShiftRight1Lo, SixtyThreeMShamt);
   SDValue ShiftLeftHi   = DAG.getNode(ISD::SHL, DL, VT, Hi, Shamt);
   SDValue HiTrue  = DAG.getNode(ISD::OR,  DL, VT, ShiftLeftHi, ShiftRightLo);
-  SDValue HiFalse = DAG.getNode(ISD::SHL, DL, VT, Lo, Shamt);
+  SDValue HiFalse = DAG.getNode(ISD::SHL, DL, VT, Lo, ShamtMinus64);
 
   SDValue CC = getShiftPartsCond(Shamt, DL, DAG);
   Lo = DAG.getNode(ISD::SELECT, DL, VT, CC, LoTrue, Zero);
@@ -449,7 +467,7 @@ SDValue KlaussCPUTargetLowering::LowerShiftRightParts(SDValue Op,
   //   new_Lo = (Lo >> Shamt) | ((Hi << 1) << (63 ^ Shamt))
   //   new_Hi = Hi >> Shamt  (arithmetic for SRA, logical for SRL)
   // else:
-  //   new_Lo = Hi >> Shamt  (Shamt[5:0] = Shamt - 64; arithmetic for SRA)
+  //   new_Lo = Hi >> (Shamt - 64)  (arithmetic for SRA)
   //   new_Hi = IsSRA ? Hi >> 63 : 0
 
   unsigned ShiftRightOp = IsSRA ? ISD::SRA : ISD::SRL;
@@ -458,13 +476,15 @@ SDValue KlaussCPUTargetLowering::LowerShiftRightParts(SDValue Op,
   SDValue One        = DAG.getConstant(1, DL, VT);
   SDValue SixtyThree = DAG.getConstant(63, DL, VT);
   SDValue SixtyThreeMShamt = DAG.getNode(ISD::XOR, DL, VT, Shamt, SixtyThree);
+  SDValue ShamtMinus64 =
+      DAG.getNode(ISD::ADD, DL, VT, Shamt, DAG.getSignedConstant(-64, DL, VT));
 
   SDValue ShiftRightLo = DAG.getNode(ISD::SRL, DL, VT, Lo, Shamt);
   SDValue ShiftLeftHi1 = DAG.getNode(ISD::SHL, DL, VT, Hi, One);
   SDValue ShiftLeftHi  = DAG.getNode(ISD::SHL, DL, VT, ShiftLeftHi1, SixtyThreeMShamt);
   SDValue LoTrue  = DAG.getNode(ISD::OR,          DL, VT, ShiftRightLo, ShiftLeftHi);
   SDValue HiTrue  = DAG.getNode(ShiftRightOp,     DL, VT, Hi, Shamt);
-  SDValue LoFalse = HiTrue;
+  SDValue LoFalse = DAG.getNode(ShiftRightOp, DL, VT, Hi, ShamtMinus64);
   SDValue HiFalse = IsSRA ? DAG.getNode(ISD::SRA, DL, VT, Hi, SixtyThree) : Zero;
 
   SDValue CC = getShiftPartsCond(Shamt, DL, DAG);

@@ -507,27 +507,34 @@ static SDValue stripShiftMask(SDValue V, SelectionDAG &DAG) {
   return V.getOperand(0);
 }
 
+// X + 64k, X - 64k, X | 64k and X ^ 64k have the low bits of X.
+static bool isShamtNoOp(SDValue V) {
+  unsigned Opc = V.getOpcode();
+  return (Opc == ISD::ADD || Opc == ISD::SUB || Opc == ISD::OR ||
+          Opc == ISD::XOR) &&
+         isa<ConstantSDNode>(V.getOperand(1)) &&
+         V.getConstantOperandVal(1) % 64 == 0;
+}
+
 bool KlaussCPUDAGToDAGISel::selectShiftMask(SDValue N, SDValue &ShAmt) {
-  ShAmt = stripShiftMask(N, *CurDAG);
-  // The low bits of a sum, difference or xor depend only on the low bits of
-  // its operands, so an inner mask goes too.  X + 64k shifts by X; 64k - X
-  // by -X and 64k-1 - X (or X ^ 63) by ~X: one unary op instead of a
+  // The low bits of a sum, difference, OR or XOR depend only on the low bits
+  // of its operands, so inner masks go too.  X + 64k, X - 64k, X | 64k and
+  // X ^ 64k shift by X (the >= 64 arm of a 128-bit shift is (X | 64) - 64);
+  // 64k - X by -X and 64k-1 - X (or X ^ 63) by ~X: one unary op instead of a
   // constant and a SUBR.
+  ShAmt = stripShiftMask(N, *CurDAG);
+  while (isShamtNoOp(ShAmt))
+    ShAmt = stripShiftMask(ShAmt.getOperand(0), *CurDAG);
   unsigned NewOpc = 0;
   SDValue X;
-  if (ShAmt.getOpcode() == ISD::ADD &&
-      isa<ConstantSDNode>(ShAmt.getOperand(1))) {
-    if (ShAmt.getConstantOperandVal(1) % 64 == 0)
-      ShAmt = stripShiftMask(ShAmt.getOperand(0), *CurDAG);
-  } else if (ShAmt.getOpcode() == ISD::SUB &&
-             isa<ConstantSDNode>(ShAmt.getOperand(0))) {
+  unsigned Opc = ShAmt.getOpcode();
+  if (Opc == ISD::SUB && isa<ConstantSDNode>(ShAmt.getOperand(0))) {
     uint64_t Imm = ShAmt.getConstantOperandVal(0) % 64;
     if (Imm == 0 || Imm == 63) {
       NewOpc = Imm == 0 ? KlaussCPU::NEGR : KlaussCPU::NOTR;
       X = ShAmt.getOperand(1);
     }
-  } else if (ShAmt.getOpcode() == ISD::XOR &&
-             isa<ConstantSDNode>(ShAmt.getOperand(1)) &&
+  } else if (Opc == ISD::XOR && isa<ConstantSDNode>(ShAmt.getOperand(1)) &&
              ShAmt.getConstantOperandVal(1) % 64 == 63) {
     NewOpc = KlaussCPU::NOTR;
     X = ShAmt.getOperand(0);

@@ -228,12 +228,17 @@ when clobbered.
   clobbers FLAGS).
 - Shifts and bit fields are patterns over four more ComplexPatterns:
   `shamt` (`selectShiftMask`, as in RISC-V: the amount register of
-  SHLR/SHRR/SARR/ROLR/RORR loses an `and` keeping bits [5:0] and the
-  zero-extension of an i32 amount; 64k - X becomes NEGR, 63 - X / X ^ 63
-  NOTR), `Dup32` (the `ORR (SHLV x, 32), zext(x)` operand of the 32-bit
-  rotate nodes `ROLW`/`RORW` that `ReplaceNodeResults` makes from an i32
-  rotl/rotr), `BitFieldExtract` (BEXTR) and `FieldShiftPair`.  The
-  128-bit `*_PARTS` lowering tests bit 6 of the amount.
+  SHLR/SHRR/SARR/ROLR/RORR loses an `and` keeping bits [5:0], the
+  zero-extension of an i32 amount and any nest of `+`/`-`/`|`/`^` 64k;
+  64k - X becomes NEGR, 63 - X / X ^ 63 NOTR), `Dup32` (the
+  `ORR (SHLV x, 32), zext(x)` operand of the 32-bit rotate nodes
+  `ROLW`/`RORW` that `ReplaceNodeResults` makes from an i32 rotl/rotr),
+  `BitFieldExtract` (BEXTR) and `FieldShiftPair`.  The 128-bit `*_PARTS`
+  lowering tests bit 6 of the amount and shifts by Amt - 64 in the >= 64
+  arm: the DAG must never see a shift by 64 or more there (once the
+  combiner proves Amt >= 64 it folds such a shift to 0); `shamt` drops the
+  -64 again at isel.  A `SELECT_CC` whose operands fold to a constant
+  condition is replaced by the chosen value (`PerformDAGCombine`).
 - Scheduling: the M8 model (`KlaussCPUSchedule.td`, CPU `generic`, the
   default) drives the machine scheduler and the post-RA scheduler, which runs
   from **-O1** up (`getOptLevelToEnablePostRAScheduler`).  `-mcpu=no-sched`
