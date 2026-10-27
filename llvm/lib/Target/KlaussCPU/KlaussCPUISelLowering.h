@@ -145,6 +145,12 @@ public:
 
   unsigned getJumpTableEncoding() const override;
 
+  // Jump tables need -klausscpu-jump-table-density (40%) cases among their
+  // entries, at every optimisation level.
+  bool isSuitableForJumpTable(const SwitchInst *SI, uint64_t NumCases,
+                              uint64_t Range, ProfileSummaryInfo *PSI,
+                              BlockFrequencyInfo *BFI) const override;
+
   // EK_Custom32 entries are ABSOLUTE block addresses, in PIC mode too.  The
   // default (== isPositionIndependent()) would make BR_JT add the table base
   // to each entry under -fPIC, jumping to table+target.

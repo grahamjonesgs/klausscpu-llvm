@@ -1,0 +1,252 @@
+# RUN: llc -march=klausscpu -run-pass=klausscpu-jump-table-hoist \
+# RUN:   -verify-machineinstrs %s -o - | FileCheck %s
+#
+# KlaussCPUJumpTableHoist moves the dispatch block's table base and entry
+# offset into its single predecessor, the range check.  The SHLV clobbers
+# FLAGS, so both go in front of the compare whose flags the branch reads.
+# An instruction of the dispatch block the two read (a COPY of the index)
+# moves with them; one that cannot move (a load) keeps its user there.
+# Nothing moves when the dispatch block has a second predecessor, or when
+# the branch reads FLAGS that come from another block (no FLAGS-free slot
+# for the SHLV).
+
+--- |
+  define void @hoist() { ret void }
+  define void @copy_index() { ret void }
+  define void @load_index() { ret void }
+  define void @two_preds() { ret void }
+  define void @flags_from_pred() { ret void }
+...
+---
+name:            hoist
+tracksRegLiveness: true
+jumpTable:
+  kind:            custom32
+  entries:
+    - id:              0
+      blocks:          [ '%bb.2', '%bb.3' ]
+body:             |
+  ; CHECK-LABEL: name: hoist
+  ; CHECK:       bb.0:
+  ; CHECK:         [[IDX:%[0-9]+]]:gpr = COPY $r0
+  ; CHECK-NEXT:    [[OFF:%[0-9]+]]:gpr = SHLV [[IDX]], 2, implicit-def dead $flags
+  ; CHECK-NEXT:    [[BASE:%[0-9]+]]:gpr = SETRU %jump-table.0
+  ; CHECK-NEXT:    CMPRV_I [[IDX]], 1, implicit-def $flags
+  ; CHECK-NEXT:    JMPUGT %bb.4, implicit $flags
+  ; CHECK:       bb.1:
+  ; CHECK-NOT:     SETRU
+  ; CHECK:         [[T:%[0-9]+]]:gpr = LDIDX32R killed [[BASE]], killed [[OFF]] :: (load (s32) from jump-table)
+  ; CHECK-NEXT:    JMPR_R killed [[T]]
+  bb.0:
+    successors: %bb.4, %bb.1
+    liveins: $r0
+    %0:gpr = COPY $r0
+    CMPRV_I %0, 1, implicit-def $flags
+    JMPUGT %bb.4, implicit $flags
+
+  bb.1:
+    successors: %bb.2, %bb.3
+    %1:gpr = SHLV %0, 2, implicit-def dead $flags
+    %2:gpr = SETRU %jump-table.0
+    %3:gpr = LDIDX32R killed %2, killed %1 :: (load (s32) from jump-table)
+    JMPR_R killed %3
+
+  bb.2:
+    $r12 = SETR 1
+    RET_I implicit $r12
+
+  bb.3:
+    $r12 = SETR 2
+    RET_I implicit $r12
+
+  bb.4:
+    $r12 = SETR 3
+    RET_I implicit $r12
+...
+---
+name:            copy_index
+tracksRegLiveness: true
+jumpTable:
+  kind:            custom32
+  entries:
+    - id:              0
+      blocks:          [ '%bb.2', '%bb.3' ]
+body:             |
+  ; CHECK-LABEL: name: copy_index
+  ; CHECK:       bb.0:
+  ; CHECK:         [[IDX:%[0-9]+]]:gpr = COPY $r0
+  ; CHECK-NEXT:    [[CP:%[0-9]+]]:gpr = COPY [[IDX]]
+  ; CHECK-NEXT:    [[OFF:%[0-9]+]]:gpr = SHLV [[CP]], 2, implicit-def dead $flags
+  ; CHECK-NEXT:    [[BASE:%[0-9]+]]:gpr = SETRU %jump-table.0
+  ; CHECK-NEXT:    CMPRV_I [[IDX]], 1, implicit-def $flags
+  ; CHECK-NEXT:    JMPUGT %bb.4, implicit $flags
+  ; CHECK:       bb.1:
+  ; CHECK-NOT:     COPY
+  ; CHECK:         LDIDX32R killed [[BASE]], killed [[OFF]]
+  bb.0:
+    successors: %bb.4, %bb.1
+    liveins: $r0
+    %0:gpr = COPY $r0
+    CMPRV_I %0, 1, implicit-def $flags
+    JMPUGT %bb.4, implicit $flags
+
+  bb.1:
+    successors: %bb.2, %bb.3
+    %4:gpr = COPY %0
+    %1:gpr = SHLV %4, 2, implicit-def dead $flags
+    %2:gpr = SETRU %jump-table.0
+    %3:gpr = LDIDX32R killed %2, killed %1 :: (load (s32) from jump-table)
+    JMPR_R killed %3
+
+  bb.2:
+    $r12 = SETR 1
+    RET_I implicit $r12
+
+  bb.3:
+    $r12 = SETR 2
+    RET_I implicit $r12
+
+  bb.4:
+    $r12 = SETR 3
+    RET_I implicit $r12
+...
+---
+name:            load_index
+tracksRegLiveness: true
+jumpTable:
+  kind:            custom32
+  entries:
+    - id:              0
+      blocks:          [ '%bb.2', '%bb.3' ]
+body:             |
+  ; CHECK-LABEL: name: load_index
+  ; CHECK:       bb.0:
+  ; CHECK:         CMPRV_I
+  ; CHECK-NEXT:    [[BASE:%[0-9]+]]:gpr = SETRU %jump-table.0
+  ; CHECK-NEXT:    JMPUGT %bb.4, implicit $flags
+  ; CHECK:       bb.1:
+  ; CHECK:         LDIDX64
+  ; CHECK-NEXT:    [[OFF:%[0-9]+]]:gpr = SHLV
+  ; CHECK-NEXT:    LDIDX32R killed [[BASE]], killed [[OFF]]
+  bb.0:
+    successors: %bb.4, %bb.1
+    liveins: $r0
+    %0:gpr = COPY $r0
+    CMPRV_I %0, 1, implicit-def $flags
+    JMPUGT %bb.4, implicit $flags
+
+  bb.1:
+    successors: %bb.2, %bb.3
+    %4:gpr = LDIDX64 %0, 0 :: (load (s64))
+    %1:gpr = SHLV %4, 2, implicit-def dead $flags
+    %2:gpr = SETRU %jump-table.0
+    %3:gpr = LDIDX32R killed %2, killed %1 :: (load (s32) from jump-table)
+    JMPR_R killed %3
+
+  bb.2:
+    $r12 = SETR 1
+    RET_I implicit $r12
+
+  bb.3:
+    $r12 = SETR 2
+    RET_I implicit $r12
+
+  bb.4:
+    $r12 = SETR 3
+    RET_I implicit $r12
+...
+---
+name:            two_preds
+tracksRegLiveness: true
+jumpTable:
+  kind:            custom32
+  entries:
+    - id:              0
+      blocks:          [ '%bb.3', '%bb.4' ]
+body:             |
+  ; CHECK-LABEL: name: two_preds
+  ; CHECK:       bb.2:
+  ; CHECK:         SHLV
+  ; CHECK-NEXT:    SETRU %jump-table.0
+  ; CHECK-NEXT:    LDIDX32R
+  bb.0:
+    successors: %bb.5, %bb.1
+    liveins: $r0, $r1
+    %0:gpr = COPY $r0
+    %4:gpr = COPY $r1
+    CMPRV_I %0, 1, implicit-def $flags
+    JMPUGT %bb.5, implicit $flags
+
+  bb.1:
+    successors: %bb.2, %bb.5
+    CMPRV_I %4, 0, implicit-def $flags
+    JMPE %bb.5, implicit $flags
+
+  bb.2:
+    successors: %bb.3, %bb.4
+    %1:gpr = SHLV %0, 2, implicit-def dead $flags
+    %2:gpr = SETRU %jump-table.0
+    %3:gpr = LDIDX32R killed %2, killed %1 :: (load (s32) from jump-table)
+    JMPR_R killed %3
+
+  bb.3:
+    $r12 = SETR 1
+    RET_I implicit $r12
+
+  bb.4:
+    $r12 = SETR 2
+    RET_I implicit $r12
+
+  bb.5:
+    successors: %bb.2
+    JMP %bb.2
+...
+---
+name:            flags_from_pred
+tracksRegLiveness: true
+jumpTable:
+  kind:            custom32
+  entries:
+    - id:              0
+      blocks:          [ '%bb.3', '%bb.4' ]
+body:             |
+  ; CHECK-LABEL: name: flags_from_pred
+  ; CHECK:       bb.1:
+  ; CHECK-NOT:     SHLV
+  ; CHECK-NOT:     SETRU
+  ; CHECK:         JMPUGT %bb.5, implicit $flags
+  ; CHECK:       bb.2:
+  ; CHECK:         SHLV
+  ; CHECK-NEXT:    SETRU %jump-table.0
+  ; CHECK-NEXT:    LDIDX32R
+  bb.0:
+    successors: %bb.1, %bb.5
+    liveins: $r0
+    %0:gpr = COPY $r0
+    CMPRV_I %0, 1, implicit-def $flags
+    JMPE %bb.5, implicit $flags
+
+  bb.1:
+    successors: %bb.5, %bb.2
+    liveins: $flags
+    JMPUGT %bb.5, implicit $flags
+
+  bb.2:
+    successors: %bb.3, %bb.4
+    %1:gpr = SHLV %0, 2, implicit-def dead $flags
+    %2:gpr = SETRU %jump-table.0
+    %3:gpr = LDIDX32R killed %2, killed %1 :: (load (s32) from jump-table)
+    JMPR_R killed %3
+
+  bb.3:
+    $r12 = SETR 1
+    RET_I implicit $r12
+
+  bb.4:
+    $r12 = SETR 2
+    RET_I implicit $r12
+
+  bb.5:
+    $r12 = SETR 3
+    RET_I implicit $r12
+...

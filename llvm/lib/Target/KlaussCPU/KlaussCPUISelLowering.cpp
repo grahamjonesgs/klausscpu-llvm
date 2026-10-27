@@ -48,12 +48,19 @@ static cl::opt<unsigned>
                   cl::desc("Preferred loop-header alignment in bytes "
                            "(16 = I-cache line; 0 = off)."));
 
-// Jump tables are off by default (see the BR_JT comment in the constructor).
-// A non-zero value re-enables them with that minimum case count, for A/B
-// testing now that analyzeBranch models JMPR_R blocks correctly.
+// Jump tables (LowerBR_JT).  A dispatch through the table costs about the
+// same whatever the switch's size, a compare tree grows with it; on the board
+// the table breaks even at 12 cases (see the constructor).  0 disables them.
 static cl::opt<unsigned> MinJumpTableEntries(
-    "klausscpu-min-jump-table-entries", cl::Hidden, cl::init(0),
+    "klausscpu-min-jump-table-entries", cl::Hidden, cl::init(12),
     cl::desc("Minimum cases for a jump table (0 = jump tables disabled)."));
+
+// The share of a table's entries that must be cases.  A 4-byte entry against
+// one or two instruction words per case of a compare tree: below about 40%
+// the table is the bigger of the two.
+static cl::opt<unsigned> JumpTableDensity(
+    "klausscpu-jump-table-density", cl::Hidden, cl::init(40),
+    cl::desc("Minimum percentage of a jump table's entries that are cases."));
 
 // A run of selects on the same condition shares one compare and branch (see
 // EmitInstrWithCustomInserter); off gives each select its own diamond.
@@ -183,23 +190,13 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::JumpTable,      MVT::i64, Custom);
 
   // ---- Branch/control ----
-  // LLVM's register allocator has a known limitation: when a basic block is
-  // reachable from both a jump-table indirect branch AND direct conditional
-  // branches, the RA does not insert the required register reloads on the
-  // indirect predecessor edge.  Concretely, in Zephyr cbprintf the format-
-  // character dispatch table sends %u/%x/%X/%o directly to the encode_uint
-  // call site; r4 (buf_end) is 0 on that path instead of the correct stack-
-  // relative pointer, causing encode_uint to write to address 0xFFFFFFFF.
-  // Disabling jump tables forces all switch statements to use binary-search
-  // comparison chains where the RA correctly inserts reloads on every direct
-  // predecessor edge.
-  //
-  // That diagnosis was wrong.  The cbprintf failure reproduces with the
-  // pre-2026-09 compiler and is gone after the 2026-09 fixes (analyzeBranch
-  // treated JMPR_R/RET blocks as fall-through; compare flags were emitted
-  // dead; PIC tables were treated as relative) — board-verified with a Zephyr
-  // cbprintf test app.  Still off by default until the default is flipped;
-  // enable with -mllvm -klausscpu-min-jump-table-entries=4.
+  // Jump tables from MinJumpTableEntries cases at JumpTableDensity.  The
+  // dispatch (LowerBR_JT, the range check in front of it, and
+  // KlaussCPUJumpTableHoist) is a load, its 2 load-use bubbles and a taken
+  // JMPR, about as long as three or four levels of a compare tree.  Measured
+  // on the board, a switch called with uniformly distributed keys: dense, the
+  // table costs the same as the tree at 12 cases and saves 0.5 cycles a
+  // dispatch at 13, 3.9 at 16, 5.6 at 20; at 50% density it saves 2.3 at 12.
   setMinimumJumpTableEntries(MinJumpTableEntries ? MinJumpTableEntries
                                                  : INT_MAX);
   setOperationAction(ISD::BR_JT,  MVT::Other, Custom); // LowerBR_JT
@@ -773,6 +770,13 @@ const MCExpr *KlaussCPUTargetLowering::LowerCustomJumpTableEntry(
 
 unsigned KlaussCPUTargetLowering::getJumpTableEncoding() const {
   return MachineJumpTableInfo::EK_Custom32;
+}
+
+bool KlaussCPUTargetLowering::isSuitableForJumpTable(
+    const SwitchInst *SI, uint64_t NumCases, uint64_t Range,
+    ProfileSummaryInfo *PSI, BlockFrequencyInfo *BFI) const {
+  return NumCases * 100 >= Range * JumpTableDensity &&
+         TargetLowering::isSuitableForJumpTable(SI, NumCases, Range, PSI, BFI);
 }
 
 std::pair<unsigned, const TargetRegisterClass *>

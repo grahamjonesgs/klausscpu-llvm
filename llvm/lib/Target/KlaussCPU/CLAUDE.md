@@ -30,7 +30,8 @@ describe earlier states of the backend and are superseded by this file.
 | Immediates | each class 2/3 op exists with a sign- and a zero-extended imm32 (SGN bit); isel picks the one that holds the constant: `SETR`/`SETRU` (MOV), `ADDI`/`ADDV`/`MINUSV`, `ANDI`/`ANDV` (and OR/XOR), `CMPRV`/`CMPRVU`; boolean compares (`setcc` as a value) `CMPxxV` with a simm32; `SETR64` only for a value neither reaches.  An add of -255..-129 (a frame address too) is `MINUSV` of the negation, whose short form reaches it |
 | Multiply by a constant | `MULV` (simm32; EX-serialised, `WriteMul`); a constant 2^N+1, 2^N-1 or 1-2^N that is not a simm32 becomes `SHLV` + `ADDR`/`SUBR` (`decomposeMulByConstant`); for a simm32 one only with `-klausscpu-mul-imm-shift-add` (one more instruction than `MULV`, fewer cycles) |
 | Addresses | 32-bit, zero-extended in a register: `SETRU sym` (static), `LEAPC` (PIC); `sym+off` is folded only for `off` in [0, 2^31), other offsets are a separate add so a negative S + off stays negative; `R_KLAUSSCPU_ABS64` data is the exact 64-bit S + A (lld) |
-| Indirect branch / call | `JMPR` / `CALLR`; jump tables are off by default (`-klausscpu-min-jump-table-entries=N` enables them) |
+| Indirect branch / call | `JMPR` / `CALLR` |
+| Switches | a compare tree, or a jump table from 12 cases (clusters) at 40% density (the board break-even): a 4-byte-aligned table of absolute 32-bit block addresses (`EK_Custom32`, `R_KLAUSSCPU_ABS32`, also under PIC: only the base is PC-relative, `LEAPC`), dispatched by `LDIDX32R` + `JMPR` (`LowerBR_JT`) |
 | `llvm.trap` / `llvm.debugtrap` | both `TRAP`: an abnormal stop (crash dump; `stop = Trap` in the emulator; a debug halt with SIGTRAP under the debugger).  `HALT` is the clean stop the runtime ends a program with (exit status in R12) |
 | Shifts / rotates | 64-bit only; a register amount uses only rs2[5:0], so isel drops masks/extensions of it (`shamt`); an i32 rotate is a 64-bit rotate of the value copied into both halves (`ROLW`/`RORW`) |
 | Bit fields | `BEXTR` for `(x >> s) & (2^l - 1)` with s, l in [1, 31]; other fields and high/low masks beyond an imm32 as a shift pair (a mask stays SETR64 + ANDR in a loop, where MachineLICM hoists the SETR64, unless optsize) |
@@ -288,6 +289,12 @@ when clobbered.
   (`MaxGluedStoresPerMemcpy`), so no store directly follows its load.
   `-mcpu=no-sched` is the A/B baseline without either scheduler (and
   without `KlaussCPUEarlyIVInc` or the TTI unrolling, which serve them).
+- Before register allocation (-O1 and up): `KlaussCPUJumpTableHoist` moves
+  a jump table's base (`SETRU`/`LEAPC`) and entry offset (`SHLV`, and a
+  `COPY` of the index it reads) from the dispatch block into the range-check
+  block in front of its compare, where they fill bubbles; the dispatch block
+  is left with the dependent `LDIDX32R` + `JMPR` (`jump-table-hoist.ll`,
+  `.mir`).  It runs after MachineSink, which would sink them back.
 - Before the post-RA scheduler: FuseCmpBr's loop constants; pre-emit passes:
   FlagReuse, then FuseCmpBr (see Flags), then CalleeSavedCFI (see CFI).
 - TTI (`KlaussCPUTargetTransformInfo.cpp`): moderate partial/runtime
@@ -335,7 +342,9 @@ when clobbered.
 | `-klausscpu-break-anti-deps` | on | post-RA scheduler renames registers to break critical-path anti-dependencies |
 | `-klausscpu-postra-single-issue` | on | post-RA scheduler issues one instruction per cycle (=false: LLVM's unlimited default) |
 | `-klausscpu-early-iv-inc` | on | count a single-block loop from Init - C so its increment can issue early |
-| `-klausscpu-min-jump-table-entries` | 0 (off) | jump tables from N cases |
+| `-klausscpu-min-jump-table-entries` | 12 | jump tables from N cases (0 = none) |
+| `-klausscpu-jump-table-density` | 40 | minimum % of a jump table's entries that are cases |
+| `-klausscpu-hoist-jt-addr` | on | KlaussCPUJumpTableHoist |
 | `-klausscpu-pref-loop-align` | 16 | loop-header alignment in bytes |
 | `-klausscpu-mul-imm-shift-add` | off | multiply by a simm32 2^N±1 / 1-2^N as shift + add/sub when the schedule model rates MULV slower |
 | `-klausscpu-unroll-branch-density-gate` | on | scale the unroll budget for branchy loops |
@@ -443,11 +452,12 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPUAsmPrinter.cpp     MachineInstr → MCInst (+ CompressPat), inline-asm operand printing
 ├── KlaussCPUEarlyIVInc.cpp     IR, after LSR: loop counter counts from Init - C so its increment can issue early
 ├── KlaussCPUFlagReuse.cpp      pre-emit: CMPRV Rd,0 + JMPE/NE → JMPZ/NZ (default on)
+├── KlaussCPUJumpTableHoist.cpp pre-RA: jump-table base and entry offset into the range-check block
 ├── KlaussCPUFuseCmpBr.cpp      pre-emit: compare + branch → ISA v3 FBR (default on); pre-sched2 instance: loop constants
 ├── KlaussCPUCalleeSavedCFI.cpp pre-emit: a callee-saved register's .cfi_offset behind its scheduled spill
 ├── KlaussCPUTargetTransformInfo.h/.cpp  TTI — M8 unroll budget gated on branch density, no peel; LSR cost order, register count
 ├── KlaussCPUSubtarget.h/.cpp   single subtarget; member init order is critical
-├── KlaussCPUTargetMachine.h/.cpp CodeGenTargetMachineImpl; pass config (AtomicExpand, EarlyIVInc, isel, pre-sched2 and pre-emit passes); pre-RA scheduler compare/branch pairing
+├── KlaussCPUTargetMachine.h/.cpp CodeGenTargetMachineImpl; pass config (AtomicExpand, EarlyIVInc, isel, pre-RA, pre-sched2 and pre-emit passes); pre-RA scheduler compare/branch pairing
 ├── AsmParser/
 │   └── KlaussCPUAsmParser.cpp  -gen-asm-matcher driver; registers vs symbols, PC-relative targets
 ├── Disassembler/

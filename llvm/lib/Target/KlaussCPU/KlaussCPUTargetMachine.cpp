@@ -41,11 +41,13 @@ FunctionPass *createKlaussCPUCalleeSavedCFIPass();
 FunctionPass *createKlaussCPUEarlyIVIncPass();
 FunctionPass *createKlaussCPUFlagReusePass();
 FunctionPass *createKlaussCPUFuseCmpBrPass(bool LoopConstsOnly = false);
+FunctionPass *createKlaussCPUJumpTableHoistPass();
 void initializeKlaussCPUCalleeSavedCFIPass(PassRegistry &);
 void initializeKlaussCPUDAGToDAGISelLegacyPass(PassRegistry &);
 void initializeKlaussCPUEarlyIVIncPass(PassRegistry &);
 void initializeKlaussCPUFlagReusePass(PassRegistry &);
 void initializeKlaussCPUFuseCmpBrPass(PassRegistry &);
+void initializeKlaussCPUJumpTableHoistPass(PassRegistry &);
 } // namespace llvm
 
 using namespace llvm;
@@ -61,6 +63,7 @@ LLVMInitializeKlaussCPUTarget() {
   initializeKlaussCPUEarlyIVIncPass(PR);
   initializeKlaussCPUFlagReusePass(PR);
   initializeKlaussCPUFuseCmpBrPass(PR);
+  initializeKlaussCPUJumpTableHoistPass(PR);
 }
 
 static Reloc::Model getEffectiveRelocModel(std::optional<Reloc::Model> RM) {
@@ -142,6 +145,7 @@ public:
 
   void addIRPasses() override;
   bool addInstSelector() override;
+  void addPreRegAlloc() override;
   void addPreSched2() override;
   void addPreEmitPass() override;
 };
@@ -174,6 +178,13 @@ void KlaussCPUPassConfig::addIRPasses() {
 bool KlaussCPUPassConfig::addInstSelector() {
   addPass(createKlaussCPUISelDag(getKlaussCPUTargetMachine()));
   return false;
+}
+
+void KlaussCPUPassConfig::addPreRegAlloc() {
+  // A jump table's base and entry offset into the switch's range-check
+  // block, after MachineSink (KlaussCPUJumpTableHoist.cpp).
+  if (getOptLevel() != CodeGenOptLevel::None)
+    addPass(createKlaussCPUJumpTableHoistPass());
 }
 
 void KlaussCPUPassConfig::addPreSched2() {
