@@ -106,20 +106,6 @@ static DecodeStatus decodeFBRCondOperand(MCInst &Inst, uint64_t Imm,
   return MCDisassembler::Success;
 }
 
-// BEXTR / BDEP: $rd is tied to $rs, but both rd [11:8] and rs1 [7:4] are
-// encoded, so only words with rd == rs1 have an assembly spelling.
-static DecodeStatus decodeTiedRdRsImm32(MCInst &Inst, uint64_t Insn,
-                                        uint64_t Address,
-                                        const MCDisassembler *Decoder) {
-  uint32_t Rd = fieldFromInstruction(Insn, 8, 4);
-  if (fieldFromInstruction(Insn, 4, 4) != Rd)
-    return MCDisassembler::Fail;
-  DecodeGPRRegisterClass(Inst, Rd, Address, Decoder);
-  DecodeGPRRegisterClass(Inst, Rd, Address, Decoder);
-  return decodeSImmOperand<32>(Inst, fieldFromInstruction(Insn, 32, 32),
-                               Address, Decoder);
-}
-
 #include "KlaussCPUGenDisassemblerTables.inc"
 
 namespace {

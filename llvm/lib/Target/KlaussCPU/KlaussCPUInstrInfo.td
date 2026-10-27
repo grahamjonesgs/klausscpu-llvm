@@ -38,47 +38,85 @@ def KlaussCPUCallNode : SDNode<"KlaussCPUISD::CALL", SDT_KlaussCPUCall,
 
 //===----------------------------------------------------------------------===//
 // Assembler operand match classes
-// Used by the AsmParser to validate and render parsed operands.
+//
+// Every immediate operand names the values its field can hold.  The generated
+// matcher rejects any other constant with the class's DiagnosticString, so an
+// out-of-range value is an error rather than silently truncated by the
+// encoder.  A symbolic expression is accepted only by the classes of operands
+// whose EncoderMethod emits a fixup (allowSym).
 //===----------------------------------------------------------------------===//
 
-// Matches any immediate expression (integer literal or label).
-def AnyImmAsmOperand : AsmOperandClass {
-  let Name            = "AnyImm";
-  let PredicateMethod = "isImm";
-  let RenderMethod    = "addImmOperands";
+// A constant in [low, high] that is a multiple of scale, or with allowSym any
+// non-constant expression (KlaussCPUOperand::isImmRange).
+class KCImmAsmOperand<string name, int low, int high, int scale = 1,
+                      bit allowSym = 0> : AsmOperandClass {
+  let Name             = name;
+  let RenderMethod     = "addImmOperands";
+  let PredicateMethod  = "isImmRange<" # low # ", " # high # ", " # scale #
+                         ", " # !if(allowSym, "true", "false") # ">";
+  let DiagnosticType   = "Invalid" # name;
+  let DiagnosticString = "immediate must be " #
+                         !if(!gt(scale, 1), "a multiple of " # scale # " in",
+                             "an integer in") #
+                         " the range [" # low # ", " # high # "]" #
+                         !if(allowSym, " or a symbol", "");
 }
 
-def BrTargetAsmOperand : AsmOperandClass {
-  let Name            = "BrTarget";
-  let PredicateMethod = "isImm";
-  let RenderMethod    = "addImmOperands";
-}
+class SImmAsmOperand<int width, bit allowSym = 0, string suffix = "">
+    : KCImmAsmOperand<"SImm" # width # suffix,
+                      !sub(0, !shl(1, !sub(width, 1))),
+                      !sub(!shl(1, !sub(width, 1)), 1), 1, allowSym>;
+
+class UImmAsmOperand<int width, bit allowSym = 0, string suffix = "">
+    : KCImmAsmOperand<"UImm" # width # suffix, 0, !sub(!shl(1, width), 1), 1,
+                      allowSym>;
+
+// Fields the CPU sign- or zero-extends to 64 bits (ISA_ENCODING_V2_MAP §2,
+// SGN), the shift count / bit index N and the ENTER frame size.
+def SImm32AsmOperand : SImmAsmOperand<32>;
+def UImm32AsmOperand : UImmAsmOperand<32>;
+def UImm22AsmOperand : UImmAsmOperand<22>;
+def UImm6AsmOperand  : UImmAsmOperand<6>;
+
+// A raw 32-bit word that is not extended (SETR64 / PUSHV64 halves, the
+// peripheral immediates): either spelling of the 32-bit pattern.
+def Imm32AsmOperand : KCImmAsmOperand<"Imm32", -2147483648, 4294967295>;
+
+// SETR: the CPU sign-extends the imm32.  An unsigned 32-bit constant is also
+// accepted as its 32-bit pattern (`setr r0, 0xF00F0000` for an MMIO address
+// is sign-extended exactly like the ABS32 address of a symbol there).
+def Imm32SymAsmOperand
+    : KCImmAsmOperand<"Imm32Sym", -2147483648, 4294967295, 1, 1>;
+
+// Absolute address: a symbol or a 32-bit address (FK_KlaussCPU_ABS32).
+def UImm32SymAsmOperand : UImmAsmOperand<32, 1, "Sym">;
 
 // PC-relative target (jmp*rel, callrel, leapc, short and fused branches).  A
-// bare number is the displacement from the instruction, as the disassembler
-// prints it; an operand that names a symbol is the target address
-// (KlaussCPUAsmParser::parsePCRelTarget).
-def PCRelTargetAsmOperand : AsmOperandClass {
-  let Name            = "PCRelTarget";
-  let PredicateMethod = "isImm";
-  let RenderMethod    = "addImmOperands";
-  let ParserMethod    = "parsePCRelTarget";
+// bare number is the byte displacement from the instruction, as the
+// disassembler prints it; an operand that names a symbol is the target
+// address (KlaussCPUAsmParser::parsePCRelTarget).  Short / fused branches
+// store a word displacement, so their constant must be a multiple of 4.
+class PCRelAsmOperand<int width, int scale>
+    : KCImmAsmOperand<"PCRel" # width, !sub(0, !shl(1, !sub(width, 1))),
+                      !sub(!shl(1, !sub(width, 1)), scale), scale, 1> {
+  let ParserMethod = "parsePCRelTarget";
 }
+def PCRel32AsmOperand : PCRelAsmOperand<32, 1>;
+def PCRel20AsmOperand : PCRelAsmOperand<20, 4>;
+def PCRel15AsmOperand : PCRelAsmOperand<15, 4>;
 
-// Constant-only small immediates: an expression here cannot be encoded.
 // The fused-branch condition is PRED | INV << 3 with PRED 0..4; the CPU
 // traps on PRED 5..7 (pipeline_core.sv), so those are rejected too.
 def FBRCondAsmOperand : AsmOperandClass {
-  let Name            = "FBRCond";
-  let PredicateMethod = "isFBRCond";
-  let RenderMethod    = "addImmOperands";
+  let Name             = "FBRCond";
+  let PredicateMethod  = "isFBRCond";
+  let RenderMethod     = "addImmOperands";
+  let DiagnosticType   = "InvalidFBRCond";
+  let DiagnosticString = "fused-branch condition must be an integer in the "
+                         "range [0, 4] or [8, 12]";
 }
 
-def SImm4AsmOperand : AsmOperandClass {
-  let Name            = "SImm4";
-  let PredicateMethod = "isSImm4";
-  let RenderMethod    = "addImmOperands";
-}
+def SImm4AsmOperand : SImmAsmOperand<4>;
 
 //===----------------------------------------------------------------------===//
 // Operand types
@@ -93,19 +131,30 @@ def SImm4AsmOperand : AsmOperandClass {
 
 def simm32 : Operand<i64> {
   let DecoderMethod    = "decodeSImmOperand<32>";
-  let ParserMatchClass = AnyImmAsmOperand;
+  let ParserMatchClass = SImm32AsmOperand;
 }
 
 def uimm32 : Operand<i64> {
   let DecoderMethod    = "decodeUImmOperand<32>";
-  let ParserMatchClass = AnyImmAsmOperand;
+  let ParserMatchClass = UImm32AsmOperand;
 }
 
-// Shift count / bit index in word0[20:15].  The assembler encodes the low 6
-// bits of any constant; isel only selects counts 0..63.
+// Raw 32-bit word, printed signed.
+def imm32 : Operand<i64> {
+  let DecoderMethod    = "decodeSImmOperand<32>";
+  let ParserMatchClass = Imm32AsmOperand;
+}
+
+// Shift count / bit index in word0[20:15].
 def uimm6 : Operand<i64>, ImmLeaf<i64, [{ return isUInt<6>(Imm); }]> {
   let DecoderMethod    = "decodeUImmOperand<6>";
-  let ParserMatchClass = AnyImmAsmOperand;
+  let ParserMatchClass = UImm6AsmOperand;
+}
+
+// ENTER frame size in dwords, word0[21:0].
+def uimm22 : Operand<i64> {
+  let DecoderMethod    = "decodeUImmOperand<22>";
+  let ParserMatchClass = UImm22AsmOperand;
 }
 
 // Word-1 immediate that may also be a symbol's address: FK_KlaussCPU_ABS32.
@@ -113,26 +162,26 @@ def uimm6 : Operand<i64>, ImmLeaf<i64, [{ return isUInt<6>(Imm); }]> {
 def simm32_abs : Operand<i64> {
   let EncoderMethod    = "getAbs32OpValue";
   let DecoderMethod    = "decodeSImmOperand<32>";
-  let ParserMatchClass = AnyImmAsmOperand;
+  let ParserMatchClass = Imm32SymAsmOperand;
 }
 
 def uimm32_abs : Operand<i64> {
   let EncoderMethod    = "getAbs32OpValue";
   let DecoderMethod    = "decodeUImmOperand<32>";
-  let ParserMatchClass = AnyImmAsmOperand;
+  let ParserMatchClass = UImm32SymAsmOperand;
 }
 
 // 32-bit absolute branch/call target address (word 1, FK_KlaussCPU_ABS32).
 def BrTarget32 : Operand<OtherVT> {
   let EncoderMethod    = "getAbs32OpValue";
   let DecoderMethod    = "decodeUImmOperand<32>";
-  let ParserMatchClass = BrTargetAsmOperand;
+  let ParserMatchClass = UImm32SymAsmOperand;
 }
 
 def CallTarget32 : Operand<i64> {
   let EncoderMethod    = "getAbs32OpValue";
   let DecoderMethod    = "decodeUImmOperand<32>";
-  let ParserMatchClass = BrTargetAsmOperand;
+  let ParserMatchClass = UImm32SymAsmOperand;
 }
 
 // PC-relative branch/call target and LEAPC offset: a 32-bit byte
@@ -140,19 +189,19 @@ def CallTarget32 : Operand<i64> {
 def PCRelTarget32 : Operand<OtherVT> {
   let EncoderMethod    = "getPCRel32OpValue";
   let DecoderMethod    = "decodeSImmOperand<32>";
-  let ParserMatchClass = PCRelTargetAsmOperand;
+  let ParserMatchClass = PCRel32AsmOperand;
 }
 
 def PCRelCallTarget32 : Operand<i64> {
   let EncoderMethod    = "getPCRel32OpValue";
   let DecoderMethod    = "decodeSImmOperand<32>";
-  let ParserMatchClass = PCRelTargetAsmOperand;
+  let ParserMatchClass = PCRel32AsmOperand;
 }
 
 def pcrel_simm32 : Operand<i64> {
   let EncoderMethod    = "getPCRel32OpValue";
   let DecoderMethod    = "decodeSImmOperand<32>";
-  let ParserMatchClass = PCRelTargetAsmOperand;
+  let ParserMatchClass = PCRel32AsmOperand;
 }
 
 // ISA v3 short branch target: byte displacement, encoded as a simm18 word
@@ -160,7 +209,7 @@ def pcrel_simm32 : Operand<i64> {
 def PCRelTarget18 : Operand<OtherVT> {
   let EncoderMethod    = "getPCRel18OpValue";
   let DecoderMethod    = "decodeSImmOperand<20>";
-  let ParserMatchClass = PCRelTargetAsmOperand;
+  let ParserMatchClass = PCRel20AsmOperand;
 }
 
 // ISA v3 fused-branch target: byte displacement, encoded as a simm13 word
@@ -168,7 +217,7 @@ def PCRelTarget18 : Operand<OtherVT> {
 def PCRelTarget13 : Operand<OtherVT> {
   let EncoderMethod    = "getPCRel13OpValue";
   let DecoderMethod    = "decodeSImmOperand<15>";
-  let ParserMatchClass = PCRelTargetAsmOperand;
+  let ParserMatchClass = PCRel15AsmOperand;
 }
 
 // Fused-branch condition (PRED | INV << 3) and register-immediate operand.
@@ -388,7 +437,7 @@ class I0<bits<32> word0, dag outs, dag ins, string asmstr, list<dag> pat = []>
 //===----------------------------------------------------------------------===//
 
 // 3-operand (rd and rs independent in v2).  The count/position operand is a
-// plain immediate; its low 6 bits are encoded.
+// 6-bit constant (uimm6).
 class ShiftImmN<bits<32> word0, string mnem, list<dag> pat = []>
     : KCInst32<word0, (outs GPR:$rd), (ins GPR:$rs, uimm6:$imm),
                mnem # "\t$rd, $rs, $imm", pat> {
@@ -436,23 +485,6 @@ class RV_st<bits<32> word0, string asmstr>
   let Inst{11-8}  = rs_data;
 }
 
-// In-place: rd op= imm32   ($rd tied to $rs)
-class RV_2addr<bits<32> word0, string asmstr, list<dag> pat = []>
-    : KCInst64<word0, (outs GPR:$rd), (ins GPR:$rs, simm32:$imm), asmstr,
-               pat> {
-  bits<4>  rd;
-  bits<4>  rs;
-  bits<32> imm;
-  let Inst{63-32} = imm;
-  let Inst{11-8}  = rd;
-  let Inst{7-4}   = rs;
-  let Constraints = "$rd = $rs";
-  let Defs        = [FLAGS];   // addv/minusv set flags (bitwise-imm over-marked; safe)
-  // The generated decoder would merge the two tied register fields; this one
-  // rejects a word with rd != rs1, which the one asm slot cannot express.
-  let DecoderMethod = "decodeTiedRdRsImm32";
-}
-
 // 3-operand immediate form: rd = rs op imm32 (untied — see R_unary).
 class RV_imm<bits<32> word0, string mnem, Operand immop = simm32>
     : KCInst64<word0, (outs GPR:$rd), (ins GPR:$rs, immop:$imm),
@@ -464,6 +496,20 @@ class RV_imm<bits<32> word0, string mnem, Operand immop = simm32>
   let Inst{11-8}  = rd;
   let Inst{7-4}   = rs;
   let Defs        = [FLAGS];   // addv/minusv set flags (bitwise-imm over-marked; safe)
+}
+
+// Three registers + imm32: rd = f(rs1, rs2, imm32) (BDEP).
+class RRRV<bits<32> word0, string mnem, Operand immop>
+    : KCInst64<word0, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2, immop:$imm),
+               mnem # "\t$rd, $rs1, $rs2, $imm"> {
+  bits<4>  rd;
+  bits<4>  rs1;
+  bits<4>  rs2;
+  bits<32> imm;
+  let Inst{63-32} = imm;
+  let Inst{11-8}  = rd;
+  let Inst{7-4}   = rs1;
+  let Inst{3-0}   = rs2;
 }
 
 // Compare register to immediate — flags only, no output (CMPRV)
@@ -575,7 +621,7 @@ class Vsp<bits<32> word0, string asmstr, Operand immop = simm32>
 
 // rd = (hi32 << 32) | lo32
 class V64_ld<bits<32> word0, string asmstr, list<dag> pat = []>
-    : KCInst96<word0, (outs GPR:$rd), (ins simm32:$lo, simm32:$hi), asmstr,
+    : KCInst96<word0, (outs GPR:$rd), (ins imm32:$lo, imm32:$hi), asmstr,
                pat> {
   bits<4>  rd;
   bits<32> lo;
@@ -587,7 +633,7 @@ class V64_ld<bits<32> word0, string asmstr, list<dag> pat = []>
 
 // Push (hi32 << 32) | lo32
 class V64_imm<bits<32> word0, string asmstr>
-    : KCInst96<word0, (outs), (ins simm32:$lo, simm32:$hi), asmstr> {
+    : KCInst96<word0, (outs), (ins imm32:$lo, imm32:$hi), asmstr> {
   bits<32> lo;
   bits<32> hi;
   let Inst{95-64} = hi;
@@ -893,7 +939,7 @@ def ADDSP_I : Vsp<0xA5400000, "addsp\t$imm">;
 //   ENTER N : push R15; R15 = SP; SP -= 8*N      (N = frame dwords, [21:0])
 //   LEAVE   : SP = R15; pop R15
 let Uses = [SP, R15], Defs = [SP, R15], hasSideEffects = 1, mayStore = 1 in
-def ENTER_I : KCInst32<0x66000000, (outs), (ins i64imm:$n), "enter\t$n"> {
+def ENTER_I : KCInst32<0x66000000, (outs), (ins uimm22:$n), "enter\t$n"> {
   bits<22> n;
   let Inst{21-0} = n;
 }
@@ -1034,7 +1080,7 @@ def : Pat<(i64 (add GPR:$rs, simm32_imm:$imm)), (ADDI GPR:$rs, simm32_imm:$imm)>
 //===----------------------------------------------------------------------===//
 // Immediate-form ALU patterns
 //
-// These fold a constant operand directly into the RV_2addr / R_inplace
+// These fold a constant operand directly into the RV_imm / ShiftImmN
 // encoding, avoiding the separate SETR (8 B) that the register-register form
 // would need to materialise the constant.  This matters disproportionately on
 // KlaussCPU because the core is fetch-bound — fewer fetched words ≈ fewer
@@ -1295,15 +1341,18 @@ def RORR1 : R_unary<0x5120C000, "rorr1">;
 def ROLCR : R_unary<0x5160C000, "rolcr"> { let Uses = [FLAGS]; } // rotate through carry
 def RORCR : R_unary<0x51A0C000, "rorcr"> { let Uses = [FLAGS]; } // rotate through carry
 
-// ── RV 2-address (rd op= imm32) and RV compare (rs, imm32) ──────────────────
-// Bit position / start+len are packed in the immediate (see opcode_select.vh).
-// Bit set/clear/toggle by embedded position N — v2: single word, 2-address.
+// ── Bit ops by embedded position N, bit-field extract / deposit ────────────
+// Bit set/clear/toggle by embedded position N — v2: single word.
 def BSET  : ShiftImmN<0x52200000, "bset">;
 def BCLR  : ShiftImmN<0x52600000, "bclr">;
 def BTGL  : ShiftImmN<0x52A00000, "btgl">;
-// Bit-field extract/deposit stay 2 words (params packed in imm32).
-def BEXTR : RV_2addr<0x93000000, "bextr\t$rd, $imm">;
-def BDEP  : RV_2addr<0x93400000, "bdep\t$rd, $imm">;
+// Bit-field extract / deposit: 2 words, the field descriptor in imm32
+// (start [4:0], len [12:8]; 32-bit fields, result's upper half zero).
+//   BEXTR rd, rs1, imm       rd = (rs1 >> start) & mask(len)   (sets Z)
+//   BDEP  rd, rs1, rs2, imm  rd = rs1 with rs2[len-1:0] deposited at start
+// BEXTR's rs2 field must be 0 (the template's), which the CPU checks.
+def BEXTR : RV_imm<0x93000000, "bextr", uimm32>;
+def BDEP  : RRRV<0x93400000, "bdep", uimm32>;
 // Bit-test by embedded position N — v2: single word, flag-only.
 def BTST  : BitTestImmN<0x52E00000, "btst\t$rs, $imm">;
 
@@ -1351,15 +1400,15 @@ let hasSideEffects = 1 in {
   def RGB2R    : RetiredV1_R<0x00003060, "rgb2r\t$reg">;   // retired v1
   def LCDDATAR : R_in<0x71000000, (ins GPR:$reg), "lcddatar\t$reg">;
   // V (fixed op32 + imm32)
-  def DELAYV   : Vsp<0xAC050000, "delayv\t$imm">;
+  def DELAYV   : Vsp<0xAC050000, "delayv\t$imm", imm32>;
   let isRetiredV1 = 1 in {   // v1 words (LEN=00), see RetiredV1_R
-  def LEDV     : Vsp<0x00003070, "ledv\t$imm">;
-  def RGB1V    : Vsp<0x00003074, "rgb1v\t$imm">;
-  def RGB2V    : Vsp<0x00003075, "rgb2v\t$imm">;
+  def LEDV     : Vsp<0x00003070, "ledv\t$imm", imm32>;
+  def RGB1V    : Vsp<0x00003074, "rgb1v\t$imm", imm32>;
+  def RGB2V    : Vsp<0x00003075, "rgb2v\t$imm", imm32>;
   }
-  def LCD      : Vsp<0xB2000000, "lcd\t$imm">;
-  def LCDCMDV  : Vsp<0xB0000000, "lcdcmdv\t$imm">;
-  def LCDDATAV : Vsp<0xB1000000, "lcddatav\t$imm">;
+  def LCD      : Vsp<0xB2000000, "lcd\t$imm", imm32>;
+  def LCDCMDV  : Vsp<0xB0000000, "lcdcmdv\t$imm", imm32>;
+  def LCDDATAV : Vsp<0xB1000000, "lcddatav\t$imm", imm32>;
 }
 
 // ── Mnemonic aliases for the canonical opcode_select.vh spellings ───────────
@@ -1419,8 +1468,7 @@ def : Pat<(i64 (sextloadi32 (add (i64 GPR:$base), simm32_imm:$off))),
 // A load/store offset is a byte offset: simm8_lslN is bits [N+7:N] of an
 // (N+8)-bit signed offset whose low N bits are zero.
 class ShortImmOperand<string decoder> : Operand<i64> {
-  let DecoderMethod    = decoder;
-  let ParserMatchClass = AnyImmAsmOperand;
+  let DecoderMethod = decoder;
 }
 def uimm8 : ShortImmOperand<"decodeUImmOperand<8>">;
 foreach shift = 0-3 in
@@ -1635,6 +1683,9 @@ def : InstAlias<"xorv\t$rd, $imm", (XORV GPR:$rd, GPR:$rd, uimm32:$imm)>;
 def : InstAlias<"mulv\t$rd, $imm", (MULV GPR:$rd, GPR:$rd, simm32:$imm)>;
 def : InstAlias<"divv\t$rd, $imm", (DIVV GPR:$rd, GPR:$rd, simm32:$imm)>;
 def : InstAlias<"modv\t$rd, $imm", (MODV GPR:$rd, GPR:$rd, simm32:$imm)>;
+def : InstAlias<"bextr\t$rd, $imm", (BEXTR GPR:$rd, GPR:$rd, uimm32:$imm)>;
+// The old `bdep rd, imm` had no source operand (it deposited r0) and has no
+// alias: write `bdep rd, rd, rs, imm`.
 
 //===----------------------------------------------------------------------===//
 // Bit-manipulation-by-constant patterns (need BSET/BCLR/BTGL defined above)

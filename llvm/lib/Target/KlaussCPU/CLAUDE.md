@@ -30,7 +30,12 @@ rs2[3:0], imm32 in word 1.  The `Inst` fields in `KlaussCPUInstrInfo.td` are
 the encodings (each format class takes the ISA map's word-0 template; short
 forms derive theirs from the 2-word twin), emitted by `-gen-emitter`'s
 `getBinaryCodeForInstr`.  Operands that may be symbols carry an
-`EncoderMethod` that creates the fixup.
+`EncoderMethod` that creates the fixup.  Every immediate operand has a
+range-checked `AsmOperandClass` (`KCImmAsmOperand`): the assembler rejects
+an out-of-range constant, and a symbol where no fixup exists, with the
+class's `DiagnosticString`.  Registers have no prefix, so a lone register
+name is the register in a register slot and the symbol of that name in an
+immediate/target slot (`KlaussCPUAsmParser.cpp` header).
 
 ### Flag sets — NEVER MIX
 
@@ -920,8 +925,10 @@ and one-instruction signed sub-word loads (`LDIDX8_S`/`LDIDX16_S`).
     avoid colliding with the existing codegen mnemonics. (For 8-byte-aligned
     addresses — the normal case — 0xFC and 0x0C behave identically.)
   - **Operand conventions worth noting**: bit ops `bset/bclr/btgl/btst` take the
-    bit index in the immediate; `bextr/bdep` pack start (imm[4:0]) + len
-    (imm[12:8]); `ldidx64r/stidx64r` take the offset as a *register*
+    bit index in the immediate; `bextr rd, rs1, imm` / `bdep rd, rs1, rs2,
+    imm` (base rs1, source rs2) pack start (imm[4:0]) + len (imm[12:8]) —
+    the old `bdep rd, imm` could not name its source (it deposited r0) and is
+    gone; `ldidx64r/stidx64r` take the offset as a *register*
     (`ldidx64r rd, base, idx`, EA = base+idx; Step 37). Unary/imm/shift-by-N
     ops are 3-operand since Step 37 (`incr rd, rs`); the old 2-address
     spellings (`incr r1`, `addv r1, 5`) still assemble as rd == rs.
@@ -1119,7 +1126,7 @@ DEBUG_PLAN Phase 0 (plan: `klaussCPU/DEBUG_PLAN.md`), branch `debug-support`.
   the printer shows target addresses under `PrintBranchImmAsAddress`
   (llvm-objdump) and `KlaussCPUMCInstrAnalysis::evaluateBranch` symbolizes
   them.  The encoder now also accepts immediate targets for short / fused
-  branches.  BEXTR/BDEP's tied rd/rs1 must match (`decodeTiedRdRsImm32`).
+  branches.
   LEN=00 words (retired v1 opcodes, lld's `00 00 f0 11` fill) don't decode.
 - **Verified**: llc asm vs objdump of llc's object for Doom renderer/game +
   FreeRTOS tasks/queue at -O0/-O1/-O2/PIC: 59,660 instructions, 0 mismatches;

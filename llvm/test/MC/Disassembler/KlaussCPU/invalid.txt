@@ -4,9 +4,9 @@
 # CHECK: warning: invalid instruction encoding
 0x00 0x00 0xf0 0x11
 
-# BEXTR with rd (r3) != rs1 (r5): the tied operands have one asm slot.
+# BEXTR with a non-zero rs2 field [3:0]: the CPU traps.
 # CHECK: warning: invalid instruction encoding
-0x50 0x03 0x00 0x93 0x85 0xff 0xff 0xff
+0x57 0x03 0x00 0x93 0x04 0x08 0x00 0x00
 
 # Non-zero "x" field [15:12] on ADDR: the v2 CPU traps, so it does not decode.
 # CHECK: warning: invalid instruction encoding

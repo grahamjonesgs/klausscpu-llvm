@@ -105,8 +105,9 @@ void KlaussCPUMCCodeEmitter::getMachineOpValue(
     return;
   }
   // An operand with no EncoderMethod has no fixup to resolve a symbol with.
-  // The parser accepts any expression in an immediate slot, so diagnose it
-  // here rather than encode a wrong value.
+  // The assembler's operand classes reject a symbol there and codegen never
+  // builds one; should one get through, diagnose it rather than encode a
+  // wrong value.
   assert(MO.isExpr() && "operand must be reg, imm or expr");
   Ctx.reportError(MI.getLoc(), "operand must be a constant: no relocation "
                                "exists for a symbol in this field");

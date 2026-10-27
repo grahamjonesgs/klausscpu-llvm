@@ -4,8 +4,15 @@
 // processing inline asm blocks and by llvm-mc for standalone assembly.
 //
 // Register syntax:  r0–r15  (or single-letter aliases a–p, case-insensitive)
-// Immediates:       integer literals or label expressions
+// Immediates:       integer literals or label expressions, range-checked by
+//                   the operand classes in KlaussCPUInstrInfo.td
 // Instruction fmt:  mnemonic [operand [, operand]*]
+//
+// There is no register prefix, so a symbol can be spelled like a register
+// (`call b`, `leapc r12, sp`).  A lone register name is parsed as a register
+// operand that also carries the expression for the symbol of that name; it
+// matches a register class as the register and an immediate class as the
+// symbol, so the instruction's operand list decides.
 //
 //===----------------------------------------------------------------------===//
 
@@ -61,10 +68,14 @@ public:
     return Op;
   }
 
+  // SymExpr: the same identifier read as an expression (see the file
+  // header), or null.
   static std::unique_ptr<KlaussCPUOperand>
-  createReg(MCRegister Reg, SMLoc S, SMLoc E) {
+  createReg(MCRegister Reg, SMLoc S, SMLoc E,
+            const MCExpr *SymExpr = nullptr) {
     auto Op = std::make_unique<KlaussCPUOperand>(Register, S, E);
     Op->RegNum = Reg;
+    Op->ImmVal = SymExpr;
     return Op;
   }
 
@@ -82,25 +93,37 @@ public:
   bool isMem()   const override { return false; }
   bool isImm()   const override { return Kind == Immediate; }
 
+  // The operand as an immediate: an expression, or a register name read
+  // as a symbol.  Null for a token or a register with no symbol reading.
+  const MCExpr *getImmExpr() const {
+    return Kind == Token ? nullptr : ImmVal;
+  }
+
   bool isConstantImm(int64_t &Val) const {
-    if (!isImm())
-      return false;
-    const auto *CE = dyn_cast<MCConstantExpr>(ImmVal);
+    const auto *CE = dyn_cast_or_null<MCConstantExpr>(getImmExpr());
     if (!CE)
       return false;
     Val = CE->getValue();
     return true;
   }
 
+  // Immediate operand classes (KCImmAsmOperand): a constant in [Lo, Hi] that
+  // is a multiple of Scale; with AllowSym also a symbolic expression, which
+  // the operand's EncoderMethod turns into a fixup.
+  template <int64_t Lo, int64_t Hi, int64_t Scale, bool AllowSym>
+  bool isImmRange() const {
+    if (!getImmExpr())
+      return false;
+    int64_t Val;
+    if (!isConstantImm(Val))
+      return AllowSym;
+    return Val >= Lo && Val <= Hi && Val % Scale == 0;
+  }
+
   // Fused-branch condition PRED | INV << 3; PRED 5..7 trap on the CPU.
   bool isFBRCond() const {
     int64_t Val;
     return isConstantImm(Val) && isUInt<4>(Val) && (Val & 7) <= 4;
-  }
-
-  bool isSImm4() const {
-    int64_t Val;
-    return isConstantImm(Val) && isInt<4>(Val);
   }
 
   MCRegister getReg() const override {
@@ -115,11 +138,6 @@ public:
     return Tok;
   }
 
-  const MCExpr *getImm() const {
-    assert(isImm() && "not an immediate operand");
-    return ImmVal;
-  }
-
   SMLoc getStartLoc() const override { return StartLoc; }
   SMLoc getEndLoc()   const override { return EndLoc; }
 
@@ -131,8 +149,8 @@ public:
   }
 
   void addImmOperands(MCInst &Inst, unsigned N) const {
-    assert(N == 1 && isImm());
-    const MCExpr *Expr = getImm();
+    const MCExpr *Expr = getImmExpr();
+    assert(N == 1 && Expr && "not an immediate operand");
     if (const auto *CE = dyn_cast<MCConstantExpr>(Expr))
       Inst.addOperand(MCOperand::createImm(CE->getValue()));
     else
@@ -156,6 +174,7 @@ private:
   // original buffer.
   std::string    Tok;
   MCRegister     RegNum;
+  // Immediate: the value.  Register: the symbol reading of its name, or null.
   const MCExpr  *ImmVal = nullptr;
 };
 
@@ -172,7 +191,7 @@ class KlaussCPUAsmParser : public MCTargetAsmParser {
   MCAsmParser &Parser;
 
   // Set while parsing a PC-relative target operand; PCRelAbsSym is the first
-  // absolute .set/.equ symbol it names (see parsePCRelTarget).
+  // absolute .set/.equ symbol it names (see parsePCRelExpr).
   bool InPCRelTarget = false;
   MCSymbol *PCRelAbsSym = nullptr;
   int64_t PCRelAbsVal = 0;
@@ -186,9 +205,20 @@ class KlaussCPUAsmParser : public MCTargetAsmParser {
 
   MCRegister matchRegisterByName(StringRef Name);
   ParseStatus parseOperand(OperandVector &Operands, StringRef Mnemonic);
-  ParseStatus parsePCRelTarget(OperandVector &Operands);
+  ParseStatus parseImmOrRegName(OperandVector &Operands, bool PCRel);
+  bool parsePCRelExpr(const MCExpr *&Expr, SMLoc &E);
+  ParseStatus parsePCRelTarget(OperandVector &Operands) {
+    return parseImmOrRegName(Operands, /*PCRel=*/true);
+  }
 
 public:
+  enum KlaussCPUMatchResultTy : unsigned {
+    Match_Dummy = FIRST_TARGET_MATCH_RESULT_TY,
+#define GET_OPERAND_DIAGNOSTIC_TYPES
+#include "KlaussCPUGenAsmMatcher.inc"
+#undef GET_OPERAND_DIAGNOSTIC_TYPES
+  };
+
   KlaussCPUAsmParser(const MCSubtargetInfo &STI, MCAsmParser &Parser,
                       const MCInstrInfo &MII,
                       const MCTargetOptions &Options)
@@ -221,34 +251,13 @@ public:
 // Register parsing
 //===----------------------------------------------------------------------===//
 
-// The generated MatchRegisterName handles r0–r15/sp/ra.
-// Single-letter aliases (a–p) are handled with a manual table here.
-static MCRegister matchRegisterAlias(StringRef Name) {
-  if (Name.size() != 1)
-    return MCRegister();
-  // Aliases a(=r0)…p(=r15), lowercase only.
-  static const struct { char alias; MCRegister reg; } Tbl[] = {
-    {'a', KlaussCPU::R0},  {'b', KlaussCPU::R1},
-    {'c', KlaussCPU::R2},  {'d', KlaussCPU::R3},
-    {'e', KlaussCPU::R4},  {'f', KlaussCPU::R5},
-    {'g', KlaussCPU::R6},  {'h', KlaussCPU::R7},
-    {'i', KlaussCPU::R8},  {'j', KlaussCPU::R9},
-    {'k', KlaussCPU::R10}, {'l', KlaussCPU::R11},
-    {'m', KlaussCPU::R12}, {'n', KlaussCPU::R13},
-    {'o', KlaussCPU::R14}, {'p', KlaussCPU::R15},
-  };
-  char c = Name[0];
-  for (const auto &E : Tbl)
-    if (E.alias == c)
-      return E.reg;
-  return MCRegister();
-}
-
+// r0–r15, sp, ra, flags (MatchRegisterName) and the letter names a–p
+// (AltNames, MatchRegisterAltName), in any case.
 MCRegister KlaussCPUAsmParser::matchRegisterByName(StringRef Name) {
   std::string Lower = Name.lower();
   if (MCRegister R = MatchRegisterName(Lower))
     return R;
-  return matchRegisterAlias(Lower);
+  return MatchRegisterAltName(Lower);
 }
 
 bool KlaussCPUAsmParser::parseRegister(MCRegister &Reg, SMLoc &StartLoc,
@@ -286,31 +295,37 @@ ParseStatus KlaussCPUAsmParser::parseOperand(OperandVector &Operands,
   ParseStatus Res = MatchOperandParserImpl(Operands, Mnemonic);
   if (!Res.isNoMatch())
     return Res;
+  return parseImmOrRegName(Operands, /*PCRel=*/false);
+}
 
+// An expression (literal, label, or arithmetic), or a register name.  A
+// register name that is the whole operand also keeps its reading as a symbol
+// (see the file header); one that starts a longer expression (`b+8`) is the
+// symbol.
+ParseStatus KlaussCPUAsmParser::parseImmOrRegName(OperandVector &Operands,
+                                                  bool PCRel) {
   SMLoc S = getLexer().getLoc();
-
-  // Try register first.
+  MCRegister Reg;
   if (getLexer().is(AsmToken::Identifier)) {
-    MCRegister Reg = matchRegisterByName(getLexer().getTok().getString());
-    if (Reg) {
-      SMLoc E = getLexer().getTok().getEndLoc();
-      Operands.push_back(KlaussCPUOperand::createReg(Reg, S, E));
-      Parser.Lex();
-      return ParseStatus::Success;
-    }
+    AsmToken Next = getLexer().peekTok();
+    if (Next.is(AsmToken::Comma) || Next.is(AsmToken::EndOfStatement) ||
+        Next.is(AsmToken::Eof))
+      Reg = matchRegisterByName(getLexer().getTok().getString());
   }
 
-  // Otherwise parse as an expression (literal, label, or arithmetic).
   const MCExpr *Expr;
   SMLoc E;
-  if (Parser.parseExpression(Expr, E))
+  if (PCRel ? parsePCRelExpr(Expr, E) : Parser.parseExpression(Expr, E))
     return ParseStatus::Failure;
 
-  Operands.push_back(KlaussCPUOperand::createImm(Expr, S, E));
+  if (Reg)
+    Operands.push_back(KlaussCPUOperand::createReg(Reg, S, E, Expr));
+  else
+    Operands.push_back(KlaussCPUOperand::createImm(Expr, S, E));
   return ParseStatus::Success;
 }
 
-// A PC-relative target (PCRelTargetAsmOperand): a bare number is the
+// A PC-relative target (PCRelAsmOperand): a bare number is the
 // displacement from the instruction, as the disassembler prints it, and an
 // operand that names a symbol is the target address, which the PC-relative
 // fixup turns into a displacement or a relocation.  The generic parser folds
@@ -318,18 +333,12 @@ ParseStatus KlaussCPUAsmParser::parseOperand(OperandVector &Operands,
 // read as PC + ROMFN.  parsePrimaryExpr notes such a symbol, and a folded
 // result is rebuilt as SYM + (value - SYM): the same target as when the .set
 // follows the use, in every spelling (`(SYM)`, `4+SYM`, `-SYM`).
-ParseStatus KlaussCPUAsmParser::parsePCRelTarget(OperandVector &Operands) {
-  if (getLexer().is(AsmToken::Identifier) &&
-      matchRegisterByName(getLexer().getTok().getString()))
-    return ParseStatus::NoMatch;
-
+bool KlaussCPUAsmParser::parsePCRelExpr(const MCExpr *&Expr, SMLoc &E) {
   SMLoc S = getLexer().getLoc();
   SaveAndRestore InTarget(InPCRelTarget, true);
   SaveAndRestore<MCSymbol *> AbsSym(PCRelAbsSym, nullptr);
-  const MCExpr *Expr;
-  SMLoc E;
   if (Parser.parseExpression(Expr, E))
-    return ParseStatus::Failure;
+    return true;
 
   if (const auto *CE = dyn_cast<MCConstantExpr>(Expr); CE && PCRelAbsSym) {
     Expr = MCSymbolRefExpr::create(PCRelAbsSym, getContext(), S);
@@ -339,9 +348,7 @@ ParseStatus KlaussCPUAsmParser::parsePCRelTarget(OperandVector &Operands) {
                                        getContext()),
           getContext(), S);
   }
-
-  Operands.push_back(KlaussCPUOperand::createImm(Expr, S, E));
-  return ParseStatus::Success;
+  return false;
 }
 
 bool KlaussCPUAsmParser::parsePrimaryExpr(const MCExpr *&Res, SMLoc &EndLoc) {
@@ -456,8 +463,18 @@ bool KlaussCPUAsmParser::matchAndEmitInstruction(SMLoc IDLoc,
   }
 
   default:
-    return true;
+    break;
   }
+
+  // An operand class's DiagnosticString (KlaussCPUInstrInfo.td).
+  if (const char *Diag =
+          getMatchKindDiag(static_cast<KlaussCPUMatchResultTy>(Result))) {
+    SMLoc ErrLoc = ErrorInfo < Operands.size()
+                       ? Operands[ErrorInfo]->getStartLoc()
+                       : IDLoc;
+    return Error(ErrLoc, Diag);
+  }
+  llvm_unreachable("unknown match result");
 }
 
 //===----------------------------------------------------------------------===//

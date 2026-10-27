@@ -17,8 +17,14 @@ defm : RemapAllTargetPseudoPointerOperands<GPR>;
 // Declare the target
 //===----------------------------------------------------------------------===//
 
+def KlaussCPUAsmParser : AsmParser {
+  // Registers also match their letter names a..p (the AltNames).
+  let ShouldEmitMatchRegisterAltName = 1;
+}
+
 def KlaussCPU : Target {
   let InstructionSet = KlaussCPUInstrInfo;
+  let AssemblyParsers = [KlaussCPUAsmParser];
   // No instruction has hidden register constraints, so post-RA passes
   // (MachineCopyPropagation, the post-RA scheduler's anti-dependence breaker)
   // may rename registers.  Without this every instruction is emitted with

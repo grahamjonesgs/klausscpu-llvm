@@ -5,24 +5,24 @@
 # RUN:   | FileCheck %s --implicit-check-not=error:
 
 # A symbol in an immediate field whose operand has no EncoderMethod (so no
-# fixup kind) is diagnosed by the code emitter instead of crashing it.  The
-# parser still accepts the expression; a constant-only operand class would
-# reject it earlier (review issue 9).  Constants folded by the parser encode.
+# fixup kind) is rejected by the operand class (KCImmAsmOperand without
+# allowSym), with the field's range, instead of reaching the code emitter.
+# Constants folded by the parser encode.
 
         .set    kconst, 5
         addv    r1, r2, kconst
         cmprv   r1, kconst
 
-# CHECK: [[#@LINE+1]]:9: error: operand must be a constant: no relocation exists for a symbol in this field
+# CHECK: [[#@LINE+1]]:25: error: immediate must be an integer in the range [0, 4294967295]
         addv    r1, r2, sym
-# CHECK: [[#@LINE+1]]:9: error: operand must be a constant: no relocation exists for a symbol in this field
+# CHECK: [[#@LINE+1]]:21: error: immediate must be an integer in the range [-2147483648, 2147483647]
         cmprv   r1, sym
-# CHECK: [[#@LINE+1]]:9: error: operand must be a constant: no relocation exists for a symbol in this field
+# CHECK: [[#@LINE+1]]:25: error: immediate must be an integer in the range [-2147483648, 2147483647]
         ldidx64 r1, r2, sym
-# CHECK: [[#@LINE+1]]:9: error: operand must be a constant: no relocation exists for a symbol in this field
+# CHECK: [[#@LINE+1]]:25: error: immediate must be an integer in the range [0, 63]
         shlv    r1, r2, sym
-# CHECK: [[#@LINE+1]]:9: error: operand must be a constant: no relocation exists for a symbol in this field
+# CHECK: [[#@LINE+1]]:17: error: immediate must be an integer in the range [0, 4194303]
         enter   sym
-# CHECK: [[#@LINE+1]]:9: error: operand must be a constant: no relocation exists for a symbol in this field
+# CHECK: [[#@LINE+1]]:25: error: immediate must be an integer in the range [0, 4294967295]
         addv    r1, r2, later
 later:
