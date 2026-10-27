@@ -21,6 +21,15 @@
 //    the same thing at the branch, and the instructions in between never
 //    observed its flags. Debug instructions are ignored (-g does not change
 //    codegen) and stay where they are;
+//  * a constant outside simm4 fuses only in a loop: when the branch is in the
+//    loop header or its only latch (it runs on every iteration), and a
+//    register is free in the whole loop, a SETR/SETRU in the preheader puts
+//    the constant there once and the branch becomes FBR_RR, as does any
+//    other compare with that constant in the loop. The register
+//    must be one nothing in the loop reads, writes or clobbers, not live into
+//    any loop block (so not live through the loop), not read by the
+//    preheader's terminators, and either caller-saved or a callee-saved
+//    register the prologue already saves. -O1 and up only;
 //  * the condition maps onto a class-3 predicate: EQ/NE (incl. Z/NZ),
 //    signed LT/GE/LE/GT, unsigned LT/GE/LE/GT (incl. C/NC);
 //  * the flags are dead after the branch (no later reader in the block, not
@@ -38,10 +47,13 @@
 
 #include "KlaussCPUInstrInfo.h"
 #include "KlaussCPUSubtarget.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineLoopInfo.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Support/CommandLine.h"
 
 // The pass name must differ from the -klausscpu-fuse-cmp-br option below: opt
@@ -60,6 +72,11 @@ static cl::opt<bool> EnableFuseCmpBr(
     "klausscpu-fuse-cmp-br", cl::Hidden, cl::init(true),
     cl::desc("KlaussCPU ISA v3 B: fuse compare + conditional branch"));
 
+static cl::opt<bool> EnableFuseLoopConst(
+    "klausscpu-fuse-loop-const", cl::Hidden, cl::init(true),
+    cl::desc("KlaussCPU: fuse a loop's compare with a constant outside simm4 "
+             "by setting the constant in a free register in the preheader"));
+
 namespace {
 
 // simm13 words: the fused branch reaches PC-16384 .. PC+16380. The worst-case
@@ -68,6 +85,11 @@ namespace {
 constexpr int64_t MaxFusedDisp = 16000;
 // Size of an instruction whose length is unknown: no branch across it fuses.
 constexpr uint64_t UnboundedSize = uint64_t(1) << 20;
+// Loop constants set up per function. Each SETR/SETRU (at most 8 bytes) is
+// inserted after the offsets are computed, so every range check leaves room
+// for all of them.
+constexpr unsigned MaxLoopConsts = 16;
+constexpr int64_t LoopConstBytes = 8 * MaxLoopConsts;
 
 // Class-3 predicate + INV for a conditional jump that follows CMP a, b.
 // Returns false for conditions with no predicate (S/NS/O/NO).
@@ -100,10 +122,26 @@ public:
   StringRef getPassName() const override {
     return PASS_NAME;
   }
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.setPreservesCFG();
+    AU.addRequired<MachineLoopInfoWrapperPass>();
+    AU.addPreserved<MachineLoopInfoWrapperPass>();
+    MachineFunctionPass::getAnalysisUsage(AU);
+  }
   MachineFunctionProperties getRequiredProperties() const override {
     return MachineFunctionProperties().set(
         MachineFunctionProperties::Property::NoVRegs);
   }
+
+private:
+  Register loopConstReg(MachineInstr &Cmp, MachineBasicBlock &MBB);
+
+  MachineFunction *MF = nullptr;
+  MachineLoopInfo *MLI = nullptr;
+  const TargetInstrInfo *TII = nullptr;
+  const TargetRegisterInfo *TRI = nullptr;
+  // The register holding a constant in a loop: (loop, SETR/SETRU, value).
+  DenseMap<std::tuple<MachineLoop *, unsigned, int64_t>, Register> LoopConsts;
 };
 
 // Worst-case size in bytes of MI. An inline asm statement can be a directive
@@ -116,8 +154,16 @@ uint64_t worstCaseSize(const MachineInstr &MI, const TargetInstrInfo &TII) {
   return TII.get(MI.getOpcode()).getSize();
 }
 
-// The CMPRR / CMPRV whose flags the conditional branch Br reads, if Br can
-// take over its compare: it is the nearest FLAGS writer before Br, and
+// True if the immediate of CMPRV / CMPRVU Cmp fits FBR_RI's simm4. CMPRVU
+// zero-extends its immediate: the same value as simm4 for 0..7.
+bool fitsSImm4(const MachineInstr &Cmp) {
+  int64_t Imm = Cmp.getOperand(1).getImm();
+  int64_t Lo = Cmp.getOpcode() == KlaussCPU::CMPRVU_I ? 0 : -8;
+  return Imm >= Lo && Imm <= 7;
+}
+
+// The CMPRR / CMPRV / CMPRVU whose flags the conditional branch Br reads, if
+// Br can take over its compare: it is the nearest FLAGS writer before Br, and
 // nothing between them reads FLAGS, redefines a compare operand, or has an
 // effect on FLAGS that is not modelled (calls, inline asm, side effects).
 MachineInstr *findFusableCompare(MachineInstr &Br,
@@ -146,16 +192,10 @@ MachineInstr *findFusableCompare(MachineInstr &Br,
       return nullptr;
     break;
   case KlaussCPU::CMPRV_I:
-  case KlaussCPU::CMPRVU_I: {
-    // CMPRVU zero-extends its immediate: the same value as simm4 for 0..7.
+  case KlaussCPU::CMPRVU_I:
     if (!Cmp->getOperand(1).isImm())
       return nullptr;
-    int64_t Imm = Cmp->getOperand(1).getImm();
-    int64_t Lo = Cmp->getOpcode() == KlaussCPU::CMPRVU_I ? 0 : -8;
-    if (Imm < Lo || Imm > 7)
-      return nullptr;
     break;
-  }
   default:
     return nullptr;
   }
@@ -177,25 +217,118 @@ MachineInstr *findFusableCompare(MachineInstr &Br,
 
 char KlaussCPUFuseCmpBr::ID = 0;
 
-INITIALIZE_PASS(KlaussCPUFuseCmpBr, DEBUG_TYPE, PASS_NAME, false, false)
+INITIALIZE_PASS_BEGIN(KlaussCPUFuseCmpBr, DEBUG_TYPE, PASS_NAME, false, false)
+INITIALIZE_PASS_DEPENDENCY(MachineLoopInfoWrapperPass)
+INITIALIZE_PASS_END(KlaussCPUFuseCmpBr, DEBUG_TYPE, PASS_NAME, false, false)
 
-bool KlaussCPUFuseCmpBr::runOnMachineFunction(MachineFunction &MF) {
+// A register holding the immediate of the CMPRV / CMPRVU Cmp throughout the
+// loop around MBB, set in the loop's preheader, or none (see the header).
+Register KlaussCPUFuseCmpBr::loopConstReg(MachineInstr &Cmp,
+                                          MachineBasicBlock &MBB) {
+  MachineLoop *L = MLI->getLoopFor(&MBB);
+  if (!L)
+    return Register();
+  unsigned SetOpc =
+      Cmp.getOpcode() == KlaussCPU::CMPRVU_I ? KlaussCPU::SETRU : KlaussCPU::SETR;
+  int64_t Imm = Cmp.getOperand(1).getImm();
+  // Already set up for this loop or one around it: free to use anywhere in it.
+  for (MachineLoop *Outer = L; Outer; Outer = Outer->getParentLoop()) {
+    auto It = LoopConsts.find(std::make_tuple(Outer, SetOpc, Imm));
+    if (It != LoopConsts.end())
+      return It->second;
+  }
+  // A new one costs a SETR per entry to the loop: only for a branch that runs
+  // on every iteration.
+  if (&MBB != L->getHeader() && &MBB != L->getLoopLatch())
+    return Register();
+  MachineBasicBlock *Preheader = L->getLoopPreheader();
+  if (!Preheader || LoopConsts.size() >= MaxLoopConsts)
+    return Register();
+
+  // Every register the loop touches or has live in (the loop constants set
+  // up so far included), and those the preheader's terminators read.
+  BitVector Used(TRI->getNumRegs());
+  auto MarkUsed = [&](const MachineInstr &MI) {
+    for (const MachineOperand &MO : MI.operands()) {
+      if (MO.isReg() && MO.getReg().isPhysical()) {
+        for (MCRegAliasIterator A(MO.getReg(), TRI, true); A.isValid(); ++A)
+          Used.set(*A);
+      } else if (MO.isRegMask()) {
+        for (unsigned R = 1, E = TRI->getNumRegs(); R != E; ++R)
+          if (MO.clobbersPhysReg(R))
+            Used.set(R);
+      }
+    }
+  };
+  for (MachineBasicBlock *B : L->blocks()) {
+    for (const MachineBasicBlock::RegisterMaskPair &LI : B->liveins())
+      for (MCRegAliasIterator A(LI.PhysReg, TRI, true); A.isValid(); ++A)
+        Used.set(*A);
+    for (const MachineInstr &MI : *B)
+      if (!MI.isDebugInstr())
+        MarkUsed(MI);
+  }
+  for (const MachineInstr &MI : Preheader->terminators())
+    MarkUsed(MI);
+
+  // A callee-saved register is free to write only if the prologue saves it.
+  const MachineRegisterInfo &MRI = MF->getRegInfo();
+  const MachineFrameInfo &MFI = MF->getFrameInfo();
+  BitVector Writable(TRI->getNumRegs(), true);
+  for (const MCPhysReg *CSR = MRI.getCalleeSavedRegs(); CSR && *CSR; ++CSR)
+    Writable.reset(*CSR);
+  if (MFI.isCalleeSavedInfoValid())
+    for (const CalleeSavedInfo &CSI : MFI.getCalleeSavedInfo())
+      Writable.set(CSI.getReg());
+
+  Register Reg;
+  for (MCPhysReg R : KlaussCPU::GPRRegClass)
+    if (!MRI.isReserved(R) && !Used.test(R) && Writable.test(R)) {
+      Reg = R;
+      break;
+    }
+  if (!Reg)
+    return Register();
+
+  BuildMI(*Preheader, Preheader->getFirstTerminator(), DebugLoc(),
+          TII->get(SetOpc), Reg)
+      .addImm(Imm);
+  for (MachineBasicBlock *B : L->blocks()) {
+    B->addLiveIn(Reg);
+    B->sortUniqueLiveIns();
+    // A stale debug location in the register would now show the constant.
+    for (MachineInstr &MI : *B)
+      if (MI.isDebugValue() && MI.hasDebugOperandForReg(Reg))
+        MI.setDebugValueUndef();
+  }
+  LoopConsts[std::make_tuple(L, SetOpc, Imm)] = Reg;
+  return Reg;
+}
+
+bool KlaussCPUFuseCmpBr::runOnMachineFunction(MachineFunction &Fn) {
   if (!EnableFuseCmpBr)
     return false;
   // A branch into another section is resolved by the linker, and PCREL13 has
   // no relocation.
-  if (MF.hasBBSections())
+  if (Fn.hasBBSections())
     return false;
-  const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
-  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+  MF = &Fn;
+  MLI = &getAnalysis<MachineLoopInfoWrapperPass>().getLI();
+  TII = Fn.getSubtarget().getInstrInfo();
+  TRI = Fn.getSubtarget().getRegisterInfo();
+  LoopConsts.clear();
+  bool LoopConstsOK = EnableFuseLoopConst &&
+                      Fn.getTarget().getOptLevel() != CodeGenOptLevel::None &&
+                      !Fn.getFunction().hasOptNone();
 
   // Worst-case offset of every block: instructions at their long encodings,
   // each aligned block after its largest padding (code is word aligned, so
   // at most Align - 4 bytes). The real distance between two points is never
-  // larger than the distance between their offsets here.
-  SmallVector<uint64_t, 16> BlockOffset(MF.getNumBlockIDs());
+  // larger than the distance between their offsets here, plus the loop
+  // constants inserted below.
+  SmallVector<uint64_t, 16> BlockOffset(Fn.getNumBlockIDs());
   uint64_t Offset = 0;
-  for (MachineBasicBlock &MBB : MF) {
+  for (MachineBasicBlock &MBB : Fn) {
     uint64_t A = MBB.getAlignment().value();
     if (A > 4)
       Offset += A - 4;
@@ -203,9 +336,10 @@ bool KlaussCPUFuseCmpBr::runOnMachineFunction(MachineFunction &MF) {
     for (MachineInstr &MI : MBB)
       Offset += worstCaseSize(MI, *TII);
   }
+  const int64_t Limit = MaxFusedDisp - (LoopConstsOK ? LoopConstBytes : 0);
 
   bool Changed = false;
-  for (MachineBasicBlock &MBB : MF) {
+  for (MachineBasicBlock &MBB : Fn) {
     SmallVector<MachineInstr *, 4> Dead;
     uint64_t BrOffset = BlockOffset[MBB.getNumber()];
     for (MachineInstr &Br : MBB) {
@@ -221,13 +355,19 @@ bool KlaussCPUFuseCmpBr::runOnMachineFunction(MachineFunction &MF) {
       MachineBasicBlock *Target = Br.getOperand(0).getMBB();
       int64_t Disp = int64_t(BlockOffset[Target->getNumber()]) -
                      int64_t(ThisOffset);
-      if (Disp < -MaxFusedDisp || Disp > MaxFusedDisp)
+      if (Disp < -Limit || Disp > Limit)
         continue;
       if (!KlaussCPUInstrInfo::flagsDeadAfter(Br))
         continue;
       MachineInstr *Cmp = findFusableCompare(Br, TRI);
       if (!Cmp)
         continue;
+      bool RR = Cmp->getOpcode() == KlaussCPU::CMPRR_I;
+      Register ConstReg;
+      if (!RR && !fitsSImm4(*Cmp)) {
+        if (!LoopConstsOK || !(ConstReg = loopConstReg(*Cmp, MBB)))
+          continue;
+      }
 
       // The compare operands are now read at Br: move their kill flags (from
       // the compare, or from a last use in between) onto the fused branch.
@@ -247,13 +387,15 @@ bool KlaussCPUFuseCmpBr::runOnMachineFunction(MachineFunction &MF) {
       }
 
       int64_t CC = Pred | (Inv ? 8 : 0);
-      bool RR = Cmp->getOpcode() == KlaussCPU::CMPRR_I;
       MachineInstrBuilder MIB =
           BuildMI(MBB, Br.getIterator(), Br.getDebugLoc(),
-                  TII->get(RR ? KlaussCPU::FBR_RR : KlaussCPU::FBR_RI))
+                  TII->get(RR || ConstReg ? KlaussCPU::FBR_RR
+                                          : KlaussCPU::FBR_RI))
               .addReg(Cmp->getOperand(0).getReg(), RegFlags[0]);
       if (RR)
         MIB.addReg(Cmp->getOperand(1).getReg(), RegFlags[1]);
+      else if (ConstReg)
+        MIB.addReg(ConstReg);
       else
         MIB.addImm(Cmp->getOperand(1).getImm());
       MIB.addImm(CC).addMBB(Target);

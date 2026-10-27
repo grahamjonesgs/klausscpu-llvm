@@ -1,0 +1,281 @@
+# KlaussCPUFuseCmpBr: a loop compare with a constant outside FBR_RI's simm4
+# fuses as FBR_RR when a register is free in the whole loop. The constant is
+# set once, in the preheader, and the register becomes live into every loop
+# block. Only from -O1, only for a branch in the loop header or its only
+# latch (other blocks may reuse a constant already set up), never with a
+# register the loop touches or has live in, and a callee-saved register only
+# when the prologue saves it.
+#
+# RUN: llc -march=klausscpu -run-pass=klausscpu-cmp-br-fuse -verify-machineinstrs \
+# RUN:   %s -o - | FileCheck %s
+# RUN: llc -march=klausscpu -O0 -run-pass=klausscpu-cmp-br-fuse \
+# RUN:   -verify-machineinstrs %s -o - | FileCheck %s --check-prefix=O0
+# RUN: llc -march=klausscpu -run-pass=klausscpu-cmp-br-fuse -verify-machineinstrs \
+# RUN:   -klausscpu-fuse-loop-const=false %s -o - | FileCheck %s --check-prefix=O0
+
+--- |
+  declare void @g()
+  define void @latch() { ret void }
+  define void @unsigned_const() { ret void }
+  define void @call_in_loop() { ret void }
+  define void @call_in_loop_saved_csr() { ret void }
+  define void @body_block() { ret void }
+  define void @no_preheader() { ret void }
+  define void @dbg_in_loop() !dbg !4 { ret void }
+
+  !llvm.dbg.cu = !{!0}
+  !llvm.module.flags = !{!3}
+  !0 = distinct !DICompileUnit(language: DW_LANG_C11, file: !1, isOptimized: true, runtimeVersion: 0, emissionKind: FullDebug)
+  !1 = !DIFile(filename: "t.c", directory: "/")
+  !2 = !{}
+  !3 = !{i32 2, !"Debug Info Version", i32 3}
+  !4 = distinct !DISubprogram(name: "dbg_in_loop", scope: !1, file: !1, line: 1, type: !5, scopeLine: 1, spFlags: DISPFlagDefinition | DISPFlagOptimized, unit: !0, retainedNodes: !2)
+  !5 = !DISubroutineType(types: !2)
+  !6 = !DILocalVariable(name: "v", scope: !4, file: !1, line: 1, type: !7)
+  !7 = !DIBasicType(name: "long", size: 64, encoding: DW_ATE_signed)
+  !8 = !DILocation(line: 0, scope: !4)
+...
+---
+# for (i = 0; i < 100; i++) *p = i;  r12 (first in allocation order) is free.
+# CHECK-LABEL: name: latch
+# CHECK:       bb.0:
+# CHECK:         $r1 = SETR 0
+# CHECK-NEXT:    $r12 = SETR 100
+# CHECK:       bb.1:
+# CHECK:         liveins: $r0, $r1, $r12
+# CHECK:         FBR_RR $r1, $r12, 1, %bb.1
+# CHECK-NOT:     CMPRV_I
+#
+# O0-LABEL:    name: latch
+# O0-NOT:      $r12 = SETR
+# O0:          CMPRV_I $r1, 100
+# O0-NEXT:     JMPLT %bb.1
+name:            latch
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1
+    liveins: $r0
+
+    $r1 = SETR 0
+
+  bb.1:
+    successors: %bb.1, %bb.2
+    liveins: $r0, $r1
+
+    STIDX64 $r1, $r0, 0 :: (store (s64))
+    $r1 = INCR $r1, implicit-def dead $flags
+    CMPRV_I $r1, 100, implicit-def $flags
+    JMPLT %bb.1, implicit killed $flags
+
+  bb.2:
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15
+...
+---
+# CMPRVU's immediate is zero-extended, so the constant is set with SETRU.
+# The preheader ends in a jump, and the SETRU goes before it.
+# CHECK-LABEL: name: unsigned_const
+# CHECK:       bb.0:
+# CHECK:         $r12 = SETRU 3000000000
+# CHECK-NEXT:    JMP %bb.1
+# CHECK:       bb.1:
+# CHECK:         FBR_RR $r1, $r12, 3, %bb.1
+name:            unsigned_const
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1
+    liveins: $r0
+
+    $r1 = SETR 0
+    JMP %bb.1
+
+  bb.1:
+    successors: %bb.1, %bb.2
+    liveins: $r0, $r1
+
+    STIDX64 $r1, $r0, 0 :: (store (s64))
+    $r1 = INCR $r1, implicit-def dead $flags
+    CMPRVU_I $r1, 3000000000, implicit-def $flags
+    JMPULT %bb.1, implicit killed $flags
+
+  bb.2:
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15
+...
+---
+# The call clobbers every caller-saved register, and no callee-saved one is
+# saved by the prologue: nothing is free.
+# CHECK-LABEL: name: call_in_loop
+# CHECK:       bb.1:
+# CHECK:         CMPRV_I $r4, 100, implicit-def $flags
+# CHECK-NEXT:    JMPLT %bb.1
+name:            call_in_loop
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1
+    $r4 = SETR 0
+
+  bb.1:
+    successors: %bb.1, %bb.2
+    liveins: $r4
+
+    CALL_I @g, implicit-def dead $r0, implicit-def dead $r1, implicit-def dead $r2, implicit-def dead $r3, implicit-def dead $r8, implicit-def dead $r9, implicit-def dead $r10, implicit-def dead $r11, implicit-def dead $r12, implicit-def dead $r13, implicit-def dead $r14, implicit-def dead $flags, implicit $sp, implicit $sp
+    $r4 = INCR $r4, implicit-def dead $flags
+    CMPRV_I $r4, 100, implicit-def $flags
+    JMPLT %bb.1, implicit killed $flags
+
+  bb.2:
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15
+...
+---
+# The same loop where the prologue saves r4 and r5: r5 is free to use.
+# CHECK-LABEL: name: call_in_loop_saved_csr
+# CHECK:       bb.0:
+# CHECK:         $r5 = SETR 100
+# CHECK:       bb.1:
+# CHECK:         FBR_RR $r4, $r5, 1, %bb.1
+name:            call_in_loop_saved_csr
+tracksRegLiveness: true
+frameInfo:
+  isCalleeSavedInfoValid: true
+stack:
+  - { id: 0, type: spill-slot, offset: -24, size: 8, alignment: 8,
+      callee-saved-register: '$r4' }
+  - { id: 1, type: spill-slot, offset: -32, size: 8, alignment: 8,
+      callee-saved-register: '$r5' }
+body:             |
+  bb.0:
+    successors: %bb.1
+    $r4 = SETR 0
+
+  bb.1:
+    successors: %bb.1, %bb.2
+    liveins: $r4
+
+    CALL_I @g, implicit-def dead $r0, implicit-def dead $r1, implicit-def dead $r2, implicit-def dead $r3, implicit-def dead $r8, implicit-def dead $r9, implicit-def dead $r10, implicit-def dead $r11, implicit-def dead $r12, implicit-def dead $r13, implicit-def dead $r14, implicit-def dead $flags, implicit $sp, implicit $sp
+    $r4 = INCR $r4, implicit-def dead $flags
+    CMPRV_I $r4, 100, implicit-def $flags
+    JMPLT %bb.1, implicit killed $flags
+
+  bb.2:
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15
+...
+---
+# bb.2 is neither the header nor the latch: its compare with 50 stays, but
+# its compare with 120 reuses the register the header's compare set up.
+# CHECK-LABEL: name: body_block
+# CHECK:       bb.0:
+# CHECK:         $r12 = SETR 120
+# CHECK:       bb.1:
+# CHECK:         FBR_RR $r1, $r12, 8, %bb.5
+# CHECK:       bb.2:
+# CHECK:         CMPRV_I $r1, 50, implicit-def $flags
+# CHECK-NEXT:    JMPE %bb.5
+# CHECK:       bb.3:
+# CHECK:         FBR_RR $r1, $r12, 0, %bb.5
+name:            body_block
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1
+    liveins: $r0
+
+    $r1 = SETR 0
+
+  bb.1:
+    successors: %bb.5, %bb.2
+    liveins: $r0, $r1
+
+    CMPRV_I $r1, 120, implicit-def $flags
+    JMPNE %bb.5, implicit killed $flags
+
+  bb.2:
+    successors: %bb.5, %bb.3
+    liveins: $r0, $r1
+
+    CMPRV_I $r1, 50, implicit-def $flags
+    JMPE %bb.5, implicit killed $flags
+
+  bb.3:
+    successors: %bb.5, %bb.4
+    liveins: $r0, $r1
+
+    CMPRV_I $r1, 120, implicit-def $flags
+    JMPE %bb.5, implicit killed $flags
+
+  bb.4:
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15
+
+  bb.5:
+    successors: %bb.1, %bb.4
+    liveins: $r0, $r1
+
+    $r1 = INCR $r1, implicit-def dead $flags
+    CMPRR_I $r1, $r0, implicit-def $flags
+    JMPLT %bb.1, implicit killed $flags
+    JMP %bb.4
+...
+---
+# The loop is entered from two blocks: there is no preheader.
+# CHECK-LABEL: name: no_preheader
+# CHECK:       CMPRV_I $r1, 100, implicit-def $flags
+# CHECK-NEXT:  JMPLT %bb.2
+name:            no_preheader
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $r0, $r1
+
+    CMPRR_I $r0, $r1, implicit-def $flags
+    JMPE %bb.2, implicit killed $flags
+
+  bb.1:
+    successors: %bb.2
+    liveins: $r1
+
+    $r1 = INCR $r1, implicit-def dead $flags
+
+  bb.2:
+    successors: %bb.2, %bb.3
+    liveins: $r1
+
+    $r1 = INCR $r1, implicit-def dead $flags
+    CMPRV_I $r1, 100, implicit-def $flags
+    JMPLT %bb.2, implicit killed $flags
+
+  bb.3:
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15
+...
+---
+# A debug location left in the chosen register inside the loop would show
+# the constant: it becomes undef. -g does not change the choice.
+# CHECK-LABEL: name: dbg_in_loop
+# CHECK:       bb.0:
+# CHECK:         $r12 = SETR 100
+# CHECK:       bb.1:
+# CHECK:         DBG_VALUE $noreg, $noreg,
+# CHECK:         FBR_RR $r1, $r12, 1, %bb.1
+name:            dbg_in_loop
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1
+    liveins: $r0
+
+    $r1 = SETR 0
+
+  bb.1:
+    successors: %bb.1, %bb.2
+    liveins: $r0, $r1
+
+    DBG_VALUE $r12, $noreg, !6, !DIExpression(), debug-location !8
+    STIDX64 $r1, $r0, 0 :: (store (s64))
+    $r1 = INCR $r1, implicit-def dead $flags
+    CMPRV_I $r1, 100, implicit-def $flags
+    JMPLT %bb.1, implicit killed $flags
+
+  bb.2:
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15
+...

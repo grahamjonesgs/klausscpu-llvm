@@ -150,6 +150,7 @@ define void @mix() nounwind {
 ; CHECK-NEXT:    setr64 r13, -1985229329, 19088743
 ; CHECK-NEXT:    setr64 r14, 1985229328, -19088744
 ; CHECK-NEXT:    setr r12, 0
+; CHECK-NEXT:    setr r10, 500000
 ; CHECK-NEXT:    .p2align 4
 ; CHECK-NEXT:  .LBB2_1: # %for.body
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
@@ -163,8 +164,7 @@ define void @mix() nounwind {
 ; CHECK-NEXT:    xorr r14, r11, r14
 ; CHECK-NEXT:    addr r14, r14, r12
 ; CHECK-NEXT:    incr r12, r12
-; CHECK-NEXT:    cmprv r12, 500000
-; CHECK-NEXT:    jmpnerel .LBB2_1
+; CHECK-NEXT:    fbr r12, r10, 8, .LBB2_1
 ; CHECK-NEXT:  # %bb.2: # %for.cond.cleanup
 ; CHECK-NEXT:    addr r12, r14, r13
 ; CHECK-NEXT:    setru r14, g_sink
@@ -177,6 +177,7 @@ define void @mix() nounwind {
 ; REGS-NEXT:    setr64 r13, -1985229329, 19088743
 ; REGS-NEXT:    setr64 r14, 1985229328, -19088744
 ; REGS-NEXT:    setr r12, 0
+; REGS-NEXT:    setr r8, 500000
 ; REGS-NEXT:    .p2align 4
 ; REGS-NEXT:  .LBB2_1: # %for.body
 ; REGS-NEXT:    # =>This Inner Loop Header: Depth=1
@@ -190,8 +191,7 @@ define void @mix() nounwind {
 ; REGS-NEXT:    xorr r9, r9, r14
 ; REGS-NEXT:    addr r14, r12, r9
 ; REGS-NEXT:    incr r12, r12
-; REGS-NEXT:    cmprv r12, 500000
-; REGS-NEXT:    jmpnerel .LBB2_1
+; REGS-NEXT:    fbr r12, r8, 8, .LBB2_1
 ; REGS-NEXT:  # %bb.2: # %for.cond.cleanup
 ; REGS-NEXT:    addr r14, r9, r11
 ; REGS-NEXT:    subr r14, r14, r10

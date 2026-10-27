@@ -123,7 +123,11 @@ pre-emit passes rely on this liveness:
   spills between the pair do not stop it; it gives up at a FLAGS reader, a
   redefined compare operand, a call or inline asm.  Range is checked per
   branch at worst-case sizes plus alignment padding; a non-empty inline asm
-  (unbounded size) blocks only the branches that span it.
+  (unbounded size) blocks only the branches that span it.  At -O1 and up, a
+  loop compare with a constant outside simm4 (in the header or the only
+  latch) gets the constant in a register free throughout the loop, set by a
+  SETR/SETRU in the preheader, and becomes `FBR_RR`; other compares with
+  that constant in the loop reuse it.
 - Both rewrite only when FLAGS is dead after the branch
   (`KlaussCPUInstrInfo::flagsDeadAfter`): no later reader in the block and
   no successor with FLAGS live-in (MachineCSE can leave a successor reading
@@ -279,6 +283,7 @@ when clobbered.
 | `-klausscpu-short-forms` / `-klausscpu-short-branches` | on | ISA v3 1-word forms (override `-mattr`) |
 | `-klausscpu-enter-leave` / `-klausscpu-leaveret` | on | ENTER/LEAVE frames, LEAVE+RET → LEAVERET |
 | `-klausscpu-fuse-cmp-br` | on | FBR fused compare-and-branch |
+| `-klausscpu-fuse-loop-const` | on | FBR for a loop compare with a non-simm4 constant, via a free register set in the preheader |
 | `-klausscpu-arith-flag-reuse` | on | FlagReuse peephole |
 | `-klausscpu-w32-alu` / `-klausscpu-w32-compare` | on | 32-bit W ops / W compares |
 | `-klausscpu-group-selects` | on | consecutive selects on one condition share a compare/branch |
