@@ -7,6 +7,9 @@
 #ifndef LLVM_LIB_TARGET_KLAUSSCPU_MCTARGETDESC_KLAUSSCPUMCTARGETDESC_H
 #define LLVM_LIB_TARGET_KLAUSSCPU_MCTARGETDESC_KLAUSSCPUMCTARGETDESC_H
 
+#include "llvm/ADT/StringRef.h"
+#include <string>
+
 namespace llvm {
 class MCAsmBackend;
 class MCCodeEmitter;
@@ -25,16 +28,22 @@ MCAsmBackend *createKlaussCPUAsmBackend(const Target &T,
                                          const MCSubtargetInfo &STI,
                                          const MCRegisterInfo &MRI,
                                          const MCTargetOptions &Options);
-/// ISA v3: rewrite a 2-word immediate instruction into its 1-word short form
-/// when the immediate fits (KlaussCPUMCCompress.cpp). Returns true if changed.
-bool compressKlaussCPUInst(MCInst &Inst);
-/// ISA v3 A1 short branches (KlaussCPUMCCompress.cpp).
-bool isKlaussCPUShortBranch(unsigned Opcode);
-/// The 2-word form a short branch relaxes to (PC-relative when one exists).
-unsigned relaxKlaussCPUShortBranch(unsigned Opcode);
-// Index of the PC-relative operand of Opcode (a byte displacement from the
-// instruction's address when it is an immediate), or -1 if it has none.
-int getKlaussCPUPCRelOperand(unsigned Opcode);
+namespace KlaussCPU {
+/// FS with the -klausscpu-short-forms / -klausscpu-short-branches overrides
+/// applied, for every subtarget the target creates.
+std::string getEffectiveFeatureString(StringRef FS);
+
+/// The CompressPats (KlaussCPUInstrInfo.td): rewrite MI into its ISA v3
+/// short 1-word form, or a short branch back into its 2-word form.  Return
+/// false, leaving OutInst untouched, when MI has no such form.
+bool compress(MCInst &OutInst, const MCInst &MI, const MCSubtargetInfo &STI);
+bool uncompress(MCInst &OutInst, const MCInst &MI,
+                const MCSubtargetInfo &STI);
+} // namespace KlaussCPU
 } // namespace llvm
+
+// Defines symbolic names for the subtarget features.
+#define GET_SUBTARGETINFO_ENUM
+#include "KlaussCPUGenSubtargetInfo.inc"
 
 #endif // LLVM_LIB_TARGET_KLAUSSCPU_MCTARGETDESC_KLAUSSCPUMCTARGETDESC_H

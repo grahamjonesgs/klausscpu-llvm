@@ -29,7 +29,14 @@ words, word 0 = LEN[31:30] CLASS[29:26] attrs/OP[25:12] rd[11:8] rs1[7:4]
 rs2[3:0], imm32 in word 1.  The `Inst` fields in `KlaussCPUInstrInfo.td` are
 the encodings (each format class takes the ISA map's word-0 template; short
 forms derive theirs from the 2-word twin), emitted by `-gen-emitter`'s
-`getBinaryCodeForInstr`.  Operands that may be symbols carry an
+`getBinaryCodeForInstr`.  The AsmPrinter and AsmParser turn a 2-word
+instruction into its 1-word short form through the `CompressPat`s
+(`-gen-compress-inst-emitter`, `KlaussCPU::compress`) when its literal
+immediate fits, or when a branch target is a symbol; the asm backend relaxes
+a short branch by expanding its pattern again (`KlaussCPU::uncompress`).  The
+`short-forms` / `short-branches` subtarget features gate this; every CPU has
+them, and `-mllvm -klausscpu-short-forms=false` /
+`-klausscpu-short-branches=false` turn them off.  Operands that may be symbols carry an
 `EncoderMethod` that creates the fixup.  Every immediate operand has a
 range-checked `AsmOperandClass` (`KCImmAsmOperand`): the assembler rejects
 an out-of-range constant, and a symbol where no fixup exists, with the
@@ -167,7 +174,7 @@ add:
 ```
 llvm/lib/Target/KlaussCPU/
 ├── CMakeLists.txt              tablegen steps + add_llvm_target
-├── KlaussCPU.td                target root: includes Register+Instr .td, SchedModel
+├── KlaussCPU.td                target root: subtarget features, includes Register+Instr .td, SchedModel
 ├── KlaussCPURegisterInfo.td    16 GPRs (r0–r15) + SP; GPR class; allocation order
 ├── KlaussCPUInstrInfo.td       full ISA + KlaussCPURetGlue SDNode + isel patterns
 ├── KlaussCPUInstrInfo.h/.cpp   KlaussCPUGenInstrInfo wrapper
@@ -187,7 +194,7 @@ llvm/lib/Target/KlaussCPU/
 │   ├── KlaussCPUMCAsmInfo.h/.cpp  MCAsmInfoELF subclass
 │   ├── KlaussCPUInstPrinter.h/.cpp printInst / printOperand; uses GenAsmWriter.inc
 │   ├── KlaussCPUMCCodeEmitter.cpp  generated getBinaryCodeForInstr (encodings = .td Inst fields) + fixup operand hooks
-│   └── KlaussCPUMCTargetDesc.h/.cpp  LLVMInitializeKlaussCPUTargetMC
+│   └── KlaussCPUMCTargetDesc.h/.cpp  LLVMInitializeKlaussCPUTargetMC; generated CompressPat compress/uncompress
 └── TargetInfo/
     ├── CMakeLists.txt
     ├── KlaussCPUTargetInfo.h   declares getTheKlaussCPUTarget()
@@ -227,7 +234,8 @@ SelectionDAGTargetInfo    TSI;
 ### MCTargetDesc / AsmPrinter
 - `MCExpr::print()` is private → use `MAI.printExpr(OS, *expr)` instead
 - Include order in `KlaussCPUMCTargetDesc.cpp` matters:
-  `GET_REGINFO_ENUM` → `GET_INSTRINFO_MC_DESC` → `GET_SUBTARGETINFO_MC_DESC` → `GET_REGINFO_MC_DESC`
+  `GET_REGINFO_ENUM` → `GET_INSTRINFO_ENUM` → `GET_INSTRINFO_MC_DESC` → `GET_SUBTARGETINFO_MC_DESC` → `GET_REGINFO_MC_DESC`
+  (the subtarget feature enum comes from `KlaussCPUMCTargetDesc.h`; the CompressPat `.inc` goes last)
   (register enum must precede instr MC desc because implicit Uses/Defs reference register identifiers)
 - `SelectionDAGISel::getPassName()` is not virtual — do not try to override it
 - `INITIALIZE_PASS` expands to `void llvm::initializeXxxPass(PassRegistry&)` — experimental targets are not in `InitializePasses.h`, so add a manual forward declaration before the macro

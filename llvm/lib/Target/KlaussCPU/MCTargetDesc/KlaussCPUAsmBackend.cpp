@@ -231,9 +231,15 @@ public:
 
   // ── ISA v3 A1 short-branch relaxation ─────────────────────────────────────
 
-  bool mayNeedRelaxation(unsigned Opcode, ArrayRef<MCOperand>,
-                         const MCSubtargetInfo &) const override {
-    return isKlaussCPUShortBranch(Opcode);
+  // The short branches are the instructions whose CompressPat expands back
+  // (KlaussCPUInstrInfo.td); relaxing one is that expansion.
+  bool mayNeedRelaxation(unsigned Opcode, ArrayRef<MCOperand> Operands,
+                         const MCSubtargetInfo &STI) const override {
+    MCInst Inst, Long;
+    Inst.setOpcode(Opcode);
+    for (const MCOperand &Op : Operands)
+      Inst.addOperand(Op);
+    return KlaussCPU::uncompress(Long, Inst, STI);
   }
 
   // Stay short only when the target is resolved (same section, local) and
@@ -250,10 +256,11 @@ public:
   }
 
   void relaxInstruction(MCInst &Inst,
-                        const MCSubtargetInfo &) const override {
-    unsigned Long = relaxKlaussCPUShortBranch(Inst.getOpcode());
-    assert(Long && "relaxing a non-short-branch");
-    Inst.setOpcode(Long);
+                        const MCSubtargetInfo &STI) const override {
+    MCInst Long;
+    [[maybe_unused]] bool Success = KlaussCPU::uncompress(Long, Inst, STI);
+    assert(Success && "relaxing a non-short-branch");
+    Inst = std::move(Long);
   }
 
   // ── NOP padding ──────────────────────────────────────────────────────────

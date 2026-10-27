@@ -103,7 +103,7 @@ class PCRelAsmOperand<int width, int scale>
 }
 def PCRel32AsmOperand : PCRelAsmOperand<32, 1>;
 // Short branches are AsmVariantName "NoMatch" (the parser emits the 2-word
-// form and compressKlaussCPUInst shortens it), so this class never reaches
+// form and its CompressPat shortens it), so this class never reaches
 // the matcher; it gives PCRelTarget18 a class consistent with the others.
 def PCRel20AsmOperand : PCRelAsmOperand<20, 4>;
 def PCRel15AsmOperand : PCRelAsmOperand<15, 4>;
@@ -129,7 +129,9 @@ def SImm4AsmOperand : SImmAsmOperand<4>;
 // The DecoderMethod (KlaussCPUDisassembler) extends the field the way the CPU
 // does: a constant operand of a zero-extending op (ISA_ENCODING_V2_MAP §2,
 // SGN=0) and an absolute address decode unsigned, everything else signed.
-// PC-relative operands decode to the byte displacement from the instruction.
+// PC-relative operands decode to the byte displacement from the instruction;
+// they are OPERAND_PCREL, which is how the InstPrinter and MCInstrAnalysis
+// find them.
 //===----------------------------------------------------------------------===//
 
 def simm32 : Operand<i64> {
@@ -179,6 +181,12 @@ def BrTarget32 : Operand<OtherVT> {
   let EncoderMethod    = "getAbs32OpValue";
   let DecoderMethod    = "decodeUImmOperand<32>";
   let ParserMatchClass = UImm32SymAsmOperand;
+  let MCOperandPredicate = [{
+    int64_t Imm;
+    if (MCOp.evaluateAsConstantImm(Imm))
+      return isUInt<32>(Imm);
+    return MCOp.isExpr();
+  }];
 }
 
 def CallTarget32 : Operand<i64> {
@@ -193,26 +201,41 @@ def PCRelTarget32 : Operand<OtherVT> {
   let EncoderMethod    = "getPCRel32OpValue";
   let DecoderMethod    = "decodeSImmOperand<32>";
   let ParserMatchClass = PCRel32AsmOperand;
+  let OperandType      = "OPERAND_PCREL";
+  let MCOperandPredicate = [{
+    int64_t Imm;
+    if (MCOp.evaluateAsConstantImm(Imm))
+      return isInt<32>(Imm);
+    return MCOp.isExpr();
+  }];
 }
 
 def PCRelCallTarget32 : Operand<i64> {
   let EncoderMethod    = "getPCRel32OpValue";
   let DecoderMethod    = "decodeSImmOperand<32>";
   let ParserMatchClass = PCRel32AsmOperand;
+  let OperandType      = "OPERAND_PCREL";
 }
 
 def pcrel_simm32 : Operand<i64> {
   let EncoderMethod    = "getPCRel32OpValue";
   let DecoderMethod    = "decodeSImmOperand<32>";
   let ParserMatchClass = PCRel32AsmOperand;
+  let OperandType      = "OPERAND_PCREL";
 }
 
 // ISA v3 short branch target: byte displacement, encoded as a simm18 word
-// displacement in word0[17:0] (FK_KlaussCPU_PCREL18).
-def PCRelTarget18 : Operand<OtherVT> {
+// displacement in word0[17:0] (FK_KlaussCPU_PCREL18).  Only a symbolic
+// target compresses into a short branch (the CompressPats below): the asm
+// backend relaxes it back when the target is out of range or not local.  A
+// literal target stays in the 2-word form it was written in.
+def PCRelTarget18 : Operand<OtherVT>,
+                    ImmLeaf<i64, [{return isShiftedInt<18, 2>(Imm);}]> {
   let EncoderMethod    = "getPCRel18OpValue";
   let DecoderMethod    = "decodeSImmOperand<20>";
   let ParserMatchClass = PCRel20AsmOperand;
+  let OperandType      = "OPERAND_PCREL";
+  let MCOperandPredicate = [{ return MCOp.isExpr(); }];
 }
 
 // ISA v3 fused-branch target: byte displacement, encoded as a simm13 word
@@ -221,6 +244,7 @@ def PCRelTarget13 : Operand<OtherVT> {
   let EncoderMethod    = "getPCRel13OpValue";
   let DecoderMethod    = "decodeSImmOperand<15>";
   let ParserMatchClass = PCRel15AsmOperand;
+  let OperandType      = "OPERAND_PCREL";
 }
 
 // Fused-branch condition (PRED | INV << 3) and register-immediate operand.
@@ -1455,12 +1479,12 @@ def : Pat<(i64 (sextloadi32 (add (i64 GPR:$base), simm32_imm:$off))),
 //===----------------------------------------------------------------------===//
 // ISA v3 short 1-word forms (ISA_V3_PROPOSAL.md §3, A3/A4/A5).
 //
-// Never selected by isel. KlaussCPUMCCompress (MCTargetDesc) rewrites the
-// 2-word form into its short twin at MC emission — from the AsmPrinter and
-// the AsmParser alike — when the immediate fits the 8-bit word-0 field
-// (loads/stores: scaled by the access size). Operand lists and asm text match
-// the long form exactly, so the rewrite is an opcode swap.
-// -mllvm -klausscpu-short-forms=false disables it.
+// Never selected by isel.  The CompressPats below rewrite the 2-word form
+// into its short twin at MC emission -- from the AsmPrinter and the AsmParser
+// alike -- when the immediate fits the 8-bit word-0 field (loads/stores:
+// scaled by the access size).  Operand lists and asm text match the long form
+// exactly, so the rewrite is an opcode swap.  FeatureShortForms gates it
+// (-mllvm -klausscpu-short-forms=false turns it off).
 //
 // Encoding (ISA_ENCODING_V2_MAP §7.1): the long twin's word 0 with LEN=01
 // and the 8-bit immediate in [19:12]; a load/store offset is stored divided
@@ -1469,14 +1493,25 @@ def : Pat<(i64 (sextloadi32 (add (i64 GPR:$base), simm32_imm:$off))),
 
 // The imm8 operands: signed or unsigned as the long twin extends its imm32.
 // A load/store offset is a byte offset: simm8_lslN is bits [N+7:N] of an
-// (N+8)-bit signed offset whose low N bits are zero.
-class ShortImmOperand<string decoder> : Operand<i64> {
+// (N+8)-bit signed offset whose low N bits are zero.  `fits` is checked on
+// the long form's operand, of which the encoding keeps the low 32 bits.  Only
+// a literal compresses: a symbol needs the long form's word-1 fixup.
+class ShortImmOperand<string decoder, string fits>
+    : Operand<i64>, ImmLeaf<i64, "return " # fits # ";"> {
   let DecoderMethod = decoder;
+  let MCOperandPredicate = [{
+    if (!MCOp.isImm())
+      return false;
+    int64_t Imm = MCOp.getImm();
+    return }] # fits # [{;
+  }];
 }
-def uimm8 : ShortImmOperand<"decodeUImmOperand<8>">;
+def uimm8 : ShortImmOperand<"decodeUImmOperand<8>",
+                            "isUInt<8>(Lo_32(Imm))">;
 foreach shift = 0-3 in
 def simm8_lsl # shift
-    : ShortImmOperand<"decodeSImmOperand<" # !add(8, shift) # ">">;
+    : ShortImmOperand<"decodeSImmOperand<" # !add(8, shift) # ">",
+                      "isShiftedInt<8, " # shift # ">(SignExtend64<32>(Imm))">;
 
 // The short forms are decoded and printed like any instruction, but the
 // assembler never matches them (their asm string is the long form's, which
@@ -1581,9 +1616,9 @@ def LDIDX32_S_SH : ShortLoad<LDIDX32_S, 2, "ldidx32s\t$rd, $base, $offset">;
 def LDIDX64_SH   : ShortLoad<LDIDX64, 3, "ldidx64\t$rd, $base, $offset">;
 def LDIDX64U_SH  : ShortLoad<LDIDX64U, 3, "ldidx64u\t$rd, $base, $offset">;
 }
-// A1 short PC-relative branches (1 word, simm18 words). Produced by the same
-// compressor for any branch to a symbolic target and relaxed back to the
-// 2-word PC-relative form by the asm backend when out of range / not local.
+// A1 short PC-relative branches (1 word, simm18 words). Produced by their
+// CompressPats (below) for any branch to a symbolic target and relaxed back to
+// the 2-word PC-relative form by the asm backend when out of range / not local.
 let isBranch = 1, isTerminator = 1, Uses = [FLAGS] in {
 foreach c = ["z", "nz", "c", "nc", "o", "no", "s", "ns", "lt", "ge", "le",
              "gt", "ult", "uge", "ule", "ugt", "e", "ne"] in
@@ -1605,6 +1640,55 @@ def STIDX32_SH   : ShortStore<STIDX32, 2, "stidx32\t$rs_data, $base, $offset">;
 def STIDX64_SH   : ShortStore<STIDX64, 3, "stidx64\t$rs_data, $base, $offset">;
 def STIDX64U_SH  : ShortStore<STIDX64U, 3, "stidx64u\t$rs_data, $base, $offset">;
 }
+}
+
+// Long -> short compression (-gen-compress-inst-emitter; KlaussCPU::compress).
+// The immediate forms are compress-only.  A short branch expands back to the
+// 2-word PC-relative form (to the absolute one for JMPO/JMPNO, which have
+// none): that is how the asm backend relaxes it (KlaussCPU::uncompress), and
+// what makes it relaxable at all.
+let isCompressOnly = true in {
+let Predicates = [HasShortForms] in {
+def : CompressPat<(SETR GPR:$rd, simm8_lsl0:$imm),
+                  (SETR_SH GPR:$rd, simm8_lsl0:$imm)>;
+def : CompressPat<(ADDI GPR:$rd, GPR:$rs, simm8_lsl0:$imm),
+                  (ADDI_SH GPR:$rd, GPR:$rs, simm8_lsl0:$imm)>;
+def : CompressPat<(CMPRV_I GPR:$rs, simm8_lsl0:$imm),
+                  (CMPRV_SH GPR:$rs, simm8_lsl0:$imm)>;
+foreach op = ["ADDV", "MINUSV", "ANDV", "ORV", "XORV"] in
+def : CompressPat<(!cast<KCInst64>(op) GPR:$rd, GPR:$rs, uimm8:$imm),
+                  (!cast<KCInst32>(op # "_SH") GPR:$rd, GPR:$rs, uimm8:$imm)>;
+
+foreach ld = [["LDIDX8", "0"], ["LDIDX8_S", "0"], ["LDIDX16", "1"],
+              ["LDIDX16_S", "1"], ["LDIDX32", "2"], ["LDIDX32_S", "2"],
+              ["LDIDX64", "3"], ["LDIDX64U", "3"]] in {
+  defvar off = !cast<Operand>("simm8_lsl" # ld[1]);
+  def : CompressPat<(!cast<KCInst64>(ld[0]) GPR:$rd, GPR:$base, off:$offset),
+                    (!cast<KCInst32>(ld[0] # "_SH") GPR:$rd, GPR:$base,
+                                                    off:$offset)>;
+}
+foreach st = [["STIDX8", "0"], ["STIDX16", "1"], ["STIDX32", "2"],
+              ["STIDX64", "3"], ["STIDX64U", "3"]] in {
+  defvar off = !cast<Operand>("simm8_lsl" # st[1]);
+  def : CompressPat<(!cast<KCInst64>(st[0]) GPR:$rs_data, GPR:$base,
+                                            off:$offset),
+                    (!cast<KCInst32>(st[0] # "_SH") GPR:$rs_data, GPR:$base,
+                                                    off:$offset)>;
+}
+}
+}
+
+let Predicates = [HasShortBranches] in
+foreach c = ["", "Z", "NZ", "C", "NC", "O", "NO", "S", "NS", "LT", "GE", "LE",
+             "GT", "ULT", "UGE", "ULE", "UGT", "E", "NE"] in {
+  defvar short = !cast<KCInst32>("JMP" # c # "_SH");
+  defvar hasRel = !exists<KCInst64>("JMP" # c # "REL");
+  let isCompressOnly = hasRel in
+  def : CompressPat<(!cast<KCInst64>("JMP" # c) PCRelTarget18:$target),
+                    (short PCRelTarget18:$target)>;
+  if hasRel then
+  def : CompressPat<(!cast<KCInst64>("JMP" # c # "REL") PCRelTarget18:$target),
+                    (short PCRelTarget18:$target)>;
 }
 
 // ISA v3 B: fused compare-and-branch (class 0xD, 1 word, flags untouched).

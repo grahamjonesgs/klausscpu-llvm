@@ -9,6 +9,8 @@
 //   MCSubtargetInfo  — subtarget feature descriptions (from tablegen)
 //   MCInstPrinter    — text assembly printer
 //
+// and holds the generated CompressPat functions (KlaussCPU::compress).
+//
 //===----------------------------------------------------------------------===//
 
 #include "KlaussCPUInstPrinter.h"
@@ -16,11 +18,13 @@
 #include "KlaussCPUMCTargetDesc.h"
 #include "TargetInfo/KlaussCPUTargetInfo.h"
 #include "llvm/MC/MCDwarf.h"
+#include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrAnalysis.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/TargetParser/Triple.h"
 
@@ -28,6 +32,9 @@
 // identifiers (e.g. KlaussCPU::SP) in their implicit Uses/Defs tables.
 #define GET_REGINFO_ENUM
 #include "KlaussCPUGenRegisterInfo.inc"
+
+#define GET_INSTRINFO_ENUM
+#include "KlaussCPUGenInstrInfo.inc"
 
 #define GET_INSTRINFO_MC_DESC
 #define ENABLE_INSTR_PREDICATE_VERIFIER
@@ -40,6 +47,47 @@
 #include "KlaussCPUGenRegisterInfo.inc"
 
 using namespace llvm;
+
+#define GEN_COMPRESS_INSTR
+#define GEN_UNCOMPRESS_INSTR
+#include "KlaussCPUGenCompressInstEmitter.inc"
+
+bool KlaussCPU::compress(MCInst &OutInst, const MCInst &MI,
+                         const MCSubtargetInfo &STI) {
+  return compressInst(OutInst, MI, STI);
+}
+
+bool KlaussCPU::uncompress(MCInst &OutInst, const MCInst &MI,
+                           const MCSubtargetInfo &STI) {
+  return uncompressInst(OutInst, MI, STI);
+}
+
+// A/B switches for the ISA v3 short forms, on by default in every processor.
+// Given explicitly they override -mattr.
+static cl::opt<bool> EnableShortForms(
+    "klausscpu-short-forms", cl::init(true), cl::Hidden,
+    cl::desc("Emit ISA v3 short 1-word immediate forms when the value fits "
+             "(feature short-forms)"));
+static cl::opt<bool> EnableShortBranches(
+    "klausscpu-short-branches", cl::init(true), cl::Hidden,
+    cl::desc("Emit ISA v3 short 1-word PC-relative branches, relaxed when "
+             "out of range (feature short-branches)"));
+
+std::string KlaussCPU::getEffectiveFeatureString(StringRef FS) {
+  std::string Res = FS.str();
+  auto Override = [&Res](const cl::opt<bool> &Opt, StringRef Feature) {
+    if (!Opt.getNumOccurrences())
+      return;
+    if (!Res.empty())
+      Res += ',';
+    Res += (Opt ? "+" : "-") + Feature.str();
+  };
+  // short-branches implies short-forms, so -short-forms, applied last, turns
+  // the branches off too.
+  Override(EnableShortBranches, "short-branches");
+  Override(EnableShortForms, "short-forms");
+  return Res;
+}
 
 static MCInstrInfo *createKlaussCPUMCInstrInfo() {
   MCInstrInfo *X = new MCInstrInfo();
@@ -74,8 +122,9 @@ static MCSubtargetInfo *createKlaussCPUMCSubtargetInfo(const Triple &TT,
   std::string CPUName = std::string(CPU);
   if (CPUName.empty())
     CPUName = "generic";
-  return createKlaussCPUMCSubtargetInfoImpl(TT, CPUName, /*TuneCPU=*/CPUName,
-                                             FS);
+  return createKlaussCPUMCSubtargetInfoImpl(
+      TT, CPUName, /*TuneCPU=*/CPUName,
+      KlaussCPU::getEffectiveFeatureString(FS));
 }
 
 static MCInstPrinter *
@@ -85,6 +134,15 @@ createKlaussCPUMCInstPrinter(const Triple & /*T*/, unsigned SyntaxVariant,
   if (SyntaxVariant == 0)
     return new KlaussCPUInstPrinter(MAI, MII, MRI);
   return nullptr;
+}
+
+// Index of the PC-relative operand of Desc (a byte displacement from the
+// instruction's address when it is an immediate), or -1 if it has none.
+static int getPCRelOperand(const MCInstrDesc &Desc) {
+  for (auto [I, Op] : enumerate(Desc.operands()))
+    if (Op.OperandType == MCOI::OPERAND_PCREL)
+      return I;
+  return -1;
 }
 
 namespace {
@@ -99,7 +157,7 @@ public:
     const MCInstrDesc &Desc = Info->get(Inst.getOpcode());
     if (!(Desc.isBranch() || Desc.isCall()))
       return false; // includes LEAPC, whose PC-relative operand is data
-    int PCRelOp = getKlaussCPUPCRelOperand(Inst.getOpcode());
+    int PCRelOp = getPCRelOperand(Desc);
     unsigned TargetOp = PCRelOp >= 0 ? PCRelOp : 0;
     if (Inst.getNumOperands() <= TargetOp || !Inst.getOperand(TargetOp).isImm())
       return false; // register-indirect (JMPR/CALLR) or symbolic

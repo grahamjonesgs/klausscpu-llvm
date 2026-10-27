@@ -109,8 +109,10 @@ void KlaussCPUAsmPrinter::emitInstruction(const MachineInstr *MI) {
       Inst.addOperand(Op);
   }
 
-  compressKlaussCPUInst(Inst); // ISA v3 short 1-word forms
-  EmitToStreamer(*OutStreamer, Inst);
+  // ISA v3 short 1-word forms.
+  MCInst CInst;
+  bool Compressed = KlaussCPU::compress(CInst, Inst, getSubtargetInfo());
+  EmitToStreamer(*OutStreamer, Compressed ? CInst : Inst);
 }
 
 bool KlaussCPUAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,

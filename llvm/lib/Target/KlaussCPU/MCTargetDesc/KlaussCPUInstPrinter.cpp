@@ -5,7 +5,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "KlaussCPUInstPrinter.h"
-#include "KlaussCPUMCTargetDesc.h"
 #include "llvm/MC/MCInstrInfo.h"
 
 #define GET_INSTRINFO_ENUM
@@ -29,14 +28,14 @@ void KlaussCPUInstPrinter::printRegName(raw_ostream &OS, MCRegister Reg) {
 
 void KlaussCPUInstPrinter::printInst(const MCInst *MI, uint64_t Address,
                                       StringRef Annot,
-                                      const MCSubtargetInfo & /*STI*/,
+                                      const MCSubtargetInfo &STI,
                                       raw_ostream &O) {
-  CurAddress = Address;
-  printInstruction(MI, Address, O);
+  printInstruction(MI, Address, STI, O);
   printAnnotation(O, Annot);
 }
 
 void KlaussCPUInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
+                                         const MCSubtargetInfo & /*STI*/,
                                          raw_ostream &O) {
   const MCOperand &Op = MI->getOperand(OpNo);
   if (Op.isReg()) {
@@ -44,35 +43,38 @@ void KlaussCPUInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
     return;
   }
   if (Op.isImm()) {
-    // Branch targets: PC-relative operands hold the byte displacement from
-    // this instruction; absolute JMP/CALL targets hold the address.  With
-    // PrintBranchImmAsAddress (llvm-objdump) both print as the target address.
-    // JMPO/JMPNO have no PC-relative spelling, so their short forms print
-    // with the absolute mnemonic and must always show the target address.
-    if ((MI->getOpcode() == KlaussCPU::JMPO_SH ||
-         MI->getOpcode() == KlaussCPU::JMPNO_SH) && OpNo == 0) {
-      uint64_t Target = uint32_t(CurAddress + Op.getImm());
-      if (PrintBranchImmAsAddress)
-        O << formatHex(Target);
-      else
-        O << Target;
+    // An absolute JMP/CALL target holds the address; with
+    // PrintBranchImmAsAddress (llvm-objdump) it prints as one.
+    if (PrintBranchImmAsAddress && OpNo == 0 &&
+        (MII.get(MI->getOpcode()).isBranch() ||
+         MII.get(MI->getOpcode()).isCall())) {
+      O << formatHex(uint64_t(uint32_t(Op.getImm())));
       return;
-    }
-    if (PrintBranchImmAsAddress) {
-      int PCRelOp = getKlaussCPUPCRelOperand(MI->getOpcode());
-      const MCInstrDesc &Desc = MII.get(MI->getOpcode());
-      if (int(OpNo) == PCRelOp) {
-        O << formatHex(uint64_t(uint32_t(CurAddress + Op.getImm())));
-        return;
-      }
-      if (PCRelOp < 0 && OpNo == 0 && (Desc.isBranch() || Desc.isCall())) {
-        O << formatHex(uint64_t(uint32_t(Op.getImm())));
-        return;
-      }
     }
     O << Op.getImm();
     return;
   }
   assert(Op.isExpr() && "expected expression operand");
   MAI.printExpr(O, *Op.getExpr());
+}
+
+void KlaussCPUInstPrinter::printOperand(const MCInst *MI, uint64_t Address,
+                                         unsigned OpNo,
+                                         const MCSubtargetInfo &STI,
+                                         raw_ostream &O) {
+  const MCOperand &Op = MI->getOperand(OpNo);
+  if (!Op.isImm())
+    return printOperand(MI, OpNo, STI, O);
+  // The byte displacement from this instruction; with PrintBranchImmAsAddress
+  // (llvm-objdump) it prints as the target address.  JMPO/JMPNO have no
+  // PC-relative spelling, so their short forms print with the absolute
+  // mnemonic and must always show the target address.
+  uint64_t Target = uint32_t(Address + Op.getImm());
+  if (PrintBranchImmAsAddress)
+    O << formatHex(Target);
+  else if (MI->getOpcode() == KlaussCPU::JMPO_SH ||
+           MI->getOpcode() == KlaussCPU::JMPNO_SH)
+    O << Target;
+  else
+    O << Op.getImm();
 }

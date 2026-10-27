@@ -31,11 +31,20 @@ class KlaussCPUSubtarget : public KlaussCPUGenSubtargetInfo {
   SelectionDAGTargetInfo    TSI;
   const TargetMachine      &TM;
 
+  // Subtarget features (KlaussCPU.td), set by ParseSubtargetFeatures.
+#define GET_SUBTARGETINFO_MACRO(ATTRIBUTE, DEFAULT, GETTER)                    \
+  bool ATTRIBUTE = DEFAULT;
+#include "KlaussCPUGenSubtargetInfo.inc"
+
 public:
   KlaussCPUSubtarget(const Triple &TT, StringRef CPU, StringRef FS,
                      const TargetMachine &TM);
 
   void ParseSubtargetFeatures(StringRef CPU, StringRef TuneCPU, StringRef FS);
+
+#define GET_SUBTARGETINFO_MACRO(ATTRIBUTE, DEFAULT, GETTER)                    \
+  bool GETTER() const { return ATTRIBUTE; }
+#include "KlaussCPUGenSubtargetInfo.inc"
 
   const KlaussCPURegisterInfo  *getRegisterInfo()  const override { return &RI;  }
   const KlaussCPUInstrInfo     *getInstrInfo()      const override { return &II;  }

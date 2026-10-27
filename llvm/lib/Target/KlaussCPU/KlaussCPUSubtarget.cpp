@@ -5,6 +5,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "KlaussCPUSubtarget.h"
+#include "MCTargetDesc/KlaussCPUMCTargetDesc.h"
 
 #define DEBUG_TYPE "klausscpu-subtarget"
 
@@ -16,7 +17,8 @@ using namespace llvm;
 
 KlaussCPUSubtarget::KlaussCPUSubtarget(const Triple &TT, StringRef CPU,
                                         StringRef FS, const TargetMachine &TM)
-    : KlaussCPUGenSubtargetInfo(TT, CPU, /*TuneCPU=*/CPU, FS),
+    : KlaussCPUGenSubtargetInfo(TT, CPU, /*TuneCPU=*/CPU,
+                                KlaussCPU::getEffectiveFeatureString(FS)),
       RI(),
       II(*this, RI),  // RI is initialized before II (declaration order)
       FL(*this),
@@ -25,7 +27,7 @@ KlaussCPUSubtarget::KlaussCPUSubtarget(const Triple &TT, StringRef CPU,
       TM(TM) {
   // Parse any subtarget features.
   std::string CPUName = CPU.empty() ? "generic" : CPU.str();
-  ParseSubtargetFeatures(CPUName, CPUName, FS);
+  ParseSubtargetFeatures(CPUName, CPUName, getFeatureString());
 }
 
 bool KlaussCPUSubtarget::isPositionIndependent() const {

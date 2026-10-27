@@ -444,11 +444,14 @@ bool KlaussCPUAsmParser::matchAndEmitInstruction(SMLoc IDLoc,
       MatchInstructionImpl(Operands, Inst, ErrorInfo, MatchingInlineAsm);
 
   switch (Result) {
-  case Match_Success:
+  case Match_Success: {
     Inst.setLoc(IDLoc);
-    compressKlaussCPUInst(Inst); // ISA v3 short 1-word forms
-    Out.emitInstruction(Inst, getSTI());
+    // ISA v3 short 1-word forms.
+    MCInst CInst;
+    bool Compressed = KlaussCPU::compress(CInst, Inst, getSTI());
+    Out.emitInstruction(Compressed ? CInst : Inst, getSTI());
     return false;
+  }
 
   case Match_MissingFeature:
     return Error(IDLoc, "instruction requires an unsupported feature");
