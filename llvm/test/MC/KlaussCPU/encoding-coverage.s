@@ -205,6 +205,18 @@
         memget64	r1, r2
 # CHECK: memreadrr r1, r2 # encoding: [0x20,0x01,0x00,0x5b]
         memreadrr	r1, r2
+# CHECK: ldidx8r r1, r2, r3 # encoding: [0x23,0x01,0x60,0x58]
+        ldidx8r	r1, r2, r3
+# CHECK: ldidx8sr r1, r2, r3 # encoding: [0x23,0x01,0xe0,0x58]
+        ldidx8sr	r1, r2, r3
+# CHECK: ldidx16r r1, r2, r3 # encoding: [0x23,0x01,0x60,0x59]
+        ldidx16r	r1, r2, r3
+# CHECK: ldidx16sr r1, r2, r3 # encoding: [0x23,0x01,0xe0,0x59]
+        ldidx16sr	r1, r2, r3
+# CHECK: ldidx32r r1, r2, r3 # encoding: [0x23,0x01,0x60,0x5a]
+        ldidx32r	r1, r2, r3
+# CHECK: ldidx32sr r1, r2, r3 # encoding: [0x23,0x01,0xe0,0x5a]
+        ldidx32sr	r1, r2, r3
 # CHECK: ldidx64r r1, r2, r3 # encoding: [0x23,0x01,0x60,0x5b]
         ldidx64r	r1, r2, r3
 # CHECK: memreadr r1, 4096 # encoding: [0x00,0x01,0x40,0x9b,0x00,0x10,0x00,0x00]
@@ -253,6 +265,12 @@
         memset64	r1, r2
 # CHECK: memset64rr r1, r2 # encoding: [0x20,0x01,0x00,0x5f]
         memset64rr	r1, r2
+# CHECK: stidx8r r1, r2, r3 # encoding: [0x23,0x01,0x60,0x5c]
+        stidx8r	r1, r2, r3
+# CHECK: stidx16r r1, r2, r3 # encoding: [0x23,0x01,0x60,0x5d]
+        stidx16r	r1, r2, r3
+# CHECK: stidx32r r1, r2, r3 # encoding: [0x23,0x01,0x60,0x5e]
+        stidx32r	r1, r2, r3
 # CHECK: stidx64r r1, r2, r3 # encoding: [0x23,0x01,0x60,0x5f]
         stidx64r	r1, r2, r3
 # CHECK: memsetr r1, 4096 # encoding: [0x00,0x01,0x40,0x9f,0x00,0x10,0x00,0x00]

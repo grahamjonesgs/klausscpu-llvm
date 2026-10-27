@@ -496,7 +496,9 @@ SDValue KlaussCPUTargetLowering::LowerBR_JT(SDValue Op,
   SDValue EntryAddr = DAG.getNode(ISD::ADD, DL, MVT::i64, Base, Scaled);
 
   // Load the 4-byte absolute target address from the table (zero-extend).
-  // All code addresses fit in 32 bits, so zero-extension is correct.
+  // All code addresses fit in 32 bits, so zero-extension is correct.  This
+  // selects the register-offset LDIDX32R, which force-aligns its EA; the
+  // table is 4-byte aligned (EK_Custom32's entry alignment).
   MachineFunction &MF = DAG.getMachineFunction();
   SDValue Target =
       DAG.getExtLoad(ISD::ZEXTLOAD, DL, MVT::i64, Chain, EntryAddr,

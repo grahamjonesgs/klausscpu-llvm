@@ -391,9 +391,9 @@ class RRst<bits<32> word0, string asmstr, list<dag> pat = []>
   let SchedRW    = [WriteStore];
 }
 
-// Register-offset indexed 64-bit load/store: EA = rs1 + rs2 (the offset
-// register is a real GPR operand in rs2).
-class Idx64RegOff_ld<bits<32> word0, string asmstr>
+// Register-offset indexed load/store (MODE=11, 1 word): EA = rs1 + rs2 (the
+// offset register is a real GPR operand in rs2).
+class IdxRegOff_ld<bits<32> word0, string asmstr>
     : KCInst32<word0, (outs GPR:$rd), (ins GPR:$base, GPR:$offset), asmstr> {
   bits<4> rd;
   bits<4> base;
@@ -404,7 +404,7 @@ class Idx64RegOff_ld<bits<32> word0, string asmstr>
   let mayLoad    = 1;
   let SchedRW    = [WriteLoad];
 }
-class Idx64RegOff_st<bits<32> word0, string asmstr>
+class IdxRegOff_st<bits<32> word0, string asmstr>
     : KCInst32<word0, (outs), (ins GPR:$rs_data, GPR:$base, GPR:$offset),
                asmstr> {
   bits<4> rs_data;
@@ -1405,8 +1405,24 @@ def MEMSETR  : RV_st<0x9F400000, "memsetr\t$rs_data, $addr"> { let mayStore = 1;
 def LDIDX64U : RRV_ld<0x9B200000, "ldidx64u\t$rd, $base, $offset">;
 def STIDX64U : RRV_st<0x9F200000, "stidx64u\t$rs_data, $base, $offset">;
 // v2: register-offset indexed ops are a single word (offset reg in rs2[3:0]).
-def LDIDX64R : Idx64RegOff_ld<0x5B600000, "ldidx64r\t$rd, $base, $offset">;
-def STIDX64R : Idx64RegOff_st<0x5F600000, "stidx64r\t$rs_data, $base, $offset">;
+def LDIDX64R : IdxRegOff_ld<0x5B600000, "ldidx64r\t$rd, $base, $offset">;
+def STIDX64R : IdxRegOff_st<0x5F600000, "stidx64r\t$rs_data, $base, $offset">;
+// The sub-word MODE=11 forms: the same word-0 layout with SIZE [25:24] and,
+// for loads, SGN [23] (CPU_ARCHITECTURE.md §8.1: every SIZE x SGN x MODE is
+// legal; pipeline_core.sv:550-570 decodes them, EA = rs1 + rs2 at :1004).
+// The ISA map names only the 64-bit pair.  Like the LDIDX16/32 / STIDX16/32
+// forms, the 16- and 32-bit ones are force-aligned (EA & ~1 / & ~3; the RTL
+// at :1106-1113 and :1186-1188), which is safe while LLVM emits no
+// under-aligned access (see the MEMSET16/32 warning above).
+def LDIDX8R   : IdxRegOff_ld<0x58600000, "ldidx8r\t$rd, $base, $offset">;
+def LDIDX16R  : IdxRegOff_ld<0x59600000, "ldidx16r\t$rd, $base, $offset">;
+def LDIDX32R  : IdxRegOff_ld<0x5A600000, "ldidx32r\t$rd, $base, $offset">;
+def LDIDX8_SR  : IdxRegOff_ld<0x58E00000, "ldidx8sr\t$rd, $base, $offset">;
+def LDIDX16_SR : IdxRegOff_ld<0x59E00000, "ldidx16sr\t$rd, $base, $offset">;
+def LDIDX32_SR : IdxRegOff_ld<0x5AE00000, "ldidx32sr\t$rd, $base, $offset">;
+def STIDX8R   : IdxRegOff_st<0x5C600000, "stidx8r\t$rs_data, $base, $offset">;
+def STIDX16R  : IdxRegOff_st<0x5D600000, "stidx16r\t$rs_data, $base, $offset">;
+def STIDX32R  : IdxRegOff_st<0x5E600000, "stidx32r\t$rs_data, $base, $offset">;
 
 // ── V (fixed op32 + imm32/address) — push / conditional jumps ───────────────
 def PUSHV : Vsp<0xA4400000, "pushv\t$imm", uimm32> { let mayStore = 1; }
@@ -1864,3 +1880,28 @@ def : Pat<(i64 (load (add (i64 GPR:$base), (i64 GPR:$idx)))),
           (LDIDX64R GPR:$base, GPR:$idx)>;
 def : Pat<(store (i64 GPR:$val), (add (i64 GPR:$base), (i64 GPR:$idx))),
           (STIDX64R GPR:$val, GPR:$base, GPR:$idx)>;
+
+// The same for the sub-word accesses (`s[i]`, `a[i]` of char/short/int, the
+// jump-table entry load): 1-word LDIDX{8,16,32}[_S]R / STIDX{8,16,32}R
+// instead of ADDR + MEMGETn / MEMSETn.  The 16/32-bit forms force-align
+// their EA, as LDIDX16/32 and STIDX16/32 do; every such access LLVM emits is
+// naturally aligned (allowsMisalignedMemoryAccesses() is false).
+multiclass RegRegLoadPat<PatFrag ld, Instruction Inst> {
+  def : Pat<(i64 (ld (add (i64 GPR:$base), (i64 GPR:$idx)))),
+            (Inst GPR:$base, GPR:$idx)>;
+}
+defm : RegRegLoadPat<zextloadi8,  LDIDX8R>;
+defm : RegRegLoadPat<extloadi8,   LDIDX8R>;
+defm : RegRegLoadPat<sextloadi8,  LDIDX8_SR>;
+defm : RegRegLoadPat<zextloadi16, LDIDX16R>;
+defm : RegRegLoadPat<extloadi16,  LDIDX16R>;
+defm : RegRegLoadPat<sextloadi16, LDIDX16_SR>;
+defm : RegRegLoadPat<zextloadi32, LDIDX32R>;
+defm : RegRegLoadPat<extloadi32,  LDIDX32R>;
+defm : RegRegLoadPat<sextloadi32, LDIDX32_SR>;
+def : Pat<(truncstorei8  (i64 GPR:$val), (add (i64 GPR:$base), (i64 GPR:$idx))),
+          (STIDX8R  GPR:$val, GPR:$base, GPR:$idx)>;
+def : Pat<(truncstorei16 (i64 GPR:$val), (add (i64 GPR:$base), (i64 GPR:$idx))),
+          (STIDX16R GPR:$val, GPR:$base, GPR:$idx)>;
+def : Pat<(truncstorei32 (i64 GPR:$val), (add (i64 GPR:$base), (i64 GPR:$idx))),
+          (STIDX32R GPR:$val, GPR:$base, GPR:$idx)>;

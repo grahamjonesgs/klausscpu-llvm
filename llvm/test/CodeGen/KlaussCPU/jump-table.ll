@@ -9,24 +9,25 @@
 ; mode too.  The generic BR_JT expansion treats PIC tables as relative and
 ; added the table base to the loaded entry (jumping to table+target), which
 ; broke every jump table in the -fPIC baremetal builds.  LowerBR_JT loads
-; the entry (zero-extended) and jumps to it directly.  Jump tables are still
+; the entry (zero-extended, one register-offset LDIDX32R off the 4-byte
+; aligned table) and jumps to it directly.  Jump tables are still
 ; off by default (OFF) pending an on-board re-test.
 
 define i64 @sw(i64 %x) {
 ; CHECK-LABEL: sw:
 ; CHECK:         setr [[BASE:r[0-9]+]], .LJTI0_0
-; CHECK:         addr [[E:r[0-9]+]], [[BASE]], {{r[0-9]+}}
-; CHECK-NEXT:    memget32 [[T:r[0-9]+]], [[E]]
+; CHECK:         ldidx32r [[T:r[0-9]+]], [[BASE]], {{r[0-9]+}}
 ; CHECK-NEXT:    jmpr [[T]]
-; CHECK:       .LJTI0_0:
+; CHECK:       .p2align 2
+; CHECK-NEXT:  .LJTI0_0:
 ; CHECK-NEXT:    .long .LBB0_
 ;
 ; PIC-LABEL: sw:
 ; PIC:           leapc [[BASE:r[0-9]+]], .LJTI0_0
-; PIC:           addr [[E:r[0-9]+]], [[BASE]], {{r[0-9]+}}
-; PIC-NEXT:      memget32 [[T:r[0-9]+]], [[E]]
+; PIC:           ldidx32r [[T:r[0-9]+]], [[BASE]], {{r[0-9]+}}
 ; PIC-NEXT:      jmpr [[T]]
-; PIC:         .LJTI0_0:
+; PIC:         .p2align 2
+; PIC-NEXT:    .LJTI0_0:
 ; PIC-NEXT:      .long .LBB0_
 ;
 ; OFF-LABEL: sw:
