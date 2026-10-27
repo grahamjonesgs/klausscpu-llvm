@@ -66,9 +66,11 @@ def PCRelTargetAsmOperand : AsmOperandClass {
 }
 
 // Constant-only small immediates: an expression here cannot be encoded.
-def UImm4AsmOperand : AsmOperandClass {
-  let Name            = "UImm4";
-  let PredicateMethod = "isUImm4";
+// The fused-branch condition is PRED | INV << 3 with PRED 0..4; the CPU
+// traps on PRED 5..7 (pipeline_core.sv), so those are rejected too.
+def FBRCondAsmOperand : AsmOperandClass {
+  let Name            = "FBRCond";
+  let PredicateMethod = "isFBRCond";
   let RenderMethod    = "addImmOperands";
 }
 
@@ -96,6 +98,13 @@ def simm32 : Operand<i64> {
 
 def uimm32 : Operand<i64> {
   let DecoderMethod    = "decodeUImmOperand<32>";
+  let ParserMatchClass = AnyImmAsmOperand;
+}
+
+// Shift count / bit index in word0[20:15].  The assembler encodes the low 6
+// bits of any constant; isel only selects counts 0..63.
+def uimm6 : Operand<i64>, ImmLeaf<i64, [{ return isUInt<6>(Imm); }]> {
+  let DecoderMethod    = "decodeUImmOperand<6>";
   let ParserMatchClass = AnyImmAsmOperand;
 }
 
@@ -163,10 +172,10 @@ def PCRelTarget13 : Operand<OtherVT> {
 }
 
 // Fused-branch condition (PRED | INV << 3) and register-immediate operand.
-// The CPU traps on PRED 5..7, so those do not decode.
+// The CPU traps on PRED 5..7, so those neither assemble nor decode.
 def fbr_cc : Operand<i64> {
   let DecoderMethod    = "decodeFBRCondOperand";
-  let ParserMatchClass = UImm4AsmOperand;
+  let ParserMatchClass = FBRCondAsmOperand;
 }
 
 def fbr_simm4 : Operand<i64> {
@@ -381,7 +390,7 @@ class I0<bits<32> word0, dag outs, dag ins, string asmstr, list<dag> pat = []>
 // 3-operand (rd and rs independent in v2).  The count/position operand is a
 // plain immediate; its low 6 bits are encoded.
 class ShiftImmN<bits<32> word0, string mnem, list<dag> pat = []>
-    : KCInst32<word0, (outs GPR:$rd), (ins GPR:$rs, simm32:$imm),
+    : KCInst32<word0, (outs GPR:$rd), (ins GPR:$rs, uimm6:$imm),
                mnem # "\t$rd, $rs, $imm", pat> {
   bits<4> rd;
   bits<4> rs;
@@ -395,7 +404,7 @@ class ShiftImmN<bits<32> word0, string mnem, list<dag> pat = []>
 // Bit test by embedded constant N — flag-only, no destination register
 // (Z = ~bit).
 class BitTestImmN<bits<32> word0, string asmstr>
-    : KCInst32<word0, (outs), (ins GPR:$rs, simm32:$imm), asmstr> {
+    : KCInst32<word0, (outs), (ins GPR:$rs, uimm6:$imm), asmstr> {
   bits<4> rs;
   bits<6> imm;
   let Inst{20-15} = imm;
@@ -1039,7 +1048,6 @@ def : Pat<(i64 (add GPR:$rs, simm32_imm:$imm)), (ADDI GPR:$rs, simm32_imm:$imm)>
 // Out-of-range constants simply fall through to the register-register form.
 //===----------------------------------------------------------------------===//
 
-def uimm6      : ImmLeaf<i64, [{ return isUInt<6>(Imm); }]>;
 def uimm32_imm : ImmLeaf<i64, [{ return isUInt<32>(Imm); }]>;
 
 // Shift by a constant amount (0–63).
@@ -1587,14 +1595,14 @@ def FBR_RI : FusedBranch<0x74200000,
 // `shlv r1, 3`) assembling as rd == rs so existing hand-written .s / inline
 // asm keeps working.  The printer always emits the 3-operand form.
 //===----------------------------------------------------------------------===//
-def : InstAlias<"shlv\t$rd, $imm", (SHLV GPR:$rd, GPR:$rd, simm32:$imm)>;
-def : InstAlias<"shrv\t$rd, $imm", (SHRV GPR:$rd, GPR:$rd, simm32:$imm)>;
-def : InstAlias<"shrav\t$rd, $imm", (SHRAV GPR:$rd, GPR:$rd, simm32:$imm)>;
-def : InstAlias<"rolv\t$rd, $imm", (ROLV GPR:$rd, GPR:$rd, simm32:$imm)>;
-def : InstAlias<"rorv\t$rd, $imm", (RORV GPR:$rd, GPR:$rd, simm32:$imm)>;
-def : InstAlias<"bset\t$rd, $imm", (BSET GPR:$rd, GPR:$rd, simm32:$imm)>;
-def : InstAlias<"bclr\t$rd, $imm", (BCLR GPR:$rd, GPR:$rd, simm32:$imm)>;
-def : InstAlias<"btgl\t$rd, $imm", (BTGL GPR:$rd, GPR:$rd, simm32:$imm)>;
+def : InstAlias<"shlv\t$rd, $imm", (SHLV GPR:$rd, GPR:$rd, uimm6:$imm)>;
+def : InstAlias<"shrv\t$rd, $imm", (SHRV GPR:$rd, GPR:$rd, uimm6:$imm)>;
+def : InstAlias<"shrav\t$rd, $imm", (SHRAV GPR:$rd, GPR:$rd, uimm6:$imm)>;
+def : InstAlias<"rolv\t$rd, $imm", (ROLV GPR:$rd, GPR:$rd, uimm6:$imm)>;
+def : InstAlias<"rorv\t$rd, $imm", (RORV GPR:$rd, GPR:$rd, uimm6:$imm)>;
+def : InstAlias<"bset\t$rd, $imm", (BSET GPR:$rd, GPR:$rd, uimm6:$imm)>;
+def : InstAlias<"bclr\t$rd, $imm", (BCLR GPR:$rd, GPR:$rd, uimm6:$imm)>;
+def : InstAlias<"btgl\t$rd, $imm", (BTGL GPR:$rd, GPR:$rd, uimm6:$imm)>;
 def : InstAlias<"incr\t$rd", (INCR GPR:$rd, GPR:$rd)>;
 def : InstAlias<"decr\t$rd", (DECR GPR:$rd, GPR:$rd)>;
 def : InstAlias<"negr\t$rd", (NEGR GPR:$rd, GPR:$rd)>;

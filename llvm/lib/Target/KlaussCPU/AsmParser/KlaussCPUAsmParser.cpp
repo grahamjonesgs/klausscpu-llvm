@@ -92,9 +92,10 @@ public:
     return true;
   }
 
-  bool isUImm4() const {
+  // Fused-branch condition PRED | INV << 3; PRED 5..7 trap on the CPU.
+  bool isFBRCond() const {
     int64_t Val;
-    return isConstantImm(Val) && isUInt<4>(Val);
+    return isConstantImm(Val) && isUInt<4>(Val) && (Val & 7) <= 4;
   }
 
   bool isSImm4() const {

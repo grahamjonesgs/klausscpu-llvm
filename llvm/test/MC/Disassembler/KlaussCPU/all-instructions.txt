@@ -1,10 +1,16 @@
 # RUN: llvm-mc -triple=klausscpu --disassemble %s | FileCheck %s
+# RUN: llvm-mc -triple=klausscpu --disassemble %s -o %t.s
+# RUN: llvm-mc -triple=klausscpu %t.s | sed '/^$/d' | diff %t.s -
 
-# One word per decodable instruction, with distinct field values: rd = rs1 = r3 (tied forms need them equal), rs2 = r7,
-# negative / high-bit immediates.  Every line also reassembles to the same
-# bytes (or, for a short branch with a numeric target, to the equivalent
-# 2-word form).  PC-relative targets print as the byte displacement; JMPO /
-# JMPNO short forms print the absolute target (no PC-relative spelling).
+# One word per decodable instruction, with distinct field values: rd = rs1 =
+# r3 (tied forms need them equal), rs2 = r7, negative / high-bit immediates.
+# PC-relative targets print as the byte displacement; JMPO / JMPNO short forms
+# print the absolute target (no PC-relative spelling).
+#
+# The second and third RUN lines check that every line of the disassembly is
+# accepted by the assembler and prints back unchanged.  The bytes can differ:
+# the assembler picks a short form for a long one whose immediate fits, and a
+# short branch with a numeric target reassembles to the 2-word form.
 
 # RET_I
 # CHECK: ret

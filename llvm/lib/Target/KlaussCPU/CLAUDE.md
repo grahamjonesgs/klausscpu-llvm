@@ -1110,7 +1110,8 @@ DEBUG_PLAN Phase 0 (plan: `klaussCPU/DEBUG_PLAN.md`), branch `debug-support`.
   builds one decode table per instruction width (32/64/96 bits) from the .td
   `Inst` fields; `getInstruction` picks it from LEN.  Operand types name
   their `DecoderMethod` (signed vs unsigned imm32 follows the CPU's SGN
-  extension; FBR cc rejects PRED 5..7).  Short forms are decoded but kept out
+  extension; the FBR cc operand rejects PRED 5..7 here and in the
+  assembler).  Short forms are decoded but kept out
   of the asm matcher with `AsmVariantName = "NoMatch"`; SHLAR (= SHLR1) and
   the retired v1 ops are `isAsmParserOnly`.  More specific encodings (ROLR1 =
   ROLV N=1) are tried first by the generated table.  PC-relative operands
