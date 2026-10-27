@@ -1213,8 +1213,8 @@ def : Pat<(sra GPR:$rs, uimm6:$sh), (SHRAV GPR:$rs, uimm6:$sh)>;
 // (pipeline_core.sv ex_shcnt = ex_b[5:0]; klausscc emu/exec.rs
 // exec_shift_bit `& 0x3F`), so selectShiftMask drops what cannot change
 // those bits: an `and` that keeps them (the `& 63` of a rotate or funnel
-// shift, the zero-extension of a promoted i32 amount), X + 64k, and turns
-// 64k - X into NEGR and 64k-1 - X into NOTR.
+// shift, the zero-extension of a promoted i32 amount) and X +/-/|/^ 64k,
+// nested, and turns 64k - X into NEGR and 63 - X (or X ^ 63) into NOTR.
 def shamt : ComplexPattern<i64, 1, "selectShiftMask", [], [], 0>;
 def : Pat<(shl  GPR:$rs1, shamt:$rs2), (SHLR   GPR:$rs1, shamt:$rs2)>;
 def : Pat<(srl  GPR:$rs1, shamt:$rs2), (SHRR   GPR:$rs1, shamt:$rs2)>;
@@ -1237,15 +1237,17 @@ def : Pat<(xor GPR:$rs, negsimm32_imm:$i), (XORI GPR:$rs, negsimm32_imm:$i)>;
 // A mask of the high 64-k bits (k >= 32) or of the low k bits (k > 32),
 // which no imm32 reaches: a shift pair (2 words) instead of SETR64 + ANDR
 // (4 words, the same count).  Only for a constant with no other use in the
-// block: a shared SETR64 serves every AND with one more instruction.
+// block: a shared SETR64 serves every AND with one more instruction.  Not in
+// a loop either, where MachineLICM hoists the SETR64 (preferMaskShiftPair).
 def highmask64_imm : PatLeaf<(imm), [{
   uint64_t V = N->getZExtValue();
-  return N->hasOneUse() && V != 0 && isMask_64(~V) && llvm::countr_zero(V) >= 32;
+  return N->hasOneUse() && V != 0 && isMask_64(~V) &&
+         llvm::countr_zero(V) >= 32 && preferMaskShiftPair();
 }]>;
 def lowmask64_imm : PatLeaf<(imm), [{
   uint64_t V = N->getZExtValue();
   return N->hasOneUse() && isMask_64(V) && llvm::popcount(V) > 32 &&
-         llvm::popcount(V) < 64;
+         llvm::popcount(V) < 64 && preferMaskShiftPair();
 }]>;
 def TrailingZeros : SDNodeXForm<imm, [{
   return CurDAG->getTargetConstant(llvm::countr_zero(N->getZExtValue()),

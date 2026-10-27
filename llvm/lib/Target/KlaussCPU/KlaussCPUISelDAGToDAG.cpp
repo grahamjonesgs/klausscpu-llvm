@@ -20,6 +20,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "KlaussCPUTargetMachine.h"
+#include "llvm/ADT/SCCIterator.h"
+#include "llvm/CodeGen/FunctionLoweringInfo.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
@@ -213,6 +215,7 @@ public:
 
   bool runOnMachineFunction(MachineFunction &MF) override {
     LocalDist.clear();
+    CycleBlocks.reset();
     return SelectionDAGISel::runOnMachineFunction(MF);
   }
 
@@ -235,6 +238,7 @@ public:
   bool selectBitFieldExtract(SDValue N, SDValue &Src, SDValue &Field);
   bool selectFieldShiftPair(SDValue N, SDValue &Src, SDValue &Shl,
                             SDValue &Srl);
+  bool preferMaskShiftPair() const;
 
   bool SelectInlineAsmMemoryOperand(const SDValue &Op,
                                     InlineAsm::ConstraintCode ConstraintID,
@@ -247,6 +251,9 @@ private:
   // frameOffsetFitsShortForm: LocalDist[I] bounds how far below the frame
   // register local I can start.  Filled lazily, once per function.
   SmallVector<int64_t, 0> LocalDist;
+  // preferMaskShiftPair: the IR blocks on a CFG cycle.  Filled lazily, once
+  // per function.
+  mutable std::optional<SmallPtrSet<const BasicBlock *, 16>> CycleBlocks;
 };
 
 class KlaussCPUDAGToDAGISelLegacy : public SelectionDAGISelLegacy {
@@ -634,6 +641,28 @@ bool KlaussCPUDAGToDAGISel::selectFieldShiftPair(SDValue N, SDValue &Src,
   Shl = CurDAG->getTargetConstant(64 - Start - Len, DL, MVT::i64);
   Srl = CurDAG->getTargetConstant(64 - Len, DL, MVT::i64);
   return true;
+}
+
+// highmask64_imm / lowmask64_imm: an AND with a 64-bit mask is a shift pair
+// (2 words) rather than SETR64 + ANDR (4 words, the same count) unless the
+// block is on a CFG cycle in a function optimised for speed.  There
+// MachineLICM hoists the SETR64 out of the loop, which leaves one ANDR per
+// iteration instead of two shifts.  At -O0 nothing is hoisted, and with
+// optsize the 2 words win.
+bool KlaussCPUDAGToDAGISel::preferMaskShiftPair() const {
+  const Function &F = CurDAG->getMachineFunction().getFunction();
+  if (OptLevel == CodeGenOptLevel::None || F.hasOptSize())
+    return true;
+  const BasicBlock *BB = FuncInfo->MBB->getBasicBlock();
+  if (!BB)
+    return true;
+  if (!CycleBlocks) {
+    CycleBlocks.emplace();
+    for (scc_iterator<const Function *> I = scc_begin(&F); !I.isAtEnd(); ++I)
+      if (I.hasCycle())
+        CycleBlocks->insert(I->begin(), I->end());
+  }
+  return !CycleBlocks->contains(BB);
 }
 
 // Inline asm memory operands ('m', 'o') become a (base, simm32 offset) pair,

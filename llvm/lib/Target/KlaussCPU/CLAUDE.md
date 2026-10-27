@@ -32,7 +32,7 @@ describe earlier states of the backend and are superseded by this file.
 | Indirect branch / call | `JMPR` / `CALLR`; jump tables are off by default (`-klausscpu-min-jump-table-entries=N` enables them) |
 | `llvm.trap` / `llvm.debugtrap` | `HALT` / `TRAP` (the debugger's breakpoint) |
 | Shifts / rotates | 64-bit only; a register amount uses only rs2[5:0], so isel drops masks/extensions of it (`shamt`); an i32 rotate is a 64-bit rotate of the value copied into both halves (`ROLW`/`RORW`) |
-| Bit fields | `BEXTR` for `(x >> s) & (2^l - 1)` with s, l in [1, 31]; other fields and high/low masks beyond an imm32 as a shift pair |
+| Bit fields | `BEXTR` for `(x >> s) & (2^l - 1)` with s, l in [1, 31]; other fields and high/low masks beyond an imm32 as a shift pair (a mask stays SETR64 + ANDR in a loop, where MachineLICM hoists the SETR64, unless optsize) |
 
 ### Instruction encoding
 

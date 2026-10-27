@@ -392,6 +392,100 @@ define i64 @mask_shared(i64 %x, i64 %y) nounwind {
   ret i64 %r
 }
 
+; In a loop the mask stays SETR64: MachineLICM hoists it, leaving one ANDR
+; per iteration instead of two shifts.  With optsize the shift pair is kept.
+define void @mask_high24_loop(ptr %p, i64 %n) nounwind {
+; CHECK-LABEL: mask_high24_loop:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    setr r12, 0
+; CHECK-NEXT:    setr64 r14, 0, -256
+; CHECK-NEXT:    .p2align 4
+; CHECK-NEXT:  .LBB30_1: # %loop
+; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
+; CHECK-NEXT:    ldidx64 r13, r0, 0
+; CHECK-NEXT:    incr r12, r12
+; CHECK-NEXT:    andr r13, r13, r14
+; CHECK-NEXT:    stidx64 r13, r0, 0
+; CHECK-NEXT:    addi r0, r0, 8
+; CHECK-NEXT:    fbr r12, r1, 3, .LBB30_1
+; CHECK-NEXT:  # %bb.2: # %exit
+; CHECK-NEXT:    leaveret
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %0 ], [ %i1, %loop ]
+  %a = getelementptr i64, ptr %p, i64 %i
+  %v = load i64, ptr %a
+  %m = and i64 %v, -1099511627776
+  store i64 %m, ptr %a
+  %i1 = add i64 %i, 1
+  %c = icmp ult i64 %i1, %n
+  br i1 %c, label %loop, label %exit
+exit:
+  ret void
+}
+
+define void @mask_low40_loop(ptr %p, i64 %n) nounwind {
+; CHECK-LABEL: mask_low40_loop:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    setr r12, 0
+; CHECK-NEXT:    setr64 r14, -1, 255
+; CHECK-NEXT:    .p2align 4
+; CHECK-NEXT:  .LBB31_1: # %loop
+; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
+; CHECK-NEXT:    ldidx64 r13, r0, 0
+; CHECK-NEXT:    incr r12, r12
+; CHECK-NEXT:    andr r13, r13, r14
+; CHECK-NEXT:    stidx64 r13, r0, 0
+; CHECK-NEXT:    addi r0, r0, 8
+; CHECK-NEXT:    fbr r12, r1, 3, .LBB31_1
+; CHECK-NEXT:  # %bb.2: # %exit
+; CHECK-NEXT:    leaveret
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %0 ], [ %i1, %loop ]
+  %a = getelementptr i64, ptr %p, i64 %i
+  %v = load i64, ptr %a
+  %m = and i64 %v, 1099511627775
+  store i64 %m, ptr %a
+  %i1 = add i64 %i, 1
+  %c = icmp ult i64 %i1, %n
+  br i1 %c, label %loop, label %exit
+exit:
+  ret void
+}
+
+define void @mask_high24_loop_optsize(ptr %p, i64 %n) nounwind optsize {
+; CHECK-LABEL: mask_high24_loop_optsize:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    setr r12, 0
+; CHECK-NEXT:  .LBB32_1: # %loop
+; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
+; CHECK-NEXT:    ldidx64 r14, r0, 0
+; CHECK-NEXT:    incr r12, r12
+; CHECK-NEXT:    shrv r14, r14, 40
+; CHECK-NEXT:    shlv r14, r14, 40
+; CHECK-NEXT:    stidx64 r14, r0, 0
+; CHECK-NEXT:    addi r0, r0, 8
+; CHECK-NEXT:    fbr r12, r1, 3, .LBB32_1
+; CHECK-NEXT:  # %bb.2: # %exit
+; CHECK-NEXT:    leaveret
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %0 ], [ %i1, %loop ]
+  %a = getelementptr i64, ptr %p, i64 %i
+  %v = load i64, ptr %a
+  %m = and i64 %v, -1099511627776
+  store i64 %m, ptr %a
+  %i1 = add i64 %i, 1
+  %c = icmp ult i64 %i1, %n
+  br i1 %c, label %loop, label %exit
+exit:
+  ret void
+}
+
 ; 128-bit shifts: bit 6 of the amount picks the half; 63 - amount is NOTR.
 
 define i128 @shl128(i128 %a, i128 %b) nounwind {
@@ -400,7 +494,7 @@ define i128 @shl128(i128 %a, i128 %b) nounwind {
 ; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    andv r14, r2, 64
 ; CHECK-NEXT:    shlr r12, r0, r2
-; CHECK-NEXT:    fbri r14, 0, 8, .LBB30_2
+; CHECK-NEXT:    fbri r14, 0, 8, .LBB33_2
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    notr r14, r2
 ; CHECK-NEXT:    shrv r13, r0, 1
@@ -408,7 +502,7 @@ define i128 @shl128(i128 %a, i128 %b) nounwind {
 ; CHECK-NEXT:    shrr r14, r13, r14
 ; CHECK-NEXT:    orr r11, r11, r14
 ; CHECK-NEXT:    leaveret
-; CHECK-NEXT:  .LBB30_2:
+; CHECK-NEXT:  .LBB33_2:
 ; CHECK-NEXT:    copy r11, r12
 ; CHECK-NEXT:    setr r12, 0
 ; CHECK-NEXT:    leaveret
@@ -422,7 +516,7 @@ define i128 @lshr128(i128 %a, i128 %b) nounwind {
 ; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    andv r12, r2, 64
 ; CHECK-NEXT:    shrr r11, r1, r2
-; CHECK-NEXT:    fbri r12, 0, 8, .LBB31_2
+; CHECK-NEXT:    fbri r12, 0, 8, .LBB34_2
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    notr r12, r2
 ; CHECK-NEXT:    shlv r14, r1, 1
@@ -430,7 +524,7 @@ define i128 @lshr128(i128 %a, i128 %b) nounwind {
 ; CHECK-NEXT:    shlr r12, r14, r12
 ; CHECK-NEXT:    orr r12, r13, r12
 ; CHECK-NEXT:    leaveret
-; CHECK-NEXT:  .LBB31_2:
+; CHECK-NEXT:  .LBB34_2:
 ; CHECK-NEXT:    copy r12, r11
 ; CHECK-NEXT:    setr r11, 0
 ; CHECK-NEXT:    leaveret
@@ -444,7 +538,7 @@ define i128 @ashr128(i128 %a, i128 %b) nounwind {
 ; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    andv r12, r2, 64
 ; CHECK-NEXT:    sarr r11, r1, r2
-; CHECK-NEXT:    fbri r12, 0, 8, .LBB32_2
+; CHECK-NEXT:    fbri r12, 0, 8, .LBB35_2
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    notr r12, r2
 ; CHECK-NEXT:    shlv r14, r1, 1
@@ -452,7 +546,7 @@ define i128 @ashr128(i128 %a, i128 %b) nounwind {
 ; CHECK-NEXT:    shlr r12, r14, r12
 ; CHECK-NEXT:    orr r12, r13, r12
 ; CHECK-NEXT:    leaveret
-; CHECK-NEXT:  .LBB32_2:
+; CHECK-NEXT:  .LBB35_2:
 ; CHECK-NEXT:    shrav r14, r1, 63
 ; CHECK-NEXT:    copy r12, r11
 ; CHECK-NEXT:    copy r11, r14
