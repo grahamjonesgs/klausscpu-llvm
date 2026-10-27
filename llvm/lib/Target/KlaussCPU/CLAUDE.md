@@ -278,7 +278,12 @@ when clobbered.
   (`KlaussCPUInstrInfo::CreateTargetPostRAHazardRecognizer`: LLVM's default
   recognizer sets no issue limit for a model without itineraries) and
   renames registers to break anti-dependencies on the critical path
-  (`getAntiDepBreakMode`, `ANTIDEP_CRITICAL`).  An inline memcpy is
+  (`getAntiDepBreakMode`, `ANTIDEP_CRITICAL`).  The pre-RA scheduler keeps
+  a `CMPRR`/`CMPRV`/`CMPRVU` next to the conditional branch that reads its
+  flags (a macro-fusion DAG mutation, `KlaussCPUTargetMachine::
+  createMachineScheduler`): an instruction it put in between could be given
+  the compare operand's register by the allocator, and that redefinition
+  stops FuseCmpBr (`sched-cmp-br-pair.ll`).  An inline memcpy is
   lowered as groups of four loads then four stores
   (`MaxGluedStoresPerMemcpy`), so no store directly follows its load.
   `-mcpu=no-sched` is the A/B baseline without either scheduler (and
@@ -326,6 +331,7 @@ when clobbered.
 | `-klausscpu-w32-alu` / `-klausscpu-w32-compare` | on | 32-bit W ops / W compares |
 | `-klausscpu-group-selects` | on | consecutive selects on one condition share a compare/branch |
 | `-klausscpu-fold-fi-offset` | on | fold frame index + constant into the access / ADDI offset |
+| `-klausscpu-sched-cmp-br-pair` | on | pre-RA scheduler keeps a compare next to its branch (for FuseCmpBr) |
 | `-klausscpu-break-anti-deps` | on | post-RA scheduler renames registers to break critical-path anti-dependencies |
 | `-klausscpu-postra-single-issue` | on | post-RA scheduler issues one instruction per cycle (=false: LLVM's unlimited default) |
 | `-klausscpu-early-iv-inc` | on | count a single-block loop from Init - C so its increment can issue early |
@@ -441,7 +447,7 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPUCalleeSavedCFI.cpp pre-emit: a callee-saved register's .cfi_offset behind its scheduled spill
 ├── KlaussCPUTargetTransformInfo.h/.cpp  TTI — M8 unroll budget gated on branch density, no peel; LSR cost order, register count
 ├── KlaussCPUSubtarget.h/.cpp   single subtarget; member init order is critical
-├── KlaussCPUTargetMachine.h/.cpp CodeGenTargetMachineImpl; pass config (AtomicExpand, EarlyIVInc, isel, pre-sched2 and pre-emit passes)
+├── KlaussCPUTargetMachine.h/.cpp CodeGenTargetMachineImpl; pass config (AtomicExpand, EarlyIVInc, isel, pre-sched2 and pre-emit passes); pre-RA scheduler compare/branch pairing
 ├── AsmParser/
 │   └── KlaussCPUAsmParser.cpp  -gen-asm-matcher driver; registers vs symbols, PC-relative targets
 ├── Disassembler/

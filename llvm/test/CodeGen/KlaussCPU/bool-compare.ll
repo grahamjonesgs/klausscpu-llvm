@@ -185,10 +185,9 @@ define i64 @w_cse(i32 %a, i32 %b, i1 %p) nounwind {
 ; CHECK-LABEL: w_cse:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    andv r12, r2, 1
-; CHECK-NEXT:    cmprv r12, 0
+; CHECK-NEXT:    andv r14, r2, 1
 ; CHECK-NEXT:    cmpltrw r12, r0, r1
-; CHECK-NEXT:    jmperel .LBB14_2
+; CHECK-NEXT:    fbri r14, 0, 0, .LBB14_2
 ; CHECK-NEXT:  # %bb.1: # %t
 ; CHECK-NEXT:    addr r12, r12, r12
 ; CHECK-NEXT:  .LBB14_2: # %f

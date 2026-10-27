@@ -23,11 +23,14 @@
 #include "KlaussCPUMachineFunctionInfo.h"
 #include "KlaussCPUTargetTransformInfo.h"
 #include "TargetInfo/KlaussCPUTargetInfo.h"
+#include "llvm/CodeGen/MacroFusion.h"
+#include "llvm/CodeGen/MachineScheduler.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/PassRegistry.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Target/TargetOptions.h"
 #include <optional>
@@ -87,6 +90,40 @@ KlaussCPUTargetMachine::KlaussCPUTargetMachine(
   // Epilogues that end in a plain LEAVE tear the frame down before the block's
   // terminator; CFIFixup re-establishes the frame CFI for later blocks.
   setCFIFixup(true);
+}
+
+// The pre-RA scheduler keeps a compare next to the conditional branch that
+// reads its flags, the pair KlaussCPUFuseCmpBr fuses after register
+// allocation.  An instruction the scheduler puts in between may get a
+// compare operand's register (it is free once the compare has read it), and
+// that redefinition blocks the fusion.
+static cl::opt<bool> SchedFuseCmpBr(
+    "klausscpu-sched-cmp-br-pair", cl::Hidden, cl::init(true),
+    cl::desc("Pre-RA scheduler: keep a compare adjacent to its branch"));
+
+static bool isCmpBrPair(const TargetInstrInfo &, const TargetSubtargetInfo &,
+                        const MachineInstr *First, const MachineInstr &Second) {
+  if (!Second.isConditionalBranch() ||
+      !Second.readsRegister(KlaussCPU::FLAGS, /*TRI=*/nullptr))
+    return false;
+  if (!First)
+    return true;
+  switch (First->getOpcode()) {
+  case KlaussCPU::CMPRR_I:
+  case KlaussCPU::CMPRV_I:
+  case KlaussCPU::CMPRVU_I:
+    return true;
+  default:
+    return false;
+  }
+}
+
+ScheduleDAGInstrs *
+KlaussCPUTargetMachine::createMachineScheduler(MachineSchedContext *C) const {
+  ScheduleDAGMILive *DAG = createSchedLive(C);
+  if (SchedFuseCmpBr)
+    DAG->addMutation(createMacroFusionDAGMutation({isCmpBrPair}));
+  return DAG;
 }
 
 //===----------------------------------------------------------------------===//
