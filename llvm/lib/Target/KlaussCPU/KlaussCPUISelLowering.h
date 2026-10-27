@@ -70,6 +70,14 @@ public:
   // instead of emitting a separate ZEXTW/ZEXTB/ZEXTH.
   bool isZExtFree(SDValue Val, EVT VT2) const override;
 
+  // What loop strength reduction and CodeGenPrepare may fold into an access
+  // or an add/compare: exactly what isel selects (see the .cpp).
+  bool isLegalAddressingMode(const DataLayout &DL, const AddrMode &AM, Type *Ty,
+                             unsigned AS,
+                             Instruction *I = nullptr) const override;
+  bool isLegalAddImmediate(int64_t Imm) const override;
+  bool isLegalICmpImmediate(int64_t Imm) const override;
+
   // Multiply by a constant: MULV takes a simm32, holds EX for the multiplier
   // latency and has no short form; a shift and an add/sub may be cheaper.
   bool decomposeMulByConstant(LLVMContext &Context, EVT VT,

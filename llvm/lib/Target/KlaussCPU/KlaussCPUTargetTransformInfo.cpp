@@ -146,3 +146,41 @@ void KlaussCPUTTIImpl::getPeelingPreferences(
   PP.AllowLoopNestsPeeling = false;
   PP.PeelProfiledIterations = false;
 }
+
+unsigned KlaussCPUTTIImpl::getNumberOfRegisters(unsigned ClassID) const {
+  // R0-R14: R15 is the frame pointer (and R7 the base pointer only in a
+  // function that realigns its stack).  No vector registers, so the loop and
+  // SLP vectorizers give up at once.
+  return ClassID == 1 ? 0 : 15;
+}
+
+TypeSize KlaussCPUTTIImpl::getRegisterBitWidth(
+    TargetTransformInfo::RegisterKind K) const {
+  switch (K) {
+  case TargetTransformInfo::RGK_Scalar:
+    return TypeSize::getFixed(64);
+  case TargetTransformInfo::RGK_FixedWidthVector:
+    return TypeSize::getFixed(0);
+  case TargetTransformInfo::RGK_ScalableVector:
+    return TypeSize::getScalable(0);
+  }
+  llvm_unreachable("unknown register kind");
+}
+
+// Loop strength reduction: instruction count first, as on RISC-V.  The
+// default ranks register count first, which keeps one pointer IV per array
+// (an ADDI each per iteration) where one shared index and the 1-word r + r
+// LDIDXnR/STIDXnR need a single increment: `a[i] = b[i] + c[i] + d[i]` goes
+// from 12 to 9 instructions per iteration.  With 15 registers, an extra one
+// rarely spills (LSR still counts each register past 14 as an instruction).
+bool KlaussCPUTTIImpl::isLSRCostLess(
+    const TargetTransformInfo::LSRCost &C1,
+    const TargetTransformInfo::LSRCost &C2) const {
+  // Adds inside the loop to sum base registers need a temporary.
+  unsigned C1NumRegs = C1.NumRegs + (C1.NumBaseAdds != 0);
+  unsigned C2NumRegs = C2.NumRegs + (C2.NumBaseAdds != 0);
+  return std::tie(C1.Insns, C1NumRegs, C1.AddRecCost, C1.NumIVMuls,
+                  C1.NumBaseAdds, C1.ScaleCost, C1.ImmCost, C1.SetupCost) <
+         std::tie(C2.Insns, C2NumRegs, C2.AddRecCost, C2.NumIVMuls,
+                  C2.NumBaseAdds, C2.ScaleCost, C2.ImmCost, C2.SetupCost);
+}

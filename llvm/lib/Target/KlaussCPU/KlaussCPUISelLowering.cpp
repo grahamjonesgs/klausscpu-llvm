@@ -334,6 +334,46 @@ bool KlaussCPUTargetLowering::isZExtFree(SDValue Val, EVT VT2) const {
   return TargetLowering::isZExtFree(Val, VT2);
 }
 
+// The load/store addressing modes of KlaussCPUInstrInfo.td: [r] and
+// r + simm32 at every width (MEMGETn/MEMSETn, LDIDXn/STIDXn), and r + r with
+// no displacement (LDIDXnR/STIDXnR, MODE=11).  There is no scaled index, and
+// no absolute or symbol address: a global or a constant address is a SETRU /
+// SETR into a register first.  An access wider than a register is split into
+// 8-byte pieces at base + 8k, which r + r does not reach.  (The default
+// claims r + r for every size, a bare constant address and 2*r, and caps the
+// offset at simm16.)
+bool KlaussCPUTargetLowering::isLegalAddressingMode(const DataLayout &DL,
+                                                    const AddrMode &AM,
+                                                    Type *Ty, unsigned AS,
+                                                    Instruction *I) const {
+  if (AM.BaseGV || AM.ScalableOffset || !isInt<32>(AM.BaseOffs))
+    return false;
+
+  switch (AM.Scale) {
+  case 0: // "r + i"; a bare "i" needs a register.
+    return AM.HasBaseReg;
+  case 1:
+    if (!AM.HasBaseReg) // "r + i"
+      return true;
+    // "r + r"
+    return AM.BaseOffs == 0 &&
+           (!Ty->isSized() || DL.getTypeStoreSize(Ty).getKnownMinValue() <= 8);
+  default:
+    return false;
+  }
+}
+
+// ADDI adds a simm32, ADDV a zero-extended imm32, MINUSV subtracts one.
+bool KlaussCPUTargetLowering::isLegalAddImmediate(int64_t Imm) const {
+  return isInt<32>(Imm) || isUInt<32>(Imm) ||
+         isUInt<32>(-static_cast<uint64_t>(Imm));
+}
+
+// CMPRV compares with a simm32, CMPRVU with a zero-extended imm32.
+bool KlaussCPUTargetLowering::isLegalICmpImmediate(int64_t Imm) const {
+  return isInt<32>(Imm) || isUInt<32>(Imm);
+}
+
 // The DAGCombiner calls this for (mul x, C) and, on true, expands C =
 // 2^N + 1, 2^N - 1 or 1 - 2^N into (x << N) + x, (x << N) - x or
 // x - (x << N): two ALU ops, both 1 word.  Only those shapes are accepted:

@@ -4,11 +4,14 @@
 ; independent instruction up (the pre-RA MISched schedules bottom-up), so in a
 ; byte-copy loop the counter and pointer updates go between the load and the
 ; store that uses it.  With -mcpu=no-sched (NoSchedModel, PostRAScheduler=0)
-; it stays off and the store follows the load directly.
+; it stays off and the store follows the load directly.  LSR is off so the
+; loop keeps its two pointer IVs (it would share one index between the
+; register-offset load and store, leaving nothing to move).
 ;
-; RUN: llc -march=klausscpu -verify-machineinstrs -O1 < %s | FileCheck %s
-; RUN: llc -march=klausscpu -verify-machineinstrs -O1 -mcpu=no-sched < %s \
-; RUN:   | FileCheck %s --check-prefix=NOSCHED
+; RUN: llc -march=klausscpu -verify-machineinstrs -O1 -disable-lsr < %s \
+; RUN:   | FileCheck %s
+; RUN: llc -march=klausscpu -verify-machineinstrs -O1 -disable-lsr \
+; RUN:   -mcpu=no-sched < %s | FileCheck %s --check-prefix=NOSCHED
 
 define void @bytecopy(ptr %d, ptr %s, i64 %n) {
 ; CHECK-LABEL: bytecopy:
@@ -27,13 +30,15 @@ entry:
   br i1 %cmp, label %exit, label %loop
 
 loop:
-  %i = phi i64 [ %inc, %loop ], [ 0, %entry ]
-  %src = getelementptr inbounds i8, ptr %s, i64 %i
-  %v = load i8, ptr %src, align 1
-  %dst = getelementptr inbounds i8, ptr %d, i64 %i
-  store i8 %v, ptr %dst, align 1
-  %inc = add nuw i64 %i, 1
-  %done = icmp eq i64 %inc, %n
+  %p = phi ptr [ %p1, %loop ], [ %s, %entry ]
+  %q = phi ptr [ %q1, %loop ], [ %d, %entry ]
+  %k = phi i64 [ %k1, %loop ], [ %n, %entry ]
+  %v = load i8, ptr %p, align 1
+  store i8 %v, ptr %q, align 1
+  %p1 = getelementptr inbounds i8, ptr %p, i64 1
+  %q1 = getelementptr inbounds i8, ptr %q, i64 1
+  %k1 = add i64 %k, -1
+  %done = icmp eq i64 %k1, 0
   br i1 %done, label %exit, label %loop
 
 exit:

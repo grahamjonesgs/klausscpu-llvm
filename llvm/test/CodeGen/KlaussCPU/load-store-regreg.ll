@@ -163,15 +163,15 @@ define i64 @slen(ptr %s) nounwind {
 ; CHECK-LABEL: slen:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    setr r12, 0
+; CHECK-NEXT:    setr r14, 0
 ; CHECK-NEXT:    .p2align 4
 ; CHECK-NEXT:  .LBB12_1: # %loop
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
-; CHECK-NEXT:    ldidx8r r14, r0, r12
-; CHECK-NEXT:    incr r12, r12
-; CHECK-NEXT:    fbri r14, 0, 8, .LBB12_1
+; CHECK-NEXT:    ldidx8r r13, r0, r14
+; CHECK-NEXT:    copy r12, r14
+; CHECK-NEXT:    incr r14, r14
+; CHECK-NEXT:    fbri r13, 0, 8, .LBB12_1
 ; CHECK-NEXT:  # %bb.2: # %done
-; CHECK-NEXT:    decr r12, r12
 ; CHECK-NEXT:    leaveret
 entry:
   br label %loop

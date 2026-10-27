@@ -253,7 +253,15 @@ when clobbered.
 - TTI (`KlaussCPUTargetTransformInfo.cpp`): moderate partial/runtime
   unrolling (MaxCount 4) with the budget scaled down for branch-dense loop
   bodies, no peeling; `-mcpu=no-sched` reverts to no body-duplicating
-  unrolling.
+  unrolling.  Loop strength reduction ranks solutions by instruction count first
+  (`isLSRCostLess`, as RISC-V), sees 15 GPRs and no vector registers, and
+  drops a solution that costs more than the loop it started from
+  (`shouldDropLSRSolutionIfLessProfitable`).  `isLegalAddressingMode` (in
+  `KlaussCPUISelLowering.cpp`) is exactly what isel selects: r + simm32,
+  r + r (no displacement, accesses up to 8 bytes), no scaled index, no
+  absolute address; `isLegalAddImmediate` / `isLegalICmpImmediate` are the
+  imm32 forms (ADDI/ADDV/MINUSV, CMPRV/CMPRVU).  So array loops share one
+  byte-offset IV across their r + r accesses.
 
 ### Hidden options (`-mllvm`)
 
@@ -374,7 +382,7 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPUAsmPrinter.cpp     MachineInstr → MCInst (+ CompressPat), inline-asm operand printing
 ├── KlaussCPUFlagReuse.cpp      pre-emit: CMPRV Rd,0 + JMPE/NE → JMPZ/NZ (default on)
 ├── KlaussCPUFuseCmpBr.cpp      pre-emit: compare + branch → ISA v3 FBR (default on)
-├── KlaussCPUTargetTransformInfo.h/.cpp  TTI — M8 unroll budget gated on branch density, no peel
+├── KlaussCPUTargetTransformInfo.h/.cpp  TTI — M8 unroll budget gated on branch density, no peel; LSR cost order, register count
 ├── KlaussCPUSubtarget.h/.cpp   single subtarget; member init order is critical
 ├── KlaussCPUTargetMachine.h/.cpp CodeGenTargetMachineImpl; pass config (AtomicExpand, isel, pre-emit passes)
 ├── AsmParser/

@@ -26,6 +26,10 @@
 // (NoSchedModel, the M8 A/B baseline) there is no scheduler to fill the gaps, so
 // it reverts to the conservative pre-M8 preferences.
 //
+// Loop strength reduction counts instructions first (isLSRCostLess) against
+// the real register file (getNumberOfRegisters) and the addressing modes in
+// KlaussCPUTargetLowering::isLegalAddressingMode.
+//
 //===----------------------------------------------------------------------===//
 
 #ifndef LLVM_LIB_TARGET_KLAUSSCPU_KLAUSSCPUTARGETTRANSFORMINFO_H
@@ -59,6 +63,20 @@ public:
 
   void getPeelingPreferences(Loop *L, ScalarEvolution &SE,
                              TTI::PeelingPreferences &PP) const override;
+
+  unsigned getNumberOfRegisters(unsigned ClassID) const override;
+  TypeSize
+  getRegisterBitWidth(TargetTransformInfo::RegisterKind K) const override;
+  bool isLSRCostLess(const TargetTransformInfo::LSRCost &C1,
+                     const TargetTransformInfo::LSRCost &C2) const override;
+  // LSR's search is heuristic: under the instruction-first order it can
+  // settle on a solution worse than the loop it started from
+  // (perf_baseline's k_alu: a second IV only for a value used after the
+  // loop, +1 instruction per iteration).  Keep the loop as it was then.
+  // LSR's estimate of that loop can be optimistic: a strlen-style loop
+  // whose exit value is the pre-increment index keeps a COPY it would have
+  // removed (+1 per iteration); the corpus still favours dropping.
+  bool shouldDropLSRSolutionIfLessProfitable() const override { return true; }
 };
 
 } // namespace llvm
