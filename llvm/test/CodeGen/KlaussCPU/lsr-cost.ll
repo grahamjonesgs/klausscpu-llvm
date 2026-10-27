@@ -155,10 +155,10 @@ define void @mix() nounwind {
 ; CHECK-NEXT:  .LBB2_1: # %for.body
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
 ; CHECK-NEXT:    addr r13, r14, r13
+; CHECK-NEXT:    shrv r9, r14, 3
 ; CHECK-NEXT:    shlv r11, r13, 7
 ; CHECK-NEXT:    xorr r13, r11, r13
-; CHECK-NEXT:    shrv r11, r14, 3
-; CHECK-NEXT:    subr r13, r13, r11
+; CHECK-NEXT:    subr r13, r13, r9
 ; CHECK-NEXT:    addr r14, r13, r14
 ; CHECK-NEXT:    shlv r11, r14, 11
 ; CHECK-NEXT:    xorr r14, r11, r14
@@ -167,8 +167,8 @@ define void @mix() nounwind {
 ; CHECK-NEXT:    fbr r12, r10, 8, .LBB2_1
 ; CHECK-NEXT:  # %bb.2: # %for.cond.cleanup
 ; CHECK-NEXT:    addr r12, r14, r13
-; CHECK-NEXT:    setru r14, g_sink
-; CHECK-NEXT:    stidx64 r12, r14, 0
+; CHECK-NEXT:    setru r13, g_sink
+; CHECK-NEXT:    stidx64 r12, r13, 0
 ; CHECK-NEXT:    leaveret
 ;
 ; REGS-LABEL: mix:

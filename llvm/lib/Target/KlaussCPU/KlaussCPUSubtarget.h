@@ -76,6 +76,14 @@ public:
   CodeGenOptLevel getOptLevelToEnablePostRAScheduler() const override {
     return CodeGenOptLevel::Less;
   }
+
+  // Let the post-RA scheduler rename registers to break anti-dependencies
+  // on the critical path.  Register allocation reuses a freed register at
+  // once (a rematerialised LEAPC into the register the previous one used,
+  // a shift result register reused for an unrelated one), which pins a
+  // dependent pair together where the scheduler could otherwise move an
+  // independent instruction between them.
+  AntiDepBreakMode getAntiDepBreakMode() const override;
 };
 
 } // namespace llvm

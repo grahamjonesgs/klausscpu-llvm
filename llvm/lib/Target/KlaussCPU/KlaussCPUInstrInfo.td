@@ -357,6 +357,7 @@ class RRR<bits<32> word0, dag outs, dag ins, string asmstr,
   let Inst{7-4}  = rs1;
   let Inst{3-0}  = rs2;
   let Defs       = [FLAGS];   // arith/cmp/shift/mul/div set flags (bitwise over-marked; safe)
+  let SchedRW    = [WriteALU, WriteFlags];
 }
 
 //===----------------------------------------------------------------------===//
@@ -432,6 +433,7 @@ class R_inplace<bits<32> word0, string asmstr, list<dag> pat = []>
   let Inst{11-8}  = rd;
   let Constraints = "$rd = $rs1";
   let Defs        = [FLAGS];   // inc/dec/neg/shift-by-1/sext set flags (over-marked; safe)
+  let SchedRW     = [WriteALU, WriteFlags];
 }
 
 // Unary 3-operand form: rd = f(rs1).  ISA v2 encodes rd and rs1 separately
@@ -447,6 +449,7 @@ class R_unary<bits<32> word0, string mnem, list<dag> pat = []>
   let Inst{11-8} = rd;
   let Inst{7-4}  = rs1;
   let Defs       = [FLAGS];   // inc/dec/neg/sext/... set flags (over-marked; safe)
+  let SchedRW    = [WriteALU, WriteFlags];
 }
 
 // Input-only, source in rs1: PUSH, SETSP, DELAYR, LCDDATAR
@@ -493,6 +496,7 @@ class ShiftImmN<bits<32> word0, string mnem, list<dag> pat = []>
   let Inst{11-8}  = rd;
   let Inst{7-4}   = rs;
   let Defs        = [FLAGS];   // shlv/shrv/rolv/rorv set flags
+  let SchedRW     = [WriteALU, WriteFlags];
 }
 
 // Bit test by embedded constant N — flag-only, no destination register
@@ -541,6 +545,7 @@ class RV_imm<bits<32> word0, string mnem, Operand immop = simm32>
   let Inst{11-8}  = rd;
   let Inst{7-4}   = rs;
   let Defs        = [FLAGS];   // addv/minusv set flags (bitwise-imm over-marked; safe)
+  let SchedRW     = [WriteALU, WriteFlags];
 }
 
 // Three registers + imm32: rd = f(rs1, rs2, imm32) (BDEP).
@@ -582,6 +587,7 @@ class RRV_alu<bits<32> word0, string asmstr, list<dag> pat = []>
   let Inst{11-8}  = rd;
   let Inst{7-4}   = rs;
   let Defs        = [FLAGS];   // addi sets flags
+  let SchedRW     = [WriteALU, WriteFlags];
 }
 
 // Indexed load: rd = mem[base + offset]
@@ -717,11 +723,11 @@ def XORR   : RRR<0x45800000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
 def ADDW   : RRR<0x44280000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "addw\t$rd, $rs1, $rs2">;
 def SUBW   : RRR<0x44680000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "subw\t$rd, $rs1, $rs2">;
 def ADDIW  : RRV_alu<0x88380000, "addiw\t$rd, $rs, $imm">;
-let SchedRW = [WriteMul] in
+let SchedRW = [WriteMul, WriteMulFlags] in
 def MULW   : RRR<0x68880000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "mulw\t$rd, $rs1, $rs2">;
 
 // Multiply (EX-serialized, ~5c — M8)
-let SchedRW = [WriteMul] in {
+let SchedRW = [WriteMul, WriteMulFlags] in {
 def MULR   : RRR<0x68800000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "mulr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (mul GPR:$rs1, GPR:$rs2))]>;
@@ -736,7 +742,7 @@ def MULHUR : RRR<0x68400000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
 }
 
 // Divide / modulo (EX-serialized, iterative — M8)
-let SchedRW = [WriteDiv] in {
+let SchedRW = [WriteDiv, WriteDivFlags] in {
 def DIVR   : RRR<0x69800000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "divr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (sdiv GPR:$rs1, GPR:$rs2))]>;
@@ -1054,9 +1060,9 @@ def SHRV    : ShiftImmN<0x50604000, "shrv">;
 def SHRAV   : ShiftImmN<0x50A04000, "shrav">;
 // The immediate forms use the same EX-serialised multiplier and divider as
 // MULR/DIVR (pipeline_core.sv class A decode: U_MUL/U_DIV/U_MOD for LEN=10).
-let SchedRW = [WriteMul] in
+let SchedRW = [WriteMul, WriteMulFlags] in
 def MULV    : RV_imm<0xA8800000, "mulv">;
-let SchedRW = [WriteDiv] in {
+let SchedRW = [WriteDiv, WriteDivFlags] in {
 def DIVV    : RV_imm<0xA9800000, "divv">;
 def MODV    : RV_imm<0xAA800000, "modv">;
 }

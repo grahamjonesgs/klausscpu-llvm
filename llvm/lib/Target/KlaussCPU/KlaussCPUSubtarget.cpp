@@ -6,6 +6,7 @@
 
 #include "KlaussCPUSubtarget.h"
 #include "MCTargetDesc/KlaussCPUMCTargetDesc.h"
+#include "llvm/Support/CommandLine.h"
 
 #define DEBUG_TYPE "klausscpu-subtarget"
 
@@ -14,6 +15,11 @@
 #include "KlaussCPUGenSubtargetInfo.inc"
 
 using namespace llvm;
+
+static cl::opt<bool> BreakAntiDeps(
+    "klausscpu-break-anti-deps", cl::Hidden, cl::init(true),
+    cl::desc("Let the post-RA scheduler rename registers to break "
+             "anti-dependencies.  =false for A/B."));
 
 KlaussCPUSubtarget::KlaussCPUSubtarget(const Triple &TT, StringRef CPU,
                                         StringRef FS, const TargetMachine &TM)
@@ -32,4 +38,12 @@ KlaussCPUSubtarget::KlaussCPUSubtarget(const Triple &TT, StringRef CPU,
 
 bool KlaussCPUSubtarget::isPositionIndependent() const {
   return TM.isPositionIndependent();
+}
+
+// Critical-path renaming only: on the board it is as fast as renaming every
+// anti-dependency (ANTIDEP_ALL) on perf_baseline and 2 cycles per Dhrystone
+// run faster (1541 vs 1543), and it renames fewer registers.
+TargetSubtargetInfo::AntiDepBreakMode
+KlaussCPUSubtarget::getAntiDepBreakMode() const {
+  return BreakAntiDeps ? ANTIDEP_CRITICAL : ANTIDEP_NONE;
 }

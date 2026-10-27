@@ -292,6 +292,15 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::VAEND,   MVT::Other, Expand);
 
   // ---- Misc ----
+  // An inline memcpy (a struct copy) as groups of four loads followed by
+  // their four stores.  Ungrouped, isel emits load, store, load, store, and
+  // nothing may move a load above the previous store (the scheduler cannot
+  // tell the source from the destination), so every store waits for the
+  // load just before it: two stall cycles per word (load-use latency 3,
+  // KlaussCPUSchedule.td).  Grouped, each store is three or more
+  // instructions after its load.
+  MaxGluedStoresPerMemcpy = 4;
+
   // Only 32-bit and 64-bit native integer widths.
   setMinFunctionAlignment(Align(4));
   setPrefFunctionAlignment(Align(4));

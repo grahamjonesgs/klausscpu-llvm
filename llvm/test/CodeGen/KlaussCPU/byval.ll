@@ -43,12 +43,12 @@ define void @pass_const() {
 define void @pass_stack_slot(ptr %p) {
 ; CHECK-LABEL: pass_stack_slot:
 ; CHECK:         enter 8
-; CHECK:         ldidx64 r12, r0, 24
-; CHECK-NEXT:    addi [[COPY:r[0-9]+]], r15, -32
-; CHECK:         stidx64 r12, r15, -8
-; CHECK:         ldidx64 r12, r0, 0
-; CHECK:         stidx64 r12, r15, -32
-; CHECK-NEXT:    getsp [[SP:r[0-9]+]]
+; CHECK-DAG:     ldidx64 [[W3:r[0-9]+]], r0, 24
+; CHECK-DAG:     ldidx64 [[W0:r[0-9]+]], r0, 0
+; CHECK-DAG:     addi [[COPY:r[0-9]+]], r15, -32
+; CHECK-DAG:     stidx64 [[W3]], r15, -8
+; CHECK-DAG:     stidx64 [[W0]], r15, -32
+; CHECK-DAG:     getsp [[SP:r[0-9]+]]
 ; CHECK:         stidx64 [[COPY]], [[SP]], 24
 ; CHECK-NEXT:    call take5
   call void @take5(i64 10, i64 20, i64 30, i64 40, ptr byval(%struct.S) align 8 %p)
@@ -74,11 +74,11 @@ define void @pass_vla(i64 %n, ptr %p) {
 ; CHECK-LABEL: pass_vla:
 ; CHECK:         call use
 ; CHECK-NEXT:    addsp 24
-; CHECK-NEXT:    ldidx64 r12, [[P:r[0-9]+]], 24
-; CHECK-NEXT:    stidx64 r12, r15, -16
-; CHECK:         ldidx64 r12, [[P]], 0
-; CHECK-NEXT:    stidx64 r12, r15, -40
-; CHECK-NEXT:    addsp -32
+; CHECK-DAG:     ldidx64 [[W3:r[0-9]+]], [[P:r[0-9]+]], 24
+; CHECK-DAG:     ldidx64 [[W0:r[0-9]+]], [[P]], 0
+; CHECK-DAG:     stidx64 [[W3]], r15, -16
+; CHECK-DAG:     stidx64 [[W0]], r15, -40
+; CHECK:         addsp -32
 ; CHECK-NEXT:    getsp [[SP:r[0-9]+]]
 ; CHECK-NEXT:    addi [[COPY:r[0-9]+]], r15, -40
 ; CHECK:         stidx64 [[COPY]], [[SP]], 24
@@ -100,8 +100,8 @@ declare void @take3(ptr byval({ i8, i8, i8 }) align 1)
 define void @pass_odd(ptr %p, ptr %q) {
 ; CHECK-LABEL: pass_odd:
 ; CHECK:         stidx8 {{r[0-9]+}}, r15, [[#%d,E13:]]
-; CHECK:         stidx32 {{r[0-9]+}}, r15, [[#%d,E13-4]]
-; CHECK:         addi r0, r15, [[#%d,E13-12]]
+; CHECK-DAG:     stidx32 {{r[0-9]+}}, r15, [[#%d,E13-4]]
+; CHECK-DAG:     addi r0, r15, [[#%d,E13-12]]
 ; CHECK-NOT:     {{(copy|addi|setr) r0,}}
 ; CHECK:         stidx64 {{r[0-9]+}}, r15, [[#%d,E13-12]]
 ; CHECK-NEXT:    call take13

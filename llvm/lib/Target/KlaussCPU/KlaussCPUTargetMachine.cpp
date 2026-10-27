@@ -35,7 +35,7 @@
 namespace llvm {
 FunctionPass *createKlaussCPUISelDag(KlaussCPUTargetMachine &TM);
 FunctionPass *createKlaussCPUFlagReusePass();
-FunctionPass *createKlaussCPUFuseCmpBrPass();
+FunctionPass *createKlaussCPUFuseCmpBrPass(bool LoopConstsOnly = false);
 void initializeKlaussCPUDAGToDAGISelLegacyPass(PassRegistry &);
 void initializeKlaussCPUFlagReusePass(PassRegistry &);
 void initializeKlaussCPUFuseCmpBrPass(PassRegistry &);
@@ -99,6 +99,7 @@ public:
 
   void addIRPasses() override;
   bool addInstSelector() override;
+  void addPreSched2() override;
   void addPreEmitPass() override;
 };
 } // namespace
@@ -127,6 +128,13 @@ void KlaussCPUPassConfig::addIRPasses() {
 bool KlaussCPUPassConfig::addInstSelector() {
   addPass(createKlaussCPUISelDag(getKlaussCPUTargetMachine()));
   return false;
+}
+
+void KlaussCPUPassConfig::addPreSched2() {
+  // The FuseCmpBr loop constants, before the post-RA scheduler's register
+  // renaming can take the free register they need (KlaussCPUFuseCmpBr.cpp).
+  if (getOptLevel() != CodeGenOptLevel::None)
+    addPass(createKlaussCPUFuseCmpBrPass(/*LoopConstsOnly=*/true));
 }
 
 void KlaussCPUPassConfig::addPreEmitPass() {

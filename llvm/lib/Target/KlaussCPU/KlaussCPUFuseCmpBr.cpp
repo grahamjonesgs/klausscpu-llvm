@@ -29,7 +29,14 @@
 //    must be one nothing in the loop reads, writes or clobbers, not live into
 //    any loop block (so not live through the loop), not read by the
 //    preheader's terminators, and either caller-saved or a callee-saved
-//    register the prologue already saves. -O1 and up only;
+//    register the prologue already saves. -O1 and up only. A second
+//    instance of this pass runs before the post-RA scheduler (addPreSched2)
+//    and only does this part, turning the compare into CMPRR with the
+//    constant register (outer loops first), so that the scheduler's
+//    anti-dependency renaming sees the register as taken. It skips a
+//    function with a non-empty inline asm (see the range rule below); a
+//    compare it converted that then fails the range check stays the 1-word
+//    CMPRR instead of the 2-word CMPRV;
 //  * the condition maps onto a class-3 predicate: EQ/NE (incl. Z/NZ),
 //    signed LT/GE/LE/GT, unsigned LT/GE/LE/GT (incl. C/NC);
 //  * the flags are dead after the branch (no later reader in the block, not
@@ -117,7 +124,10 @@ bool branchPred(unsigned Opc, unsigned &Pred, bool &Inv) {
 class KlaussCPUFuseCmpBr : public MachineFunctionPass {
 public:
   static char ID;
-  KlaussCPUFuseCmpBr() : MachineFunctionPass(ID) {}
+  /// \p LoopConstsOnly: the instance that runs before the post-RA scheduler
+  /// (see the header) and only sets up the loop constants.
+  explicit KlaussCPUFuseCmpBr(bool LoopConstsOnly = false)
+      : MachineFunctionPass(ID), LoopConstsOnly(LoopConstsOnly) {}
   bool runOnMachineFunction(MachineFunction &MF) override;
   StringRef getPassName() const override {
     return PASS_NAME;
@@ -135,6 +145,9 @@ public:
 
 private:
   Register loopConstReg(MachineInstr &Cmp, MachineBasicBlock &MBB);
+  bool setUpLoopConsts(MachineFunction &Fn);
+
+  bool LoopConstsOnly;
 
   MachineFunction *MF = nullptr;
   MachineLoopInfo *MLI = nullptr;
@@ -305,6 +318,59 @@ Register KlaussCPUFuseCmpBr::loopConstReg(MachineInstr &Cmp,
   return Reg;
 }
 
+// Before the post-RA scheduler: give each fusable loop compare with a
+// constant outside simm4 its loop constant now, as CMPRV_I r, imm ->
+// CMPRR_I r, rC, which the pre-emit instance then fuses like any register
+// compare.  The post-RA scheduler renames registers to break
+// anti-dependencies and may take every free register in a loop (an unrolled
+// body); with the constant already live through the loop, it leaves rC
+// alone.  The range is checked when fusing: a compare left unfused is the
+// 1-word CMPRR_I instead of the 2-word CMPRV_I.
+bool KlaussCPUFuseCmpBr::setUpLoopConsts(MachineFunction &Fn) {
+  // A non-empty inline asm blocks the branches that span it; leave such a
+  // function to the pre-emit instance, which checks each branch's range.
+  for (MachineBasicBlock &MBB : Fn)
+    for (MachineInstr &MI : MBB)
+      if (worstCaseSize(MI, *TII) >= UnboundedSize)
+        return false;
+
+  // Outer loops first, so an inner loop reuses a constant its outer loop
+  // already holds (as when fusing in layout order after block placement).
+  SmallVector<MachineInstr *, 8> Cmps;
+  for (MachineBasicBlock &MBB : Fn) {
+    for (MachineInstr &Br : MBB.terminators()) {
+      unsigned Pred;
+      bool Inv;
+      if (!Br.isConditionalBranch() || !branchPred(Br.getOpcode(), Pred, Inv) ||
+          !KlaussCPUInstrInfo::flagsDeadAfter(Br))
+        continue;
+      MachineInstr *Cmp = findFusableCompare(Br, TRI);
+      if (Cmp && Cmp->getOpcode() != KlaussCPU::CMPRR_I && !fitsSImm4(*Cmp))
+        Cmps.push_back(Cmp);
+    }
+  }
+  llvm::stable_sort(Cmps, [&](MachineInstr *A, MachineInstr *B) {
+    return MLI->getLoopDepth(A->getParent()) < MLI->getLoopDepth(B->getParent());
+  });
+
+  bool Changed = false;
+  for (MachineInstr *Cmp : Cmps) {
+    MachineBasicBlock &MBB = *Cmp->getParent();
+    Register ConstReg = loopConstReg(*Cmp, MBB);
+    if (!ConstReg)
+      continue;
+    const MachineOperand &Lhs = Cmp->getOperand(0);
+    BuildMI(MBB, Cmp->getIterator(), Cmp->getDebugLoc(),
+            TII->get(KlaussCPU::CMPRR_I))
+        .addReg(Lhs.getReg(), getKillRegState(Lhs.isKill()) |
+                                  getUndefRegState(Lhs.isUndef()))
+        .addReg(ConstReg);
+    Cmp->eraseFromParent();
+    Changed = true;
+  }
+  return Changed;
+}
+
 bool KlaussCPUFuseCmpBr::runOnMachineFunction(MachineFunction &Fn) {
   if (!EnableFuseCmpBr)
     return false;
@@ -320,6 +386,8 @@ bool KlaussCPUFuseCmpBr::runOnMachineFunction(MachineFunction &Fn) {
   bool LoopConstsOK = EnableFuseLoopConst &&
                       Fn.getTarget().getOptLevel() != CodeGenOptLevel::None &&
                       !Fn.getFunction().hasOptNone();
+  if (LoopConstsOnly)
+    return LoopConstsOK && setUpLoopConsts(Fn);
 
   // Worst-case offset of every block: instructions at their long encodings,
   // each aligned block after its largest padding (code is word aligned, so
@@ -410,5 +478,7 @@ bool KlaussCPUFuseCmpBr::runOnMachineFunction(MachineFunction &Fn) {
 }
 
 namespace llvm {
-FunctionPass *createKlaussCPUFuseCmpBrPass() { return new KlaussCPUFuseCmpBr(); }
+FunctionPass *createKlaussCPUFuseCmpBrPass(bool LoopConstsOnly) {
+  return new KlaussCPUFuseCmpBr(LoopConstsOnly);
+}
 } // namespace llvm

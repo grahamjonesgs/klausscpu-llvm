@@ -127,7 +127,10 @@ pre-emit passes rely on this liveness:
   loop compare with a constant outside simm4 (in the header or the only
   latch) gets the constant in a register free throughout the loop, set by a
   SETR/SETRU in the preheader, and becomes `FBR_RR`; other compares with
-  that constant in the loop reuse it.
+  that constant in the loop reuse it.  That loop-constant setup runs as a
+  second instance of the pass before the post-RA scheduler (`addPreSched2`,
+  the compare becomes `CMPRR` with the constant register), so the
+  scheduler's register renaming cannot take the free register.
 - Both rewrite only when FLAGS is dead after the branch
   (`KlaussCPUInstrInfo::flagsDeadAfter`): no later reader in the block and
   no successor with FLAGS live-in (MachineCSE can leave a successor reading
@@ -255,11 +258,20 @@ when clobbered.
   combiner proves Amt >= 64 it folds such a shift to 0); `shamt` drops the
   -64 again at isel.  A `SELECT_CC` whose operands fold to a constant
   condition is replaced by the chosen value (`PerformDAGCombine`).
-- Scheduling: the M8 model (`KlaussCPUSchedule.td`, CPU `generic`, the
-  default) drives the machine scheduler and the post-RA scheduler, which runs
-  from **-O1** up (`getOptLevelToEnablePostRAScheduler`).  `-mcpu=no-sched`
-  is the A/B baseline without either.
-- Pre-emit passes: FlagReuse, then FuseCmpBr (see Flags).
+- Scheduling: the model in `KlaussCPUSchedule.td` (CPU `generic`, the
+  default) is the RTL's interlocks as issue distances: ALU result 2, load 3,
+  FLAGS 2 (`WriteFlags`, the second write of an ALU op with a destination),
+  MUL 5 (EX busy 4), DIV 20; the D-cache hit freeze and SP are not modelled
+  (order-independent / not movable).  It drives the pre-RA machine scheduler
+  (GenericScheduler, in-order: an unready node waits in the pending queue)
+  and the post-RA list scheduler, which runs from **-O1** up
+  (`getOptLevelToEnablePostRAScheduler`) and renames registers to break
+  anti-dependencies on the critical path (`getAntiDepBreakMode`,
+  `ANTIDEP_CRITICAL`).  An inline memcpy is lowered as groups of four loads
+  then four stores (`MaxGluedStoresPerMemcpy`), so no store directly follows
+  its load.  `-mcpu=no-sched` is the A/B baseline without either scheduler.
+- Before the post-RA scheduler: FuseCmpBr's loop constants; pre-emit passes:
+  FlagReuse, then FuseCmpBr (see Flags).
 - TTI (`KlaussCPUTargetTransformInfo.cpp`): moderate partial/runtime
   unrolling (MaxCount 4) with the budget scaled down for branch-dense loop
   bodies, no peeling; `-mcpu=no-sched` reverts to no body-duplicating
@@ -288,6 +300,7 @@ when clobbered.
 | `-klausscpu-w32-alu` / `-klausscpu-w32-compare` | on | 32-bit W ops / W compares |
 | `-klausscpu-group-selects` | on | consecutive selects on one condition share a compare/branch |
 | `-klausscpu-fold-fi-offset` | on | fold frame index + constant into the access / ADDI offset |
+| `-klausscpu-break-anti-deps` | on | post-RA scheduler renames registers to break critical-path anti-dependencies |
 | `-klausscpu-min-jump-table-entries` | 0 (off) | jump tables from N cases |
 | `-klausscpu-pref-loop-align` | 16 | loop-header alignment in bytes |
 | `-klausscpu-mul-imm-shift-add` | off | multiply by a simm32 2^N±1 / 1-2^N as shift + add/sub when the schedule model rates MULV slower |
@@ -385,7 +398,7 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPU.td                target root: subtarget features, AsmWriter/AsmParser, includes the other .td files
 ├── KlaussCPURegisterInfo.td    16 GPRs (r0–r15, alt names a–p) + SP + FLAGS; allocation order
 ├── KlaussCPUCallingConv.td     CC_KlaussCPU, RetCC_KlaussCPU, CSR_KlaussCPU
-├── KlaussCPUSchedule.td        M8 scheduling model; processors `generic` and `no-sched`
+├── KlaussCPUSchedule.td        scheduling model (RTL interlock latencies); processors `generic` and `no-sched`
 ├── KlaussCPUInstrInfo.td       encodings, operand types, isel patterns, short forms + CompressPats, aliases
 ├── KlaussCPUInstrInfo.h/.cpp   branch analysis, copies, spills, flagsDeadAfter
 ├── KlaussCPURegisterInfo.h/.cpp reserved regs, stack realignment, eliminateFrameIndex
@@ -395,10 +408,10 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPUMachineFunctionInfo.h  per-function state (vararg frame index)
 ├── KlaussCPUAsmPrinter.cpp     MachineInstr → MCInst (+ CompressPat), inline-asm operand printing
 ├── KlaussCPUFlagReuse.cpp      pre-emit: CMPRV Rd,0 + JMPE/NE → JMPZ/NZ (default on)
-├── KlaussCPUFuseCmpBr.cpp      pre-emit: compare + branch → ISA v3 FBR (default on)
+├── KlaussCPUFuseCmpBr.cpp      pre-emit: compare + branch → ISA v3 FBR (default on); pre-sched2 instance: loop constants
 ├── KlaussCPUTargetTransformInfo.h/.cpp  TTI — M8 unroll budget gated on branch density, no peel; LSR cost order, register count
 ├── KlaussCPUSubtarget.h/.cpp   single subtarget; member init order is critical
-├── KlaussCPUTargetMachine.h/.cpp CodeGenTargetMachineImpl; pass config (AtomicExpand, isel, pre-emit passes)
+├── KlaussCPUTargetMachine.h/.cpp CodeGenTargetMachineImpl; pass config (AtomicExpand, isel, pre-sched2 and pre-emit passes)
 ├── AsmParser/
 │   └── KlaussCPUAsmParser.cpp  -gen-asm-matcher driver; registers vs symbols, PC-relative targets
 ├── Disassembler/
