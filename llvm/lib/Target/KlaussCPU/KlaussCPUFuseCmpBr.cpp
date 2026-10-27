@@ -32,7 +32,10 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/Support/CommandLine.h"
 
-#define DEBUG_TYPE "klausscpu-fuse-cmp-br"
+// The pass name must differ from the -klausscpu-fuse-cmp-br option below: opt
+// registers every legacy pass name as a command-line option, and a clash
+// aborts opt at startup ("registered more than once").
+#define DEBUG_TYPE "klausscpu-cmp-br-fuse"
 #define PASS_NAME "KlaussCPU fused compare-and-branch (ISA v3 B)"
 
 namespace llvm {

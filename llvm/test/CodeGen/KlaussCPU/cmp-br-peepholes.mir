@@ -14,7 +14,7 @@
 #
 # RUN: llc -march=klausscpu -run-pass=klausscpu-flag-reuse -verify-machineinstrs \
 # RUN:   %s -o - | FileCheck %s --check-prefix=REUSE
-# RUN: llc -march=klausscpu -run-pass=klausscpu-fuse-cmp-br -verify-machineinstrs \
+# RUN: llc -march=klausscpu -run-pass=klausscpu-cmp-br-fuse -verify-machineinstrs \
 # RUN:   %s -o - | FileCheck %s --check-prefix=FUSE
 
 --- |
