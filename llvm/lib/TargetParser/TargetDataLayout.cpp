@@ -570,8 +570,9 @@ std::string Triple::computeDataLayout(StringRef ABIName) const {
            "v32:32:32-v64:64:64-v512:512:512-v1024:1024:1024-v2048:2048:2048";
   case Triple::klausscpu:
     // The only copy: KlaussCPUTargetMachine and clang's KlaussCPUTargetInfo
-    // both take it from here.  n32:64 advertises both i32 and i64 as native
-    // widths.
+    // both take it from here (the Rust target spec repeats it, which
+    // test/CodeGen/KlaussCPU/rust-target-spec.test checks).  n32:64
+    // advertises both i32 and i64 as native widths.
     return "e-m:e-p:64:64-i64:64-i128:128-n32:64";
   case Triple::loongarch32:
   case Triple::loongarch64:

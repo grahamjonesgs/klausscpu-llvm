@@ -14,7 +14,8 @@
 //                             JMPREL/JMPxxREL/CALLREL/LEAPC instructions.
 //                             field_value = S + A − instr_addr.
 //                             lld computes S + A − (instr_addr+4) (R_PC) and
-//                             we add 4 in relocate() for the hardware convention.
+//                             relocate() adds KlaussCPUABI::Word1Offset (4)
+//                             for the hardware convention.
 //   R_KLAUSSCPU_PC32   (4) — 32-bit signed PC-relative *data* — a cross-section
 //                             symbol difference (A − B) in .rodata/.data, e.g.
 //                             the -fPIC relative lookup tables emitted by
@@ -37,12 +38,16 @@
 // Code loaded at run time is relocated by its loader, from an ET_REL object
 // (Zephyr llext) or from the RELA sections kept by --emit-relocs.
 //
+// The gaps between code sections are filled with KlaussCPUABI::InvalidWord,
+// an architecturally reserved word that traps as an invalid opcode.
+//
 //===----------------------------------------------------------------------===//
 
 #include "Symbols.h"
 #include "Target.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/Support/Endian.h"
+#include "llvm/TargetParser/KlaussCPUABI.h"
 
 using namespace llvm;
 using namespace llvm::object;
@@ -69,10 +74,10 @@ public:
 } // namespace
 
 KlaussCPU::KlaussCPU(Ctx &ctx) : TargetInfo(ctx) {
-  // Fill between input sections: the retired v1 HALT encoding (0x0000F011,
-  // big-endian).  Its LEN field [31:30] of the LE word 0x11F00000 is 00, so
-  // the v2 CPU raises ERR_INV_OPCODE if it is ever executed.
-  trapInstr = {0x00, 0x00, 0xF0, 0x11};
+  // Fill between code sections: a reserved word (LEN = 00, class 0), which
+  // the CPU traps on as an invalid opcode.  Not TRAP, the debugger's
+  // breakpoint, nor HALT, which would look like a clean exit.
+  write32le(trapInstr.data(), KlaussCPUABI::InvalidWord);
   needsThunks = true;
 }
 
@@ -129,8 +134,9 @@ void KlaussCPU::relocate(uint8_t *loc, const Relocation &rel,
   case R_KLAUSSCPU_PCREL32:
     // val = S + A − (instr_addr+4) from lld's R_PC computation.
     // Hardware uses instr_addr as PC origin, so field = val + 4.
-    checkInt(ctx, loc, static_cast<int64_t>(val) + 4, 32, rel);
-    write32le(loc, static_cast<uint32_t>(val + 4));
+    checkInt(ctx, loc, static_cast<int64_t>(val) + KlaussCPUABI::Word1Offset,
+             32, rel);
+    write32le(loc, static_cast<uint32_t>(val + KlaussCPUABI::Word1Offset));
     break;
   case R_KLAUSSCPU_PC32:
     // Data symbol difference (A − B): the fixup slot itself is the PC origin,

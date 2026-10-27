@@ -5,7 +5,7 @@ directory:
 
 | Path | What it is |
 |---|---|
-| `klausscpu-unknown-none-elf.json` | rustc target spec (data layout must byte-match `llvm/lib/TargetParser/TargetDataLayout.cpp`) |
+| `klausscpu-unknown-none-elf.json` | rustc target spec (data layout must byte-match `llvm/lib/TargetParser/TargetDataLayout.cpp`; `llvm/test/CodeGen/KlaussCPU/rust-target-spec.test` checks it) |
 | `rustc-patches/0001-*.patch`, `0002-*.patch` | the complete rustc fork delta (callconv module, `rustc_llvm` wiring, llvm-wrapper guard fixes) |
 | `rustc-patches/bootstrap.toml` | rustc bootstrap config template (edit the `llvm-config` path) |
 | `hello-smoke/` | bare-metal MMIO smoke test (M1 artifact; no C runtime at all) |
@@ -13,7 +13,7 @@ directory:
 | `hello-ext/` | Zephyr LLEXT extension with `alloc` over the kernel heap (M3 artifact); `build-llext.sh` is the packaging pipeline |
 | `crates/` | the `klauss-*` reusable library crates (a Cargo workspace) + `blinky`/`ext-hello` examples built from them — see `crates/README.md` |
 | `klauss-build` | one driver for both flavors (`elf` / `llext`), with path discovery, section-merge, and loader/import verification baked in |
-| `klausscpu.ld` | bundled bare-metal linker script (mirror of the runtime's; makes bare-metal links self-contained) |
+| `klausscpu.ld` | bundled bare-metal linker script (mirror of the runtime's, which klausscpu-runtime's `check-toolchain-constants.py` compares; makes bare-metal links self-contained) |
 | `.klaussbuild.env.sample` | template for the machine-local `.klaussbuild.env` (gitignored) the driver sources |
 
 Pinned versions (re-verify on any change — see "Rebasing" below):

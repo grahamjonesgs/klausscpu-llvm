@@ -46,8 +46,10 @@
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCValue.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/Support/EndianStream.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/TargetParser/KlaussCPUABI.h"
 
 using namespace llvm;
 
@@ -231,7 +233,7 @@ public:
     // offset 4); unresolved, the relocation carries it and Value is 0.
     case KlaussCPU::FK_KlaussCPU_PCREL32:
       if (IsResolved) {
-        int64_t Disp = static_cast<int64_t>(Value) + 4;
+        int64_t Disp = static_cast<int64_t>(Value) + KlaussCPUABI::Word1Offset;
         if (!isInt<32>(Disp)) {
           getContext().reportError(Fixup.getLoc(),
                                    "PC-relative target out of range");
@@ -303,15 +305,16 @@ public:
 
   // ── NOP padding ──────────────────────────────────────────────────────────
 
-  // v2 NOP = 0x6C000000 (4-byte, little-endian: 00 00 00 6C).
-  // Padding that is not a multiple of 4 follows data (.byte, .ascii) in a code
-  // section, so its first Count % 4 bytes can never be executed: zero-fill
-  // them and NOP-fill from the next word boundary, as RISC-V does.
+  // NOP words (KlaussCPUABI::NopWord, little-endian).  Padding that is not a
+  // multiple of 4 follows data (.byte, .ascii) in a code section, so its
+  // first Count % 4 bytes can never be executed: zero-fill them and NOP-fill
+  // from the next word boundary, as RISC-V does.
   bool writeNopData(raw_ostream &OS, uint64_t Count,
                     const MCSubtargetInfo *STI) const override {
     OS.write_zeros(Count % 4);
     for (uint64_t i = 0, n = Count / 4; i < n; ++i)
-      OS.write("\x00\x00\x00\x6C", 4);
+      support::endian::write<uint32_t>(OS, KlaussCPUABI::NopWord,
+                                       llvm::endianness::little);
     return true;
   }
 

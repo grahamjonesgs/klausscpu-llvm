@@ -19,23 +19,29 @@
 #include "lldb/Utility/DataExtractor.h"
 #include "lldb/Utility/RegisterValue.h"
 #include "lldb/ValueObject/ValueObjectConstResult.h"
-#include "llvm/ADT/StringSwitch.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/TargetParser/KlaussCPUABI.h"
 #include "llvm/TargetParser/Triple.h"
 
 using namespace lldb;
 using namespace lldb_private;
+namespace KlaussCPUABI = llvm::KlaussCPUABI;
 
 LLDB_PLUGIN_DEFINE_ADV(ABISysV_klausscpu, ABIKlaussCPU)
 
 namespace {
-// DWARF register numbers (KlaussCPURegisterInfo.td).  The PC shares number 17
-// with LLVM's RA column, so the CFI return-address rule restores the PC.
-enum : uint32_t {
-  dwarf_r0 = 0,
-  dwarf_r15 = 15,
-  dwarf_sp = 16,
-  dwarf_pc = 17,
-};
+// DWARF register numbers: a GPR's is its number.  The PC shares LLVM's RA
+// column, so the CFI return-address rule restores the PC.
+constexpr uint32_t dwarf_fp = KlaussCPUABI::FPReg;
+constexpr uint32_t dwarf_sp = KlaussCPUABI::DwarfSP;
+constexpr uint32_t dwarf_pc = KlaussCPUABI::DwarfRA;
+
+// CFA offsets (KlaussCPUABI.h): the return address is at CFA-8, the caller's
+// r15 at CFA-16, and r15 = CFA-16 once the prologue has run.
+constexpr int RetAddrSize = KlaussCPUABI::RetAddrSize;
+constexpr int FPToCFAOffset = KlaussCPUABI::FPToCFAOffset;
+
+llvm::StringRef gprName(unsigned N) { return KlaussCPUABI::GPRNames[N]; }
 } // namespace
 
 ABISP ABISysV_klausscpu::CreateInstance(ProcessSP process_sp,
@@ -47,16 +53,20 @@ ABISP ABISysV_klausscpu::CreateInstance(ProcessSP process_sp,
 }
 
 uint32_t ABISysV_klausscpu::GetGenericNum(llvm::StringRef name) {
-  return llvm::StringSwitch<uint32_t>(name)
-      .Case("pc", LLDB_REGNUM_GENERIC_PC)
-      .Case("sp", LLDB_REGNUM_GENERIC_SP)
-      .Case("r15", LLDB_REGNUM_GENERIC_FP)
-      .Case("flags", LLDB_REGNUM_GENERIC_FLAGS)
-      .Case("r0", LLDB_REGNUM_GENERIC_ARG1)
-      .Case("r1", LLDB_REGNUM_GENERIC_ARG2)
-      .Case("r2", LLDB_REGNUM_GENERIC_ARG3)
-      .Case("r3", LLDB_REGNUM_GENERIC_ARG4)
-      .Default(LLDB_INVALID_REGNUM);
+  if (name == "pc")
+    return LLDB_REGNUM_GENERIC_PC;
+  if (name == "sp")
+    return LLDB_REGNUM_GENERIC_SP;
+  if (name == "flags")
+    return LLDB_REGNUM_GENERIC_FLAGS;
+  if (name == gprName(KlaussCPUABI::FPReg))
+    return LLDB_REGNUM_GENERIC_FP;
+  static_assert(KlaussCPUABI::NumArgGPRs <=
+                LLDB_REGNUM_GENERIC_ARG8 - LLDB_REGNUM_GENERIC_ARG1 + 1);
+  for (unsigned I = 0; I < KlaussCPUABI::NumArgGPRs; ++I)
+    if (name == gprName(KlaussCPUABI::ArgGPRs[I]))
+      return LLDB_REGNUM_GENERIC_ARG1 + I;
+  return LLDB_INVALID_REGNUM;
 }
 
 std::string ABISysV_klausscpu::GetMCName(std::string name) {
@@ -70,18 +80,20 @@ std::string ABISysV_klausscpu::GetMCName(std::string name) {
 bool ABISysV_klausscpu::RegisterIsVolatile(const RegisterInfo *reg_info) {
   if (!reg_info)
     return true;
-  // Callee-saved: r4-r7, the frame pointer r15, and SP.
-  return !llvm::StringSwitch<bool>(reg_info->name)
-              .Cases({"r4", "r5", "r6", "r7", "r15", "sp"}, true)
-              .Default(false);
+  // Callee-saved: r4-r7 (CSR_KlaussCPU), the frame pointer r15, and SP.
+  llvm::StringRef name = reg_info->name;
+  if (name == "sp" || name == gprName(KlaussCPUABI::FPReg))
+    return false;
+  return llvm::none_of(KlaussCPUABI::CalleeSavedGPRs,
+                       [&](unsigned N) { return name == gprName(N); });
 }
 
 UnwindPlanSP ABISysV_klausscpu::CreateFunctionEntryUnwindPlan() {
   // At the first instruction CALL has just pushed the return address:
   // CFA = SP+8, PC = [CFA-8], caller's SP = CFA.
   UnwindPlan::Row row;
-  row.GetCFAValue().SetIsRegisterPlusOffset(dwarf_sp, 8);
-  row.SetRegisterLocationToAtCFAPlusOffset(dwarf_pc, -8, true);
+  row.GetCFAValue().SetIsRegisterPlusOffset(dwarf_sp, RetAddrSize);
+  row.SetRegisterLocationToAtCFAPlusOffset(dwarf_pc, -RetAddrSize, true);
   row.SetRegisterLocationToIsCFAPlusOffset(dwarf_sp, 0, true);
 
   auto plan_sp = std::make_shared<UnwindPlan>(eRegisterKindDWARF);
@@ -95,9 +107,9 @@ UnwindPlanSP ABISysV_klausscpu::CreateDefaultUnwindPlan() {
   // Every function keeps a frame pointer: after the prologue r15 points at
   // the saved caller r15, with the return address above it.
   UnwindPlan::Row row;
-  row.GetCFAValue().SetIsRegisterPlusOffset(dwarf_r15, 16);
-  row.SetRegisterLocationToAtCFAPlusOffset(dwarf_pc, -8, true);
-  row.SetRegisterLocationToAtCFAPlusOffset(dwarf_r15, -16, true);
+  row.GetCFAValue().SetIsRegisterPlusOffset(dwarf_fp, FPToCFAOffset);
+  row.SetRegisterLocationToAtCFAPlusOffset(dwarf_pc, -RetAddrSize, true);
+  row.SetRegisterLocationToAtCFAPlusOffset(dwarf_fp, -FPToCFAOffset, true);
   row.SetRegisterLocationToIsCFAPlusOffset(dwarf_sp, 0, true);
 
   auto plan_sp = std::make_shared<UnwindPlan>(eRegisterKindDWARF);
@@ -126,8 +138,10 @@ ABISysV_klausscpu::GetReturnValueObjectImpl(Thread &thread,
   RegisterContextSP reg_ctx = thread.GetRegisterContext();
   if (!reg_ctx)
     return {};
-  const RegisterInfo *lo = reg_ctx->GetRegisterInfoByName("r12");
-  const RegisterInfo *hi = reg_ctx->GetRegisterInfoByName("r11");
+  const RegisterInfo *lo =
+      reg_ctx->GetRegisterInfoByName(gprName(KlaussCPUABI::RetGPRs[0]));
+  const RegisterInfo *hi =
+      reg_ctx->GetRegisterInfoByName(gprName(KlaussCPUABI::RetGPRs[1]));
   if (!lo || (size > 8 && !hi))
     return {};
 
@@ -165,9 +179,10 @@ Status ABISysV_klausscpu::SetReturnValueObject(StackFrameSP &frame_sp,
   offset_t offset = 0;
   uint64_t raw = data.GetMaxU64(&offset, num_bytes);
   RegisterContext &reg_ctx = *frame_sp->GetThread()->GetRegisterContext();
-  if (!reg_ctx.WriteRegisterFromUnsigned(reg_ctx.GetRegisterInfoByName("r12"),
+  llvm::StringRef ret_reg = gprName(KlaussCPUABI::RetGPRs[0]);
+  if (!reg_ctx.WriteRegisterFromUnsigned(reg_ctx.GetRegisterInfoByName(ret_reg),
                                          raw))
-    return Status::FromErrorString("failed to write r12");
+    return Status::FromErrorStringWithFormatv("failed to write {0}", ret_reg);
   return Status();
 }
 

@@ -11,14 +11,16 @@
 
 #include "lldb/Target/ABI.h"
 #include "lldb/lldb-private.h"
+#include "llvm/TargetParser/KlaussCPUABI.h"
 
-// KlaussCPU calling convention (see llvm/lib/Target/KlaussCPU/CLAUDE.md):
-// arguments r0-r3, return value r12 (r12:r11 for 128-bit), callee-saved
-// r4-r7 and r15 (frame pointer), 32-bit SP and PC.  CALL pushes the 64-bit
-// return address, so at function entry CFA = SP+8 and the return address is
-// at CFA-8; after the prologue (ENTER or PUSH r15; GETSP r15) CFA = r15+16
-// with the caller's r15 at CFA-16.  The PC has DWARF number 17, which is the
-// CFI return-address column.
+// KlaussCPU calling convention (see llvm/lib/Target/KlaussCPU/CLAUDE.md; the
+// numbers come from llvm/TargetParser/KlaussCPUABI.h): arguments r0-r3,
+// return value r12 (r12:r11 for 128-bit), callee-saved r4-r7 and r15 (frame
+// pointer), 32-bit SP and PC.  CALL pushes the 64-bit return address, so at
+// function entry CFA = SP+8 and the return address is at CFA-8; after the
+// prologue (ENTER or PUSH r15; GETSP r15) CFA = r15+16 with the caller's r15
+// at CFA-16.  The PC has DWARF number 17, which is the CFI return-address
+// column.
 class ABISysV_klausscpu : public lldb_private::MCBasedABI {
 public:
   ~ABISysV_klausscpu() override = default;
@@ -50,24 +52,26 @@ public:
 
   bool CallFrameAddressIsValid(lldb::addr_t cfa) override {
     // The stack is 8-byte aligned and lives in 32-bit memory.
-    return cfa != 0 && (cfa & 7) == 0 && cfa <= UINT32_MAX;
+    return cfa != 0 && cfa % llvm::KlaussCPUABI::StackAlign == 0 &&
+           cfa <= llvm::KlaussCPUABI::MaxAddress;
   }
 
   bool CodeAddressIsValid(lldb::addr_t pc) override {
-    return (pc & 3) == 0 && pc <= UINT32_MAX;
+    return pc % llvm::KlaussCPUABI::MinInstBytes == 0 &&
+           pc <= llvm::KlaussCPUABI::MaxAddress;
   }
 
   // An interrupt frame saves {flags, INT_MASK, PC} in one 64-bit word; only
   // the low 32 bits are the code address.
   lldb::addr_t FixCodeAddress(lldb::addr_t pc) override {
-    return pc & UINT32_MAX;
+    return pc & llvm::KlaussCPUABI::MaxAddress;
   }
   lldb::addr_t FixDataAddress(lldb::addr_t addr) override {
-    return addr & UINT32_MAX;
+    return addr & llvm::KlaussCPUABI::MaxAddress;
   }
 
   bool GetPointerReturnRegister(const char *&name) override {
-    name = "r12";
+    name = llvm::KlaussCPUABI::GPRNames[llvm::KlaussCPUABI::RetGPRs[0]];
     return true;
   }
 

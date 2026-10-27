@@ -76,6 +76,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/TargetParser/KlaussCPUABI.h"
 
 using namespace llvm;
 
@@ -93,6 +94,10 @@ static bool fitsEnter(uint64_t FrameSize) {
   return FrameSize % 8 == 0 && (FrameSize / 8) < (uint64_t(1) << 22);
 }
 
+// The prologue saves the caller's R15 just below the return address.
+static constexpr int SavedFPCFAOffset =
+    -static_cast<int>(KlaussCPUABI::FPToCFAOffset);
+
 StackOffset
 KlaussCPUFrameLowering::getFrameIndexReference(const MachineFunction &MF,
                                                int FI,
@@ -105,7 +110,7 @@ KlaussCPUFrameLowering::getFrameIndexReference(const MachineFunction &MF,
   // pushes the caller's R15 first).  Locals are laid out below the saved R15,
   // so their offsets are R15-relative already.
   if (MFI.isFixedObjectIndex(FI))
-    Offset += 8;
+    Offset += KlaussCPUABI::SavedFPSize;
   // In a realigning function the locals are BP-relative.  The callee-saved
   // slots stay R15-relative: they are written before BP is set up.
   else if (hasBP(MF) && !MFI.isCalleeSavedObjectIndex(FI))
@@ -179,7 +184,8 @@ void KlaussCPUFrameLowering::emitPrologue(MachineFunction &MF,
   bool HasBP = hasBP(MF);
   Align Alignment = std::max(MFI.getMaxAlign(), getStackAlign());
   if (HasBP)
-    MFI.setStackSize(MFI.getStackSize() + Alignment.value() - 8);
+    MFI.setStackSize(MFI.getStackSize() + Alignment.value() -
+                     getStackAlign().value());
 
   uint64_t FrameSize = MFI.getStackSize();
   if (EnableEnterLeave && fitsEnter(FrameSize)) {
@@ -188,8 +194,8 @@ void KlaussCPUFrameLowering::emitPrologue(MachineFunction &MF,
         .addImm(FrameSize / 8)
         .setMIFlag(MachineInstr::FrameSetup);
     if (NeedsCFI) {
-      CFIBuilder.buildDefCFA(KlaussCPU::R15, 16);
-      CFIBuilder.buildOffset(KlaussCPU::R15, -16);
+      CFIBuilder.buildDefCFA(KlaussCPU::R15, KlaussCPUABI::FPToCFAOffset);
+      CFIBuilder.buildOffset(KlaussCPU::R15, SavedFPCFAOffset);
     }
   } else {
     // Save the caller's frame pointer.
@@ -197,8 +203,8 @@ void KlaussCPUFrameLowering::emitPrologue(MachineFunction &MF,
         .addReg(KlaussCPU::R15, RegState::Kill)
         .setMIFlag(MachineInstr::FrameSetup);
     if (NeedsCFI) {
-      CFIBuilder.buildDefCFAOffset(16);
-      CFIBuilder.buildOffset(KlaussCPU::R15, -16);
+      CFIBuilder.buildDefCFAOffset(KlaussCPUABI::FPToCFAOffset);
+      CFIBuilder.buildOffset(KlaussCPU::R15, SavedFPCFAOffset);
     }
 
     // Establish new frame pointer: R15 = SP.
@@ -278,7 +284,7 @@ void KlaussCPUFrameLowering::emitEpilogue(MachineFunction &MF,
     BuildMI(MBB, MBBI, DL, TII.get(KlaussCPU::LEAVE_I))
         .setMIFlag(MachineInstr::FrameDestroy);
     if (NeedsCFI) {
-      CFIBuilder.buildDefCFA(KlaussCPU::SP, 8);
+      CFIBuilder.buildDefCFA(KlaussCPU::SP, KlaussCPUABI::RetAddrSize);
       buildFrameTornDownCFI(MF, CFIBuilder);
     }
     return;
@@ -295,7 +301,7 @@ void KlaussCPUFrameLowering::emitEpilogue(MachineFunction &MF,
   BuildMI(MBB, MBBI, DL, TII.get(KlaussCPU::POP_R), KlaussCPU::R15)
       .setMIFlag(MachineInstr::FrameDestroy);
   if (NeedsCFI) {
-    CFIBuilder.buildDefCFAOffset(8);
+    CFIBuilder.buildDefCFAOffset(KlaussCPUABI::RetAddrSize);
     buildFrameTornDownCFI(MF, CFIBuilder);
   }
 }
@@ -336,6 +342,6 @@ void KlaussCPUFrameLowering::resetCFIToInitialState(
     MachineBasicBlock &MBB) const {
   // Back to the CIE state: CFA = SP+8, every register holds its own value.
   CFIInstBuilder CFIBuilder(MBB, MBB.begin(), MachineInstr::NoFlags);
-  CFIBuilder.buildDefCFA(KlaussCPU::SP, 8);
+  CFIBuilder.buildDefCFA(KlaussCPU::SP, KlaussCPUABI::RetAddrSize);
   buildFrameTornDownCFI(*MBB.getParent(), CFIBuilder);
 }

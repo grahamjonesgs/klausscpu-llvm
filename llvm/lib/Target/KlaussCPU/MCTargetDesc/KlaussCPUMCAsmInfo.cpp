@@ -6,6 +6,7 @@
 
 #include "KlaussCPUMCAsmInfo.h"
 #include "llvm/MC/MCTargetOptions.h"
+#include "llvm/TargetParser/KlaussCPUABI.h"
 #include "llvm/TargetParser/Triple.h"
 
 using namespace llvm;
@@ -18,5 +19,5 @@ KlaussCPUMCAsmInfo::KlaussCPUMCAsmInfo(const Triple & /*TheTriple*/,
   CommentString = "#";
   SupportsDebugInformation = true;
   ExceptionsType = ExceptionHandling::DwarfCFI;
-  MinInstAlignment = 4;              // all instructions are 4 or 8 bytes
+  MinInstAlignment = KlaussCPUABI::MinInstBytes; // 1-3 words, word aligned
 }

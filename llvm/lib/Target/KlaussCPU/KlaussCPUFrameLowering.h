@@ -16,6 +16,7 @@
 #define LLVM_LIB_TARGET_KLAUSSCPU_KLAUSSCPUFRAMELOWERING_H
 
 #include "llvm/CodeGen/TargetFrameLowering.h"
+#include "llvm/TargetParser/KlaussCPUABI.h"
 
 namespace llvm {
 
@@ -25,7 +26,7 @@ class KlaussCPUFrameLowering : public TargetFrameLowering {
 public:
   explicit KlaussCPUFrameLowering(const KlaussCPUSubtarget &STI)
       : TargetFrameLowering(StackGrowsDown,
-                            /*StackAlignment=*/Align(8),
+                            /*StackAlignment=*/Align(KlaussCPUABI::StackAlign),
                             /*LocalAreaOffset=*/0) {}
 
   void emitPrologue(MachineFunction &MF,

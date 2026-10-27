@@ -7,6 +7,7 @@
 #include "KlaussCPU.h"
 #include "clang/Basic/Builtins.h"
 #include "clang/Basic/MacroBuilder.h"
+#include "llvm/TargetParser/KlaussCPUABI.h"
 
 using namespace clang;
 using namespace clang::targets;
@@ -18,13 +19,8 @@ KlaussCPUTargetInfo::getTargetBuiltins() const {
 }
 
 // R0–R15 (16 GPRs).
-static const char *const GCCRegNames[] = {
-    "r0", "r1", "r2",  "r3",  "r4",  "r5",  "r6",  "r7",
-    "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
-};
-
 ArrayRef<const char *> KlaussCPUTargetInfo::getGCCRegNames() const {
-  return llvm::ArrayRef(GCCRegNames);
+  return llvm::ArrayRef(llvm::KlaussCPUABI::GPRNames);
 }
 
 void KlaussCPUTargetInfo::getTargetDefines(const LangOptions &Opts,

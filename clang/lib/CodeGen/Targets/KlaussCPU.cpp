@@ -8,6 +8,7 @@
 
 #include "ABIInfoImpl.h"
 #include "TargetInfo.h"
+#include "llvm/TargetParser/KlaussCPUABI.h"
 
 using namespace clang;
 using namespace clang::CodeGen;
@@ -35,10 +36,11 @@ public:
   RValue EmitVAArg(CodeGenFunction &CGF, Address VAListAddr, QualType Ty,
                    AggValueSlot Slot) const override {
     ABIArgInfo AI = classifyArgumentType(Ty);
-    return emitVoidPtrVAArg(CGF, VAListAddr, Ty, AI.isIndirect(),
-                            getContext().getTypeInfoInChars(Ty),
-                            CharUnits::fromQuantity(8),
-                            /*AllowHigherAlign=*/false, Slot);
+    return emitVoidPtrVAArg(
+        CGF, VAListAddr, Ty, AI.isIndirect(),
+        getContext().getTypeInfoInChars(Ty),
+        CharUnits::fromQuantity(llvm::KlaussCPUABI::SlotSize),
+        /*AllowHigherAlign=*/false, Slot);
   }
 };
 

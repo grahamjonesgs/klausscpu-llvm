@@ -26,6 +26,7 @@
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
+#include "llvm/TargetParser/KlaussCPUABI.h"
 #include "llvm/TargetParser/Triple.h"
 
 // Register enum must come first — instruction descriptions reference register
@@ -117,8 +118,11 @@ static MCAsmInfo *createKlaussCPUMCAsmInfo(const MCRegisterInfo &MRI,
   MCAsmInfo *MAI = new KlaussCPUMCAsmInfo(TT, Options);
   unsigned SP = MRI.getDwarfRegNum(KlaussCPU::SP, true);
   unsigned RA = MRI.getDwarfRegNum(KlaussCPU::RA, true);
-  MAI->addInitialFrameState(MCCFIInstruction::cfiDefCfa(nullptr, SP, 8));
-  MAI->addInitialFrameState(MCCFIInstruction::createOffset(nullptr, RA, -8));
+  constexpr int RetAddrSize = KlaussCPUABI::RetAddrSize;
+  MAI->addInitialFrameState(
+      MCCFIInstruction::cfiDefCfa(nullptr, SP, RetAddrSize));
+  MAI->addInitialFrameState(
+      MCCFIInstruction::createOffset(nullptr, RA, -RetAddrSize));
   return MAI;
 }
 

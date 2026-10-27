@@ -19,6 +19,7 @@
 #include "llvm/BinaryFormat/XCOFF.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/TargetParser/ARMTargetParser.h"
+#include "llvm/TargetParser/KlaussCPUABI.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -251,8 +252,9 @@ static constexpr const CoreDefinition g_core_definitions[] = {
 
     // 32-bit addresses (ELF32, DWARF address size 4) although GPRs and C
     // pointers are 64-bit; instructions are 1-3 words.
-    {eByteOrderLittle, 4, 4, 12, llvm::Triple::klausscpu,
-     ArchSpec::eCore_klausscpu, "klausscpu"},
+    {eByteOrderLittle, llvm::KlaussCPUABI::AddressBits / 8,
+     llvm::KlaussCPUABI::MinInstBytes, llvm::KlaussCPUABI::MaxInstBytes,
+     llvm::Triple::klausscpu, ArchSpec::eCore_klausscpu, "klausscpu"},
 };
 
 // Ensure that we have an entry in the g_core_definitions for each core. If you

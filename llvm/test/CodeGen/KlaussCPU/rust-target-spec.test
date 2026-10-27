@@ -1,0 +1,14 @@
+## The Rust target spec (lib/Target/KlaussCPU/rust/klausscpu-unknown-none-elf.json)
+## repeats facts LLVM owns.  rustc rejects a spec whose data-layout differs
+## from the one the target machine computes (TargetDataLayout.cpp), and the
+## pointer width and endianness must agree with that data layout.
+
+# RUN: %python -c "import json, sys; s = json.load(open(sys.argv[1])); \
+# RUN:   print('rust', s['data-layout'], s['llvm-target'], s['target-endian'], \
+# RUN:         s['target-pointer-width'], s['arch'])" \
+# RUN:   %S/../../../lib/Target/KlaussCPU/rust/klausscpu-unknown-none-elf.json > %t
+# RUN: echo "" | opt -mtriple=klausscpu-unknown-elf -S >> %t
+# RUN: FileCheck %s --input-file=%t
+
+# CHECK:      rust [[DL:e-[^ ]*-p:]][[PW:[0-9]+]][[DLREST::[^ ]*]] klausscpu-unknown-elf little [[PW]] klausscpu
+# CHECK:      target datalayout = "[[DL]][[PW]][[DLREST]]"

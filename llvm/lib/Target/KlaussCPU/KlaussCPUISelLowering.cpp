@@ -37,6 +37,8 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/TargetParser/KlaussCPUABI.h"
+#include <iterator>
 #include <optional>
 
 using namespace llvm;
@@ -1127,7 +1129,8 @@ SDValue KlaussCPUTargetLowering::LowerFormalArguments(
   SmallVector<CCValAssign, 16> ArgLocs;
   CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
   // Reserve [SP+0..SP+31]: return address + ABI reserved area.
-  CCInfo.AllocateStack(32, Align(8));
+  CCInfo.AllocateStack(KlaussCPUABI::IncomingArgOffset,
+                       Align(KlaussCPUABI::SlotSize));
   CCInfo.AnalyzeFormalArguments(Ins, CC_KlaussCPU);
 
   for (const CCValAssign &VA : ArgLocs) {
@@ -1151,7 +1154,8 @@ SDValue KlaussCPUTargetLowering::LowerFormalArguments(
   if (IsVarArg) {
     static const MCPhysReg ArgRegs[] = {
         KlaussCPU::R0, KlaussCPU::R1, KlaussCPU::R2, KlaussCPU::R3};
-    constexpr unsigned NumArgRegs = 4;
+    constexpr unsigned NumArgRegs = std::size(ArgRegs);
+    static_assert(NumArgRegs == KlaussCPUABI::NumArgGPRs);
 
     // Index of the first unallocated (= first potential vararg) register.
     unsigned FirstVaReg =
@@ -1181,8 +1185,11 @@ SDValue KlaussCPUTargetLowering::LowerFormalArguments(
     std::optional<int> VaArgFI;
     SmallVector<SDValue, 4> Stores;
     for (unsigned I = FirstVaReg; I < NumArgRegs; ++I) {
-      int SlotOff = (int)(I * 8); // R_I → [incoming_SP + I*8]
-      int FI = MFI.CreateFixedObject(8, SlotOff, /*isImmutable=*/false);
+      // R_I → [incoming_SP + I*8]
+      int SlotOff =
+          KlaussCPUABI::RetAddrSize + (I - 1) * KlaussCPUABI::SlotSize;
+      int FI = MFI.CreateFixedObject(KlaussCPUABI::SlotSize, SlotOff,
+                                     /*isImmutable=*/false);
       if (!VaArgFI)
         VaArgFI = FI;
       Register VReg = RegInfo.createVirtualRegister(&KlaussCPU::GPRRegClass);
@@ -1288,7 +1295,8 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
   // The callee pre-reserves 32 bytes from incoming_SP.  The caller's GETSP
   // value is incoming_SP + 8, so pre-reserve only 24 bytes here so the first
   // stack arg offset (24) maps to incoming_SP + 32 on the callee side.
-  CCInfo.AllocateStack(24, Align(8));
+  CCInfo.AllocateStack(KlaussCPUABI::OutgoingArgOffset,
+                       Align(KlaussCPUABI::SlotSize));
   CCInfo.AnalyzeCallOperands(CLI.Outs, CC_KlaussCPU);
 
   unsigned StackSize = CCInfo.getStackSize(); // ≥ 24

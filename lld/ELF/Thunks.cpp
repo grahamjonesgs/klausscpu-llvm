@@ -33,6 +33,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
+#include "llvm/TargetParser/KlaussCPUABI.h"
 #include <cstdint>
 #include <cstring>
 
@@ -1585,7 +1586,7 @@ void KlaussCPUThunk::writeTo(uint8_t *buf) {
   uint64_t s = destination.getVA(ctx, addend);
   uint64_t p = getThunkTargetSym()->getVA(ctx);
   // JMPREL (pipeline_core.sv U_JMP, brel: target = PC + imm32 of word 1).
-  write32(ctx, buf, 0xA1000000);
+  write32(ctx, buf, KlaussCPUABI::JmpRelWord);
   write32(ctx, buf + 4, static_cast<uint32_t>(s - p));
 }
 
