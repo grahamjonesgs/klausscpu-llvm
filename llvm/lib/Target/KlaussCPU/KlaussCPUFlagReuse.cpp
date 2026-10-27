@@ -18,8 +18,9 @@
 //     jmpz/jmpnz  <target>   ; reads Z
 //
 // deleting the CMPRV and its execute cycles from every matching loop
-// iteration.  Instructions that write no flag may sit between the three.  On a fetch-bound core (fetch = 59-75% of cycles) that directly
-// cuts fetched words per iteration.
+// iteration.  Instructions that write no flag may sit between the three.
+// On a fetch-bound core (fetch = 59-75% of cycles) that directly cuts
+// fetched words per iteration.
 //
 // Why a post-RA MI peephole and not a DAG-level rewrite: dropping the compare
 // at selection time requires gluing the arithmetic op adjacent to the branch,
