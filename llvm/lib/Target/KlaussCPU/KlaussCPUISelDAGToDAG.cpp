@@ -277,7 +277,7 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
 
   // ---- KlaussCPUISD::SELECT_CC → SELECT_CC_RR/RI (custom inserter) --------
   // (lhs, rhs, cc, trueV, falseV).  The pseudo carries the conditional-jump
-  // opcode directly; the inserter emits CMPRR/CMPRV + that jump.
+  // opcode directly; the inserter emits CMPRR/CMPRV/CMPRVU + that jump.
   if (N->getOpcode() == KlaussCPUISD::SELECT_CC) {
     SDLoc DL(N);
     SDValue LHS = N->getOperand(0);

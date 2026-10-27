@@ -461,6 +461,12 @@ the `klausscpu-runtime` repo root; see its READMEs for build/run detail:
   immediate forms (`setru`, `cmprvu`, `andi`/`ori`/`xori` and their short
   forms).**  The emulator executes them correctly (generic decode), but
   klausscc disassembly and crash dumps do not name them; extend the table there.
+- **A data initializer `sym + A` with `A` outside int32 does not assemble.**
+  `uintptr_t q = (uintptr_t)&arr + 0x80000000UL;` at file scope emits
+  `.quad arr+2147483648`, which MC rejects with `relocation addend out of
+  range`: an ELFCLASS32 RELA addend is 32-bit signed, so it cannot be carried.
+  The same expression in code is exact (`SETRU arr` + `ADDV`/`ADDI`, see the
+  Addresses row).  Compute such values at run time instead.
 - **Zephyr *packaged* logging (`cbprintf_package`) may still mis-render mixed
   32/64-bit conversions.**  The packaged path (`lib/os/cbprintf_packaged.c`,
   used by deferred/immediate `LOG_*`) packs each arg by its C-type size

@@ -947,13 +947,15 @@ def ADJCALLSTACKUP   : Pseudo<(outs), (ins i64imm:$amt1, i64imm:$amt2),
 // to one of these; EmitInstrWithCustomInserter (KlaussCPUISelLowering.cpp)
 // expands it to CMPRR/CMPRV/CMPRVU + the conditional jump in $jmp + a PHI.
 // $jmp holds the JMPxx opcode (from KlaussCPUInstrInfo::getCondBranchOpcode).
+// SELECT_CC_RI's $rhs is a plain i64imm, not simm32: it holds a simm32
+// (CMPRV / CMPRVW) or a value in [2^31, 2^32) (CMPRVU).
 // Defs=[FLAGS]: the expansion's compare clobbers the flags.
 let usesCustomInserter = 1, hasSideEffects = 0, Defs = [FLAGS] in {
 def SELECT_CC_RR : Pseudo<(outs GPR:$dst),
                           (ins GPR:$lhs, GPR:$rhs, i64imm:$jmp,
                                GPR:$trueV, GPR:$falseV)>;
 def SELECT_CC_RI : Pseudo<(outs GPR:$dst),
-                          (ins GPR:$lhs, simm32:$rhs, i64imm:$jmp,
+                          (ins GPR:$lhs, i64imm:$rhs, i64imm:$jmp,
                                GPR:$trueV, GPR:$falseV)>;
 }
 
