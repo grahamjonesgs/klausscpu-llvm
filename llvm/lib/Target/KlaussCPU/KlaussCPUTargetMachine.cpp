@@ -34,9 +34,11 @@
 
 namespace llvm {
 FunctionPass *createKlaussCPUISelDag(KlaussCPUTargetMachine &TM);
+FunctionPass *createKlaussCPUCalleeSavedCFIPass();
 FunctionPass *createKlaussCPUEarlyIVIncPass();
 FunctionPass *createKlaussCPUFlagReusePass();
 FunctionPass *createKlaussCPUFuseCmpBrPass(bool LoopConstsOnly = false);
+void initializeKlaussCPUCalleeSavedCFIPass(PassRegistry &);
 void initializeKlaussCPUDAGToDAGISelLegacyPass(PassRegistry &);
 void initializeKlaussCPUEarlyIVIncPass(PassRegistry &);
 void initializeKlaussCPUFlagReusePass(PassRegistry &);
@@ -51,6 +53,7 @@ LLVMInitializeKlaussCPUTarget() {
   // Register the target's MachineFunction passes so MIR tests can run them
   // with -run-pass.
   PassRegistry &PR = *PassRegistry::getPassRegistry();
+  initializeKlaussCPUCalleeSavedCFIPass(PR);
   initializeKlaussCPUDAGToDAGISelLegacyPass(PR);
   initializeKlaussCPUEarlyIVIncPass(PR);
   initializeKlaussCPUFlagReusePass(PR);
@@ -150,6 +153,10 @@ void KlaussCPUPassConfig::addPreEmitPass() {
   addPass(createKlaussCPUFlagReusePass());
   // ISA v3 B — fuse the remaining adjacent compare + conditional branch.
   addPass(createKlaussCPUFuseCmpBrPass());
+  // The callee-saved .cfi_offset rules, behind the scheduled spills (with -g
+  // or unwind tables only; before CFIFixup, which copies them into the
+  // state it restores).
+  addPass(createKlaussCPUCalleeSavedCFIPass());
 }
 
 TargetTransformInfo

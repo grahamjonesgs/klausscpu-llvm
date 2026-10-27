@@ -54,7 +54,11 @@
 // unwind tables).  CFA = the caller's SP before its CALL.  The CIE (see
 // createKlaussCPUMCAsmInfo) starts each function at CFA = SP+8 with the return
 // address (RA column, DWARF 17) at CFA-8.  After the prologue CFA = R15+16
-// with the caller's R15 at CFA-16; callee-saved spills add .cfi_offset rules.
+// with the caller's R15 at CFA-16; each callee-saved spill is followed by its
+// .cfi_offset rule, placed after post-RA scheduling by KlaussCPUCalleeSavedCFI
+// so that -g does not change the schedule (CFI instructions are scheduling
+// boundaries; the rest of the frame's CFI follows instructions that write SP,
+// which are boundaries anyway).
 // SP moves after the prologue (VLAs, call frames) need no CFI because the CFA
 // is R15-based.  An epilogue folded into LEAVERET leaves the function in the
 // same instruction, so it needs no CFI; a plain LEAVE switches the CFA back to
@@ -210,7 +214,7 @@ void KlaussCPUFrameLowering::emitPrologue(MachineFunction &MF,
           .setMIFlag(MachineInstr::FrameSetup);
   }
 
-  if (!HasBP && !NeedsCFI)
+  if (!HasBP)
     return;
 
   // Callee-saved spills (spillCalleeSavedRegisters) follow the prologue.
@@ -231,20 +235,8 @@ void KlaussCPUFrameLowering::emitPrologue(MachineFunction &MF,
         .setMIFlag(MachineInstr::FrameSetup);
   }
 
-  if (!NeedsCFI)
-    return;
-
-  // Place the .cfi_offset rules for the callee-saved registers after the
-  // spills.  Spill slots are R15-relative (getFrameIndexReference), and
-  // R15 = CFA-16.
-  CFIBuilder.setInsertPoint(MBBI);
-  for (const CalleeSavedInfo &CS : MFI.getCalleeSavedInfo()) {
-    Register FrameReg;
-    StackOffset Offset =
-        getFrameIndexReference(MF, CS.getFrameIdx(), FrameReg);
-    assert(FrameReg == KlaussCPU::R15 && "Callee-saved slot not R15-relative");
-    CFIBuilder.buildOffset(CS.getReg(), Offset.getFixed() - 16);
-  }
+  // The callee-saved registers' .cfi_offset rules are placed behind their
+  // spills after the post-RA scheduler (KlaussCPUCalleeSavedCFI.cpp).
 }
 
 // Once the frame is gone, R15 and the callee-saved registers hold the
@@ -312,7 +304,8 @@ bool KlaussCPUFrameLowering::spillCalleeSavedRegisters(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
     ArrayRef<CalleeSavedInfo> CSI, const TargetRegisterInfo *TRI) const {
   // Same stores as the generic code, but flagged FrameSetup so emitPrologue
-  // can place the CSR .cfi_offset rules after them.
+  // can place the BP setup and KlaussCPUCalleeSavedCFI the CSR .cfi_offset
+  // rules after them.
   const TargetInstrInfo &TII = *MBB.getParent()->getSubtarget().getInstrInfo();
   for (const CalleeSavedInfo &CS : CSI) {
     MCRegister Reg = CS.getReg();

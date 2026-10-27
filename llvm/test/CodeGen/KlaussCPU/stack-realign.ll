@@ -244,8 +244,8 @@ define void @cfi() uwtable {
 ; CHECK-NEXT:    .cfi_def_cfa r15, 16
 ; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    stidx64 r7, r15, -8 # 8-byte Folded Spill
-; CHECK-NEXT:    andi r7, r15, -16
 ; CHECK-NEXT:    .cfi_offset r7, -24
+; CHECK-NEXT:    andi r7, r15, -16
 ; CHECK-NEXT:    addi r0, r7, -16
 ; CHECK-NEXT:    call use
 ; CHECK-NEXT:    ldidx64 r7, r15, -8 # 8-byte Folded Reload
@@ -260,8 +260,8 @@ define void @cfi() uwtable {
 ; PUSH-NEXT:    .cfi_def_cfa_register r15
 ; PUSH-NEXT:    addsp -56
 ; PUSH-NEXT:    stidx64 r7, r15, -8 # 8-byte Folded Spill
-; PUSH-NEXT:    andi r7, r15, -16
 ; PUSH-NEXT:    .cfi_offset r7, -24
+; PUSH-NEXT:    andi r7, r15, -16
 ; PUSH-NEXT:    addi r0, r7, -16
 ; PUSH-NEXT:    call use
 ; PUSH-NEXT:    ldidx64 r7, r15, -8 # 8-byte Folded Reload

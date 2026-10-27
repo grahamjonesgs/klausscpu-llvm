@@ -43,13 +43,14 @@ define i64 @leaf(i64 %x) uwtable {
   ret i64 %v
 }
 
-; Callee-saved registers: .cfi_offset rules come after the spills, at
-; R15-relative slot offset - 16; the frame teardown drops them again.
+; Callee-saved registers: each .cfi_offset rule directly follows its spill
+; (KlaussCPUCalleeSavedCFI), at R15-relative slot offset - 16; the frame
+; teardown drops them again.
 define i64 @csrs(i64 %a, i64 %b) uwtable {
 ; CHECK-LABEL: csrs:
 ; CHECK:         stidx64 r4, r15, -8
-; CHECK-NEXT:    stidx64 r5, r15, -16
 ; CHECK-NEXT:    .cfi_offset r4, -24
+; CHECK-NEXT:    stidx64 r5, r15, -16
 ; CHECK-NEXT:    .cfi_offset r5, -32
 ; CHECK:         ldidx64 r5, r15, -16
 ; CHECK:         ldidx64 r4, r15, -8

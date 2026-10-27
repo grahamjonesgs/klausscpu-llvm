@@ -208,7 +208,16 @@ Inline asm may not write R7 in such a function.  See
 
 **CFI** (with `-g`, unwind tables or IR without `nounwind`): CIE
 `CFA = SP+8, RA (DWARF 17) = [CFA-8]`; after ENTER `CFA = R15+16`, caller R15
-at `CFA-16`.  `setCFIFixup(true)` repairs blocks laid out after a `LEAVE`.
+at `CFA-16`; each callee-saved spill is followed by its `.cfi_offset` rule.
+`setCFIFixup(true)` repairs blocks laid out after a `LEAVE`.  CFI
+instructions are scheduling boundaries, so -g must not add one where the
+scheduler could otherwise move code: the ENTER/LEAVE (PUSH/ADDSP, SETSP/POP)
+CFI follows instructions that write SP, which are boundaries anyway, and the
+callee-saved rules are only added after the post-RA scheduler
+(`KlaussCPUCalleeSavedCFI`, the last pre-emit pass).  -g and -g0 give the
+same code (`csr-cfi-sched.ll`), except with `-klausscpu-enter-leave=false`
+in a function without locals (no ADDSP, so the CFI behind `GETSP R15` is
+an extra boundary).
 
 ### Inline asm
 
@@ -275,7 +284,7 @@ when clobbered.
   `-mcpu=no-sched` is the A/B baseline without either scheduler (and
   without `KlaussCPUEarlyIVInc` or the TTI unrolling, which serve them).
 - Before the post-RA scheduler: FuseCmpBr's loop constants; pre-emit passes:
-  FlagReuse, then FuseCmpBr (see Flags).
+  FlagReuse, then FuseCmpBr (see Flags), then CalleeSavedCFI (see CFI).
 - TTI (`KlaussCPUTargetTransformInfo.cpp`): moderate partial/runtime
   unrolling (MaxCount 4) with the budget scaled down for branch-dense loop
   bodies, no peeling; `-mcpu=no-sched` reverts to no body-duplicating
@@ -429,6 +438,7 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPUEarlyIVInc.cpp     IR, after LSR: loop counter counts from Init - C so its increment can issue early
 ├── KlaussCPUFlagReuse.cpp      pre-emit: CMPRV Rd,0 + JMPE/NE → JMPZ/NZ (default on)
 ├── KlaussCPUFuseCmpBr.cpp      pre-emit: compare + branch → ISA v3 FBR (default on); pre-sched2 instance: loop constants
+├── KlaussCPUCalleeSavedCFI.cpp pre-emit: a callee-saved register's .cfi_offset behind its scheduled spill
 ├── KlaussCPUTargetTransformInfo.h/.cpp  TTI — M8 unroll budget gated on branch density, no peel; LSR cost order, register count
 ├── KlaussCPUSubtarget.h/.cpp   single subtarget; member init order is critical
 ├── KlaussCPUTargetMachine.h/.cpp CodeGenTargetMachineImpl; pass config (AtomicExpand, EarlyIVInc, isel, pre-sched2 and pre-emit passes)
