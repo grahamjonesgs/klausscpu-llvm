@@ -432,16 +432,42 @@ SDValue KlaussCPUTargetLowering::LowerShiftRightParts(SDValue Op,
   return DAG.getMergeValues(Parts, DL);
 }
 
+// Both SETRU and LEAPC build a 32-bit address zero-extended, so `sym+off`
+// folded into the instruction is right only while S + off lies in
+// [0, 2^32).  A negative offset can take it below zero (`&arr[i - K]` with
+// arr at a low address and a large constant K): the folded form would yield
+// 0x00000000_FFFFxxxx instead of the negative 64-bit value, and the 64-bit
+// add of the index then carries into bit 32 (pointer compares and ptrtoint
+// go wrong; the EA, bits [31:0], would still be right).  Fold only a
+// non-negative offset below 2^31 (also the range of an ELFCLASS32 addend)
+// and add any other one separately: SETRU sym + ADDI off is exact.
+static SDValue wrapSymbolWithOffset(SelectionDAG &DAG, const SDLoc &DL,
+                                    unsigned WrapOp, SDValue TSym,
+                                    int64_t Offset) {
+  SDValue Addr = DAG.getNode(WrapOp, DL, MVT::i64, TSym);
+  if (Offset == 0)
+    return Addr;
+  return DAG.getNode(ISD::ADD, DL, MVT::i64, Addr,
+                     DAG.getSignedConstant(Offset, DL, MVT::i64));
+}
+
+static bool isFoldableSymbolOffset(int64_t Offset) {
+  return isUInt<31>(Offset);
+}
+
 SDValue KlaussCPUTargetLowering::LowerGlobalAddress(SDValue Op,
                                                       SelectionDAG &DAG) const {
   auto *N = cast<GlobalAddressSDNode>(Op);
-  SDValue TGA = DAG.getTargetGlobalAddress(N->getGlobal(), SDLoc(N), MVT::i64,
-                                            N->getOffset());
+  SDLoc DL(N);
+  int64_t Offset = N->getOffset();
+  bool Fold = isFoldableSymbolOffset(Offset);
+  SDValue TGA = DAG.getTargetGlobalAddress(N->getGlobal(), DL, MVT::i64,
+                                           Fold ? Offset : 0);
   // PIC: wrap in LEAPC → emits LEAPC with PCREL32 fixup.
   // Non-PIC: wrap in ADDR → emits SETRU with ABS32 fixup.
   unsigned WrapOp = getTargetMachine().isPositionIndependent()
                         ? KlaussCPUISD::LEAPC : KlaussCPUISD::ADDR;
-  return DAG.getNode(WrapOp, SDLoc(N), MVT::i64, TGA);
+  return wrapSymbolWithOffset(DAG, DL, WrapOp, TGA, Fold ? 0 : Offset);
 }
 
 SDValue KlaussCPUTargetLowering::LowerExternalSymbol(SDValue Op,
@@ -456,10 +482,14 @@ SDValue KlaussCPUTargetLowering::LowerExternalSymbol(SDValue Op,
 SDValue KlaussCPUTargetLowering::LowerBlockAddress(SDValue Op,
                                                      SelectionDAG &DAG) const {
   auto *N = cast<BlockAddressSDNode>(Op);
-  SDValue TBA = DAG.getTargetBlockAddress(N->getBlockAddress(), MVT::i64);
+  SDLoc DL(N);
+  int64_t Offset = N->getOffset();
+  bool Fold = isFoldableSymbolOffset(Offset);
+  SDValue TBA = DAG.getTargetBlockAddress(N->getBlockAddress(), MVT::i64,
+                                          Fold ? Offset : 0);
   unsigned WrapOp = getTargetMachine().isPositionIndependent()
                         ? KlaussCPUISD::LEAPC : KlaussCPUISD::ADDR;
-  return DAG.getNode(WrapOp, SDLoc(N), MVT::i64, TBA);
+  return wrapSymbolWithOffset(DAG, DL, WrapOp, TBA, Fold ? 0 : Offset);
 }
 
 SDValue KlaussCPUTargetLowering::LowerJumpTable(SDValue Op,

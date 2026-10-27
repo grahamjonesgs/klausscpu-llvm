@@ -9,7 +9,7 @@
 //                             (branch/call target) or 4-byte data reference.
 //   R_KLAUSSCPU_ABS64  (2) — 64-bit absolute, LE — 8-byte pointer field in
 //                             .rodata/.data (struct members, pointer arrays):
-//                             the 32-bit address, zero-extended.
+//                             S + A in 64 bits, the address S zero-extended.
 //   R_KLAUSSCPU_PCREL32(3) — 32-bit signed PC-relative, LE — word-1 slot of
 //                             JMPREL/JMPxxREL/CALLREL/LEAPC instructions.
 //                             field_value = S + A − instr_addr.
@@ -88,14 +88,24 @@ void KlaussCPU::relocate(uint8_t *loc, const Relocation &rel,
     write32le(loc, static_cast<uint32_t>(val));
     break;
   case R_KLAUSSCPU_ABS64:
-    // 8-byte pointer field in .rodata/.data.  Addresses are 32-bit and
-    // zero-extended, as SETRU, LEAPC and the assembler's own FK_Data_8 build
-    // them, but lld hands an ELFCLASS32 target the value sign-extended from
-    // 32 bits: keep the low half, so an address >= 2 GiB is not
-    // 0xFFFFFFFF_xxxxxxxx.  The exception is the -1 tombstone of a reference
-    // from a .debug_* section (relocateNonAlloc, expr R_NONE) to a discarded
-    // section, which DWARF consumers expect as all-ones.
-    if (rel.expr == R_NONE && val == UINT64_MAX)
+    // 8-byte field in .rodata/.data: the exact 64-bit S + A, with the 32-bit
+    // address S zero-extended as SETRU, LEAPC and the assembler's own
+    // FK_Data_8 build it.  lld hands an ELFCLASS32 target `val` sign-extended
+    // from 32 bits, which cannot tell an address >= 2 GiB (positive) from a
+    // negative S + A (`(intptr_t)&x - 0x100000` with x at a low address), so
+    // recompute it from the symbol: S + A in 64 bits, as the code computes
+    // it (KlaussCPUISelLowering keeps a negative offset out of SETRU).
+    if (rel.expr == R_ABS && rel.sym) {
+      write64le(loc, rel.sym->getVA(ctx, rel.addend));
+      break;
+    }
+    // A non-alloc section (relocateNonAlloc: expr R_NONE, no symbol), i.e.
+    // .debug_*, where S + A is an address: zero-extend the low half, except
+    // the all-ones tombstone of a reference to a discarded section, which
+    // DWARF consumers expect.  (A live reference to exactly 0xFFFFFFFF also
+    // reaches here as all-ones; relocateNoSym passes nothing to tell them
+    // apart; nothing the compiler describes in DWARF lives there.)
+    if (val == UINT64_MAX)
       write64le(loc, val);
     else
       write64le(loc, static_cast<uint32_t>(val));

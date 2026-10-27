@@ -28,7 +28,7 @@ describe earlier states of the backend and are superseded by this file.
 | Load/store addressing | `[r]` (`MEMGETn`/`MEMSETn`), `r + simm32` (`LDIDXn`/`STIDXn`, 1-word short form for a small scaled offset), `r + r` at every width (`LDIDXnR`/`LDIDXn_SR`/`STIDXnR`, MODE=11); 16/32-bit forms other than `MEMGET32` force-align the EA |
 | 32-bit ops | `ADDW`/`SUBW`/`ADDIW`/`MULW`, `CMPRRW`/`CMPRVW` (ISA v3 D2/D3) |
 | Immediates | each class 2/3 op exists with a sign- and a zero-extended imm32 (SGN bit); isel picks the one that holds the constant: `SETR`/`SETRU` (MOV), `ADDI`/`ADDV`/`MINUSV`, `ANDI`/`ANDV` (and OR/XOR), `CMPRV`/`CMPRVU`; `SETR64` only for a value neither reaches |
-| Addresses | 32-bit, zero-extended in a register: `SETRU sym` (static), `LEAPC` (PIC), `R_KLAUSSCPU_ABS64` data (lld zero-extends) |
+| Addresses | 32-bit, zero-extended in a register: `SETRU sym` (static), `LEAPC` (PIC); `sym+off` is folded only for `off` in [0, 2^31), other offsets are a separate add so a negative S + off stays negative; `R_KLAUSSCPU_ABS64` data is the exact 64-bit S + A (lld) |
 | Indirect branch / call | `JMPR` / `CALLR`; jump tables are off by default (`-klausscpu-min-jump-table-entries=N` enables them) |
 | `llvm.trap` / `llvm.debugtrap` | `HALT` / `TRAP` (the debugger's breakpoint) |
 
@@ -415,7 +415,7 @@ SelectionDAGTargetInfo    TSI;
 - `DAG.getTargetGlobalAddress(same_params)` is **CSE-deduplicated** — calling it twice returns the *same* `SDNode*`. If you then call `getMachineNode(SETR, DL, MVT::i64, SDValue(tga_node, 0))` and `ReplaceNode(tga_node, setr_node)`, `ReplaceAllUsesWith` rewrites SETR's own operand from `tga_node` to `setr_node` → self-referential machine instruction `%0 = SETR %0` → RegAllocFast crash `"no reload in start block. Missing vreg def?"`.
 - **Fix — ADDR wrapper node:** `LowerGlobalAddress` / `LowerExternalSymbol` wrap the TargetGlobalAddress in a `KlaussCPUISD::ADDR` node (`LEAPC` under PIC), which the `(KlaussCPUAddr tglobaladdr)` → `SETRU` pattern selects: `ADDR` (not TGA) is the node replaced → no circular reference.
 - Call-site callee addresses **bypass `LowerOperation`** — `LowerCall` calls `DAG.getTargetGlobalAddress()` directly, and the bare TGA is consumed by the `CALL_I` tablegen pattern. Never wrap call-target TGAs in ADDR.
-- `SETR64` is a single 12-byte instruction for 64-bit constants: `rd = (hi32 << 32) | lo32`. Isel uses it only for an i64 constant that is neither a simm32 (`SETR`) nor a uimm32 (`SETRU`). Global addresses are always ≤ 32 bits and use SETRU (zero-extended, like LEAPC), not SETR64.
+- `SETR64` is a single 12-byte instruction for 64-bit constants: `rd = (hi32 << 32) | lo32`. Isel uses it only for an i64 constant that is neither a simm32 (`SETR`) nor a uimm32 (`SETRU`). Global addresses are always ≤ 32 bits and use SETRU (zero-extended, like LEAPC), not SETR64. `LowerGlobalAddress` / `LowerBlockAddress` fold only an offset in [0, 2^31) into the SETRU / LEAPC operand: `SETRU arr-800000` would zero-extend a negative S + off (`&arr[i - 100000]`, arr at a low address), so such an offset becomes SETRU sym + ADDI off (test `symbol-offset.ll`).
 - `SDUse` iterators: `for (auto UI = N->use_begin(); UI != N->use_end(); ++UI)` — `*UI` is an `SDUse&`. Access the user node via `UI->getUser()` (arrow, not dot).
 
 ---
