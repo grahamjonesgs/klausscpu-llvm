@@ -132,5 +132,15 @@
 # A register where an immediate is expected gets the class's message too.
 # ERR: [[#@LINE+1]]:25: error: immediate must be an integer in the range [0, 4294967295]
         addv    r1, r2, r3
+# A missing operand is reported as such, not as the range of the class the
+# closest form expected there.
+# ERR: [[#@LINE+1]]:9: error: too few operands for instruction
+        addv    r1, r2
+# ERR: [[#@LINE+1]]:9: error: too few operands for instruction
+        bextr   r1, r2
+# ERR: [[#@LINE+1]]:9: error: too few operands for instruction
+        shlv    r1, r2
+# ERR: [[#@LINE+1]]:9: error: too few operands for instruction
+        setr    r1
 lab:
 .endif

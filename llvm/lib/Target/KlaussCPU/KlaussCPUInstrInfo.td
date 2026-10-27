@@ -102,6 +102,9 @@ class PCRelAsmOperand<int width, int scale>
   let ParserMethod = "parsePCRelTarget";
 }
 def PCRel32AsmOperand : PCRelAsmOperand<32, 1>;
+// Short branches are AsmVariantName "NoMatch" (the parser emits the 2-word
+// form and compressKlaussCPUInst shortens it), so this class never reaches
+// the matcher; it gives PCRelTarget18 a class consistent with the others.
 def PCRel20AsmOperand : PCRelAsmOperand<20, 4>;
 def PCRel15AsmOperand : PCRelAsmOperand<15, 4>;
 

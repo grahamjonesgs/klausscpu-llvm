@@ -35,7 +35,11 @@ range-checked `AsmOperandClass` (`KCImmAsmOperand`): the assembler rejects
 an out-of-range constant, and a symbol where no fixup exists, with the
 class's `DiagnosticString`.  Registers have no prefix, so a lone register
 name is the register in a register slot and the symbol of that name in an
-immediate/target slot (`KlaussCPUAsmParser.cpp` header).
+immediate/target slot (`KlaussCPUAsmParser.cpp` header) — so a typo such as
+`call r1` for `callr r1` is an undefined symbol at link time, not an
+assembler error.  SETR accepts [-2^31, 2^32) and the CPU sign-extends the
+imm32: `setr rX, 0xFFFFFFFF` loads -1 (kept for the runtime's
+`setr r0, 0xF00F0000` MMIO idiom).
 
 ### Flag sets — NEVER MIX
 
@@ -912,7 +916,7 @@ and one-instruction signed sub-word loads (`LDIDX8_S`/`LDIDX16_S`).
   formats are verbatim from `opcode_select.vh`, so bytes match the hardware-
   verified `klausscc` assembler. Added: ADDC, SUBC, BSETRR/BCLRRR/BTGLRR/BTSTRR
   (RRR); SETFR, SHLAR, SHRAR, ROLR1, RORR1, ROLCR, RORCR (R in-place); BSET,
-  BCLR, BTGL, BEXTR, BDEP (RV 2-addr), BTST (RV cmp); MEMREADRR, MEMSET64RR (RR);
+  BCLR, BTGL, BEXTR (RV), BDEP (RRRV), BTST (RV cmp); MEMREADRR, MEMSET64RR (RR);
   MEMREADR, MEMSETR (RV absolute, symbol-capable via new `fmtRV_addr`);
   LDIDX64U/STIDX64U (non-aligned), LDIDX64R/STIDX64R (reg-offset); PUSHV, JMPO,
   JMPNO, CALLZ/NZ/E/NE/C/NC/O/NO (V/Vcall); PUSHV64 (V64, 12-byte, manual emit);

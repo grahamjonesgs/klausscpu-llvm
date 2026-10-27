@@ -12,7 +12,11 @@
 // (`call b`, `leapc r12, sp`).  A lone register name is parsed as a register
 // operand that also carries the expression for the symbol of that name; it
 // matches a register class as the register and an immediate class as the
-// symbol, so the instruction's operand list decides.
+// symbol, so the instruction's operand list decides.  As with RISC-V's
+// `call a0`, a register name in a symbol-capable slot is therefore never an
+// assembler error: `setr r1, r2` or `call r1` assembles to a relocation
+// against a symbol `r2` / `r1`, and a typo shows up only as an undefined
+// symbol at link time.
 //
 //===----------------------------------------------------------------------===//
 
@@ -452,28 +456,25 @@ bool KlaussCPUAsmParser::matchAndEmitInstruction(SMLoc IDLoc,
   case Match_MnemonicFail:
     return Error(IDLoc, "unrecognised instruction mnemonic");
 
-  case Match_InvalidOperand: {
-    SMLoc ErrLoc = IDLoc;
-    if (ErrorInfo != ~0ULL) {
-      if (ErrorInfo >= Operands.size())
-        return Error(IDLoc, "too few operands for instruction");
-      ErrLoc = Operands[ErrorInfo]->getStartLoc();
-    }
-    return Error(ErrLoc, "invalid operand for instruction");
-  }
-
   default:
     break;
   }
 
-  // An operand class's DiagnosticString (KlaussCPUInstrInfo.td).
-  if (const char *Diag =
-          getMatchKindDiag(static_cast<KlaussCPUMatchResultTy>(Result))) {
-    SMLoc ErrLoc = ErrorInfo < Operands.size()
-                       ? Operands[ErrorInfo]->getStartLoc()
-                       : IDLoc;
-    return Error(ErrLoc, Diag);
+  // An operand did not match: Match_InvalidOperand, or an operand class's
+  // DiagnosticString (KlaussCPUInstrInfo.td).  ErrorInfo is the index of the
+  // operand; one past the last means an operand is missing, whatever class
+  // the best near-miss expected there.
+  SMLoc ErrLoc = IDLoc;
+  if (ErrorInfo != ~0ULL) {
+    if (ErrorInfo >= Operands.size())
+      return Error(IDLoc, "too few operands for instruction");
+    ErrLoc = Operands[ErrorInfo]->getStartLoc();
   }
+  if (Result == Match_InvalidOperand)
+    return Error(ErrLoc, "invalid operand for instruction");
+  if (const char *Diag =
+          getMatchKindDiag(static_cast<KlaussCPUMatchResultTy>(Result)))
+    return Error(ErrLoc, Diag);
   llvm_unreachable("unknown match result");
 }
 
