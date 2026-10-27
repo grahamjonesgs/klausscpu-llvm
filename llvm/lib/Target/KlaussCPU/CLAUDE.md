@@ -265,11 +265,13 @@ when clobbered.
   (order-independent / not movable).  It drives the pre-RA machine scheduler
   (GenericScheduler, in-order: an unready node waits in the pending queue)
   and the post-RA list scheduler, which runs from **-O1** up
-  (`getOptLevelToEnablePostRAScheduler`) and renames registers to break
-  anti-dependencies on the critical path (`getAntiDepBreakMode`,
-  `ANTIDEP_CRITICAL`).  An inline memcpy is lowered as groups of four loads
-  then four stores (`MaxGluedStoresPerMemcpy`), so no store directly follows
-  its load.  `-mcpu=no-sched` is the A/B baseline without either scheduler.
+  (`getOptLevelToEnablePostRAScheduler`), issues one instruction per cycle
+  (`KlaussCPUInstrInfo::CreateTargetPostRAHazardRecognizer`: LLVM's default
+  recognizer sets no issue limit for a model without itineraries) and
+  renames registers to break anti-dependencies on the critical path
+  (`getAntiDepBreakMode`, `ANTIDEP_CRITICAL`).  An inline memcpy is
+  lowered as groups of four loads then four stores
+  (`MaxGluedStoresPerMemcpy`), so no store directly follows its load.  `-mcpu=no-sched` is the A/B baseline without either scheduler.
 - Before the post-RA scheduler: FuseCmpBr's loop constants; pre-emit passes:
   FlagReuse, then FuseCmpBr (see Flags).
 - TTI (`KlaussCPUTargetTransformInfo.cpp`): moderate partial/runtime
@@ -287,6 +289,15 @@ when clobbered.
   imm32 forms (ADDI/ADDV/MINUSV, branch compares CMPRV/CMPRVU; a value setcc
   above INT32_MAX still needs SETRU + CMPxxR).  So array loops share one
   byte-offset IV across their r + r accesses.
+- After LSR (end of `addIRPasses`, -O1 and up), `KlaussCPUEarlyIVInc`
+  rewrites a single-block loop whose exit test `icmp eq/ne %i.next, N`
+  reads the incremented counter to count from Init - C and compare with
+  N - C, so the increment comes first in the body and the schedulers can
+  issue it early instead of directly in front of the branch that reads it.
+  Only with constant Init and N (the new constants still 32-bit, still
+  simm4 for FBR_RI if N was), no other use of `%i.next`, and every other
+  in-loop use of the counter waiting at least as long for another operand
+  (so not a load index or GEP).
 
 ### Hidden options (`-mllvm`)
 
@@ -301,6 +312,8 @@ when clobbered.
 | `-klausscpu-group-selects` | on | consecutive selects on one condition share a compare/branch |
 | `-klausscpu-fold-fi-offset` | on | fold frame index + constant into the access / ADDI offset |
 | `-klausscpu-break-anti-deps` | on | post-RA scheduler renames registers to break critical-path anti-dependencies |
+| `-klausscpu-postra-single-issue` | on | post-RA scheduler issues one instruction per cycle (=false: LLVM's unlimited default) |
+| `-klausscpu-early-iv-inc` | on | count a single-block loop from Init - C so its increment can issue early |
 | `-klausscpu-min-jump-table-entries` | 0 (off) | jump tables from N cases |
 | `-klausscpu-pref-loop-align` | 16 | loop-header alignment in bytes |
 | `-klausscpu-mul-imm-shift-add` | off | multiply by a simm32 2^N±1 / 1-2^N as shift + add/sub when the schedule model rates MULV slower |
@@ -400,18 +413,19 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPUCallingConv.td     CC_KlaussCPU, RetCC_KlaussCPU, CSR_KlaussCPU
 ├── KlaussCPUSchedule.td        scheduling model (RTL interlock latencies); processors `generic` and `no-sched`
 ├── KlaussCPUInstrInfo.td       encodings, operand types, isel patterns, short forms + CompressPats, aliases
-├── KlaussCPUInstrInfo.h/.cpp   branch analysis, copies, spills, flagsDeadAfter
+├── KlaussCPUInstrInfo.h/.cpp   branch analysis, copies, spills, flagsDeadAfter, post-RA hazard recognizer (single issue)
 ├── KlaussCPURegisterInfo.h/.cpp reserved regs, stack realignment, eliminateFrameIndex
 ├── KlaussCPUFrameLowering.h/.cpp prologue/epilogue, CFI, base pointer, getFrameIndexReference
 ├── KlaussCPUISelLowering.h/.cpp  calls/args/returns, varargs, SELECT_CC, BR_JT, i32 rotates, i128 shifts, DAG combines
 ├── KlaussCPUISelDAGToDAG.cpp   SelectCode() + C++ for BR_CC, SELECT_CC, W SETCC; AddrFI, shift/bit-field ComplexPatterns; inline-asm 'm'
 ├── KlaussCPUMachineFunctionInfo.h  per-function state (vararg frame index)
 ├── KlaussCPUAsmPrinter.cpp     MachineInstr → MCInst (+ CompressPat), inline-asm operand printing
+├── KlaussCPUEarlyIVInc.cpp     IR, after LSR: loop counter counts from Init - C so its increment can issue early
 ├── KlaussCPUFlagReuse.cpp      pre-emit: CMPRV Rd,0 + JMPE/NE → JMPZ/NZ (default on)
 ├── KlaussCPUFuseCmpBr.cpp      pre-emit: compare + branch → ISA v3 FBR (default on); pre-sched2 instance: loop constants
 ├── KlaussCPUTargetTransformInfo.h/.cpp  TTI — M8 unroll budget gated on branch density, no peel; LSR cost order, register count
 ├── KlaussCPUSubtarget.h/.cpp   single subtarget; member init order is critical
-├── KlaussCPUTargetMachine.h/.cpp CodeGenTargetMachineImpl; pass config (AtomicExpand, isel, pre-sched2 and pre-emit passes)
+├── KlaussCPUTargetMachine.h/.cpp CodeGenTargetMachineImpl; pass config (AtomicExpand, EarlyIVInc, isel, pre-sched2 and pre-emit passes)
 ├── AsmParser/
 │   └── KlaussCPUAsmParser.cpp  -gen-asm-matcher driver; registers vs symbols, PC-relative targets
 ├── Disassembler/

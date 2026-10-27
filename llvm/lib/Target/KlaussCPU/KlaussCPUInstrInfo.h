@@ -93,6 +93,11 @@ public:
                              MachineInstr::MIFlag Flags =
                                  MachineInstr::NoFlags) const override;
 
+  // The post-RA list scheduler's hazard recognizer: one instruction per
+  // cycle (KlaussCPUInstrInfo.cpp).
+  ScheduleHazardRecognizer *
+  CreateTargetPostRAHazardRecognizer(const InstrItineraryData *II,
+                                     const ScheduleDAG *DAG) const override;
 };
 
 } // namespace llvm

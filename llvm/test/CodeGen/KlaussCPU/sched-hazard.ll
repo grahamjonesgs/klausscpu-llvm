@@ -8,7 +8,18 @@
 ; shift results the same register, which pins `shrv` (b >> 3) after the
 ; xor that consumes the first shift; the post-RA scheduler renames it on the
 ; critical path (ANTIDEP_CRITICAL) and moves it into the bubble after the
-; first add, so `subr` no longer waits on it.
+; first add, so `subr` no longer waits on it.  The counter counts from -1
+; to 499999 (KlaussCPUEarlyIVInc): `b += i` ends the chain, and the INCR,
+; no longer pinned behind it and directly in front of the FBR that reads it,
+; fills the bubble after the first shift.  Five stalls per iteration, the
+; minimum for an 8-deep ALU recurrence in 11 instructions.
+;
+; fill: the post-RA list scheduler issues one instruction per cycle
+; (KlaussCPUInstrInfo::CreateTargetPostRAHazardRecognizer), so the three
+; independent ops fill the bubbles of the add/shift/xor/sub chain instead of
+; all being placed "beside" its first add.  With LLVM's default recognizer
+; (no issue limit without itineraries) the chain ends in back-to-back
+; dependent pairs: xorr, subr, stidx64.
 ;
 ; struct_copy: an inline memcpy is grouped as four loads, then their four
 ; stores (MaxGluedStoresPerMemcpy), so no store directly follows its load.
@@ -17,26 +28,26 @@ define void @chain(ptr %sink) nounwind {
 ; CHECK-LABEL: chain:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    setr64 r13, -1985229329, 19088743
-; CHECK-NEXT:    setr64 r14, 1985229328, -19088744
-; CHECK-NEXT:    setr r12, 0
-; CHECK-NEXT:    setr r10, 500000
+; CHECK-NEXT:    setr64 r14, -1985229329, 19088743
+; CHECK-NEXT:    setr64 r13, 1985229328, -19088744
+; CHECK-NEXT:    setr r12, -1
+; CHECK-NEXT:    setr r10, 499999
 ; CHECK-NEXT:    .p2align 4
 ; CHECK-NEXT:  .LBB0_1: # %for.body
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
-; CHECK-NEXT:    addr r13, r14, r13
-; CHECK-NEXT:    shrv r9, r14, 3
-; CHECK-NEXT:    shlv r11, r13, 7
-; CHECK-NEXT:    xorr r13, r11, r13
-; CHECK-NEXT:    subr r13, r13, r9
 ; CHECK-NEXT:    addr r14, r13, r14
-; CHECK-NEXT:    shlv r11, r14, 11
-; CHECK-NEXT:    xorr r14, r11, r14
-; CHECK-NEXT:    addr r14, r14, r12
+; CHECK-NEXT:    shrv r9, r13, 3
+; CHECK-NEXT:    shlv r11, r14, 7
 ; CHECK-NEXT:    incr r12, r12
+; CHECK-NEXT:    xorr r14, r11, r14
+; CHECK-NEXT:    subr r14, r14, r9
+; CHECK-NEXT:    addr r13, r14, r13
+; CHECK-NEXT:    shlv r11, r13, 11
+; CHECK-NEXT:    xorr r13, r11, r13
+; CHECK-NEXT:    addr r13, r13, r12
 ; CHECK-NEXT:    fbr r12, r10, 8, .LBB0_1
 ; CHECK-NEXT:  # %bb.2: # %exit
-; CHECK-NEXT:    addr r12, r14, r13
+; CHECK-NEXT:    addr r12, r13, r14
 ; CHECK-NEXT:    stidx64 r12, r0, 0
 ; CHECK-NEXT:    leaveret
 entry:
@@ -62,6 +73,36 @@ for.body:
 exit:
   %r = add i64 %b.next, %a.next
   store volatile i64 %r, ptr %sink, align 8
+  ret void
+}
+
+define void @fill(ptr %p, i64 %a, i64 %b, i64 %c) nounwind {
+; CHECK-LABEL: fill:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    addr r12, r1, r2
+; CHECK-NEXT:    orr r14, r3, r1
+; CHECK-NEXT:    shlv r12, r12, 7
+; CHECK-NEXT:    andr r13, r2, r3
+; CHECK-NEXT:    xorr r12, r12, r2
+; CHECK-NEXT:    subr r11, r3, r1
+; CHECK-NEXT:    subr r12, r12, r3
+; CHECK-NEXT:    stidx64 r14, r0, 0
+; CHECK-NEXT:    stidx64 r13, r0, 0
+; CHECK-NEXT:    stidx64 r11, r0, 0
+; CHECK-NEXT:    stidx64 r12, r0, 0
+; CHECK-NEXT:    leaveret
+  %a1 = add i64 %a, %b
+  %a2 = shl i64 %a1, 7
+  %a3 = xor i64 %a2, %b
+  %a4 = sub i64 %a3, %c
+  %f1 = or i64 %c, %a
+  %f2 = and i64 %b, %c
+  %f3 = sub i64 %c, %a
+  store volatile i64 %f1, ptr %p
+  store volatile i64 %f2, ptr %p
+  store volatile i64 %f3, ptr %p
+  store volatile i64 %a4, ptr %p
   ret void
 }
 

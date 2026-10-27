@@ -34,9 +34,11 @@
 
 namespace llvm {
 FunctionPass *createKlaussCPUISelDag(KlaussCPUTargetMachine &TM);
+FunctionPass *createKlaussCPUEarlyIVIncPass();
 FunctionPass *createKlaussCPUFlagReusePass();
 FunctionPass *createKlaussCPUFuseCmpBrPass(bool LoopConstsOnly = false);
 void initializeKlaussCPUDAGToDAGISelLegacyPass(PassRegistry &);
+void initializeKlaussCPUEarlyIVIncPass(PassRegistry &);
 void initializeKlaussCPUFlagReusePass(PassRegistry &);
 void initializeKlaussCPUFuseCmpBrPass(PassRegistry &);
 } // namespace llvm
@@ -50,6 +52,7 @@ LLVMInitializeKlaussCPUTarget() {
   // with -run-pass.
   PassRegistry &PR = *PassRegistry::getPassRegistry();
   initializeKlaussCPUDAGToDAGISelLegacyPass(PR);
+  initializeKlaussCPUEarlyIVIncPass(PR);
   initializeKlaussCPUFlagReusePass(PR);
   initializeKlaussCPUFuseCmpBrPass(PR);
 }
@@ -123,6 +126,9 @@ void KlaussCPUPassConfig::addIRPasses() {
   // __sync_* libcall (FP, uinc/udec_wrap, usub_cond/sat) cmpxchg loops.
   addPass(createAtomicExpandLegacyPass());
   TargetPassConfig::addIRPasses();
+  // After loop strength reduction has settled each loop's counter.
+  if (getOptLevel() != CodeGenOptLevel::None)
+    addPass(createKlaussCPUEarlyIVIncPass());
 }
 
 bool KlaussCPUPassConfig::addInstSelector() {

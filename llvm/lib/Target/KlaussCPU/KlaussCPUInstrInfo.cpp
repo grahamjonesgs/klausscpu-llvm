@@ -11,11 +11,18 @@
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/ScheduleHazardRecognizer.h"
+#include "llvm/Support/CommandLine.h"
 
 #define GET_INSTRINFO_CTOR_DTOR
 #include "KlaussCPUGenInstrInfo.inc"
 
 using namespace llvm;
+
+static cl::opt<bool> PostRASingleIssue(
+    "klausscpu-postra-single-issue", cl::Hidden, cl::init(true),
+    cl::desc("Post-RA list scheduler issues one instruction per cycle.  "
+             "=false restores LLVM's default (unlimited issue) for A/B."));
 
 KlaussCPUInstrInfo::KlaussCPUInstrInfo(const KlaussCPUSubtarget &STI_,
                                         const KlaussCPURegisterInfo &RI)
@@ -301,3 +308,33 @@ void KlaussCPUInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
       .addReg(SrcReg, getKillRegState(KillSrc));
 }
 
+namespace {
+// Single issue for the post-RA list scheduler.  Its default recognizer is the
+// itinerary scoreboard, which a SchedMachineModel without itineraries leaves
+// disabled: atIssueLimit() is then never true, and the list scheduler puts
+// every ready instruction into the same cycle.  It then takes the first
+// ready instructions in priority order as filling one cycle and only later
+// meets the stall it could have filled (perf_baseline's ALU loop issued an
+// off-path SHRV and INCR "beside" the first ADDR, and the dependent SHLV,
+// XORR, ... stalled behind each other).  Counting one instruction per cycle
+// makes CurCycle the issue slot, so an instruction that is not ready yet
+// leaves its slot to the highest-priority ready one.  Latencies are the
+// scheduler's own (KlaussCPUSchedule.td); this adds no hazards.
+class KlaussCPUPostRAHazardRecognizer : public ScheduleHazardRecognizer {
+  bool Issued = false;
+
+public:
+  KlaussCPUPostRAHazardRecognizer() { MaxLookAhead = 1; }
+  bool atIssueLimit() const override { return Issued; }
+  void EmitInstruction(SUnit *) override { Issued = true; }
+  void AdvanceCycle() override { Issued = false; }
+  void Reset() override { Issued = false; }
+};
+} // end anonymous namespace
+
+ScheduleHazardRecognizer *KlaussCPUInstrInfo::CreateTargetPostRAHazardRecognizer(
+    const InstrItineraryData *II, const ScheduleDAG *DAG) const {
+  if (!PostRASingleIssue)
+    return TargetInstrInfo::CreateTargetPostRAHazardRecognizer(II, DAG);
+  return new KlaussCPUPostRAHazardRecognizer();
+}

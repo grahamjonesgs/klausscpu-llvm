@@ -519,8 +519,8 @@ define void @store_i64_misaligned(ptr %p, i64 %x) nounwind {
 ; CHECK-NEXT:    stidx64 r1, r15, -8
 ; CHECK-NEXT:    addi r2, r15, -8
 ; CHECK-NEXT:    setr r0, 8
-; CHECK-NEXT:    setr r3, 5
 ; CHECK-NEXT:    copy r1, r12
+; CHECK-NEXT:    setr r3, 5
 ; CHECK-NEXT:    call __atomic_store
 ; CHECK-NEXT:    leaveret
 ;

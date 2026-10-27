@@ -99,7 +99,7 @@ declare void @take3(ptr byval({ i8, i8, i8 }) align 1)
 
 define void @pass_odd(ptr %p, ptr %q) {
 ; CHECK-LABEL: pass_odd:
-; CHECK:         stidx8 {{r[0-9]+}}, r15, [[#%d,E13:]]
+; CHECK-DAG:     stidx8 {{r[0-9]+}}, r15, [[#%d,E13:]]
 ; CHECK-DAG:     stidx32 {{r[0-9]+}}, r15, [[#%d,E13-4]]
 ; CHECK-DAG:     addi r0, r15, [[#%d,E13-12]]
 ; CHECK-NOT:     {{(copy|addi|setr) r0,}}

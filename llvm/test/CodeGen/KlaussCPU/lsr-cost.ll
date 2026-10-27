@@ -48,13 +48,13 @@ define void @add3(ptr %a, ptr %b, ptr %c, ptr %d, i64 %n) nounwind {
 ; REGS-NEXT:    ldidx64 r13, r2, 0
 ; REGS-NEXT:    ldidx64 r11, r3, 0
 ; REGS-NEXT:    decr r12, r12
-; REGS-NEXT:    addi r3, r3, 8
-; REGS-NEXT:    addi r2, r2, 8
-; REGS-NEXT:    addi r1, r1, 8
 ; REGS-NEXT:    addr r14, r13, r14
+; REGS-NEXT:    addi r3, r3, 8
 ; REGS-NEXT:    addr r14, r14, r11
+; REGS-NEXT:    addi r2, r2, 8
 ; REGS-NEXT:    stidx64 r14, r0, 0
 ; REGS-NEXT:    addi r0, r0, 8
+; REGS-NEXT:    addi r1, r1, 8
 ; REGS-NEXT:    fbri r12, 0, 8, .LBB0_1
 ; REGS-NEXT:  .LBB0_2: # %for.cond.cleanup
 ; REGS-NEXT:    leaveret
@@ -147,26 +147,26 @@ define void @mix() nounwind {
 ; CHECK-LABEL: mix:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    setr64 r13, -1985229329, 19088743
-; CHECK-NEXT:    setr64 r14, 1985229328, -19088744
-; CHECK-NEXT:    setr r12, 0
-; CHECK-NEXT:    setr r10, 500000
+; CHECK-NEXT:    setr64 r14, -1985229329, 19088743
+; CHECK-NEXT:    setr64 r13, 1985229328, -19088744
+; CHECK-NEXT:    setr r12, -1
+; CHECK-NEXT:    setr r10, 499999
 ; CHECK-NEXT:    .p2align 4
 ; CHECK-NEXT:  .LBB2_1: # %for.body
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
-; CHECK-NEXT:    addr r13, r14, r13
-; CHECK-NEXT:    shrv r9, r14, 3
-; CHECK-NEXT:    shlv r11, r13, 7
-; CHECK-NEXT:    xorr r13, r11, r13
-; CHECK-NEXT:    subr r13, r13, r9
 ; CHECK-NEXT:    addr r14, r13, r14
-; CHECK-NEXT:    shlv r11, r14, 11
-; CHECK-NEXT:    xorr r14, r11, r14
-; CHECK-NEXT:    addr r14, r14, r12
+; CHECK-NEXT:    shrv r9, r13, 3
+; CHECK-NEXT:    shlv r11, r14, 7
 ; CHECK-NEXT:    incr r12, r12
+; CHECK-NEXT:    xorr r14, r11, r14
+; CHECK-NEXT:    subr r14, r14, r9
+; CHECK-NEXT:    addr r13, r14, r13
+; CHECK-NEXT:    shlv r11, r13, 11
+; CHECK-NEXT:    xorr r13, r11, r13
+; CHECK-NEXT:    addr r13, r13, r12
 ; CHECK-NEXT:    fbr r12, r10, 8, .LBB2_1
 ; CHECK-NEXT:  # %bb.2: # %for.cond.cleanup
-; CHECK-NEXT:    addr r12, r14, r13
+; CHECK-NEXT:    addr r12, r13, r14
 ; CHECK-NEXT:    setru r13, g_sink
 ; CHECK-NEXT:    stidx64 r12, r13, 0
 ; CHECK-NEXT:    leaveret

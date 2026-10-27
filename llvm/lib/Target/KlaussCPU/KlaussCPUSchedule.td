@@ -48,9 +48,13 @@
 // ready yet waits in the pending queue, so it orders by these latencies.  (A
 // variant that ranked the critical path above region register pressure was
 // measured and dropped: 2-3 cycles per Dhrystone run slower on the board.)
-// The post-RA list scheduler is top-down by latency and renames registers to
-// break anti-dependencies on the critical path
-// (KlaussCPUSubtarget::getAntiDepBreakMode).
+// The post-RA list scheduler is top-down by latency, issues one instruction
+// per cycle (KlaussCPUInstrInfo::CreateTargetPostRAHazardRecognizer; without
+// itineraries LLVM's default recognizer sets no issue limit) and renames
+// registers to break anti-dependencies on the critical path
+// (KlaussCPUSubtarget::getAntiDepBreakMode).  A loop counter read by the
+// exit branch would still sit directly in front of it after its last use;
+// KlaussCPUEarlyIVInc moves the increment to the top of the loop first.
 //
 //===----------------------------------------------------------------------===//
 

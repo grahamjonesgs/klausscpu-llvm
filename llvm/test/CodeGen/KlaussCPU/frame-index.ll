@@ -104,10 +104,10 @@ define i64 @field_offsets(i64 %a, i64 %b) nounwind {
 ; CHECK-NEXT:    ldidx32s r14, r15, -44
 ; CHECK-NEXT:    addr r12, r12, r13
 ; CHECK-NEXT:    ldidx64 r13, r15, -40
-; CHECK-NEXT:    ldidx64 r5, r15, -16 # 8-byte Folded Reload
-; CHECK-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
 ; CHECK-NEXT:    addr r12, r12, r14
+; CHECK-NEXT:    ldidx64 r5, r15, -16 # 8-byte Folded Reload
 ; CHECK-NEXT:    addr r12, r12, r13
+; CHECK-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
 ; CHECK-NEXT:    leaveret
   %s = alloca [4 x i64], align 8
   call void @use(ptr %s)
@@ -317,8 +317,8 @@ define i64 @with_vla(i64 %n, i64 %v) nounwind {
 ; CHECK-NEXT:    enter 2
 ; CHECK-NEXT:    addi r12, r0, 7
 ; CHECK-NEXT:    stidx64 r1, r15, -8
-; CHECK-NEXT:    getsp r14
 ; CHECK-NEXT:    andi r12, r12, -8
+; CHECK-NEXT:    getsp r14
 ; CHECK-NEXT:    subr r0, r14, r12
 ; CHECK-NEXT:    setsp r0
 ; CHECK-NEXT:    addsp -24
