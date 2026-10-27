@@ -1,10 +1,10 @@
-//===-- KlaussCPUFlagReuse.cpp - Reuse arithmetic zero_flag ---------------===//
+//===-- KlaussCPUFlagReuse.cpp - Reuse the arithmetic Z flag --------------===//
 //
-// KlaussCPU LLVM backend — A3a: arithmetic zero_flag reuse (post-RA peephole).
+// KlaussCPU LLVM backend — A3a: arithmetic Z-flag reuse (post-RA peephole).
 //
 // A `(X == 0)` / `(X != 0)` branch whose X is produced by a flag-setting
 // arithmetic op does not need a compare: that op already set the hardware
-// zero_flag to `(X == 0)`.  This pass rewrites the already-scheduled triple
+// Z flag to `(X == 0)`.  This pass rewrites the already-scheduled triple
 //
 //     <arith> Rd, ...        ; sets Z = (Rd == 0)  (and S/C/V)
 //     cmprv   Rd, 0          ; CMP is now SUB-without-writeback → re-derives
@@ -14,7 +14,7 @@
 // into
 //
 //     <arith> Rd, ...
-//     jmpz/jmpnz  <target>   ; reads zero_flag
+//     jmpz/jmpnz  <target>   ; reads Z
 //
 // deleting the 8-byte CMPRV and its execute cycles from every matching loop
 // iteration.  On a fetch-bound core (fetch = 59-75% of cycles) that directly
@@ -53,7 +53,7 @@
 using namespace llvm;
 
 #define DEBUG_TYPE "klausscpu-flag-reuse"
-#define PASS_NAME "KlaussCPU arithmetic zero_flag reuse"
+#define PASS_NAME "KlaussCPU arithmetic Z-flag reuse"
 
 namespace llvm {
 void initializeKlaussCPUFlagReusePass(PassRegistry &);
@@ -72,10 +72,10 @@ static cl::opt<bool> EnableArithFlagReuse(
 
 namespace {
 
-// An arithmetic op sets zero_flag = (result == 0).  Only opcodes whose result
+// An arithmetic op sets Z = (result == 0).  Only opcodes whose result
 // register is exactly the value being tested for zero qualify.  Kept
 // deliberately narrow: every entry must be an op that (a) writes its result to
-// operand 0 and (b) is documented to set zero_flag on that result.
+// operand 0 and (b) is documented to set Z on that result.
 static bool setsZeroFlagAsResult(unsigned Opc) {
   switch (Opc) {
   case KlaussCPU::INCR:   // rd = rs1 + 1
@@ -143,7 +143,7 @@ bool KlaussCPUFlagReuse::runOnMachineFunction(MachineFunction &MF) {
       Register Rd = MI.getOperand(0).getReg();
 
       // Find the most recent FLAGS writer before the compare.  It must be a
-      // zero_flag arithmetic op writing exactly Rd, and nothing in between may
+      // Z-setting arithmetic op writing exactly Rd, and nothing in between may
       // redefine Rd.  Instructions in between are known not to touch FLAGS:
       // every flag-writing instruction declares Defs=[FLAGS] (the same
       // invariant the schedulers rely on).  Calls and inline asm are treated
@@ -196,12 +196,12 @@ bool KlaussCPUFlagReuse::runOnMachineFunction(MachineFunction &MF) {
         continue;
       FlagDef->setIsDead(false);
 
-      // Rewrite the branch to read zero_flag and drop the redundant compare.
+      // Rewrite the branch to read Z and drop the redundant compare.
       Br->setDesc(TII->get(NewBrOpc));
       DeadCompares.push_back(&MI);
       Changed = true;
       LLVM_DEBUG(dbgs() << "KlaussCPUFlagReuse: dropped CMPRV, "
-                        << "branch now reads zero_flag in " << MBB.getName()
+                        << "branch now reads Z in " << MBB.getName()
                         << "\n");
     }
     for (MachineInstr *MI : DeadCompares)

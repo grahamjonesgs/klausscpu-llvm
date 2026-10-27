@@ -213,8 +213,8 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
     SDValue Dest     = N->getOperand(4);
     SDLoc DL(N);
 
-    // A3a (arithmetic zero_flag reuse) is NOT done here.  A DAG-level attempt
-    // to drop the compare and branch on the arithmetic op's zero_flag has to
+    // A3a (arithmetic Z-flag reuse) is NOT done here.  A DAG-level attempt
+    // to drop the compare and branch on the arithmetic op's Z flag has to
     // glue the arithmetic op adjacent to the branch, which is unschedulable
     // whenever that op's result also feeds a loop back-edge (the CopyToReg has
     // nowhere to go) — it deadlocks the DAG scheduler.  A3a is instead a

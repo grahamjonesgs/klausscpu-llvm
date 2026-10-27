@@ -1,8 +1,8 @@
-; A3a — arithmetic zero_flag reuse (post-RA peephole, KlaussCPUFlagReuse.cpp).
+; A3a — arithmetic Z-flag reuse (post-RA peephole, KlaussCPUFlagReuse.cpp).
 ;
 ; When the branch condition is (X == 0) / (X != 0) and X is produced by a
 ; flag-setting arithmetic op immediately before the compare, the compare
-; against 0 is redundant: the arithmetic op already set zero_flag = (X == 0).
+; against 0 is redundant: the arithmetic op already set Z = (X == 0).
 ;
 ; Default (now ON post flag-unification): the redundant CMPRV against 0 is
 ; dropped and the equality branch reads Z via JMPZ/JMPNZ (either sense: block
@@ -56,9 +56,9 @@ f:
   ret i64 42
 }
 
-; Negative: a signed comparison uses CMPRR + JMPGE (less_flag), not the
+; Negative: a signed comparison uses CMPRR + JMPGE (reads S^V), not the
 ; CMPRV-against-0 + JMPE/JMPNE the peephole targets — it must be left alone,
-; and no zero_flag branch may appear in either mode.
+; and no Z-flag branch may appear in either mode.
 define i64 @signed_lt_branch(i64 %a, i64 %b) {
 ; OFF-LABEL: signed_lt_branch:
 ; OFF:         cmprr r0, r1

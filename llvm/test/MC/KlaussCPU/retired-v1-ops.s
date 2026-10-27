@@ -17,3 +17,14 @@
         rgb1v   5
 # CHECK: :[[@LINE+1]]:{{[0-9]+}}: error: unrecognised instruction mnemonic
         rgb2v   5
+
+# The ISA map spells them in upper case; mnemonics are case-insensitive.
+# CHECK: :[[@LINE+1]]:{{[0-9]+}}: error: unrecognised instruction mnemonic
+        LEDR    r1
+
+# The 7-segment family started with a digit, so it does not even lex as a
+# mnemonic any more.
+# CHECK: :[[@LINE+1]]:{{[0-9]+}}: error: unexpected token at start of statement
+        7segblank
+# CHECK: :[[@LINE+1]]:{{[0-9]+}}: error: unexpected token at start of statement
+        7seg1r  r1
