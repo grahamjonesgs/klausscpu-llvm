@@ -22,7 +22,7 @@ describe earlier states of the backend and are superseded by this file.
 | DataLayout | `e-m:e-p:64:64-i64:64-i128:128-n32:64` (only in `TargetDataLayout.cpp`) |
 | C type model | `int`=32; `long`/`long long`/`void*`=64 |
 | Hardware FP | none — soft-float (compiler-rt builtins) |
-| CMOV | none — `select` becomes a `SELECT_CC_RR/RI` pseudo, expanded to compare + branch |
+| CMOV | none — `select` becomes a `SELECT_CC_RR/RI` pseudo, expanded to compare + branch; a run of selects on the same condition shares one compare/branch (one PHI each) |
 | Atomics | none — `setMaxAtomicSizeInBitsSupported(0)`; AtomicExpand turns every atomic op into an `__atomic_*` libcall, fences are compiler barriers |
 | Sign-extending loads | i8/i16/i32: hardware (`LDIDX8_S`/`LDIDX16_S`/`LDIDX32_S`) |
 | Load/store addressing | `[r]` (`MEMGETn`/`MEMSETn`), `r + simm32` (`LDIDXn`/`STIDXn`, 1-word short form for a small scaled offset), `r + r` at every width (`LDIDXnR`/`LDIDXn_SR`/`STIDXnR`, MODE=11); 16/32-bit forms other than `MEMGET32` force-align the EA |
@@ -205,8 +205,10 @@ when clobbered.
 
 - Instruction selection is the generated `SelectCode` from the `.td`
   patterns; `KlaussCPUISelDAGToDAG.cpp` keeps only BR_CC / `SELECT_CC`
-  (glued compare, 32-bit W-compare choice).  A frame index, or a frame index
-  plus a constant in [-2^29, 2^29) (`add` or disjoint `or`), is the
+  (glued compare, 32-bit W-compare choice: `tryW32Compare` takes the W form
+  when an operand's 32-bit extension then dies, i.e. it feeds nothing but
+  compares of the same operands and condition).  A frame index, or a frame
+  index plus a constant in [-2^29, 2^29) (`add` or disjoint `or`), is the
   `AddrFI` / `AddrFIMem` ComplexPattern `(TargetFrameIndex, offset)`: one
   `ADDI rd, FI, offset` as a value, or the base and offset of an
   `LDIDXn`/`STIDXn` frame access.  The constant is folded when the access is
@@ -237,6 +239,7 @@ when clobbered.
 | `-klausscpu-fuse-cmp-br` | on | FBR fused compare-and-branch |
 | `-klausscpu-arith-flag-reuse` | on | FlagReuse peephole |
 | `-klausscpu-w32-alu` / `-klausscpu-w32-compare` | on | 32-bit W ops / W compares |
+| `-klausscpu-group-selects` | on | consecutive selects on one condition share a compare/branch |
 | `-klausscpu-fold-fi-offset` | on | fold frame index + constant into the access / ADDI offset |
 | `-klausscpu-min-jump-table-entries` | 0 (off) | jump tables from N cases |
 | `-klausscpu-pref-loop-align` | 16 | loop-header alignment in bytes |

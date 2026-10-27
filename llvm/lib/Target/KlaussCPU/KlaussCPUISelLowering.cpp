@@ -16,6 +16,7 @@
 #include "KlaussCPUMachineFunctionInfo.h"
 #include "KlaussCPURegisterInfo.h"
 #include "KlaussCPUSubtarget.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "KlaussCPUInstrInfo.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
@@ -51,6 +52,13 @@ static cl::opt<unsigned>
 static cl::opt<unsigned> MinJumpTableEntries(
     "klausscpu-min-jump-table-entries", cl::Hidden, cl::init(0),
     cl::desc("Minimum cases for a jump table (0 = jump tables disabled)."));
+
+// A run of selects on the same condition shares one compare and branch (see
+// EmitInstrWithCustomInserter); off gives each select its own diamond.
+static cl::opt<bool> GroupSelects(
+    "klausscpu-group-selects", cl::Hidden, cl::init(true),
+    cl::desc("Share one compare and branch between consecutive selects on "
+             "the same condition"));
 
 // Generated calling convention functions.  Must be included inside namespace
 // llvm because the generated code uses unqualified names (MVT, CCState, etc.).
@@ -1137,6 +1145,19 @@ SDValue KlaussCPUTargetLowering::LowerSELECT_CC(SDValue Op,
                        Op.getOperand(2), Op.getOperand(3), DAG);
 }
 
+// Does Next test the same condition as the select pseudo MI: same opcode,
+// operands and $jmp (which carries the W-compare flag)?
+static bool isSameSelectCondition(const MachineInstr &MI,
+                                  const MachineInstr &Next) {
+  if (Next.getOpcode() != MI.getOpcode() ||
+      Next.getOperand(1).getReg() != MI.getOperand(1).getReg() ||
+      Next.getOperand(3).getImm() != MI.getOperand(3).getImm())
+    return false;
+  const MachineOperand &RHS = MI.getOperand(2), &NextRHS = Next.getOperand(2);
+  return RHS.isReg() ? NextRHS.getReg() == RHS.getReg()
+                     : NextRHS.getImm() == RHS.getImm();
+}
+
 // Expand SELECT_CC_RR/RI to a diamond with a PHI at the sink:
 //
 //   TestBB:  CMPRR lhs, rhs   (CMPRV lhs, imm for _RI)
@@ -1148,6 +1169,18 @@ SDValue KlaussCPUTargetLowering::LowerSELECT_CC(SDValue Op,
 //
 // This preserves SSA: DstReg has exactly one definition (the PHI).
 // TrueReg and FalseReg are defined in the original BB which dominates all paths.
+//
+// As in RISCVTargetLowering's emitSelectPseudo, a run of select pseudos on
+// the same condition shares the compare and branch and gets one PHI each
+// (a swap `c ? x : y; c ? y : x`, the two selects of a 128-bit shift, the
+// soft-float operand ordering).  The run may contain other instructions;
+// they stay in TestBB, ahead of the compare, so the run ends at one that
+// could not be moved ahead of the selects: one with side effects, a memory
+// access, a call-frame pseudo, a physical register def other than FLAGS or
+// a read of FLAGS, or one that uses a select's result.  A select whose true
+// or false value is the result of an earlier select in the run also ends it
+// (its PHI would read a value not defined in TestBB).  Debug instructions
+// after the first select move to SinkBB, behind the PHIs, in their order.
 MachineBasicBlock *KlaussCPUTargetLowering::EmitInstrWithCustomInserter(
     MachineInstr &MI, MachineBasicBlock *BB) const {
   unsigned Opc = MI.getOpcode();
@@ -1160,15 +1193,46 @@ MachineBasicBlock *KlaussCPUTargetLowering::EmitInstrWithCustomInserter(
   MachineFunction *MF = BB->getParent();
   const BasicBlock *LLVMBB = BB->getBasicBlock();
 
-  Register DstReg   = MI.getOperand(0).getReg();
   Register LHSReg   = MI.getOperand(1).getReg();
   const MachineOperand &RHS = MI.getOperand(2);
   unsigned JmpOpc   = MI.getOperand(3).getImm();
   // ISA v3 D2: flag bit → 32-bit W compare (see KlaussCPUDAGToDAGISel).
   bool W32 = JmpOpc & KlaussCPU::SelectCCW32Flag;
   JmpOpc &= ~KlaussCPU::SelectCCW32Flag;
-  Register TrueReg  = MI.getOperand(4).getReg();
-  Register FalseReg = MI.getOperand(5).getReg();
+
+  // Collect the run of selects on MI's condition.
+  SmallSet<Register, 4> SelectDests;
+  SelectDests.insert(MI.getOperand(0).getReg());
+  MachineInstr *LastSelect = &MI;
+  if (GroupSelects) {
+    for (MachineInstr &I :
+         make_range(std::next(MachineBasicBlock::iterator(MI)), BB->end())) {
+      if (I.isDebugInstr())
+        continue;
+      if (I.getOpcode() == KlaussCPU::SELECT_CC_RR ||
+          I.getOpcode() == KlaussCPU::SELECT_CC_RI) {
+        if (!isSameSelectCondition(MI, I) ||
+            SelectDests.count(I.getOperand(4).getReg()) ||
+            SelectDests.count(I.getOperand(5).getReg()))
+          break;
+        SelectDests.insert(I.getOperand(0).getReg());
+        LastSelect = &I;
+        continue;
+      }
+      if (I.isTerminator() || I.isPHI() || I.hasUnmodeledSideEffects() ||
+          I.mayLoadOrStore() || I.usesCustomInsertionHook() ||
+          TII.isFrameInstr(I) || I.readsRegister(KlaussCPU::FLAGS, nullptr))
+        break;
+      if (any_of(I.operands(), [&](const MachineOperand &MO) {
+            if (!MO.isReg() || !MO.getReg())
+              return false;
+            if (MO.isUse())
+              return SelectDests.count(MO.getReg()) != 0;
+            return MO.getReg().isPhysical() && MO.getReg() != KlaussCPU::FLAGS;
+          }))
+        break;
+    }
+  }
 
   MachineBasicBlock *FalseBB = MF->CreateMachineBasicBlock(LLVMBB);
   MachineBasicBlock *SinkBB  = MF->CreateMachineBasicBlock(LLVMBB);
@@ -1179,13 +1243,26 @@ MachineBasicBlock *KlaussCPUTargetLowering::EmitInstrWithCustomInserter(
 
   // The select may sit inside a call sequence (a call argument); the new
   // blocks start with the same call frame set up.
-  unsigned CallFrameSize = TII.getCallFrameSizeAt(MI);
+  unsigned CallFrameSize = TII.getCallFrameSizeAt(*LastSelect);
   FalseBB->setCallFrameSize(CallFrameSize);
   SinkBB->setCallFrameSize(CallFrameSize);
 
-  // Move the tail of BB (after the pseudo) into SinkBB.
-  SinkBB->splice(SinkBB->begin(), BB,
-                 std::next(MI.getIterator()), BB->end());
+  // Pull the selects (into PHIs) and the debug instructions out of the run;
+  // the other instructions stay in BB.
+  SmallVector<MachineInstr *, 4> Selects, DebugInstrs;
+  auto RunEnd = std::next(MachineBasicBlock::iterator(LastSelect));
+  for (MachineInstr &I : make_range(MachineBasicBlock::iterator(MI), RunEnd)) {
+    if (I.getOpcode() == KlaussCPU::SELECT_CC_RR ||
+        I.getOpcode() == KlaussCPU::SELECT_CC_RI)
+      Selects.push_back(&I);
+    else if (I.isDebugInstr())
+      DebugInstrs.push_back(&I);
+  }
+  for (MachineInstr *DI : DebugInstrs)
+    SinkBB->push_back(DI->removeFromParent());
+
+  // Move the tail of BB (after the run) into SinkBB.
+  SinkBB->splice(SinkBB->end(), BB, RunEnd, BB->end());
   SinkBB->transferSuccessorsAndUpdatePHIs(BB);
 
   // TestBB: compare, and jump to SinkBB (true value) when the condition holds.
@@ -1212,11 +1289,14 @@ MachineBasicBlock *KlaussCPUTargetLowering::EmitInstrWithCustomInserter(
   // FalseBB: empty, just falls through to SinkBB.
   FalseBB->addSuccessorWithoutProb(SinkBB);
 
-  // SinkBB: PHI merges the two incoming values; DstReg has exactly one def.
-  BuildMI(*SinkBB, SinkBB->begin(), DL, TII.get(TargetOpcode::PHI), DstReg)
-      .addReg(TrueReg).addMBB(BB)
-      .addReg(FalseReg).addMBB(FalseBB);
-
-  MI.eraseFromParent();
+  // SinkBB: one PHI per select merges its two values; each Dst has one def.
+  auto InsertPt = SinkBB->begin();
+  for (MachineInstr *Sel : Selects) {
+    BuildMI(*SinkBB, InsertPt, Sel->getDebugLoc(), TII.get(TargetOpcode::PHI),
+            Sel->getOperand(0).getReg())
+        .addReg(Sel->getOperand(4).getReg()).addMBB(BB)
+        .addReg(Sel->getOperand(5).getReg()).addMBB(FalseBB);
+    Sel->eraseFromParent();
+  }
   return SinkBB;
 }

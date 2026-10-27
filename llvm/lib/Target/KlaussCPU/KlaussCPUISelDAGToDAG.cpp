@@ -70,12 +70,40 @@ struct Ext32 {
 
 static Ext32 classifyExt32(SDValue V);
 
+/// Is every use of Ext a compare operand of a BR_CC or SELECT_CC node that
+/// compares LHS with RHS under CC?  tryW32Compare strips Ext from each of
+/// them alike, so Ext dies.  Several selects on one condition (which the
+/// custom inserter then expands with one shared compare) are the usual case.
+static bool onlyFeedsCompare(SDNode *Ext, SDValue LHS, SDValue RHS,
+                             ISD::CondCode CC) {
+  for (const SDUse &U : Ext->uses()) {
+    const SDNode *User = U.getUser();
+    unsigned LHSNo;
+    if (User->getOpcode() == KlaussCPUISD::SELECT_CC)
+      LHSNo = 0;
+    else if (User->getOpcode() == ISD::BR_CC)
+      LHSNo = 2;
+    else
+      return false;
+    unsigned CCNo = LHSNo == 0 ? 2 : 1;
+    if ((U.getOperandNo() != LHSNo && U.getOperandNo() != LHSNo + 1) ||
+        User->getOperand(LHSNo) != LHS || User->getOperand(LHSNo + 1) != RHS ||
+        cast<CondCodeSDNode>(User->getOperand(CCNo))->get() != CC)
+      return false;
+  }
+  return true;
+}
+
 /// ISA v3 D2: can this compare use the 32-bit W form?  If so, strip the
 /// explicit extensions from LHS/RHS in place (RHS may stay a constant) and
 /// return true.  Sign-extension preserves both signed and unsigned 32-bit
 /// order, so a sext pair works for any condition; a zext pair only for
 /// EQ/NE and the unsigned conditions.  Only used when an extension
-/// instruction actually disappears.
+/// instruction actually disappears: it feeds nothing but compares like this
+/// one.  (A branch on the 64-bit compare of two registers or with a simm4
+/// fuses into an FBR, which the W compare cannot, so with one extension gone
+/// the instruction count is even there; the W form still wins on the
+/// emulator corpus, as it keeps the unextended value's register.)
 static bool tryW32Compare(ISD::CondCode CC, SDValue &LHS, SDValue &RHS) {
   if (!EnableW32Compare)
     return false;
@@ -93,8 +121,8 @@ static bool tryW32Compare(ISD::CondCode CC, SDValue &LHS, SDValue &RHS) {
   } else if (L.K == R.K && L.K != Ext32::None && (L.K == Ext32::S || Unsig)) {
     K = L.K;
   }
-  bool Saves = (L.Stripped && L.Node->hasOneUse()) ||
-               (!RC && R.Stripped && R.Node->hasOneUse());
+  bool Saves = (L.Stripped && onlyFeedsCompare(L.Node, LHS, RHS, CC)) ||
+               (!RC && R.Stripped && onlyFeedsCompare(R.Node, LHS, RHS, CC));
   if (K == Ext32::None || !Saves)
     return false;
   LHS = L.Inner;
