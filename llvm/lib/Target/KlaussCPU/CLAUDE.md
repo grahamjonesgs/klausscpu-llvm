@@ -518,13 +518,24 @@ the `klausscpu-runtime` repo root; see its READMEs for build/run detail:
   `r + r` selects `LDIDX32R` instead of `ADDR` + `MEMGET32`, a type-punned
   `*(uint32_t *)(buf + i)` with odd `i` no longer gets away with it; `buf + 4`
   (`LDIDX32`) never did.  Use `memcpy` or a packed struct for unaligned data.
-- **The klausscc assembler/disassembler table (`src/isa/table.rs`) only names
-  `LDIDX64R`/`STIDX64R` among the MODE=11 forms, none of the opposite-SGN
-  immediate forms (`setru`, `cmprvu`, `andi`/`ori`/`xori` and their short
-  forms), and none of the boolean compare-immediate / W boolean compares
-  (`cmpltv`, `cmpltrw`, `cmpltvw`, …).**  The emulator executes them
-  correctly (generic decode), but klausscc disassembly and crash dumps do
-  not name them; extend the table there.
+- **klausscc's disassembly shows only `rd` for the in-place forms, so it is
+  wrong when this backend gives them a separate `rs1`.**  klausscc (since
+  its commit 63cdab9) names every instruction in
+  `test/MC/KlaussCPU/encoding-coverage.s`: the MODE=11 sub-word
+  `LDIDX{8,16,32}[S]R`/`STIDX{8,16,32}R`, `SETRU`, `ANDI`/`ORI`/`XORI` and
+  their `.S` forms, `CMPRVU`, the boolean compare-immediates and W boolean
+  compares (`CMPLTV`, `CMPLTRW`, `CMPLTVW`, …), and the 2-word `JMP*REL`/
+  `CALLREL` (shown as `PC+n`).  But its in-place operand (`ADDV`,
+  `MINUSV`, `ANDV`, `ORV`, `XORV` and their `.S` forms, `MULV`/`DIVV`/
+  `MODV`, the shift/bit-by-immediate and unary ops) reads `rd` only, and
+  `addv r1, r2, 5` lists as `ADDV B 5` (r1 += 5).  Over half of those in
+  the bare-metal programs have `rd != rs1`.  The emulator executes them
+  correctly; only klausscc's listing is affected.  Other spellings differ
+  without changing meaning: `ldidx64`/`stidx64` are klausscc's
+  `LDIDX64A`/`STIDX64A` and `ldidx64u`/`stidx64u` its `LDIDX64`/`STIDX64`,
+  `ldidx8s` is `LDIDX8_S`, `fbr`/`fbri` are `BEQ`…`BUGTI`, `lcd` is
+  `LCDRST`, and klausscc names the 1-word forms LLVM picks by value with a
+  `.S` suffix (`jmpzrel` near is `JMPZ.S`).
 - **A data initializer `sym + A` with `A` outside int32 does not assemble.**
   `uintptr_t q = (uintptr_t)&arr + 0x80000000UL;` at file scope emits
   `.quad arr+2147483648`, which MC rejects with `relocation addend out of
