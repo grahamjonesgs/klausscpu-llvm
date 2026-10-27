@@ -1509,7 +1509,8 @@ def : Pat<(KlaussCPUCallNode (i64 GPR:$func)),
           (CALLR_R GPR:$func)>;
 
 // Unconditional and indirect branches.  BR_CC (compare glued to a
-// conditional jump) is selected in KlaussCPUDAGToDAGISel::Select.
+// conditional jump, with the W-compare choice) is selected in
+// KlaussCPUDAGToDAGISel::Select.
 let Predicates = [NotPIC] in
 def : Pat<(br bb:$target), (JMP bb:$target)>;
 let Predicates = [IsPIC] in
@@ -1524,10 +1525,12 @@ def : Pat<(debugtrap), (TRAP_I)>;
 // ISA v3 D3: (sext_inreg (add|sub|mul a, b), i32) → the W op, which drops
 // the SEXTW.  Only when the inner op has no other use (else it is computed
 // anyway and the SEXTW costs nothing extra).  An add of a simm32 constant
-// takes ADDIW; the register forms take no constant operand (any other
+// takes ADDIW (the simm32_imm leaf checks the constant; TableGen drops the
+// commuted variant with an immediate on the LHS, as the DAG puts constants
+// in operand 1); the register forms take no constant operand (any other
 // constant keeps the 64-bit op and its SEXTW).
 def w32_addi : PatFrag<(ops node:$a, node:$b), (add node:$a, node:$b), [{
-  return N->hasOneUse() && isa<ConstantSDNode>(N->getOperand(1));
+  return N->hasOneUse();
 }]>;
 class W32RegOp<SDNode op>
     : PatFrag<(ops node:$a, node:$b), (op node:$a, node:$b), [{

@@ -9,8 +9,10 @@
 // the nodes Select() handles itself:
 //   BR_CC, KlaussCPUISD::SELECT_CC: they pick the 32-bit W compare by looking
 //     at how each operand was extended and whether stripping the extension
-//     removes an instruction, and BR_CC glues the compare (which defines only
-//     FLAGS) to its conditional jump, which a pattern cannot express.
+//     removes an instruction.  BR_CC also glues the compare (which defines
+//     only FLAGS) to its conditional jump; as a pattern that would need a
+//     FLAGS-producing compare node, and the W-compare choice would still be
+//     C++, so both nodes stay here.
 //   LOAD / STORE straight off a frame index (selectFrameIndexMemOp).
 //
 //===----------------------------------------------------------------------===//
@@ -21,7 +23,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/MathExtras.h"
 
-// KlaussCPU:: opcode enum (ADJCALLSTACKDOWN, ADJCALLSTACKUP, etc.) is visible
+// KlaussCPU:: opcode enum (CMPRR_I, LDIDX64, STIDX64, etc.) is visible
 // transitively: KlaussCPUTargetMachine.h → KlaussCPUSubtarget.h →
 // KlaussCPUInstrInfo.h → GET_INSTRINFO_ENUM → KlaussCPUGenInstrInfo.inc.
 // Do NOT re-include KlaussCPUGenInstrInfo.inc here — it would redefine the enum.

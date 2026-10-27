@@ -50,3 +50,40 @@ define i64 @addiw(i32 %a) {
   %r = sext i32 %s to i64
   ret i64 %r
 }
+
+; The W op only replaces an add/sub/mul with no other use: here the 64-bit
+; add is computed for the store anyway, so the SEXTW stays.
+@g = global i32 0
+
+define i64 @addiw_multi_use(i32 %a) {
+; CHECK-LABEL: addiw_multi_use:
+; CHECK-NOT: {{^\s+addiw}}
+; CHECK: addi r14, r0, 1000
+; CHECK: sextw r12, r14
+; CHECK: leaveret
+  %s = add i32 %a, 1000
+  store i32 %s, ptr @g
+  %r = sext i32 %s to i64
+  ret i64 %r
+}
+
+; The register W forms take no constant operand: a constant left operand or
+; a multiply by a constant keeps the 64-bit op and its SEXTW.
+define i64 @subw_const_lhs(i32 %a) {
+; CHECK-LABEL: subw_const_lhs:
+; CHECK: setr r12, 5
+; CHECK-NEXT: subr r12, r12, r0
+; CHECK-NEXT: sextw r12, r12
+  %s = sub i32 5, %a
+  %r = sext i32 %s to i64
+  ret i64 %r
+}
+
+define i64 @mulw_const(i32 %a) {
+; CHECK-LABEL: mulw_const:
+; CHECK: mulv r12, r0, 12345
+; CHECK-NEXT: sextw r12, r12
+  %s = mul i32 %a, 12345
+  %r = sext i32 %s to i64
+  ret i64 %r
+}
