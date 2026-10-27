@@ -227,7 +227,9 @@ when clobbered.
   (`selectFrameAddr`).  `eliminateFrameIndex` adds the slot offset to the
   folded offset; a frame index anywhere else (or a sum that overflows
   simm32) gets the slot address in a scavenged register (`ADDI`, which
-  clobbers FLAGS).  A frame-address `ADDI` 129..255 bytes below the frame
+  clobbers FLAGS, so where FLAGS is live it is a fatal error instead: the
+  ISA has no flag-free add, and only a frame over 1.5 GiB gets there).  A
+  frame-address `ADDI` 129..255 bytes below the frame
   register becomes `MINUSV` (1-word short form) while its FLAGS def is
   dead.
 - Shifts and bit fields are patterns over four more ComplexPatterns:

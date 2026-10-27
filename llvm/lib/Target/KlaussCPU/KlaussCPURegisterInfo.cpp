@@ -18,6 +18,7 @@
 #include "KlaussCPURegisterInfo.h"
 #include "KlaussCPUFrameLowering.h"
 #include "KlaussCPUSubtarget.h"
+#include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -189,6 +190,19 @@ bool KlaussCPURegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   // single ADDI, then replace the FI operand.
   assert(RS && "Register scavenger required for variable-indexed stack access");
   assert(isInt<32>(BaseOffset) && "Frame offset out of ADDI simm32 range");
+
+  // The ADDI writes FLAGS, and the ISA has no flag-free add.  Isel puts a
+  // frame index only where the code above handles it, so this is reached
+  // only for a frame over 1.5 GiB, and the instruction is a load or store
+  // that the scheduler may have put between a compare and its reader.
+  // Refuse rather than clobber those flags.
+  LivePhysRegs LiveRegs(*this);
+  LiveRegs.addLiveOuts(MBB);
+  for (MachineInstr &I : make_range(MBB.rbegin(), std::next(II.getReverse())))
+    LiveRegs.stepBackward(I);
+  if (LiveRegs.contains(KlaussCPU::FLAGS))
+    reportFatalUsageError("KlaussCPU: frame offset out of simm32 range where "
+                          "FLAGS is live");
 
   DebugLoc DL = MI.getDebugLoc();
   Register Scratch = RS->scavengeRegisterBackwards(

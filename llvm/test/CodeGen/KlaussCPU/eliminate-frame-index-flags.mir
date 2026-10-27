@@ -1,0 +1,117 @@
+# eliminateFrameIndex puts a frame address it cannot fold (here slot offset
+# + offset overflows simm32, a frame over 1.5 GiB) in a scavenged register
+# with an ADDI, which writes FLAGS.  Where FLAGS is live -- a compare before
+# the access read by a branch after it, in the block or in a successor -- it
+# reports an error instead of clobbering the compare's result.  Where FLAGS
+# is dead the ADDI is used (eliminate-frame-index.mir).
+#
+# RUN: rm -rf %t && split-file %s %t
+# RUN: not llc -march=klausscpu -run-pass=prologepilog %t/block.mir -o /dev/null 2>&1 \
+# RUN:   | FileCheck %s
+# RUN: not llc -march=klausscpu -run-pass=prologepilog %t/succ.mir -o /dev/null 2>&1 \
+# RUN:   | FileCheck %s
+# RUN: llc -march=klausscpu -run-pass=prologepilog -verify-machineinstrs \
+# RUN:   %t/dead.mir -o - | FileCheck %s --check-prefix=DEAD
+
+# CHECK: LLVM ERROR: KlaussCPU: frame offset out of simm32 range where FLAGS is live
+
+#--- block.mir
+--- |
+  target triple = "klausscpu-unknown-elf"
+
+  define void @flags_read_in_block() { ret void }
+...
+---
+name:            flags_read_in_block
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 32, alignment: 8 }
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $r0, $r1
+
+    CMPRR_I $r0, $r1, implicit-def $flags
+    $r12 = LDIDX64 %stack.0, -2147483648
+    JMPNE %bb.2, implicit killed $flags
+    JMP %bb.1
+
+  bb.1:
+    liveins: $r12
+    RET_I implicit $r12
+
+  bb.2:
+    $r12 = SETR 0
+    RET_I implicit $r12
+...
+
+#--- succ.mir
+--- |
+  target triple = "klausscpu-unknown-elf"
+
+  define void @flags_live_into_successor() { ret void }
+...
+---
+name:            flags_live_into_successor
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 32, alignment: 8 }
+body:             |
+  bb.0:
+    successors: %bb.1
+    liveins: $r0, $r1
+
+    CMPRR_I $r0, $r1, implicit-def $flags
+    STIDX64 $r0, %stack.0, -2147483648
+
+  bb.1:
+    successors: %bb.2, %bb.3
+    liveins: $flags
+
+    JMPNE %bb.3, implicit killed $flags
+    JMP %bb.2
+
+  bb.2:
+    $r12 = SETR 1
+    RET_I implicit $r12
+
+  bb.3:
+    $r12 = SETR 0
+    RET_I implicit $r12
+...
+
+#--- dead.mir
+--- |
+  target triple = "klausscpu-unknown-elf"
+
+  define void @flags_redefined() { ret void }
+...
+---
+name:            flags_redefined
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 32, alignment: 8 }
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $r0, $r1
+
+    ; DEAD-LABEL: name: flags_redefined
+    ; DEAD:      CMPRR_I $r0, $r1, implicit-def $flags
+    ; DEAD-NEXT: [[S:\$r[0-9]+]] = ADDI $r15, -32
+    ; DEAD-NEXT: $r12 = LDIDX64 killed [[S]], -2147483648
+    ; DEAD-NEXT: CMPRR_I $r1, $r0, implicit-def $flags
+    CMPRR_I $r0, $r1, implicit-def $flags
+    $r12 = LDIDX64 %stack.0, -2147483648
+    CMPRR_I $r1, $r0, implicit-def $flags
+    JMPNE %bb.2, implicit killed $flags
+    JMP %bb.1
+
+  bb.1:
+    liveins: $r12
+    RET_I implicit $r12
+
+  bb.2:
+    $r12 = SETR 0
+    RET_I implicit $r12
+...

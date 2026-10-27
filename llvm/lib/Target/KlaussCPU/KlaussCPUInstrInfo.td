@@ -1034,7 +1034,7 @@ let isMoveImm = 1 in
 def SETR64  : V64_ld<0xCBC00000, "setr64\t$rd, $lo, $hi">;
 }
 
-// In-place immediate operations (rd op= imm32); the CPU zero-extends the
+// Immediate operations (rd = rs op imm32); the CPU zero-extends the
 // imm32 of ADDV/MINUSV/ANDV/ORV/XORV and sign-extends the MULV/DIVV/MODV one.
 def ADDV    : RV_imm<0x88200000, "addv", uimm32>;
 def MINUSV  : RV_imm<0x88600000, "minusv", uimm32>;
