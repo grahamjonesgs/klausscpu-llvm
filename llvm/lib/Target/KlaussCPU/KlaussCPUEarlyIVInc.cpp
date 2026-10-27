@@ -38,6 +38,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "KlaussCPUInstrInfo.h"
+#include "KlaussCPUSubtarget.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
@@ -73,26 +75,45 @@ static cl::opt<bool> EnableEarlyIVInc(
 
 namespace {
 
-// Issue distance from an instruction to a dependent one (KlaussCPUSchedule.td:
-// ALU 2, load 3, MUL 5, DIV 20).  Casts, GEPs and PHIs count 0: they may
-// fold away, and a low estimate only makes the rewrite less likely.
-unsigned latency(const Instruction &I) {
-  if (isa<PHINode>(I) || isa<CastInst>(I) || isa<GetElementPtrInst>(I))
-    return 0;
-  if (isa<LoadInst>(I))
-    return 3;
-  switch (I.getOpcode()) {
-  case Instruction::Mul:
-    return 5;
-  case Instruction::UDiv:
-  case Instruction::SDiv:
-  case Instruction::URem:
-  case Instruction::SRem:
-    return 20;
-  default:
-    return 2;
+// Issue distance from an instruction to a dependent one, read from the
+// subtarget's scheduling model (KlaussCPUSchedule.td) through one
+// representative instruction per class: ADDR (ALU), LDIDX64 (load), MULR,
+// DIVR.  Casts, GEPs and PHIs count 0: they may fold away, and a low
+// estimate only makes the rewrite less likely.
+struct Latencies {
+  unsigned ALU, Load, Mul, Div;
+
+  explicit Latencies(const KlaussCPUSubtarget &ST) {
+    const MCSchedModel &SM = ST.getSchedModel();
+    const TargetInstrInfo &TII = *ST.getInstrInfo();
+    auto Of = [&](unsigned Opc) {
+      return static_cast<unsigned>(std::max(
+          0, SM.computeInstrLatency(ST, TII.get(Opc).getSchedClass())));
+    };
+    ALU = Of(KlaussCPU::ADDR);
+    Load = Of(KlaussCPU::LDIDX64);
+    Mul = Of(KlaussCPU::MULR);
+    Div = Of(KlaussCPU::DIVR);
   }
-}
+
+  unsigned of(const Instruction &I) const {
+    if (isa<PHINode>(I) || isa<CastInst>(I) || isa<GetElementPtrInst>(I))
+      return 0;
+    if (isa<LoadInst>(I))
+      return Load;
+    switch (I.getOpcode()) {
+    case Instruction::Mul:
+      return Mul;
+    case Instruction::UDiv:
+    case Instruction::SDiv:
+    case Instruction::URem:
+    case Instruction::SRem:
+      return Div;
+    default:
+      return ALU;
+    }
+  }
+};
 
 // A 32-bit constant: one SETR/SETRU, like the constants it replaces.
 bool fitsImm32(const APInt &V) {
@@ -114,7 +135,7 @@ public:
   }
 
 private:
-  bool rewriteLoop(Loop &L);
+  bool rewriteLoop(Loop &L, const Latencies &Lat);
 };
 
 } // end anonymous namespace
@@ -126,7 +147,7 @@ INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(TargetPassConfig)
 INITIALIZE_PASS_END(KlaussCPUEarlyIVInc, DEBUG_TYPE, PASS_NAME, false, false)
 
-bool KlaussCPUEarlyIVInc::rewriteLoop(Loop &L) {
+bool KlaussCPUEarlyIVInc::rewriteLoop(Loop &L, const Latencies &Lat) {
   BasicBlock *BB = L.getHeader();
   BasicBlock *Preheader = L.getLoopPreheader();
   if (L.getNumBlocks() != 1 || !Preheader)
@@ -179,7 +200,7 @@ bool KlaussCPUEarlyIVInc::rewriteLoop(Loop &L) {
       auto *OpI = dyn_cast<Instruction>(Op);
       if (Op == Ignore || !OpI || OpI->getParent() != BB || isa<PHINode>(OpI))
         continue;
-      Cycle = std::max(Cycle, Ready.lookup(OpI) + latency(*OpI));
+      Cycle = std::max(Cycle, Ready.lookup(OpI) + Lat.of(*OpI));
     }
     return Cycle;
   };
@@ -196,7 +217,7 @@ bool KlaussCPUEarlyIVInc::rewriteLoop(Loop &L) {
     auto *UI = cast<Instruction>(U);
     if (UI == Inc || UI->getParent() != BB || isa<PHINode>(UI))
       continue;
-    if (ReadyAt(*UI, IV) < latency(*Inc))
+    if (ReadyAt(*UI, IV) < Lat.of(*Inc))
       return false;
     HasUse = true;
   }
@@ -258,12 +279,15 @@ bool KlaussCPUEarlyIVInc::runOnFunction(Function &F) {
     return false;
   const TargetMachine &TM =
       getAnalysis<TargetPassConfig>().getTM<TargetMachine>();
-  if (!TM.getSubtargetImpl(F)->getSchedModel().hasInstrSchedModel())
+  const auto &ST =
+      *static_cast<const KlaussCPUSubtarget *>(TM.getSubtargetImpl(F));
+  if (!ST.getSchedModel().hasInstrSchedModel())
     return false;
+  Latencies Lat(ST);
   LoopInfo &LI = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
   bool Changed = false;
   for (Loop *L : LI.getLoopsInPreorder())
-    Changed |= rewriteLoop(*L);
+    Changed |= rewriteLoop(*L, Lat);
   return Changed;
 }
 

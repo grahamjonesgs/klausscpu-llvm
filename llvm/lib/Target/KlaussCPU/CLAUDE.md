@@ -299,10 +299,11 @@ when clobbered.
   Only with constant Init and N (the new constants still 32-bit, still
   simm4 for FBR_RI if N was), no other use of `%i.next`, and every other
   in-loop use of the counter waiting at least as long for another operand
-  (so not a load index or GEP).  Not for `-mcpu=no-sched`.  The counter
-  keeps its debug location: its dbg_values move to the new add, with a
-  copy as the new PHI + C at the top of the loop, and the old increment's
-  become the new add + C (`DebugInfo/KlaussCPU/early-iv-inc.ll`).
+  (so not a load index or GEP; the latencies are the subtarget's schedule
+  model's).  Not for `-mcpu=no-sched`.  The counter keeps its debug
+  location: its dbg_values move to the new add, with a copy as the new PHI
+  + C at the top of the loop, and the old increment's become the new add + C
+  (`DebugInfo/KlaussCPU/early-iv-inc.ll`).
 
 ### Hidden options (`-mllvm`)
 
