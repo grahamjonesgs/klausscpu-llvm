@@ -1,9 +1,9 @@
 //===-- KlaussCPUDisassembler.cpp - Disassembler for KlaussCPU -----------===//
 //
-// Decodes ISA encoding v2/v3 instruction words (see KlaussCPUMCCodeEmitter.cpp
-// for the layout).  The encoder is hand-written, so the decode table
-// (KlaussCPUGenDecoderTable.inc) is generated from the encoder's `case` lines
-// by gen-decoder-table.py rather than by -gen-disassembler.
+// Decodes ISA encoding v2/v3 instruction words (see KlaussCPUInstrInfo.td
+// for the layout).  The decode table (KlaussCPUGenDecoderTable.inc) is
+// generated from the .td `Inst` fields by gen-decoder-table.py rather than by
+// -gen-disassembler.
 //
 // Instructions are 1–3 little-endian 32-bit words; LEN = word0[31:30]
 // (01 = 1 word, 10 = 2, 11 = 3).  LEN = 00 (retired v1 opcodes, data) does

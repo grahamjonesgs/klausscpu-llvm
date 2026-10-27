@@ -1,28 +1,22 @@
 //===-- KlaussCPUInstrInfo.td - KlaussCPU Instruction Definitions ----------===//
 //
-// NOTE ON ENCODING (ISA v2, the flag-day renumbering — ISA_ENCODING_V2.md):
-// The **authoritative** instruction bytes are produced by the hand-written
-// KlaussCPUMCCodeEmitter.cpp (there is no -gen-emitter / -gen-disassembler).
-// The opcode template arguments and `let Inst{}` fields in THIS file are
-// legacy/documentary only and are NOT consumed by any generated code.  What
-// this file must get right for v2 is each instruction's **Size**, operand
-// list, and 2-address ties — those drive register allocation and the emitter's
-// operand indexing.  Do not trust the numeric `op` args below as v2 opcodes.
+// ENCODING (ISA v2 + v3; hardware repo klaussCPU/ISA_ENCODING_V2_MAP.md): each
+// instruction's `Inst` field is its machine encoding, and
+// KlaussCPUMCCodeEmitter emits it through the generated
+// getBinaryCodeForInstr.  Every format class takes the instruction's word-0
+// template -- the "Template" column of the ISA map: LEN, CLASS and the
+// attribute/OP bits, with every operand field zero -- and places its
+// operands on top of it:
 //
-// v2 word-0 layout (all instructions, little-endian on the bus):
-//   [31:30]=LEN(01/10/11 = 1/2/3 words)  [29:26]=CLASS  [25:12]=attrs+OP
-//   [11:8]=rd  [7:4]=rs1  [3:0]=rs2   (stores put their data source in rd)
+//   word 0 = Inst{31-0}   [31:30]=LEN (01/10/11 = 1/2/3 words)  [29:26]=CLASS
+//                         [25:12]=attributes+OP  [11:8]=rd  [7:4]=rs1
+//                         [3:0]=rs2   (stores put their data source in rd)
+//   word 1 = Inst{63-32}  imm32 / address / branch target   (2 and 3 words)
+//   word 2 = Inst{95-64}  high half of an imm64               (3 words)
 //
-//   Legacy format table (v1 bit layout; kept for the class helpers below):
-//   Format   Size  Layout
-//   ------   ----  ------
-//   RRR       4B   [31:12]=op20  [11:8]=rd  [7:4]=rs1  [3:0]=rs2
-//   RR        4B   [31:8]=op24   [7:4]=rd   [3:0]=rs
-//   R         4B   [31:4]=op28   [3:0]=reg
-//   I0        4B   [31:0]=exact_opcode
-//   RV        8B   [63:36]=op28  [35:32]=rd  [31:0]=imm32
-//   RRV       8B   [63:40]=op24  [39:36]=rd  [35:32]=rs  [31:0]=offset32
-//   Vimm      8B   [63:32]=exact_opcode32    [31:0]=target32
+// Words are stored little-endian (Inst{7-0} is the byte at the lowest
+// address).  Operand fields the instruction does not use stay 0: the CPU
+// matches them strictly and traps otherwise.
 //
 
 //===----------------------------------------------------------------------===//
@@ -86,6 +80,9 @@ def SImm4AsmOperand : AsmOperandClass {
 
 //===----------------------------------------------------------------------===//
 // Operand types
+//
+// Operands that may name a symbol have an EncoderMethod that emits the fixup
+// (KlaussCPUMCCodeEmitter); everything else is a plain register or constant.
 //===----------------------------------------------------------------------===//
 
 def simm32 : Operand<i64> {
@@ -98,30 +95,54 @@ def uimm32 : Operand<i64> {
   let ParserMatchClass = AnyImmAsmOperand;
 }
 
-// 32-bit absolute branch/call target address
+// Word-1 immediate that may also be a symbol's address (SETR, MEMREADR,
+// MEMSETR): FK_KlaussCPU_ABS32.
+def simm32_abs : Operand<i64> {
+  let EncoderMethod    = "getAbs32OpValue";
+  let DecoderMethod    = "decodeSimm32";
+  let ParserMatchClass = AnyImmAsmOperand;
+}
+
+// 32-bit absolute branch/call target address (word 1, FK_KlaussCPU_ABS32).
 def BrTarget32 : Operand<OtherVT> {
-  let EncoderMethod    = "encodeBrTarget";
+  let EncoderMethod    = "getAbs32OpValue";
   let ParserMatchClass = BrTargetAsmOperand;
 }
 
 def CallTarget32 : Operand<i64> {
-  let EncoderMethod    = "encodeBrTarget";
+  let EncoderMethod    = "getAbs32OpValue";
   let ParserMatchClass = BrTargetAsmOperand;
 }
 
-// PC-relative branch/call target and LEAPC offset (encoded as a displacement).
+// PC-relative branch/call target and LEAPC offset: a 32-bit byte
+// displacement from the instruction in word 1 (FK_KlaussCPU_PCREL32).
 def PCRelTarget32 : Operand<OtherVT> {
-  let EncoderMethod    = "encodeBrTarget";
+  let EncoderMethod    = "getPCRel32OpValue";
   let ParserMatchClass = PCRelTargetAsmOperand;
 }
 
 def PCRelCallTarget32 : Operand<i64> {
-  let EncoderMethod    = "encodeBrTarget";
+  let EncoderMethod    = "getPCRel32OpValue";
   let ParserMatchClass = PCRelTargetAsmOperand;
 }
 
 def pcrel_simm32 : Operand<i64> {
+  let EncoderMethod    = "getPCRel32OpValue";
   let DecoderMethod    = "decodeSimm32";
+  let ParserMatchClass = PCRelTargetAsmOperand;
+}
+
+// ISA v3 short branch target: byte displacement, encoded as a simm18 word
+// displacement in word0[17:0] (FK_KlaussCPU_PCREL18).
+def PCRelTarget18 : Operand<OtherVT> {
+  let EncoderMethod    = "getPCRel18OpValue";
+  let ParserMatchClass = PCRelTargetAsmOperand;
+}
+
+// ISA v3 fused-branch target: byte displacement, encoded as a simm13 word
+// displacement in word0[20:8] (FK_KlaussCPU_PCREL13).
+def PCRelTarget13 : Operand<OtherVT> {
+  let EncoderMethod    = "getPCRel13OpValue";
   let ParserMatchClass = PCRelTargetAsmOperand;
 }
 
@@ -138,119 +159,142 @@ def fbr_simm4 : Operand<i64> {
 // Instruction base classes
 //===----------------------------------------------------------------------===//
 
-class KCInst32<dag outs, dag ins, string asmstr, list<dag> pat = []>
+class KCInst<int size, bits<32> word0, dag outs, dag ins, string asmstr,
+             list<dag> pat>
     : Instruction {
   let Namespace        = "KlaussCPU";
-  let Size             = 4;
+  let Size             = size;
   dag OutOperandList   = outs;
   dag InOperandList    = ins;
   let AsmString        = asmstr;
   let Pattern          = pat;
-  field bits<32> Inst;
-  field bits<32> SoftFail = 0;
   let DecoderNamespace = "KlaussCPU";
   let SchedRW          = [WriteALU];   // default; overridden per format (M8)
+  // Word-0 template (operand fields zero); the short forms derive theirs
+  // from their 2-word twin's.
+  bits<32> Word0 = word0;
+  // Retired v1 peripheral opcodes keep their v1 word (LEN=00, which the v2
+  // CPU traps on); every other template's LEN must match Size.
+  bit isRetiredV1 = 0;
 }
 
-class KCInst64<dag outs, dag ins, string asmstr, list<dag> pat = []>
-    : Instruction {
-  let Namespace        = "KlaussCPU";
-  let Size             = 8;
-  dag OutOperandList   = outs;
-  dag InOperandList    = ins;
-  let AsmString        = asmstr;
-  let Pattern          = pat;
+class KCInst32<bits<32> word0, dag outs, dag ins, string asmstr,
+               list<dag> pat = []>
+    : KCInst<4, word0, outs, ins, asmstr, pat> {
+  field bits<32> Inst = word0;
+  field bits<32> SoftFail = 0;
+  assert !or(isRetiredV1, !eq(word0{31-30}, 0b01)),
+         NAME # ": a 1-word template needs LEN=01";
+}
+
+// imm32 / target in word 1.
+class KCInst64<bits<32> word0, dag outs, dag ins, string asmstr,
+               list<dag> pat = []>
+    : KCInst<8, word0, outs, ins, asmstr, pat> {
   field bits<64> Inst;
   field bits<64> SoftFail = 0;
-  let DecoderNamespace = "KlaussCPU";
-  let SchedRW          = [WriteALU];   // default; overridden per format (M8)
+  let Inst{31-0} = word0;
+  assert !or(isRetiredV1, !eq(word0{31-30}, 0b10)),
+         NAME # ": a 2-word template needs LEN=10";
 }
 
-// 12-byte (3-word) instruction: opcode word + lo32 + hi32.
-// Used for SETR64.  KlaussCPUMCCodeEmitter handles this opcode manually
-// before consulting any tablegen-generated emitter table, so bits<96>
-// never overflows the uint64_t return type of getBinaryCodeForInstr().
-class KCInst96<dag outs, dag ins, string asmstr, list<dag> pat = []>
-    : Instruction {
-  let Namespace        = "KlaussCPU";
-  let Size             = 12;
-  dag OutOperandList   = outs;
-  dag InOperandList    = ins;
-  let AsmString        = asmstr;
-  let Pattern          = pat;
+// imm64: lo32 in word 1, hi32 in word 2.
+class KCInst96<bits<32> word0, dag outs, dag ins, string asmstr,
+               list<dag> pat = []>
+    : KCInst<12, word0, outs, ins, asmstr, pat> {
   field bits<96> Inst;
   field bits<96> SoftFail = 0;
-  let DecoderNamespace = "KlaussCPU";
-  let SchedRW          = [WriteALU];   // default; overridden per format (M8)
+  let Inst{31-0} = word0;
+  assert !eq(word0{31-30}, 0b11), NAME # ": a 3-word template needs LEN=11";
 }
 
 //===----------------------------------------------------------------------===//
-// Format: RRR  rd = rs1 op rs2
-// [31:12]=op20  [11:8]=rd  [7:4]=rs1  [3:0]=rs2
+// Three registers: rd = rs1 op rs2
 //===----------------------------------------------------------------------===//
 
-class RRR<bits<20> op, dag outs, dag ins, string asmstr, list<dag> pat = []>
-    : KCInst32<outs, ins, asmstr, pat> {
+class RRR<bits<32> word0, dag outs, dag ins, string asmstr,
+          list<dag> pat = []>
+    : KCInst32<word0, outs, ins, asmstr, pat> {
   bits<4> rd;
   bits<4> rs1;
   bits<4> rs2;
-  let Inst{31-12} = op;
-  let Inst{11-8}  = rd;
-  let Inst{7-4}   = rs1;
-  let Inst{3-0}   = rs2;
-  let Defs        = [FLAGS];   // arith/cmp/shift/mul/div set flags (bitwise over-marked; safe)
+  let Inst{11-8} = rd;
+  let Inst{7-4}  = rs1;
+  let Inst{3-0}  = rs2;
+  let Defs       = [FLAGS];   // arith/cmp/shift/mul/div set flags (bitwise over-marked; safe)
 }
 
 //===----------------------------------------------------------------------===//
-// Format: RR   two-register
-// [31:8]=op24  [7:4]=rd  [3:0]=rs
+// Two registers
 //===----------------------------------------------------------------------===//
 
-// 1 output, 1 input (COPY, MEMGET64)
-class RR1<bits<24> op, dag outs, dag ins, string asmstr, list<dag> pat = []>
-    : KCInst32<outs, ins, asmstr, pat> {
+// 1 output, 1 input: rd, rs1 (COPY, MEMGET*)
+class RR1<bits<32> word0, dag outs, dag ins, string asmstr,
+          list<dag> pat = []>
+    : KCInst32<word0, outs, ins, asmstr, pat> {
   bits<4> rd;
   bits<4> rs;
-  let Inst{31-8} = op;
-  let Inst{7-4}  = rd;
-  let Inst{3-0}  = rs;
+  let Inst{11-8} = rd;
+  let Inst{7-4}  = rs;
   let SchedRW    = [WriteLoad];   // MEMGET*/MEMREADRR (COPY_R overrides to WriteALU)
 }
 
-// 0 outputs, 2 source inputs (CMPRR)
-class RR0<bits<24> op, string asmstr, list<dag> pat = []>
-    : KCInst32<(outs), (ins GPR:$rs1, GPR:$rs2), asmstr, pat> {
+// 0 outputs, 2 source inputs: rs1, rs2 (CMPRR)
+class RR0<bits<32> word0, string asmstr, list<dag> pat = []>
+    : KCInst32<word0, (outs), (ins GPR:$rs1, GPR:$rs2), asmstr, pat> {
   bits<4> rs1;
   bits<4> rs2;
-  let Inst{31-8} = op;
-  let Inst{7-4}  = rs1;
-  let Inst{3-0}  = rs2;
-  let Defs       = [FLAGS];    // CMPRR sets flags
+  let Inst{7-4} = rs1;
+  let Inst{3-0} = rs2;
+  let Defs      = [FLAGS];    // CMPRR sets flags
 }
 
-// Store: data in [7:4], address in [3:0], no output (MEMSET64)
-class RRst<bits<24> op, string asmstr, list<dag> pat = []>
-    : KCInst32<(outs), (ins GPR:$rs_data, GPR:$rs_addr), asmstr, pat> {
+// Store: data in rd, address in rs1, no output (MEMSET*)
+class RRst<bits<32> word0, string asmstr, list<dag> pat = []>
+    : KCInst32<word0, (outs), (ins GPR:$rs_data, GPR:$rs_addr), asmstr, pat> {
   bits<4> rs_data;
   bits<4> rs_addr;
-  let Inst{31-8} = op;
-  let Inst{7-4}  = rs_data;
-  let Inst{3-0}  = rs_addr;
+  let Inst{11-8} = rs_data;
+  let Inst{7-4}  = rs_addr;
+  let mayStore   = 1;
+  let SchedRW    = [WriteStore];
+}
+
+// Register-offset indexed 64-bit load/store: EA = rs1 + rs2 (the offset
+// register is a real GPR operand in rs2).
+class Idx64RegOff_ld<bits<32> word0, string asmstr>
+    : KCInst32<word0, (outs GPR:$rd), (ins GPR:$base, GPR:$offset), asmstr> {
+  bits<4> rd;
+  bits<4> base;
+  bits<4> offset;
+  let Inst{11-8} = rd;
+  let Inst{7-4}  = base;
+  let Inst{3-0}  = offset;
+  let mayLoad    = 1;
+  let SchedRW    = [WriteLoad];
+}
+class Idx64RegOff_st<bits<32> word0, string asmstr>
+    : KCInst32<word0, (outs), (ins GPR:$rs_data, GPR:$base, GPR:$offset),
+               asmstr> {
+  bits<4> rs_data;
+  bits<4> base;
+  bits<4> offset;
+  let Inst{11-8} = rs_data;
+  let Inst{7-4}  = base;
+  let Inst{3-0}  = offset;
   let mayStore   = 1;
   let SchedRW    = [WriteStore];
 }
 
 //===----------------------------------------------------------------------===//
-// Format: R   single-register
-// [31:4]=op28  [3:0]=reg
+// Single register
 //===----------------------------------------------------------------------===//
 
-// In-place unary with 2-address constraint: rd = f(rd)
-class R_inplace<bits<28> op, string asmstr, list<dag> pat = []>
-    : KCInst32<(outs GPR:$rd), (ins GPR:$rs1), asmstr, pat> {
+// In-place with 2-address constraint: rd = f(rd); only rd is encoded.
+class R_inplace<bits<32> word0, string asmstr, list<dag> pat = []>
+    : KCInst32<word0, (outs GPR:$rd), (ins GPR:$rs1), asmstr, pat> {
   bits<4> rd;
-  let Inst{31-4}  = op;
-  let Inst{3-0}   = rd;
+  let Inst{11-8}  = rd;
   let Constraints = "$rd = $rs1";
   let Defs        = [FLAGS];   // inc/dec/neg/shift-by-1/sext set flags (over-marked; safe)
 }
@@ -260,183 +304,199 @@ class R_inplace<bits<28> op, string asmstr, list<dag> pat = []>
 // these are NOT tied; the register allocator only picks rd==rs1 when the
 // source is dead.  The old 1-operand spelling (`incr r1`) stays accepted via
 // InstAlias (see the end of this file).
-class R_unary<bits<28> op, string mnem, list<dag> pat = []>
-    : KCInst32<(outs GPR:$rd), (ins GPR:$rs1), mnem # "\t$rd, $rs1", pat> {
+class R_unary<bits<32> word0, string mnem, list<dag> pat = []>
+    : KCInst32<word0, (outs GPR:$rd), (ins GPR:$rs1), mnem # "\t$rd, $rs1",
+               pat> {
   bits<4> rd;
-  let Inst{31-4}  = op;
-  let Inst{3-0}   = rd;
-  let Defs        = [FLAGS];   // inc/dec/neg/sext/... set flags (over-marked; safe)
+  bits<4> rs1;
+  let Inst{11-8} = rd;
+  let Inst{7-4}  = rs1;
+  let Defs       = [FLAGS];   // inc/dec/neg/sext/... set flags (over-marked; safe)
 }
 
-// Input-only R: PUSH, SETSP, JMPR, CALLR
-class R_in<bits<28> op, dag ins, string asmstr, list<dag> pat = []>
-    : KCInst32<(outs), ins, asmstr, pat> {
+// Input-only, source in rs1: PUSH, SETSP, DELAYR, LCDDATAR
+class R_in<bits<32> word0, dag ins, string asmstr, list<dag> pat = []>
+    : KCInst32<word0, (outs), ins, asmstr, pat> {
   bits<4> reg;
-  let Inst{31-4} = op;
-  let Inst{3-0}  = reg;
+  let Inst{7-4} = reg;
 }
 
-// Output-only R: POP, GETSP
-class R_out<bits<28> op, dag outs, string asmstr, list<dag> pat = []>
-    : KCInst32<outs, (ins), asmstr, pat> {
+// Input-only, register target in rs2: JMPR, CALLR
+class R_ind<bits<32> word0, dag ins, string asmstr>
+    : KCInst32<word0, (outs), ins, asmstr> {
   bits<4> reg;
-  let Inst{31-4} = op;
-  let Inst{3-0}  = reg;
+  let Inst{3-0} = reg;
+}
+
+// Output-only, rd: POP, GETSP
+class R_out<bits<32> word0, dag outs, string asmstr, list<dag> pat = []>
+    : KCInst32<word0, outs, (ins), asmstr, pat> {
+  bits<4> reg;
+  let Inst{11-8} = reg;
+}
+
+// Retired v1 peripheral op (LED / 7-seg / RGB): the v1 word with the
+// register in [3:0].  LEN=00, so the v2 CPU traps (ERR_INV_OPCODE) if one
+// executes, which is the intended fail-fast behaviour; they exist only so
+// old hand-written inline asm still assembles.  Codegen never emits them.
+class RetiredV1_R<bits<32> word0, string asmstr>
+    : KCInst32<word0, (outs), (ins GPR:$reg), asmstr> {
+  bits<4> reg;
+  let Inst{3-0}   = reg;
+  let isRetiredV1 = 1;
 }
 
 //===----------------------------------------------------------------------===//
-// Format: I0   no operands, fixed opcode
+// No operands: the template is the whole instruction
 //===----------------------------------------------------------------------===//
 
-class I0<bits<32> op, dag outs, dag ins, string asmstr, list<dag> pat = []>
-    : KCInst32<outs, ins, asmstr, pat> {
-  let Inst{31-0} = op;
+class I0<bits<32> word0, dag outs, dag ins, string asmstr, list<dag> pat = []>
+    : KCInst32<word0, outs, ins, asmstr, pat>;
+
+//===----------------------------------------------------------------------===//
+// Class 4 shift/rotate/bit by an embedded constant N in word0[20:15]
+//===----------------------------------------------------------------------===//
+
+// 3-operand (rd and rs independent in v2).  The count/position operand is a
+// plain immediate; its low 6 bits are encoded.
+class ShiftImmN<bits<32> word0, string mnem, list<dag> pat = []>
+    : KCInst32<word0, (outs GPR:$rd), (ins GPR:$rs, simm32:$imm),
+               mnem # "\t$rd, $rs, $imm", pat> {
+  bits<4> rd;
+  bits<4> rs;
+  bits<6> imm;
+  let Inst{20-15} = imm;
+  let Inst{11-8}  = rd;
+  let Inst{7-4}   = rs;
+  let Defs        = [FLAGS];   // shlv/shrv/rolv/rorv set flags
+}
+
+// Bit test by embedded constant N — flag-only, no destination register
+// (Z = ~bit).
+class BitTestImmN<bits<32> word0, string asmstr>
+    : KCInst32<word0, (outs), (ins GPR:$rs, simm32:$imm), asmstr> {
+  bits<4> rs;
+  bits<6> imm;
+  let Inst{20-15} = imm;
+  let Inst{7-4}   = rs;
+  let Defs        = [FLAGS];   // Z = ~bit
 }
 
 //===----------------------------------------------------------------------===//
-// Format: RV   register + 32-bit immediate
-// [63:36]=op28  [35:32]=rd  [31:0]=imm32
+// Register + 32-bit immediate in word 1
 //===----------------------------------------------------------------------===//
 
-// Load immediate into register: rd = imm32
-class RV_ld<bits<28> op, string asmstr, list<dag> pat = [],
+// Load immediate / address into register: rd = imm32
+class RV_ld<bits<32> word0, string asmstr, list<dag> pat = [],
             Operand immop = simm32>
-    : KCInst64<(outs GPR:$rd), (ins immop:$imm), asmstr, pat> {
+    : KCInst64<word0, (outs GPR:$rd), (ins immop:$imm), asmstr, pat> {
   bits<4>  rd;
   bits<32> imm;
-  let Inst{63-36} = op;
-  let Inst{35-32} = rd;
-  let Inst{31-0}  = imm;
+  let Inst{63-32} = imm;
+  let Inst{11-8}  = rd;
+}
+
+// Store a register to an absolute address: data in rd, address in word 1.
+class RV_st<bits<32> word0, string asmstr>
+    : KCInst64<word0, (outs), (ins GPR:$rs_data, simm32_abs:$addr), asmstr> {
+  bits<4>  rs_data;
+  bits<32> addr;
+  let Inst{63-32} = addr;
+  let Inst{11-8}  = rs_data;
 }
 
 // In-place: rd op= imm32   ($rd tied to $rs)
-class RV_2addr<bits<28> op, string asmstr, list<dag> pat = []>
-    : KCInst64<(outs GPR:$rd), (ins GPR:$rs, simm32:$imm), asmstr, pat> {
+class RV_2addr<bits<32> word0, string asmstr, list<dag> pat = []>
+    : KCInst64<word0, (outs GPR:$rd), (ins GPR:$rs, simm32:$imm), asmstr,
+               pat> {
   bits<4>  rd;
+  bits<4>  rs;
   bits<32> imm;
-  let Inst{63-36} = op;
-  let Inst{35-32} = rd;
-  let Inst{31-0}  = imm;
+  let Inst{63-32} = imm;
+  let Inst{11-8}  = rd;
+  let Inst{7-4}   = rs;
   let Constraints = "$rd = $rs";
   let Defs        = [FLAGS];   // addv/minusv set flags (bitwise-imm over-marked; safe)
 }
 
 // 3-operand immediate form: rd = rs op imm32 (untied — see R_unary).
-class RV_imm<bits<28> op, string mnem, list<dag> pat = []>
-    : KCInst64<(outs GPR:$rd), (ins GPR:$rs, simm32:$imm),
+class RV_imm<bits<32> word0, string mnem, list<dag> pat = []>
+    : KCInst64<word0, (outs GPR:$rd), (ins GPR:$rs, simm32:$imm),
                mnem # "\t$rd, $rs, $imm", pat> {
   bits<4>  rd;
+  bits<4>  rs;
   bits<32> imm;
-  let Inst{63-36} = op;
-  let Inst{35-32} = rd;
-  let Inst{31-0}  = imm;
+  let Inst{63-32} = imm;
+  let Inst{11-8}  = rd;
+  let Inst{7-4}   = rs;
   let Defs        = [FLAGS];   // addv/minusv set flags (bitwise-imm over-marked; safe)
 }
 
 // Compare register to immediate — flags only, no output (CMPRV)
-class RV_cmp<bits<28> op, string asmstr>
-    : KCInst64<(outs), (ins GPR:$rs, simm32:$imm), asmstr> {
+class RV_cmp<bits<32> word0, string asmstr>
+    : KCInst64<word0, (outs), (ins GPR:$rs, simm32:$imm), asmstr> {
   bits<4>  rs;
   bits<32> imm;
-  let Inst{63-36} = op;
-  let Inst{35-32} = rs;
-  let Inst{31-0}  = imm;
+  let Inst{63-32} = imm;
+  let Inst{7-4}   = rs;
   let Defs        = [FLAGS];   // CMPRV sets flags
 }
 
 //===----------------------------------------------------------------------===//
-// Format: RRV   2 regs + 32-bit offset
-// [63:40]=op24  [39:36]=rd  [35:32]=rs  [31:0]=offset32
+// Two registers + 32-bit immediate / offset in word 1
 //===----------------------------------------------------------------------===//
 
 // ALU variant: rd = rs op sign_extend(imm32) — no memory side-effect.
-class RRV_alu<bits<24> op, string asmstr, list<dag> pat = []>
-    : KCInst64<(outs GPR:$rd), (ins GPR:$rs, simm32:$imm), asmstr, pat> {
+class RRV_alu<bits<32> word0, string asmstr, list<dag> pat = []>
+    : KCInst64<word0, (outs GPR:$rd), (ins GPR:$rs, simm32:$imm), asmstr,
+               pat> {
   bits<4>  rd;
   bits<4>  rs;
   bits<32> imm;
-  let Inst{63-40} = op;
-  let Inst{39-36} = rd;
-  let Inst{35-32} = rs;
-  let Inst{31-0}  = imm;
+  let Inst{63-32} = imm;
+  let Inst{11-8}  = rd;
+  let Inst{7-4}   = rs;
   let Defs        = [FLAGS];   // addi sets flags
 }
 
-// Indexed 64-bit load: rd = mem64[base + offset]
-class RRV_ld<bits<24> op, string asmstr, list<dag> pat = []>
-    : KCInst64<(outs GPR:$rd), (ins GPR:$base, simm32:$offset), asmstr, pat> {
+// Indexed load: rd = mem[base + offset]
+class RRV_ld<bits<32> word0, string asmstr, list<dag> pat = []>
+    : KCInst64<word0, (outs GPR:$rd), (ins GPR:$base, simm32:$offset),
+               asmstr, pat> {
   bits<4>  rd;
   bits<4>  base;
   bits<32> offset;
-  let Inst{63-40} = op;
-  let Inst{39-36} = rd;
-  let Inst{35-32} = base;
-  let Inst{31-0}  = offset;
+  let Inst{63-32} = offset;
+  let Inst{11-8}  = rd;
+  let Inst{7-4}   = base;
   let mayLoad     = 1;
   let SchedRW     = [WriteLoad];
 }
 
-// Indexed 64-bit store: mem64[base + offset] = rs_data
-class RRV_st<bits<24> op, string asmstr, list<dag> pat = []>
-    : KCInst64<(outs), (ins GPR:$rs_data, GPR:$base, simm32:$offset), asmstr, pat> {
+// Indexed store: mem[base + offset] = rs_data
+class RRV_st<bits<32> word0, string asmstr, list<dag> pat = []>
+    : KCInst64<word0, (outs), (ins GPR:$rs_data, GPR:$base, simm32:$offset),
+               asmstr, pat> {
   bits<4>  rs_data;
   bits<4>  base;
   bits<32> offset;
-  let Inst{63-40} = op;
-  let Inst{39-36} = rs_data;
-  let Inst{35-32} = base;
-  let Inst{31-0}  = offset;
+  let Inst{63-32} = offset;
+  let Inst{11-8}  = rs_data;
+  let Inst{7-4}   = base;
   let mayStore    = 1;
   let SchedRW     = [WriteStore];
 }
 
 //===----------------------------------------------------------------------===//
-// v2 single-word (4-byte) forms that were 2 words in v1.
-// Encoding is produced entirely by KlaussCPUMCCodeEmitter.cpp; `Inst` is left
-// unset here (documentary only, no generated emitter/decoder consumes it).
-//===----------------------------------------------------------------------===//
-
-// Class 4 shift/rotate/bit by embedded constant N (word0[20:15]); 3-operand
-// (rd and rs independent in v2).  The count/position operand is a plain immediate; the encoder
-// masks it to 6 bits.  (v1: these were 8-byte RV_2addr forms.)
-class ShiftImmN<string mnem, list<dag> pat = []>
-    : KCInst32<(outs GPR:$rd), (ins GPR:$rs, simm32:$imm),
-               mnem # "\t$rd, $rs, $imm", pat> {
-  let Defs        = [FLAGS];   // shlv/shrv/rolv/rorv set flags
-}
-
-// Class 4 bit-test by embedded constant N — flag-only, no destination register
-// (Z = ~bit).  (v1: 8-byte RV_cmp form.)
-class BitTestImmN<string asmstr>
-    : KCInst32<(outs), (ins GPR:$rs, simm32:$imm), asmstr> {
-  let Defs = [FLAGS];   // Z = ~bit
-}
-
-// Class 6/7 register-offset indexed 64-bit load/store (v2: 1 word, EA =
-// rs1 + rs2; the offset register is a real GPR operand in rs2[3:0]).
-class Idx64RegOff_ld<string asmstr>
-    : KCInst32<(outs GPR:$rd), (ins GPR:$base, GPR:$offset), asmstr> {
-  let mayLoad = 1;
-  let SchedRW = [WriteLoad];
-}
-class Idx64RegOff_st<string asmstr>
-    : KCInst32<(outs), (ins GPR:$rs_data, GPR:$base, GPR:$offset), asmstr> {
-  let mayStore = 1;
-  let SchedRW  = [WriteStore];
-}
-
-//===----------------------------------------------------------------------===//
-// Format: Vimm   fixed opcode + 32-bit target or immediate
-// [63:32]=exact_opcode32  [31:0]=value32
+// Fixed word 0 + 32-bit target or immediate in word 1
 //===----------------------------------------------------------------------===//
 
 // Unconditional branch
-class Vbr_uncond<bits<32> op, string asmstr, list<dag> pat = [],
+class Vbr_uncond<bits<32> word0, string asmstr, list<dag> pat = [],
                  Operand tgt = BrTarget32>
-    : KCInst64<(outs), (ins tgt:$target), asmstr, pat> {
+    : KCInst64<word0, (outs), (ins tgt:$target), asmstr, pat> {
   bits<32> target;
-  let Inst{63-32}            = op;
-  let Inst{31-0}             = target;
+  let Inst{63-32}  = target;
   let isBranch     = 1;
   let isTerminator = 1;
   let isBarrier    = 1;
@@ -444,56 +504,61 @@ class Vbr_uncond<bits<32> op, string asmstr, list<dag> pat = [],
 }
 
 // Conditional branch (flags set by preceding CMPRR/CMPRV)
-class Vbr_cond<bits<32> op, string asmstr, Operand tgt = BrTarget32>
-    : KCInst64<(outs), (ins tgt:$target), asmstr> {
+class Vbr_cond<bits<32> word0, string asmstr, Operand tgt = BrTarget32>
+    : KCInst64<word0, (outs), (ins tgt:$target), asmstr> {
   bits<32> target;
-  let Inst{63-32} = op;
-  let Inst{31-0}  = target;
-  let isBranch    = 1;
+  let Inst{63-32}  = target;
+  let isBranch     = 1;
   let isTerminator = 1;
-  let SchedRW     = [WriteBranch];
-  let Uses        = [FLAGS];   // conditional branch reads the flags a compare set
+  let SchedRW      = [WriteBranch];
+  let Uses         = [FLAGS];   // conditional branch reads the flags a compare set
 }
 
 // PC-relative conditional branch
-class Vbr_relcond<bits<32> op, string asmstr>
-    : Vbr_cond<op, asmstr, PCRelTarget32>;
+class Vbr_relcond<bits<32> word0, string asmstr>
+    : Vbr_cond<word0, asmstr, PCRelTarget32>;
 
 // Direct call
-class Vcall<bits<32> op, string asmstr, Operand tgt = CallTarget32>
-    : KCInst64<(outs), (ins tgt:$target), asmstr> {
+class Vcall<bits<32> word0, string asmstr, Operand tgt = CallTarget32>
+    : KCInst64<word0, (outs), (ins tgt:$target), asmstr> {
   bits<32> target;
-  let Inst{63-32} = op;
-  let Inst{31-0}  = target;
+  let Inst{63-32} = target;
   let isCall      = 1;
   let SchedRW     = [WriteBranch];
 }
 
-// SP adjustment (ADDSP)
-class Vsp<bits<32> op, string asmstr>
-    : KCInst64<(outs), (ins simm32:$imm), asmstr> {
+// SP adjustment (ADDSP), push and peripheral immediates
+class Vsp<bits<32> word0, string asmstr>
+    : KCInst64<word0, (outs), (ins simm32:$imm), asmstr> {
   bits<32> imm;
-  let Inst{63-32} = op;
-  let Inst{31-0}  = imm;
+  let Inst{63-32} = imm;
   let SchedRW     = [WriteSP];
 }
 
 //===----------------------------------------------------------------------===//
-// Format: V64   register ← 64-bit immediate  (3-word, 12-byte)
-// Word0[31:8]=op24  Word0[7:4]=rd  Word0[3:0]=0  Word1=lo32  Word2=hi32
-// Result: rd = (hi32 << 32) | lo32
+// 64-bit immediate: lo32 in word 1, hi32 in word 2 (3 words)
 //===----------------------------------------------------------------------===//
 
-class V64_ld<bits<24> op, string asmstr, list<dag> pat = []>
-    : KCInst96<(outs GPR:$rd), (ins simm32:$lo, simm32:$hi), asmstr, pat> {
+// rd = (hi32 << 32) | lo32
+class V64_ld<bits<32> word0, string asmstr, list<dag> pat = []>
+    : KCInst96<word0, (outs GPR:$rd), (ins simm32:$lo, simm32:$hi), asmstr,
+               pat> {
   bits<4>  rd;
   bits<32> lo;
   bits<32> hi;
-  let Inst{95-72} = op;
-  let Inst{71-68} = rd;
-  let Inst{67-64} = 0;
+  let Inst{95-64} = hi;
   let Inst{63-32} = lo;
-  let Inst{31-0}  = hi;
+  let Inst{11-8}  = rd;
+}
+
+// Push (hi32 << 32) | lo32
+class V64_imm<bits<32> word0, string asmstr>
+    : KCInst96<word0, (outs), (ins simm32:$lo, simm32:$hi), asmstr> {
+  bits<32> lo;
+  bits<32> hi;
+  let Inst{95-64} = hi;
+  let Inst{63-32} = lo;
+  let SchedRW     = [WriteSP];
 }
 
 //===----------------------------------------------------------------------===//
@@ -501,21 +566,21 @@ class V64_ld<bits<24> op, string asmstr, list<dag> pat = []>
 //===----------------------------------------------------------------------===//
 
 // Arithmetic
-def ADDR   : RRR<0x00010, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def ADDR   : RRR<0x44200000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "addr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (add GPR:$rs1, GPR:$rs2))]>;
-def SUBR   : RRR<0x00020, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def SUBR   : RRR<0x44600000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "subr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (sub GPR:$rs1, GPR:$rs2))]>;
 
 // Bitwise
-def ANDR   : RRR<0x00030, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def ANDR   : RRR<0x45000000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "andr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (and GPR:$rs1, GPR:$rs2))]>;
-def ORR    : RRR<0x00040, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def ORR    : RRR<0x45400000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "orr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (or  GPR:$rs1, GPR:$rs2))]>;
-def XORR   : RRR<0x00050, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def XORR   : RRR<0x45800000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "xorr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (xor GPR:$rs1, GPR:$rs2))]>;
 
@@ -525,107 +590,107 @@ def XORR   : RRR<0x00050, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
 // in KlaussCPUDAGToDAGISel::Select (-mllvm -klausscpu-w32-alu=false).
 // (No isel Pattern, so side effects are stated explicitly — see SETR64.)
 let hasSideEffects = 0 in {
-def ADDW   : RRR<0x00011, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "addw\t$rd, $rs1, $rs2">;
-def SUBW   : RRR<0x00021, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "subw\t$rd, $rs1, $rs2">;
-def ADDIW  : RRV_alu<0x000003, "addiw\t$rd, $rs, $imm">;
+def ADDW   : RRR<0x44280000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "addw\t$rd, $rs1, $rs2">;
+def SUBW   : RRR<0x44680000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "subw\t$rd, $rs1, $rs2">;
+def ADDIW  : RRV_alu<0x88380000, "addiw\t$rd, $rs, $imm">;
 let SchedRW = [WriteMul] in
-def MULW   : RRR<0x00101, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "mulw\t$rd, $rs1, $rs2">;
+def MULW   : RRR<0x68880000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "mulw\t$rd, $rs1, $rs2">;
 }
 
 // Multiply (EX-serialized, ~5c — M8)
 let SchedRW = [WriteMul] in {
-def MULR   : RRR<0x00100, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def MULR   : RRR<0x68800000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "mulr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (mul GPR:$rs1, GPR:$rs2))]>;
-def MULUR  : RRR<0x00110, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def MULUR  : RRR<0x68000000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "mulur\t$rd, $rs1, $rs2">;          // unsigned lo == signed lo; no extra pattern
-def MULHR  : RRR<0x00120, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def MULHR  : RRR<0x68C00000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "mulhr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (mulhs GPR:$rs1, GPR:$rs2))]>;
-def MULHUR : RRR<0x00130, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def MULHUR : RRR<0x68400000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "mulhur\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (mulhu GPR:$rs1, GPR:$rs2))]>;
 }
 
 // Divide / modulo (EX-serialized, iterative — M8)
 let SchedRW = [WriteDiv] in {
-def DIVR   : RRR<0x00140, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def DIVR   : RRR<0x69800000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "divr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (sdiv GPR:$rs1, GPR:$rs2))]>;
-def DIVUR  : RRR<0x00150, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def DIVUR  : RRR<0x69000000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "divur\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (udiv GPR:$rs1, GPR:$rs2))]>;
-def MODR   : RRR<0x00160, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def MODR   : RRR<0x6A800000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "modr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (srem GPR:$rs1, GPR:$rs2))]>;
-def MODUR  : RRR<0x00170, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def MODUR  : RRR<0x6A000000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "modur\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (urem GPR:$rs1, GPR:$rs2))]>;
 }
 
 // Shifts
-def SHLR   : RRR<0x00200, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def SHLR   : RRR<0x50004000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "shlr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (shl GPR:$rs1, GPR:$rs2))]>;
-def SHRR   : RRR<0x00210, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def SHRR   : RRR<0x50404000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "shrr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (srl GPR:$rs1, GPR:$rs2))]>;
-def SARR   : RRR<0x00220, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def SARR   : RRR<0x50804000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "sarr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (sra GPR:$rs1, GPR:$rs2))]>;
 
 // Rotate — selected from ISD::ROTL/ROTR (i64 Legal in ISelLowering).
 // Rust's u64::rotate_left/right and hash/crypto kernels hit these hard.
-def ROLR   : RRR<0x00230, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def ROLR   : RRR<0x50C04000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "rolr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (rotl GPR:$rs1, GPR:$rs2))]>;
-def RORR_R : RRR<0x00240, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def RORR_R : RRR<0x51004000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "rorr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (rotr GPR:$rs1, GPR:$rs2))]>;
 
 // Compare-and-materialise: rd = (rs1 cond rs2) ? 1 : 0
-def CMPEQR  : RRR<0x00300, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def CMPEQR  : RRR<0x4C200000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                  "cmpeqr\t$rd, $rs1, $rs2",
                  [(set GPR:$rd, (i64 (setcc GPR:$rs1, GPR:$rs2, SETEQ)))]>;
-def CMPNER  : RRR<0x00310, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def CMPNER  : RRR<0x4C600000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                  "cmpner\t$rd, $rs1, $rs2",
                  [(set GPR:$rd, (i64 (setcc GPR:$rs1, GPR:$rs2, SETNE)))]>;
-def CMPLTR  : RRR<0x00320, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def CMPLTR  : RRR<0x4CA00000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                  "cmpltr\t$rd, $rs1, $rs2",
                  [(set GPR:$rd, (i64 (setcc GPR:$rs1, GPR:$rs2, SETLT)))]>;
-def CMPLER  : RRR<0x00330, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def CMPLER  : RRR<0x4D200000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                  "cmpler\t$rd, $rs1, $rs2",
                  [(set GPR:$rd, (i64 (setcc GPR:$rs1, GPR:$rs2, SETLE)))]>;
-def CMPGTR  : RRR<0x00340, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def CMPGTR  : RRR<0x4D600000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                  "cmpgtr\t$rd, $rs1, $rs2",
                  [(set GPR:$rd, (i64 (setcc GPR:$rs1, GPR:$rs2, SETGT)))]>;
-def CMPGER  : RRR<0x00350, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def CMPGER  : RRR<0x4CE00000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                  "cmpger\t$rd, $rs1, $rs2",
                  [(set GPR:$rd, (i64 (setcc GPR:$rs1, GPR:$rs2, SETGE)))]>;
-def CMPULTR : RRR<0x00360, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def CMPULTR : RRR<0x4DA00000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                  "cmpultr\t$rd, $rs1, $rs2",
                  [(set GPR:$rd, (i64 (setcc GPR:$rs1, GPR:$rs2, SETULT)))]>;
-def CMPULER : RRR<0x00370, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def CMPULER : RRR<0x4E200000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                  "cmpuler\t$rd, $rs1, $rs2",
                  [(set GPR:$rd, (i64 (setcc GPR:$rs1, GPR:$rs2, SETULE)))]>;
-def CMPUGTR : RRR<0x00380, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def CMPUGTR : RRR<0x4E600000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                  "cmpugtr\t$rd, $rs1, $rs2",
                  [(set GPR:$rd, (i64 (setcc GPR:$rs1, GPR:$rs2, SETUGT)))]>;
-def CMPUGER : RRR<0x00390, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def CMPUGER : RRR<0x4DE00000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                  "cmpuger\t$rd, $rs1, $rs2",
                  [(set GPR:$rd, (i64 (setcc GPR:$rs1, GPR:$rs2, SETUGE)))]>;
 
 // Min / Max
-def MINR   : RRR<0x00400, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def MINR   : RRR<0x45C00000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "minr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (smin GPR:$rs1, GPR:$rs2))]>;
-def MAXR   : RRR<0x00410, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def MAXR   : RRR<0x46000000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "maxr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (smax GPR:$rs1, GPR:$rs2))]>;
-def MINUR  : RRR<0x00420, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def MINUR  : RRR<0x46400000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "minur\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (umin GPR:$rs1, GPR:$rs2))]>;
-def MAXUR  : RRR<0x00430, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+def MAXUR  : RRR<0x46800000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "maxur\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (umax GPR:$rs1, GPR:$rs2))]>;
 
@@ -637,7 +702,7 @@ def MAXUR  : RRR<0x00430, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
 // Pattern-less, so TableGen would otherwise guess hasSideEffects=1 and every
 // post-RA copy would become a scheduling barrier.
 let hasSideEffects = 0, isMoveReg = 1, isAsCheapAsAMove = 1 in
-def COPY_R   : RR1<0x000001, (outs GPR:$rd), (ins GPR:$rs),
+def COPY_R   : RR1<0x54000000, (outs GPR:$rd), (ins GPR:$rs),
                   "copy\t$rd, $rs"> { let SchedRW = [WriteALU]; } // move, not a load
 
 // Compare (flags only): rs1 - rs2, no writeback.
@@ -646,29 +711,29 @@ def COPY_R   : RR1<0x000001, (outs GPR:$rd), (ins GPR:$rs),
 // declares Defs=[FLAGS], conditional branches Uses=[FLAGS]).  A side-effect
 // flag would only make it a scheduling/LICM barrier for unrelated loads/stores.
 let hasSideEffects = 0 in
-def CMPRR_I  : RR0<0x000005, "cmprr\t$rs1, $rs2">;
+def CMPRR_I  : RR0<0x4C000000, "cmprr\t$rs1, $rs2">;
 // ISA v3 D2: 32-bit compare of the low halves (class 3 W bit [19]). Flags
 // are exactly those of the 32-bit subtraction; selected by BR_CC when both
 // operands are 32-bit extended (see KlaussCPUDAGToDAGISel::Select).
 let hasSideEffects = 0 in {
-def CMPRRW_I : RR0<0x000006, "cmprrw\t$rs1, $rs2">;
-def CMPRVW_I : RV_cmp<0x0000084, "cmprvw\t$rs, $imm">;
+def CMPRRW_I : RR0<0x4C080000, "cmprrw\t$rs1, $rs2">;
+def CMPRVW_I : RV_cmp<0x8C180000, "cmprvw\t$rs, $imm">;
 }
 
 // 64-bit load / store via absolute register address
-def MEMGET64 : RR1<0x00007B, (outs GPR:$rd), (ins GPR:$rs),
+def MEMGET64 : RR1<0x5B100000, (outs GPR:$rd), (ins GPR:$rs),
                   "memget64\t$rd, $rs"> {
   let mayLoad = 1;
 }
-def MEMSET64 : RRst<0x00007A, "memset64\t$rs_data, $rs_addr">;
+def MEMSET64 : RRst<0x5F100000, "memset64\t$rs_data, $rs_addr">;
 
 // Sub-word register-addressed loads (zero-extend to 64 bits, pure GPR address).
 // Indexed variants (base+offset) are LDIDX8/16/32 below.
-def MEMGET8  : RR1<0x000075, (outs GPR:$rd), (ins GPR:$rs),
+def MEMGET8  : RR1<0x58000000, (outs GPR:$rd), (ins GPR:$rs),
                   "memget8\t$rd, $rs"> { let mayLoad = 1; }
-def MEMGET16 : RR1<0x000077, (outs GPR:$rd), (ins GPR:$rs),
+def MEMGET16 : RR1<0x59000000, (outs GPR:$rd), (ins GPR:$rs),
                   "memget16\t$rd, $rs"> { let mayLoad = 1; }
-def MEMGET32 : RR1<0x000079, (outs GPR:$rd), (ins GPR:$rs),
+def MEMGET32 : RR1<0x5A000000, (outs GPR:$rd), (ins GPR:$rs),
                   "memget32\t$rd, $rs"> { let mayLoad = 1; }
 
 // Sub-word register-addressed stores (stores low N bits of rs_data to mem[rs_addr]).
@@ -685,49 +750,49 @@ def MEMGET32 : RR1<0x000079, (outs GPR:$rd), (ins GPR:$rs),
 // store path reach these opcodes on an unaligned address; route unaligned
 // stores through STIDX8/MEMSET8, or switch to a HW store that faults instead of
 // masking. (Same invariant as the force-aligned LDIDX64/STIDX64 note above.)
-def MEMSET8  : RRst<0x000074, "memset8\t$rs_data, $rs_addr">;
-def MEMSET16 : RRst<0x000076, "memset16\t$rs_data, $rs_addr">;
-def MEMSET32 : RRst<0x000078, "memset32\t$rs_data, $rs_addr">;
+def MEMSET8  : RRst<0x5C000000, "memset8\t$rs_data, $rs_addr">;
+def MEMSET16 : RRst<0x5D000000, "memset16\t$rs_data, $rs_addr">;
+def MEMSET32 : RRst<0x5E000000, "memset32\t$rs_data, $rs_addr">;
 
 //===----------------------------------------------------------------------===//
 // ALU — single-register in-place (2-address: $rd = $rs1)
 //===----------------------------------------------------------------------===//
 
-def INCR    : R_unary<0x0000084, "incr">;
-def DECR    : R_unary<0x0000085, "decr">;
-def NEGR    : R_unary<0x000008A, "negr",
+def INCR    : R_unary<0x57880000, "incr">;
+def DECR    : R_unary<0x57C80000, "decr">;
+def NEGR    : R_unary<0x54480000, "negr",
                 [(set GPR:$rd, (ineg GPR:$rs1))]>;
-def ABSR    : R_unary<0x000008B, "absr",
+def ABSR    : R_unary<0x54C80000, "absr",
                 [(set GPR:$rd, (abs GPR:$rs1))]>;
-def SHLR1   : R_unary<0x000008D, "shlr1">;
-def SHRR1   : R_unary<0x000008E, "shrr1">;
-def NOTR    : R_unary<0x0000098, "notr",
+def SHLR1   : R_unary<0x50208000, "shlr1">;
+def SHRR1   : R_unary<0x50608000, "shrr1">;
+def NOTR    : R_unary<0x54880000, "notr",
                 [(set GPR:$rd, (not GPR:$rs1))]>;
-def POPCNT  : R_unary<0x00000A8, "popcnt",
+def POPCNT  : R_unary<0x56080000, "popcnt",
                 [(set GPR:$rd, (ctpop GPR:$rs1))]>;
-def CLZ     : R_unary<0x00000A9, "clz",
+def CLZ     : R_unary<0x56400000, "clz",
                 [(set GPR:$rd, (ctlz GPR:$rs1))]>;
-def CTZ     : R_unary<0x00000AA, "ctz",
+def CTZ     : R_unary<0x56800000, "ctz",
                 [(set GPR:$rd, (cttz GPR:$rs1))]>;
-def BITREV  : R_unary<0x00000AB, "bitrev",
+def BITREV  : R_unary<0x55C00000, "bitrev",
                 [(set GPR:$rd, (bitreverse GPR:$rs1))]>;
-def BSWAP_R : R_unary<0x0000097, "bswap",
+def BSWAP_R : R_unary<0x55800000, "bswap",
                 [(set GPR:$rd, (bswap GPR:$rs1))]>;
 
 // Sign-extend to 64 bits (arch doc §7.2; hardware extends to 64)
-def SEXTB   : R_unary<0x000008C, "sextb",
+def SEXTB   : R_unary<0x55080000, "sextb",
                 [(set GPR:$rd, (sext_inreg GPR:$rs1, i8))]>;
-def SEXTH   : R_unary<0x0000094, "sexth",
+def SEXTH   : R_unary<0x55180000, "sexth",
                 [(set GPR:$rd, (sext_inreg GPR:$rs1, i16))]>;
 
 // Zero-extend to 64 bits
-def ZEXTB   : R_unary<0x0000095, "zextb">;
-def ZEXTH   : R_unary<0x0000096, "zexth">;
+def ZEXTB   : R_unary<0x55480000, "zextb">;
+def ZEXTH   : R_unary<0x55580000, "zexth">;
 
 // Sign/zero-extend 32→64 bits (hardware fixed April 2026)
-def SEXTW   : R_unary<0x00000F0, "sextw",
+def SEXTW   : R_unary<0x55200000, "sextw",
                 [(set GPR:$rd, (sext_inreg GPR:$rs1, i32))]>;
-def ZEXTW   : R_unary<0x00000F1, "zextw">;
+def ZEXTW   : R_unary<0x55600000, "zextw">;
 
 //===----------------------------------------------------------------------===//
 // Pseudo-instructions (not emitted to the binary; eliminated by PEI)
@@ -779,28 +844,31 @@ def SELECT_CC_RI : Pseudo<(outs GPR:$dst),
 //===----------------------------------------------------------------------===//
 
 let Uses = [SP], Defs = [SP], mayStore = 1 in
-def PUSH_R  : R_in<0x0000400, (ins GPR:$reg), "push\t$reg">;
+def PUSH_R  : R_in<0x64000000, (ins GPR:$reg), "push\t$reg">;
 let Uses = [SP], Defs = [SP], mayLoad = 1 in
-def POP_R   : R_out<0x0000401, (outs GPR:$reg), "pop\t$reg">;
+def POP_R   : R_out<0x64800000, (outs GPR:$reg), "pop\t$reg">;
 let Uses = [SP], hasSideEffects = 1 in
-def GETSP_R : R_out<0x0000403, (outs GPR:$reg), "getsp\t$reg">;
+def GETSP_R : R_out<0x64C00000, (outs GPR:$reg), "getsp\t$reg">;
 let Defs = [SP], hasSideEffects = 1 in
-def SETSP_R : R_in<0x0000404, (ins GPR:$reg), "setsp\t$reg">;
+def SETSP_R : R_in<0x65000000, (ins GPR:$reg), "setsp\t$reg">;
 let Uses = [SP], Defs = [SP], hasSideEffects = 1 in
-def ADDSP_I : Vsp<0x00004050, "addsp\t$imm">;
+def ADDSP_I : Vsp<0xA5400000, "addsp\t$imm">;
 
 // ISA v3 C (frame setup/teardown, one word each; no isel patterns — built by
 // KlaussCPUFrameLowering):
 //   ENTER N : push R15; R15 = SP; SP -= 8*N      (N = frame dwords, [21:0])
 //   LEAVE   : SP = R15; pop R15
 let Uses = [SP, R15], Defs = [SP, R15], hasSideEffects = 1, mayStore = 1 in
-def ENTER_I : KCInst32<(outs), (ins i64imm:$n), "enter\t$n">;
+def ENTER_I : KCInst32<0x66000000, (outs), (ins i64imm:$n), "enter\t$n"> {
+  bits<22> n;
+  let Inst{21-0} = n;
+}
 let Uses = [R15], Defs = [SP, R15], hasSideEffects = 1, mayLoad = 1 in
-def LEAVE_I : KCInst32<(outs), (ins), "leave">;
+def LEAVE_I : I0<0x66400000, (outs), (ins), "leave">;
 //   LEAVERET: LEAVE; RET  (R15 = [R15], PC = [R15+8], SP = R15 + 16)
 let isReturn = 1, isTerminator = 1, isBarrier = 1,
     Uses = [R15], Defs = [SP, R15], hasSideEffects = 1, mayLoad = 1 in
-def LEAVERET_I : KCInst32<(outs), (ins), "leaveret">;
+def LEAVERET_I : I0<0x66800000, (outs), (ins), "leaveret">;
 
 // Indirect call / jump via register
 // Defs: all caller-saved GPRs clobbered by the ABI (R0-R3=args, R8-R14=temps+return)
@@ -808,8 +876,8 @@ def LEAVERET_I : KCInst32<(outs), (ins), "leaveret">;
 let isCall = 1,
     Uses = [SP],
     Defs = [R0, R1, R2, R3, R8, R9, R10, R11, R12, R13, R14, FLAGS] in
-def CALLR_R : R_in<0x0000407, (ins GPR:$reg), "callr\t$reg">;
-def JMPR_R  : R_in<0x0000102, (ins GPR:$reg), "jmpr\t$reg"> {
+def CALLR_R : R_ind<0x62800000, (ins GPR:$reg), "callr\t$reg">;
+def JMPR_R  : R_ind<0x60800000, (ins GPR:$reg), "jmpr\t$reg"> {
   let isBranch         = 1;
   let isIndirectBranch = 1;
   let isTerminator     = 1;
@@ -827,84 +895,77 @@ def JMPR_R  : R_in<0x0000102, (ins GPR:$reg), "jmpr\t$reg"> {
 let hasSideEffects = 0, isReMaterializable = 1 in {
 // Load 32-bit immediate (sign-extended to 64 bits)
 let isAsCheapAsAMove = 1, isMoveImm = 1 in
-def SETR    : RV_ld<0x0000080, "setr\t$rd, $imm">;
+def SETR    : RV_ld<0x8BD00000, "setr\t$rd, $imm", [], simm32_abs>;
 
 // Load full 64-bit immediate: rd = (hi32 << 32) | lo32
 let isMoveImm = 1 in
-def SETR64  : V64_ld<0x0000FE, "setr64\t$rd, $lo, $hi">;
+def SETR64  : V64_ld<0xCBC00000, "setr64\t$rd, $lo, $hi">;
 }
 
 // In-place immediate operations (rd op= imm32)
-def ADDV    : RV_imm<0x0000081, "addv">;
-def MINUSV  : RV_imm<0x0000082, "minusv">;
-def ANDV    : RV_imm<0x0000086, "andv">;
-def ORV     : RV_imm<0x0000087, "orv">;
-def XORV    : RV_imm<0x0000088, "xorv">;
+def ADDV    : RV_imm<0x88200000, "addv">;
+def MINUSV  : RV_imm<0x88600000, "minusv">;
+def ANDV    : RV_imm<0x89000000, "andv">;
+def ORV     : RV_imm<0x89400000, "orv">;
+def XORV    : RV_imm<0x89800000, "xorv">;
 // Shift by immediate (count = imm[5:0]); v2: single word, count embedded.
-def SHLV    : ShiftImmN<"shlv">;
-def SHRV    : ShiftImmN<"shrv">;
-def SHRAV   : ShiftImmN<"shrav">;
-def MULV    : RV_imm<0x00000B8, "mulv">;
-def DIVV    : RV_imm<0x00000B9, "divv">;
-def MODV    : RV_imm<0x00000BA, "modv">;
+def SHLV    : ShiftImmN<0x50204000, "shlv">;
+def SHRV    : ShiftImmN<0x50604000, "shrv">;
+def SHRAV   : ShiftImmN<0x50A04000, "shrav">;
+def MULV    : RV_imm<0xA8800000, "mulv">;
+def DIVV    : RV_imm<0xA9800000, "divv">;
+def MODV    : RV_imm<0xAA800000, "modv">;
 
 // Rotate by immediate (count = imm[5:0]); v2: single word.  Register-amount
 // forms are ROLR/RORR_R.
-def ROLV    : ShiftImmN<"rolv">;
-def RORV    : ShiftImmN<"rorv">;
+def ROLV    : ShiftImmN<0x50E04000, "rolv">;
+def RORV    : ShiftImmN<0x51204000, "rorv">;
 
 // reg+imm32 add: rd = rs + sign_extend(imm32). Two distinct regs; sign-extends.
 // Replaces the SETR+ADDR two-instruction sequence for frame-address materialisation.
 // Pattern deferred: simm32_imm is not yet defined here; see isel patterns section.
-def ADDI : RRV_alu<0x000002, "addi\t$rd, $rs, $imm">;
+def ADDI : RRV_alu<0x88300000, "addi\t$rd, $rs, $imm">;
 
 // Compare register to immediate — flags only (see CMPRR_I on side effects)
 let hasSideEffects = 0 in
-def CMPRV_I : RV_cmp<0x0000083, "cmprv\t$rs, $imm">;
+def CMPRV_I : RV_cmp<0x8C100000, "cmprv\t$rs, $imm">;
 
 //===----------------------------------------------------------------------===//
 // Memory: indexed load / store  (primary frame-slot instructions)
 //
-// Opcodes from opcode_select.vh (authoritative hardware source — the
-// fpga/KlaussCPU/.../opcode_select.vh casez, NOT the stale klatest copies):
-//   LDIDX64  = 0x0000FC?? (64-bit indexed load)
-//   STIDX64  = 0x0000FD?? (64-bit indexed store)
+// Class 6 (load) / 7 (store), MODE=01 (rs1 + imm32): word 0 holds
+// SIZE [25:24], SGN [23] and A [20]; rd = destination / store data,
+// rs1 = base, word 1 = offset32.  Sub-word loads zero-extend unless SGN=1.
 //
-// IMPORTANT: opcodes 0xFC/0xFD are the *force-aligned* hardware variants
-// (LDIDX64A/STIDX64A) — the RTL computes (rs2 + imm) & ~7 before the bus
-// access.  The non-aligned 64-bit indexed ops live at 0x0C/0x0D.  Using the
-// force-aligned form is only safe because LLVM never emits a misaligned i64
-// access: allowsMisalignedMemoryAccesses() is left at its default (false), so
-// under-aligned i64 loads/stores are expanded to byte ops by the legalizer.
-// If misaligned i64 access is ever enabled, switch these to 0x0C/0x0D first
-// (and confirm the HW handles a 64-bit read spanning two cache lines).
-//   LDIDX32  = 0x0000C0?? (32-bit indexed load, zero-extends to 64)
-//   STIDX32  = 0x0000C1?? (32-bit indexed store)
-//   LDIDX16  = 0x0000C2?? (16-bit indexed load, zero-extends to 64)
-//   STIDX16  = 0x0000C3?? (16-bit indexed store)
-//   LDIDX8   = 0x0000C4?? (8-bit indexed load,  zero-extends to 64)
-//   STIDX8   = 0x0000C5?? (8-bit indexed store)
-// All are RRV format: [63:40]=op24 [39:36]=rd/rs_data [35:32]=base [31:0]=offset32
+// IMPORTANT: ldidx64/stidx64 (0x9B300000/0x9F300000) are the *force-aligned*
+// hardware variants (A=1, vh LDIDX64A/STIDX64A) — the RTL computes
+// (rs1 + imm) & ~7 before the bus access.  The non-aligned forms are
+// ldidx64u/stidx64u (A=0).  Using the force-aligned form is only safe because
+// LLVM never emits a misaligned i64 access: allowsMisalignedMemoryAccesses()
+// is left at its default (false), so under-aligned i64 loads/stores are
+// expanded to byte ops by the legalizer.  If misaligned i64 access is ever
+// enabled, switch these to the A=0 forms first (and confirm the HW handles a
+// 64-bit read spanning two cache lines).
 //===----------------------------------------------------------------------===//
 
-def LDIDX64 : RRV_ld<0x0000FC, "ldidx64\t$rd, $base, $offset">;
-def STIDX64 : RRV_st<0x0000FD, "stidx64\t$rs_data, $base, $offset">;
+def LDIDX64 : RRV_ld<0x9B300000, "ldidx64\t$rd, $base, $offset">;
+def STIDX64 : RRV_st<0x9F300000, "stidx64\t$rs_data, $base, $offset">;
 
-def LDIDX32 : RRV_ld<0x0000C0, "ldidx32\t$rd, $base, $offset">;
+def LDIDX32 : RRV_ld<0x9A200000, "ldidx32\t$rd, $base, $offset">;
 // STIDX32/STIDX16 mask addr&~3 / addr&~1 like MEMSET32/16 — safe only while
 // allowsMisalignedMemoryAccesses()==false. See the alignment warning above the
 // MEMSET8/16/32 defs before enabling any unaligned store path.
-def STIDX32 : RRV_st<0x0000C1, "stidx32\t$rs_data, $base, $offset">;
+def STIDX32 : RRV_st<0x9E200000, "stidx32\t$rs_data, $base, $offset">;
 
-def LDIDX16   : RRV_ld<0x0000C2, "ldidx16\t$rd, $base, $offset">   { let mayLoad = 1; }
-def STIDX16   : RRV_st<0x0000C3, "stidx16\t$rs_data, $base, $offset">;
-def LDIDX8    : RRV_ld<0x0000C4, "ldidx8\t$rd, $base, $offset">    { let mayLoad = 1; }
-def STIDX8    : RRV_st<0x0000C5, "stidx8\t$rs_data, $base, $offset">;
-def LDIDX8_S  : RRV_ld<0x0000C6, "ldidx8s\t$rd, $base, $offset">   { let mayLoad = 1; }
-def LDIDX16_S : RRV_ld<0x0000C7, "ldidx16s\t$rd, $base, $offset">  { let mayLoad = 1; }
+def LDIDX16   : RRV_ld<0x99200000, "ldidx16\t$rd, $base, $offset">   { let mayLoad = 1; }
+def STIDX16   : RRV_st<0x9D200000, "stidx16\t$rs_data, $base, $offset">;
+def LDIDX8    : RRV_ld<0x98200000, "ldidx8\t$rd, $base, $offset">    { let mayLoad = 1; }
+def STIDX8    : RRV_st<0x9C200000, "stidx8\t$rs_data, $base, $offset">;
+def LDIDX8_S  : RRV_ld<0x98A00000, "ldidx8s\t$rd, $base, $offset">   { let mayLoad = 1; }
+def LDIDX16_S : RRV_ld<0x99A00000, "ldidx16s\t$rd, $base, $offset">  { let mayLoad = 1; }
 // Sign-extending 32-bit indexed load (ISA v3 D1: v2 class 6 SIZE=10 SGN=1
 // MODE=01, a combination the v2 RTL already implements).
-def LDIDX32_S : RRV_ld<0x0000C8, "ldidx32s\t$rd, $base, $offset">  { let mayLoad = 1; }
+def LDIDX32_S : RRV_ld<0x9AA00000, "ldidx32s\t$rd, $base, $offset">  { let mayLoad = 1; }
 
 // Accept the canonical opcode_select.vh spelling of the signed sub-word loads
 // (LDIDX8_S / LDIDX16_S) as assembler aliases for the printed mnemonics.
@@ -942,8 +1003,7 @@ def : Pat<(i64 (add GPR:$rs, simm32_imm:$imm)), (ADDI GPR:$rs, simm32_imm:$imm)>
 // encoding, avoiding the separate SETR (8 B) that the register-register form
 // would need to materialise the constant.  This matters disproportionately on
 // KlaussCPU because the core is fetch-bound — fewer fetched words ≈ fewer
-// cycles.  The encoder (KlaussCPUMCCodeEmitter) already handles all of these
-// opcodes, so this is a pure pattern-matching addition.
+// cycles.
 //
 // Extension semantics come straight from opcode_select.vh and gate each
 // pattern — getting these wrong would silently miscompile:
@@ -1064,93 +1124,92 @@ def : Pat<(truncstorei32 (i64 GPR:$val), (add (i64 GPR:$base), simm32_imm:$off))
 // Control flow: branches and calls
 //===----------------------------------------------------------------------===//
 
-def JMP     : Vbr_uncond<0x00001000, "jmp\t$target">;
+def JMP     : Vbr_uncond<0xA0000000, "jmp\t$target">;
 
-def JMPZ    : Vbr_cond<0x00001001, "jmpz\t$target">;
-def JMPNZ   : Vbr_cond<0x00001002, "jmpnz\t$target">;
-def JMPE    : Vbr_cond<0x00001003, "jmpe\t$target">;
-def JMPNE   : Vbr_cond<0x00001004, "jmpne\t$target">;
-def JMPC    : Vbr_cond<0x00001005, "jmpc\t$target">;
-def JMPNC   : Vbr_cond<0x00001006, "jmpnc\t$target">;
-def JMPS    : Vbr_cond<0x00001013, "jmps\t$target">;
-def JMPNS   : Vbr_cond<0x00001014, "jmpns\t$target">;
-def JMPLT   : Vbr_cond<0x00001015, "jmplt\t$target">;
-def JMPLE   : Vbr_cond<0x00001016, "jmple\t$target">;
-def JMPGT   : Vbr_cond<0x00001017, "jmpgt\t$target">;
-def JMPGE   : Vbr_cond<0x00001018, "jmpge\t$target">;
-def JMPULT  : Vbr_cond<0x00001019, "jmpult\t$target">;
-def JMPULE  : Vbr_cond<0x0000101A, "jmpule\t$target">;
-def JMPUGT  : Vbr_cond<0x0000101B, "jmpugt\t$target">;
-def JMPUGE  : Vbr_cond<0x0000101C, "jmpuge\t$target">;
+def JMPZ    : Vbr_cond<0xA0080000, "jmpz\t$target">;
+def JMPNZ   : Vbr_cond<0xA00C0000, "jmpnz\t$target">;
+def JMPE    : Vbr_cond<0xA0480000, "jmpe\t$target">;
+def JMPNE   : Vbr_cond<0xA04C0000, "jmpne\t$target">;
+def JMPC    : Vbr_cond<0xA0100000, "jmpc\t$target">;
+def JMPNC   : Vbr_cond<0xA0140000, "jmpnc\t$target">;
+def JMPS    : Vbr_cond<0xA0200000, "jmps\t$target">;
+def JMPNS   : Vbr_cond<0xA0240000, "jmpns\t$target">;
+def JMPLT   : Vbr_cond<0xA0280000, "jmplt\t$target">;
+def JMPLE   : Vbr_cond<0xA0300000, "jmple\t$target">;
+def JMPGT   : Vbr_cond<0xA0340000, "jmpgt\t$target">;
+def JMPGE   : Vbr_cond<0xA02C0000, "jmpge\t$target">;
+def JMPULT  : Vbr_cond<0xA0380000, "jmpult\t$target">;
+def JMPULE  : Vbr_cond<0xA0400000, "jmpule\t$target">;
+def JMPUGT  : Vbr_cond<0xA0440000, "jmpugt\t$target">;
+def JMPUGE  : Vbr_cond<0xA03C0000, "jmpuge\t$target">;
 
 // Defs: all caller-saved GPRs clobbered by the ABI (R0-R3=args, R8-R14=temps+return)
 let Uses = [SP],
     Defs = [R0, R1, R2, R3, R8, R9, R10, R11, R12, R13, R14, FLAGS] in
-def CALL_I  : Vcall<0x00001009, "call\t$target">;
+def CALL_I  : Vcall<0xA2000000, "call\t$target">;
 
 //===----------------------------------------------------------------------===//
-// PC-relative flow control (opcodes 0x1030–0x1041, 0x099)
+// PC-relative flow control (class 8 REL=1, and LEAPC)
 // target = PC_of_this_instruction + sign_ext(imm32)   (option-B convention)
 // Used in PIC mode (-fPIC / -relocation-model=pic).
-// The encoder emits FK_KlaussCPU_PCREL32 so the assembler/linker fills in
-// (symbol_addr − instr_addr).
+// A symbolic target gets FK_KlaussCPU_PCREL32 (PCRelTarget32 and friends) so
+// the assembler/linker fills in (symbol_addr − instr_addr).
 //===----------------------------------------------------------------------===//
 
 // PC-relative unconditional branch
-def JMPREL   : Vbr_uncond<0x00001030, "jmprel\t$target", [],
+def JMPREL   : Vbr_uncond<0xA1000000, "jmprel\t$target", [],
                           PCRelTarget32>;
 
 // PC-relative conditional branches — flag sources same as absolute counterparts
-def JMPZREL   : Vbr_relcond<0x00001031, "jmpzrel\t$target">;   // zero_flag
-def JMPNZREL  : Vbr_relcond<0x00001032, "jmpnzrel\t$target">;  // !zero_flag
-def JMPEREL   : Vbr_relcond<0x00001033, "jmperel\t$target">;   // equal_flag
-def JMPNEREL  : Vbr_relcond<0x00001034, "jmpnerel\t$target">;  // !equal_flag
-def JMPCREL   : Vbr_relcond<0x00001035, "jmpcrel\t$target">;   // carry_flag
-def JMPNCREL  : Vbr_relcond<0x00001036, "jmpncrel\t$target">;  // !carry_flag
-def JMPSREL   : Vbr_relcond<0x00001037, "jmpsrel\t$target">;   // sign_flag
-def JMPNSREL  : Vbr_relcond<0x00001038, "jmpnsrel\t$target">;  // !sign_flag
-def JMPLTREL  : Vbr_relcond<0x00001039, "jmpltrel\t$target">;  // less_flag
-def JMPLEREL  : Vbr_relcond<0x0000103A, "jmplerel\t$target">;  // less|equal
-def JMPGTREL  : Vbr_relcond<0x0000103B, "jmpgtrel\t$target">;  // !less&!equal
-def JMPGEREL  : Vbr_relcond<0x0000103C, "jmpgerel\t$target">;  // !less_flag
-def JMPULTREL : Vbr_relcond<0x0000103D, "jmpultrel\t$target">; // ult_flag
-def JMPULEREL : Vbr_relcond<0x0000103E, "jmpulerel\t$target">; // ult|equal
-def JMPUGTREL : Vbr_relcond<0x0000103F, "jmpugtrel\t$target">; // !ult&!equal
-def JMPUGEREL : Vbr_relcond<0x00001040, "jmpugerel\t$target">; // !ult_flag
+def JMPZREL   : Vbr_relcond<0xA1080000, "jmpzrel\t$target">;   // zero_flag
+def JMPNZREL  : Vbr_relcond<0xA10C0000, "jmpnzrel\t$target">;  // !zero_flag
+def JMPEREL   : Vbr_relcond<0xA1480000, "jmperel\t$target">;   // equal_flag
+def JMPNEREL  : Vbr_relcond<0xA14C0000, "jmpnerel\t$target">;  // !equal_flag
+def JMPCREL   : Vbr_relcond<0xA1100000, "jmpcrel\t$target">;   // carry_flag
+def JMPNCREL  : Vbr_relcond<0xA1140000, "jmpncrel\t$target">;  // !carry_flag
+def JMPSREL   : Vbr_relcond<0xA1200000, "jmpsrel\t$target">;   // sign_flag
+def JMPNSREL  : Vbr_relcond<0xA1240000, "jmpnsrel\t$target">;  // !sign_flag
+def JMPLTREL  : Vbr_relcond<0xA1280000, "jmpltrel\t$target">;  // less_flag
+def JMPLEREL  : Vbr_relcond<0xA1300000, "jmplerel\t$target">;  // less|equal
+def JMPGTREL  : Vbr_relcond<0xA1340000, "jmpgtrel\t$target">;  // !less&!equal
+def JMPGEREL  : Vbr_relcond<0xA12C0000, "jmpgerel\t$target">;  // !less_flag
+def JMPULTREL : Vbr_relcond<0xA1380000, "jmpultrel\t$target">; // ult_flag
+def JMPULEREL : Vbr_relcond<0xA1400000, "jmpulerel\t$target">; // ult|equal
+def JMPUGTREL : Vbr_relcond<0xA1440000, "jmpugtrel\t$target">; // !ult&!equal
+def JMPUGEREL : Vbr_relcond<0xA13C0000, "jmpugerel\t$target">; // !ult_flag
 
 // PC-relative direct call: push PC+8 (return addr), PC += sign_ext(imm32)
 let Uses = [SP],
     Defs = [R0, R1, R2, R3, R8, R9, R10, R11, R12, R13, R14, FLAGS] in
-def CALLREL : Vcall<0x00001041, "callrel\t$target", PCRelCallTarget32>;
+def CALLREL : Vcall<0xA3000000, "callrel\t$target", PCRelCallTarget32>;
 
 // LEAPC: rd = PC_of_instruction + sign_ext(imm32)  (address materialisation)
-// Opcode 0x0000099 in RV_ld slot: word0 = (0x099 << 4) | rd, word1 = simm32.
-// The encoder emits FK_KlaussCPU_PCREL32 for symbol references.
+// Class 2 LEA: word 1 = simm32, FK_KlaussCPU_PCREL32 for a symbol.
 let hasSideEffects = 0, isReMaterializable = 1 in
-def LEAPC   : RV_ld<0x0000099, "leapc\t$rd, $imm", [], pcrel_simm32>;
+def LEAPC   : RV_ld<0x8B800000, "leapc\t$rd, $imm", [], pcrel_simm32>;
 
 //===----------------------------------------------------------------------===//
 // Special / system
 //===----------------------------------------------------------------------===//
 
 let isReturn = 1, isTerminator = 1, isBarrier = 1 in
-def RET_I   : I0<0x00001012, (outs), (ins), "ret", [(KlaussCPURetGlue)]>;
-def NOP_I   : I0<0x0000F010, (outs), (ins), "nop">;
-def HALT_I  : I0<0x0000F011, (outs), (ins), "halt">;
-def IRET_I  : I0<0x00006011, (outs), (ins), "iret">;
+def RET_I   : I0<0x65800000, (outs), (ins), "ret", [(KlaussCPURetGlue)]>;
+def NOP_I   : I0<0x6C000000, (outs), (ins), "nop">;
+def HALT_I  : I0<0x6C010000, (outs), (ins), "halt">;
+def IRET_I  : I0<0x65C00000, (outs), (ins), "iret">;
 
 // TRAP — debug breakpoint (v2 class B, OP 4: 0x6C040000).  With a debugger
 // attached the core halts at the TRAP's address; otherwise it raises the
 // ERR_TRAP crash dump.  Used for software breakpoints and __builtin_debugtrap.
 let hasSideEffects = 1 in
-def TRAP_I  : I0<0x0000F014, (outs), (ins), "trap">;
+def TRAP_I  : I0<0x6C040000, (outs), (ins), "trap">;
 
 // WAIT — interruptible core-suspend: stop fetching/executing and resume when an
 // unmasked, vectored interrupt becomes pending (timer tick, future wired source).
 // No register/flag side effects; IRET resumes at PC+4.  Distinct from HALT (which
 // stops permanently).  hasSideEffects keeps it from being reordered/eliminated.
 let hasSideEffects = 1 in
-def WAIT_I  : I0<0x00006012, (outs), (ins), "wait">;
+def WAIT_I  : I0<0x6C020000, (outs), (ins), "wait">;
 
 //===----------------------------------------------------------------------===//
 // Peripheral I-O instructions (hasSideEffects prevents reordering/elimination)
@@ -1160,16 +1219,17 @@ def WAIT_I  : I0<0x00006012, (outs), (ins), "wait">;
 //===----------------------------------------------------------------------===//
 
 let hasSideEffects = 1 in {
-  // ── Legacy peripheral opcodes (still in hardware; accessible via inline asm)
+  // ── Retired v1 peripheral opcodes (LEN=00 v1 words; see RetiredV1_R)
   // Set 16 on-board LEDs from register bits [15:0].
-  def LEDR_R      : R_in<0x0000300, (ins GPR:$reg), "ledr\t$reg">;
+  def LEDR_R      : RetiredV1_R<0x00003000, "ledr\t$reg">;
   // Set 7-seg display 1 from register.
-  def SEG7_1R_R   : R_in<0x0000302, (ins GPR:$reg), "7seg1r\t$reg">;
+  def SEG7_1R_R   : RetiredV1_R<0x00003020, "7seg1r\t$reg">;
   // Set 7-seg display 2 from register.
-  def SEG7_2R_R   : R_in<0x0000303, (ins GPR:$reg), "7seg2r\t$reg">;
+  def SEG7_2R_R   : RetiredV1_R<0x00003030, "7seg2r\t$reg">;
   // Set both 7-seg displays from register.
-  def SEG7R_R     : R_in<0x0000304, (ins GPR:$reg), "7segr\t$reg">;
+  def SEG7R_R     : RetiredV1_R<0x00003040, "7segr\t$reg">;
   // Blank both 7-seg displays.
+  let isRetiredV1 = 1 in
   def SEG7BLANK_I : I0<0x00003073, (outs), (ins), "7segblank">;
 }
 
@@ -1178,101 +1238,92 @@ let hasSideEffects = 1 in {
 //
 // These instructions are NOT emitted by the code generator (no isel Pattern);
 // they exist so hand-written `.s` / inline-asm can name every hardware opcode
-// in opcode_select.vh.  Opcode values and formats are taken verbatim from that
-// file, so the bytes produced by KlaussCPUMCCodeEmitter match the hardware-
-// verified `klausscc` assembler.  Each new def needs a matching `case` in
-// KlaussCPUMCCodeEmitter.cpp.
+// in opcode_select.vh.  Their word-0 templates are from ISA_ENCODING_V2_MAP,
+// so the bytes match the hardware-verified `klausscc` assembler.
 //===----------------------------------------------------------------------===//
 
 // ── RRR (rd, rs1, rs2) ─────────────────────────────────────────────────────
-def ADDC   : RRR<0x00060, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "addc\t$rd, $rs1, $rs2"> { let Uses = [FLAGS]; } // reads carry-in
-def SUBC   : RRR<0x00070, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "subc\t$rd, $rs1, $rs2"> { let Uses = [FLAGS]; } // reads borrow-in
-def BSETRR : RRR<0x00500, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "bsetrr\t$rd, $rs1, $rs2">;
-def BCLRRR : RRR<0x00510, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "bclrrr\t$rd, $rs1, $rs2">;
-def BTGLRR : RRR<0x00520, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "btglrr\t$rd, $rs1, $rs2">;
-def BTSTRR : RRR<0x00530, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "btstrr\t$rd, $rs1, $rs2">;
+def ADDC   : RRR<0x44A00000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "addc\t$rd, $rs1, $rs2"> { let Uses = [FLAGS]; } // reads carry-in
+def SUBC   : RRR<0x44E00000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "subc\t$rd, $rs1, $rs2"> { let Uses = [FLAGS]; } // reads borrow-in
+def BSETRR : RRR<0x52000000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "bsetrr\t$rd, $rs1, $rs2">;
+def BCLRRR : RRR<0x52400000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "bclrrr\t$rd, $rs1, $rs2">;
+def BTGLRR : RRR<0x52800000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "btglrr\t$rd, $rs1, $rs2">;
+def BTSTRR : RRR<0x52C00000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "btstrr\t$rd, $rs1, $rs2">;
 
 // ── R in-place (rd = f(rd); 2-address) ─────────────────────────────────────
-def SETFR : R_inplace<0x0000089, "setfr\t$rd">;
-def SHLAR : R_unary<0x000008F, "shlar">;
-def SHRAR : R_unary<0x0000090, "shrar">;
-def ROLR1 : R_unary<0x00000F8, "rolr1">;
-def RORR1 : R_unary<0x00000F9, "rorr1">;
-def ROLCR : R_unary<0x00000FA, "rolcr"> { let Uses = [FLAGS]; } // rotate through carry
-def RORCR : R_unary<0x00000FB, "rorcr"> { let Uses = [FLAGS]; } // rotate through carry
+def SETFR : R_inplace<0x57000000, "setfr\t$rd">;
+def SHLAR : R_unary<0x50208000, "shlar">;
+def SHRAR : R_unary<0x50A08000, "shrar">;
+def ROLR1 : R_unary<0x50E0C000, "rolr1">;
+def RORR1 : R_unary<0x5120C000, "rorr1">;
+def ROLCR : R_unary<0x5160C000, "rolcr"> { let Uses = [FLAGS]; } // rotate through carry
+def RORCR : R_unary<0x51A0C000, "rorcr"> { let Uses = [FLAGS]; } // rotate through carry
 
 // ── RV 2-address (rd op= imm32) and RV compare (rs, imm32) ──────────────────
 // Bit position / start+len are packed in the immediate (see opcode_select.vh).
 // Bit set/clear/toggle by embedded position N — v2: single word, 2-address.
-def BSET  : ShiftImmN<"bset">;
-def BCLR  : ShiftImmN<"bclr">;
-def BTGL  : ShiftImmN<"btgl">;
+def BSET  : ShiftImmN<0x52200000, "bset">;
+def BCLR  : ShiftImmN<0x52600000, "bclr">;
+def BTGL  : ShiftImmN<0x52A00000, "btgl">;
 // Bit-field extract/deposit stay 2 words (params packed in imm32).
-def BEXTR : RV_2addr<0x00000AC, "bextr\t$rd, $imm">;
-def BDEP  : RV_2addr<0x00000AD, "bdep\t$rd, $imm">;
+def BEXTR : RV_2addr<0x93000000, "bextr\t$rd, $imm">;
+def BDEP  : RV_2addr<0x93400000, "bdep\t$rd, $imm">;
 // Bit-test by embedded position N — v2: single word, flag-only.
-def BTST  : BitTestImmN<"btst\t$rs, $imm">;
+def BTST  : BitTestImmN<0x52E00000, "btst\t$rs, $imm">;
 
 // ── RR (rd, rs) load / (rs_data, rs_addr) store — 8-byte aligned ────────────
-def MEMREADRR  : RR1<0x000071, (outs GPR:$rd), (ins GPR:$rs), "memreadrr\t$rd, $rs"> { let mayLoad = 1; }
-def MEMSET64RR : RRst<0x000070, "memset64rr\t$rs_data, $rs_addr">;
+def MEMREADRR  : RR1<0x5B000000, (outs GPR:$rd), (ins GPR:$rs), "memreadrr\t$rd, $rs"> { let mayLoad = 1; }
+def MEMSET64RR : RRst<0x5F000000, "memset64rr\t$rs_data, $rs_addr">;
 
 // ── RV absolute memory access (rd/rs, address-imm32) — symbol-capable ───────
-def MEMREADR : RV_ld <0x0000721, "memreadr\t$rd, $imm"> { let mayLoad = 1; }
-def MEMSETR  : RV_cmp<0x0000720, "memsetr\t$rs, $imm"> { let mayStore = 1; }
+def MEMREADR : RV_ld<0x9B400000, "memreadr\t$rd, $imm", [], simm32_abs> { let mayLoad = 1; }
+def MEMSETR  : RV_st<0x9F400000, "memsetr\t$rs_data, $addr"> { let mayStore = 1; }
 
 // ── RRV 64-bit indexed: non-aligned (vh LDIDX64/STIDX64 = 0x0C/0x0D) and
 //    register-offset (vh LDIDX64R/STIDX64R).  NOTE: LLVM's ldidx64/stidx64 are
 //    the *force-aligned* 0xFC/0xFD (= vh LDIDX64A/STIDX64A); aliases below.
 //    For the *R variants the offset is a second register (EA = base + offset).
-def LDIDX64U : RRV_ld<0x00000C, "ldidx64u\t$rd, $base, $offset">;
-def STIDX64U : RRV_st<0x00000D, "stidx64u\t$rs_data, $base, $offset">;
+def LDIDX64U : RRV_ld<0x9B200000, "ldidx64u\t$rd, $base, $offset">;
+def STIDX64U : RRV_st<0x9F200000, "stidx64u\t$rs_data, $base, $offset">;
 // v2: register-offset indexed ops are a single word (offset reg in rs2[3:0]).
-def LDIDX64R : Idx64RegOff_ld<"ldidx64r\t$rd, $base, $offset">;
-def STIDX64R : Idx64RegOff_st<"stidx64r\t$rs_data, $base, $offset">;
+def LDIDX64R : Idx64RegOff_ld<0x5B600000, "ldidx64r\t$rd, $base, $offset">;
+def STIDX64R : Idx64RegOff_st<0x5F600000, "stidx64r\t$rs_data, $base, $offset">;
 
 // ── V (fixed op32 + imm32/address) — push / conditional jumps ───────────────
-def PUSHV : Vsp<0x00004020, "pushv\t$imm"> { let mayStore = 1; }
-def JMPO  : Vbr_cond<0x00001007, "jmpo\t$target">;
-def JMPNO : Vbr_cond<0x00001008, "jmpno\t$target">;
+def PUSHV : Vsp<0xA4400000, "pushv\t$imm"> { let mayStore = 1; }
+def JMPO  : Vbr_cond<0xA0180000, "jmpo\t$target">;
+def JMPNO : Vbr_cond<0xA01C0000, "jmpno\t$target">;
 
 // ── Vcall (conditional calls) ───────────────────────────────────────────────
-def CALLZ  : Vcall<0x0000100A, "callz\t$target">;
-def CALLNZ : Vcall<0x0000100B, "callnz\t$target">;
-def CALLE  : Vcall<0x0000100C, "calle\t$target">;
-def CALLNE : Vcall<0x0000100D, "callne\t$target">;
-def CALLC  : Vcall<0x0000100E, "callc\t$target">;
-def CALLNC : Vcall<0x0000100F, "callnc\t$target">;
-def CALLO  : Vcall<0x00001010, "callo\t$target">;
-def CALLNO : Vcall<0x00001011, "callno\t$target">;
+def CALLZ  : Vcall<0xA2080000, "callz\t$target">;
+def CALLNZ : Vcall<0xA20C0000, "callnz\t$target">;
+def CALLE  : Vcall<0xA2480000, "calle\t$target">;
+def CALLNE : Vcall<0xA24C0000, "callne\t$target">;
+def CALLC  : Vcall<0xA2100000, "callc\t$target">;
+def CALLNC : Vcall<0xA2140000, "callnc\t$target">;
+def CALLO  : Vcall<0xA2180000, "callo\t$target">;
+def CALLNO : Vcall<0xA21C0000, "callno\t$target">;
 
 // ── V64 (push 64-bit immediate; 12-byte) ────────────────────────────────────
-class V64_imm<bits<32> op, string asmstr>
-    : KCInst96<(outs), (ins simm32:$lo, simm32:$hi), asmstr> {
-  bits<32> lo;
-  bits<32> hi;
-  let Inst{95-64} = op;
-  let Inst{63-32} = lo;
-  let Inst{31-0}  = hi;
-  let SchedRW     = [WriteSP];
-}
-def PUSHV64 : V64_imm<0x00004060, "pushv64\t$lo, $hi"> { let mayStore = 1; }
+def PUSHV64 : V64_imm<0xE4400000, "pushv64\t$lo, $hi"> { let mayStore = 1; }
 
 // ── Peripheral / timing ops (side-effecting) ────────────────────────────────
 let hasSideEffects = 1 in {
   // R_in (single source register)
-  def DELAYR   : R_in<0x0000F00, (ins GPR:$reg), "delayr\t$reg">;
-  def RGB1R    : R_in<0x0000305, (ins GPR:$reg), "rgb1r\t$reg">;
-  def RGB2R    : R_in<0x0000306, (ins GPR:$reg), "rgb2r\t$reg">;
-  def LCDDATAR : R_in<0x0000201, (ins GPR:$reg), "lcddatar\t$reg">;
+  def DELAYR   : R_in<0x6C050000, (ins GPR:$reg), "delayr\t$reg">;
+  def RGB1R    : RetiredV1_R<0x00003050, "rgb1r\t$reg">;   // retired v1
+  def RGB2R    : RetiredV1_R<0x00003060, "rgb2r\t$reg">;   // retired v1
+  def LCDDATAR : R_in<0x71000000, (ins GPR:$reg), "lcddatar\t$reg">;
   // V (fixed op32 + imm32)
-  def DELAYV   : Vsp<0x0000F013, "delayv\t$imm">;
+  def DELAYV   : Vsp<0xAC050000, "delayv\t$imm">;
+  let isRetiredV1 = 1 in {   // v1 words (LEN=00), see RetiredV1_R
   def LEDV     : Vsp<0x00003070, "ledv\t$imm">;
   def RGB1V    : Vsp<0x00003074, "rgb1v\t$imm">;
   def RGB2V    : Vsp<0x00003075, "rgb2v\t$imm">;
-  def LCD      : Vsp<0x00002023, "lcd\t$imm">;
-  def LCDCMDV  : Vsp<0x00002021, "lcdcmdv\t$imm">;
-  def LCDDATAV : Vsp<0x00002022, "lcddatav\t$imm">;
+  }
+  def LCD      : Vsp<0xB2000000, "lcd\t$imm">;
+  def LCDCMDV  : Vsp<0xB0000000, "lcdcmdv\t$imm">;
+  def LCDDATAV : Vsp<0xB1000000, "lcddatav\t$imm">;
 }
 
 // ── Mnemonic aliases for the canonical opcode_select.vh spellings ───────────
@@ -1320,29 +1371,107 @@ def : Pat<(i64 (sextloadi32 (add (i64 GPR:$base), simm32_imm:$off))),
 // 2-word form into its short twin at MC emission — from the AsmPrinter and
 // the AsmParser alike — when the immediate fits the 8-bit word-0 field
 // (loads/stores: scaled by the access size). Operand lists and asm text match
-// the long form exactly, so the rewrite is an opcode swap; the encoding is in
-// KlaussCPUMCCodeEmitter. -mllvm -klausscpu-short-forms=false disables it.
+// the long form exactly, so the rewrite is an opcode swap.
+// -mllvm -klausscpu-short-forms=false disables it.
+//
+// Encoding (ISA_ENCODING_V2_MAP §7.1): the long twin's word 0 with LEN=01
+// and the 8-bit immediate in [19:12]; a load/store offset is stored divided
+// by the access size (1 << shift).
 //===----------------------------------------------------------------------===//
+
+class ShortForm<KCInst64 long, dag outs, dag ins, string asmstr>
+    : KCInst32<{0b01, long.Word0{29-0}}, outs, ins, asmstr>;
+
+// rd = imm8 (SETR)
+class ShortRdImm<KCInst64 long, string asmstr>
+    : ShortForm<long, (outs GPR:$rd), (ins simm32:$imm), asmstr> {
+  bits<4> rd;
+  bits<8> imm;
+  let Inst{19-12} = imm;
+  let Inst{11-8}  = rd;
+}
+
+// rd = rs op imm8
+class ShortRdRsImm<KCInst64 long, string asmstr>
+    : ShortForm<long, (outs GPR:$rd), (ins GPR:$rs, simm32:$imm), asmstr> {
+  bits<4> rd;
+  bits<4> rs;
+  bits<8> imm;
+  let Inst{19-12} = imm;
+  let Inst{11-8}  = rd;
+  let Inst{7-4}   = rs;
+}
+
+// Compare rs with imm8 (flags only)
+class ShortRsImm<KCInst64 long, string asmstr>
+    : ShortForm<long, (outs), (ins GPR:$rs, simm32:$imm), asmstr> {
+  bits<4> rs;
+  bits<8> imm;
+  let Inst{19-12} = imm;
+  let Inst{7-4}   = rs;
+}
+
+class ShortLoad<KCInst64 long, int shift, string asmstr>
+    : ShortForm<long, (outs GPR:$rd), (ins GPR:$base, simm32:$offset),
+                asmstr> {
+  bits<4>  rd;
+  bits<4>  base;
+  bits<32> offset;
+  // Bits [shift+7 : shift] of the byte offset: the scaled imm8.
+  let Inst{19-12} = !cond(!eq(shift, 0): offset{7-0},
+                          !eq(shift, 1): offset{8-1},
+                          !eq(shift, 2): offset{9-2},
+                          !eq(shift, 3): offset{10-3});
+  let Inst{11-8}  = rd;
+  let Inst{7-4}   = base;
+}
+
+class ShortStore<KCInst64 long, int shift, string asmstr>
+    : ShortForm<long, (outs), (ins GPR:$rs_data, GPR:$base, simm32:$offset),
+                asmstr> {
+  bits<4>  rs_data;
+  bits<4>  base;
+  bits<32> offset;
+  // Bits [shift+7 : shift] of the byte offset: the scaled imm8.
+  let Inst{19-12} = !cond(!eq(shift, 0): offset{7-0},
+                          !eq(shift, 1): offset{8-1},
+                          !eq(shift, 2): offset{9-2},
+                          !eq(shift, 3): offset{10-3});
+  let Inst{11-8}  = rs_data;
+  let Inst{7-4}   = base;
+}
+
+// A1 short PC-relative branch: the absolute 2-word branch's word 0 with
+// LEN=01 and REL=1 [24], keeping COND/INV [22:18]; simm18 word displacement
+// in [17:0].
+class ShortBranch<KCInst64 long, string asmstr>
+    : KCInst32<{0b01, long.Word0{29-25}, 0b1, long.Word0{23-18},
+                0b000000000000000000},
+               (outs), (ins PCRelTarget18:$target), asmstr> {
+  bits<20> target;
+  let Inst{17-0} = target{19-2};
+}
+
 let isCodeGenOnly = 1, hasSideEffects = 0 in {
-def SETR_SH    : KCInst32<(outs GPR:$rd), (ins simm32:$imm), "setr\t$rd, $imm">;
+def SETR_SH    : ShortRdImm<SETR, "setr\t$rd, $imm">;
 let Defs = [FLAGS] in {
-def ADDV_SH    : KCInst32<(outs GPR:$rd), (ins GPR:$rs, simm32:$imm), "addv\t$rd, $rs, $imm">;
-def MINUSV_SH  : KCInst32<(outs GPR:$rd), (ins GPR:$rs, simm32:$imm), "minusv\t$rd, $rs, $imm">;
-def ANDV_SH    : KCInst32<(outs GPR:$rd), (ins GPR:$rs, simm32:$imm), "andv\t$rd, $rs, $imm">;
-def ORV_SH     : KCInst32<(outs GPR:$rd), (ins GPR:$rs, simm32:$imm), "orv\t$rd, $rs, $imm">;
-def XORV_SH    : KCInst32<(outs GPR:$rd), (ins GPR:$rs, simm32:$imm), "xorv\t$rd, $rs, $imm">;
-def ADDI_SH    : KCInst32<(outs GPR:$rd), (ins GPR:$rs, simm32:$imm), "addi\t$rd, $rs, $imm">;
-def CMPRV_SH   : KCInst32<(outs), (ins GPR:$rs, simm32:$imm), "cmprv\t$rs, $imm">;
+def ADDV_SH    : ShortRdRsImm<ADDV, "addv\t$rd, $rs, $imm">;
+def MINUSV_SH  : ShortRdRsImm<MINUSV, "minusv\t$rd, $rs, $imm">;
+def ANDV_SH    : ShortRdRsImm<ANDV, "andv\t$rd, $rs, $imm">;
+def ORV_SH     : ShortRdRsImm<ORV, "orv\t$rd, $rs, $imm">;
+def XORV_SH    : ShortRdRsImm<XORV, "xorv\t$rd, $rs, $imm">;
+def ADDI_SH    : ShortRdRsImm<ADDI, "addi\t$rd, $rs, $imm">;
+def CMPRV_SH   : ShortRsImm<CMPRV_I, "cmprv\t$rs, $imm">;
 }
 let mayLoad = 1 in {
-def LDIDX8_SH    : KCInst32<(outs GPR:$rd), (ins GPR:$base, simm32:$offset), "ldidx8\t$rd, $base, $offset">;
-def LDIDX8_S_SH  : KCInst32<(outs GPR:$rd), (ins GPR:$base, simm32:$offset), "ldidx8s\t$rd, $base, $offset">;
-def LDIDX16_SH   : KCInst32<(outs GPR:$rd), (ins GPR:$base, simm32:$offset), "ldidx16\t$rd, $base, $offset">;
-def LDIDX16_S_SH : KCInst32<(outs GPR:$rd), (ins GPR:$base, simm32:$offset), "ldidx16s\t$rd, $base, $offset">;
-def LDIDX32_SH   : KCInst32<(outs GPR:$rd), (ins GPR:$base, simm32:$offset), "ldidx32\t$rd, $base, $offset">;
-def LDIDX32_S_SH : KCInst32<(outs GPR:$rd), (ins GPR:$base, simm32:$offset), "ldidx32s\t$rd, $base, $offset">;
-def LDIDX64_SH   : KCInst32<(outs GPR:$rd), (ins GPR:$base, simm32:$offset), "ldidx64\t$rd, $base, $offset">;
-def LDIDX64U_SH  : KCInst32<(outs GPR:$rd), (ins GPR:$base, simm32:$offset), "ldidx64u\t$rd, $base, $offset">;
+def LDIDX8_SH    : ShortLoad<LDIDX8, 0, "ldidx8\t$rd, $base, $offset">;
+def LDIDX8_S_SH  : ShortLoad<LDIDX8_S, 0, "ldidx8s\t$rd, $base, $offset">;
+def LDIDX16_SH   : ShortLoad<LDIDX16, 1, "ldidx16\t$rd, $base, $offset">;
+def LDIDX16_S_SH : ShortLoad<LDIDX16_S, 1, "ldidx16s\t$rd, $base, $offset">;
+def LDIDX32_SH   : ShortLoad<LDIDX32, 2, "ldidx32\t$rd, $base, $offset">;
+def LDIDX32_S_SH : ShortLoad<LDIDX32_S, 2, "ldidx32s\t$rd, $base, $offset">;
+def LDIDX64_SH   : ShortLoad<LDIDX64, 3, "ldidx64\t$rd, $base, $offset">;
+def LDIDX64U_SH  : ShortLoad<LDIDX64U, 3, "ldidx64u\t$rd, $base, $offset">;
 }
 // A1 short PC-relative branches (1 word, simm18 words). Produced by the same
 // compressor for any branch to a symbolic target and relaxed back to the
@@ -1350,39 +1479,58 @@ def LDIDX64U_SH  : KCInst32<(outs GPR:$rd), (ins GPR:$base, simm32:$offset), "ld
 let isBranch = 1, isTerminator = 1, Uses = [FLAGS] in {
 foreach c = ["z", "nz", "c", "nc", "o", "no", "s", "ns", "lt", "ge", "le",
              "gt", "ult", "uge", "ule", "ugt", "e", "ne"] in
-  def JMP # !toupper(c) # _SH : KCInst32<(outs),
-      // jmpo/jmpno share their spelling with the absolute forms (below).
-      (ins !if(!or(!eq(c, "o"), !eq(c, "no")), BrTarget32,
-               PCRelTarget32):$target),
-      // O/NO have no 2-word PC-relative spelling; print the absolute one
-      // (the target address is the same, and it reassembles to this op).
-      !if(!or(!eq(c, "o"), !eq(c, "no")), "jmp" # c, "jmp" # c # "rel") # "\t$target">;
+  def JMP # !toupper(c) # _SH
+      : ShortBranch<!cast<KCInst64>("JMP" # !toupper(c)),
+                    // O/NO have no 2-word PC-relative spelling; print the
+                    // absolute one (the target address is the same, and it
+                    // reassembles to this op).
+                    !if(!or(!eq(c, "o"), !eq(c, "no")), "jmp" # c,
+                        "jmp" # c # "rel") # "\t$target">;
 }
 let isBranch = 1, isTerminator = 1, isBarrier = 1 in
-def JMP_SH : KCInst32<(outs), (ins PCRelTarget32:$target), "jmprel\t$target">;
+def JMP_SH : ShortBranch<JMP, "jmprel\t$target">;
 
 let mayStore = 1 in {
-def STIDX8_SH    : KCInst32<(outs), (ins GPR:$rs_data, GPR:$base, simm32:$offset), "stidx8\t$rs_data, $base, $offset">;
-def STIDX16_SH   : KCInst32<(outs), (ins GPR:$rs_data, GPR:$base, simm32:$offset), "stidx16\t$rs_data, $base, $offset">;
-def STIDX32_SH   : KCInst32<(outs), (ins GPR:$rs_data, GPR:$base, simm32:$offset), "stidx32\t$rs_data, $base, $offset">;
-def STIDX64_SH   : KCInst32<(outs), (ins GPR:$rs_data, GPR:$base, simm32:$offset), "stidx64\t$rs_data, $base, $offset">;
-def STIDX64U_SH  : KCInst32<(outs), (ins GPR:$rs_data, GPR:$base, simm32:$offset), "stidx64u\t$rs_data, $base, $offset">;
+def STIDX8_SH    : ShortStore<STIDX8, 0, "stidx8\t$rs_data, $base, $offset">;
+def STIDX16_SH   : ShortStore<STIDX16, 1, "stidx16\t$rs_data, $base, $offset">;
+def STIDX32_SH   : ShortStore<STIDX32, 2, "stidx32\t$rs_data, $base, $offset">;
+def STIDX64_SH   : ShortStore<STIDX64, 3, "stidx64\t$rs_data, $base, $offset">;
+def STIDX64U_SH  : ShortStore<STIDX64U, 3, "stidx64u\t$rs_data, $base, $offset">;
 }
 }
+
 // ISA v3 B: fused compare-and-branch (class 0xD, 1 word, flags untouched).
 // $cc = PRED (0 EQ, 1 LT, 2 LE, 3 ULT, 4 ULE) | INV<<3; simm13 word
 // displacement via FK_KlaussCPU_PCREL13. Built only by KlaussCPUFuseCmpBr.
-let isBranch = 1, isTerminator = 1, hasSideEffects = 0 in {
-def FBR_RR : KCInst32<(outs),
-                      (ins GPR:$rs1, GPR:$rs2, fbr_cc:$cc,
-                           PCRelTarget32:$target),
-                      "fbr\t$rs1, $rs2, $cc, $target">;
-def FBR_RI : KCInst32<(outs),
-                      (ins GPR:$rs1, fbr_simm4:$imm, fbr_cc:$cc,
-                           PCRelTarget32:$target),
-                      "fbri\t$rs1, $imm, $cc, $target">;
+// Word 0: PRED [25:23], INV [22], IMM [21], disp13 [20:8], rs1 [7:4],
+// rs2 or simm4 [3:0].
+class FusedBranch<bits<32> word0, dag ins, string asmstr>
+    : KCInst32<word0, (outs), ins, asmstr> {
+  bits<4>  rs1;
+  bits<4>  cc;
+  bits<15> target;
+  let Inst{25-23} = cc{2-0};
+  let Inst{22}    = cc{3};
+  let Inst{20-8}  = target{14-2};
+  let Inst{7-4}   = rs1;
 }
 
+let isBranch = 1, isTerminator = 1, hasSideEffects = 0 in {
+def FBR_RR : FusedBranch<0x74000000,
+                         (ins GPR:$rs1, GPR:$rs2, fbr_cc:$cc,
+                              PCRelTarget13:$target),
+                         "fbr\t$rs1, $rs2, $cc, $target"> {
+  bits<4> rs2;
+  let Inst{3-0} = rs2;
+}
+def FBR_RI : FusedBranch<0x74200000,
+                         (ins GPR:$rs1, fbr_simm4:$imm, fbr_cc:$cc,
+                              PCRelTarget13:$target),
+                         "fbri\t$rs1, $imm, $cc, $target"> {
+  bits<4> imm;
+  let Inst{3-0} = imm;
+}
+}
 
 //===----------------------------------------------------------------------===//
 // Legacy 2-address assembler spellings.  The ops above are 3-operand in v2

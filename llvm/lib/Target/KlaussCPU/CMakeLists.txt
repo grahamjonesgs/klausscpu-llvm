@@ -4,6 +4,7 @@ set(LLVM_TARGET_DEFINITIONS KlaussCPU.td)
 
 tablegen(LLVM KlaussCPUGenRegisterInfo.inc  -gen-register-info)
 tablegen(LLVM KlaussCPUGenInstrInfo.inc     -gen-instr-info)
+tablegen(LLVM KlaussCPUGenMCCodeEmitter.inc -gen-emitter)
 tablegen(LLVM KlaussCPUGenSubtargetInfo.inc -gen-subtarget)
 tablegen(LLVM KlaussCPUGenCallingConv.inc   -gen-callingconv)
 tablegen(LLVM KlaussCPUGenDAGISel.inc       -gen-dag-isel)

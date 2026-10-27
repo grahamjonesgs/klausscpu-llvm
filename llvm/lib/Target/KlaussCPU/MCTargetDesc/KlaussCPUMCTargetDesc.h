@@ -34,8 +34,6 @@ bool compressKlaussCPUInst(MCInst &Inst);
 bool isKlaussCPUShortBranch(unsigned Opcode);
 /// The 2-word form a short branch relaxes to (PC-relative when one exists).
 unsigned relaxKlaussCPUShortBranch(unsigned Opcode);
-/// Word-0 template of a short branch (displacement bits zero).
-uint32_t klaussCPUShortBranchWord(unsigned Opcode);
 // Index of the PC-relative operand of Opcode (a byte displacement from the
 // instruction's address when it is an immediate), or -1 if it has none.
 int getKlaussCPUPCRelOperand(unsigned Opcode);

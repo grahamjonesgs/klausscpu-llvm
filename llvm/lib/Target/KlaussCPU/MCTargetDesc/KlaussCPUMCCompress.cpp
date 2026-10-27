@@ -3,8 +3,8 @@
 // ISA v3 short 1-word forms (ISA_V3_PROPOSAL.md §3, A3/A4/A5): a 2-word
 // instruction whose immediate fits the 8-bit word-0 field [19:12] is rewritten
 // into its 1-word twin (the *_SH defs in KlaussCPUInstrInfo.td). The twins
-// have the same operand list, so this is an opcode swap on the MCInst; the
-// bits are produced by KlaussCPUMCCodeEmitter.
+// have the same operand list, so this is an opcode swap on the MCInst; their
+// encodings are the .td Inst fields.
 //
 // Called from the AsmPrinter (compiled code) and the AsmParser (hand-written
 // and inline asm), in the style of RISC-V's RVC compression. Only literal
@@ -70,35 +70,32 @@ static const ShortMap Table[] = {
 
 static bool fitsS8(int64_t V) { return V >= -128 && V <= 127; }
 
-// A1 short branches: {short, long absolute, long PC-relative (0 = none),
-// long absolute word-0 template}. The short word keeps COND/INV [22:18] and
-// sets LEN=01, REL=1: 0x61000000 | (template & 0x00FC0000).
+// A1 short branches: {short, long absolute, long PC-relative (0 = none)}.
 namespace {
 struct BranchMap {
   unsigned Short, LongAbs, LongRel;
-  uint32_t AbsTpl;
 };
 } // namespace
 static const BranchMap Branches[] = {
-    {KlaussCPU::JMP_SH, KlaussCPU::JMP, KlaussCPU::JMPREL, 0xA0000000u},
-    {KlaussCPU::JMPZ_SH, KlaussCPU::JMPZ, KlaussCPU::JMPZREL, 0xA0080000u},
-    {KlaussCPU::JMPNZ_SH, KlaussCPU::JMPNZ, KlaussCPU::JMPNZREL, 0xA00C0000u},
-    {KlaussCPU::JMPC_SH, KlaussCPU::JMPC, KlaussCPU::JMPCREL, 0xA0100000u},
-    {KlaussCPU::JMPNC_SH, KlaussCPU::JMPNC, KlaussCPU::JMPNCREL, 0xA0140000u},
-    {KlaussCPU::JMPO_SH, KlaussCPU::JMPO, 0, 0xA0180000u},
-    {KlaussCPU::JMPNO_SH, KlaussCPU::JMPNO, 0, 0xA01C0000u},
-    {KlaussCPU::JMPS_SH, KlaussCPU::JMPS, KlaussCPU::JMPSREL, 0xA0200000u},
-    {KlaussCPU::JMPNS_SH, KlaussCPU::JMPNS, KlaussCPU::JMPNSREL, 0xA0240000u},
-    {KlaussCPU::JMPLT_SH, KlaussCPU::JMPLT, KlaussCPU::JMPLTREL, 0xA0280000u},
-    {KlaussCPU::JMPGE_SH, KlaussCPU::JMPGE, KlaussCPU::JMPGEREL, 0xA02C0000u},
-    {KlaussCPU::JMPLE_SH, KlaussCPU::JMPLE, KlaussCPU::JMPLEREL, 0xA0300000u},
-    {KlaussCPU::JMPGT_SH, KlaussCPU::JMPGT, KlaussCPU::JMPGTREL, 0xA0340000u},
-    {KlaussCPU::JMPULT_SH, KlaussCPU::JMPULT, KlaussCPU::JMPULTREL, 0xA0380000u},
-    {KlaussCPU::JMPUGE_SH, KlaussCPU::JMPUGE, KlaussCPU::JMPUGEREL, 0xA03C0000u},
-    {KlaussCPU::JMPULE_SH, KlaussCPU::JMPULE, KlaussCPU::JMPULEREL, 0xA0400000u},
-    {KlaussCPU::JMPUGT_SH, KlaussCPU::JMPUGT, KlaussCPU::JMPUGTREL, 0xA0440000u},
-    {KlaussCPU::JMPE_SH, KlaussCPU::JMPE, KlaussCPU::JMPEREL, 0xA0480000u},
-    {KlaussCPU::JMPNE_SH, KlaussCPU::JMPNE, KlaussCPU::JMPNEREL, 0xA04C0000u},
+    {KlaussCPU::JMP_SH, KlaussCPU::JMP, KlaussCPU::JMPREL},
+    {KlaussCPU::JMPZ_SH, KlaussCPU::JMPZ, KlaussCPU::JMPZREL},
+    {KlaussCPU::JMPNZ_SH, KlaussCPU::JMPNZ, KlaussCPU::JMPNZREL},
+    {KlaussCPU::JMPC_SH, KlaussCPU::JMPC, KlaussCPU::JMPCREL},
+    {KlaussCPU::JMPNC_SH, KlaussCPU::JMPNC, KlaussCPU::JMPNCREL},
+    {KlaussCPU::JMPO_SH, KlaussCPU::JMPO, 0},
+    {KlaussCPU::JMPNO_SH, KlaussCPU::JMPNO, 0},
+    {KlaussCPU::JMPS_SH, KlaussCPU::JMPS, KlaussCPU::JMPSREL},
+    {KlaussCPU::JMPNS_SH, KlaussCPU::JMPNS, KlaussCPU::JMPNSREL},
+    {KlaussCPU::JMPLT_SH, KlaussCPU::JMPLT, KlaussCPU::JMPLTREL},
+    {KlaussCPU::JMPGE_SH, KlaussCPU::JMPGE, KlaussCPU::JMPGEREL},
+    {KlaussCPU::JMPLE_SH, KlaussCPU::JMPLE, KlaussCPU::JMPLEREL},
+    {KlaussCPU::JMPGT_SH, KlaussCPU::JMPGT, KlaussCPU::JMPGTREL},
+    {KlaussCPU::JMPULT_SH, KlaussCPU::JMPULT, KlaussCPU::JMPULTREL},
+    {KlaussCPU::JMPUGE_SH, KlaussCPU::JMPUGE, KlaussCPU::JMPUGEREL},
+    {KlaussCPU::JMPULE_SH, KlaussCPU::JMPULE, KlaussCPU::JMPULEREL},
+    {KlaussCPU::JMPUGT_SH, KlaussCPU::JMPUGT, KlaussCPU::JMPUGTREL},
+    {KlaussCPU::JMPE_SH, KlaussCPU::JMPE, KlaussCPU::JMPEREL},
+    {KlaussCPU::JMPNE_SH, KlaussCPU::JMPNE, KlaussCPU::JMPNEREL},
 };
 
 static const BranchMap *findShortBranch(unsigned Opc) {
@@ -139,12 +136,6 @@ unsigned llvm::relaxKlaussCPUShortBranch(unsigned Opcode) {
   return B->LongRel ? B->LongRel : B->LongAbs;
 }
 
-uint32_t llvm::klaussCPUShortBranchWord(unsigned Opcode) {
-  const BranchMap *B = findShortBranch(Opcode);
-  assert(B && "not a short branch");
-  return 0x61000000u | (B->AbsTpl & 0x00FC0000u);
-}
-
 bool llvm::compressKlaussCPUInst(MCInst &Inst) {
   if (!EnableShortForms)
     return false;
@@ -165,7 +156,7 @@ bool llvm::compressKlaussCPUInst(MCInst &Inst) {
     const MCOperand &MO = Inst.getOperand(M.ImmOp);
     if (!MO.isImm())
       return false; // symbolic: needs the word-1 fixup slot
-    // The long forms use the low 32 bits of the operand (see getImm32).
+    // The long forms encode the low 32 bits of the operand (word 1).
     uint32_t Raw = static_cast<uint32_t>(MO.getImm());
     int64_t S = static_cast<int32_t>(Raw);
     bool Fits = false;

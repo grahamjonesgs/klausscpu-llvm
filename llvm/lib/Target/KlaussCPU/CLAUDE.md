@@ -22,10 +22,15 @@ LLVM trunk (v23).  Use the **RISC-V backend** as the style reference, not X86 or
 | Sign-extending loads | i8/i16: hardware (LDIDX8_S/LDIDX16_S); i32: SEXTLOAD → Expand → SEXTW |
 | Indirect branch / call | JMPR / CALLR — jump tables and function pointers supported |
 
-### Instruction encoding families
+### Instruction encoding
 
-- **3-reg ALU (RRR/RR/R)** — upper 16 bits of word 0 are non-zero
-- **Legacy / immediate (RV/RRV/Vimm)** — upper 16 bits of word 0 are zero; 8-byte instructions
+ISA v2/v3 (hardware repo `klaussCPU/ISA_ENCODING_V2_MAP.md`): 1–3 LE 32-bit
+words, word 0 = LEN[31:30] CLASS[29:26] attrs/OP[25:12] rd[11:8] rs1[7:4]
+rs2[3:0], imm32 in word 1.  The `Inst` fields in `KlaussCPUInstrInfo.td` are
+the encodings (each format class takes the ISA map's word-0 template; short
+forms derive theirs from the 2-word twin), emitted by `-gen-emitter`'s
+`getBinaryCodeForInstr`.  Operands that may be symbols carry an
+`EncoderMethod` that creates the fixup.
 
 ### Flag sets — NEVER MIX
 
@@ -168,13 +173,14 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPUTargetMachine.h/.cpp CodeGenTargetMachineImpl; PassConfig::addInstSelector + addPreEmitPass + getTargetTransformInfo
 ├── Disassembler/
 │   ├── KlaussCPUDisassembler.cpp   hand-written v2/v3 decoder (table-driven)
-│   ├── KlaussCPUGenDecoderTable.inc GENERATED from KlaussCPUMCCodeEmitter.cpp
+│   ├── KlaussCPUGenDecoderTable.inc GENERATED from the .td Inst fields (llvm-tblgen --dump-json)
 │   ├── gen-decoder-table.py        regenerates the table (run after any encoding change)
 │   └── roundtrip-check.py          disassemble→reassemble every entry; writes the MC test
 ├── MCTargetDesc/
 │   ├── CMakeLists.txt          LLVMKlaussCPUDesc; depends on KlaussCPUCommonTableGen
 │   ├── KlaussCPUMCAsmInfo.h/.cpp  MCAsmInfoELF subclass
 │   ├── KlaussCPUInstPrinter.h/.cpp printInst / printOperand; uses GenAsmWriter.inc
+│   ├── KlaussCPUMCCodeEmitter.cpp  generated getBinaryCodeForInstr (encodings = .td Inst fields) + fixup operand hooks
 │   └── KlaussCPUMCTargetDesc.h/.cpp  LLVMInitializeKlaussCPUTargetMC
 └── TargetInfo/
     ├── CMakeLists.txt
@@ -1103,8 +1109,9 @@ DEBUG_PLAN Phase 0 (plan: `klaussCPU/DEBUG_PLAN.md`), branch `debug-support`.
 - **TRAP** (`0x6C040000`, v2 class B OP 4) defined; `__builtin_debugtrap` →
   `trap`, `__builtin_trap` stays `halt`.  It is the debugger's software
   breakpoint.
-- **Disassembler** (`Disassembler/`): the encoder is hand-written, so the
-  decode table is generated from `KlaussCPUMCCodeEmitter.cpp` by
+- **Disassembler** (`Disassembler/`): the decode table is generated from
+  the .td `Inst` fields (`llvm-tblgen --dump-json`; originally from the
+  hand-written emitter, replaced by -gen-emitter in phase 2) by
   `gen-decoder-table.py`, which also rejects ambiguous encodings (special
   cases such as ROLR1 = ROLV N=1 are ordered first).  **Re-run it, then
   `roundtrip-check.py`, after any encoding change.**  PC-relative operands
