@@ -91,7 +91,7 @@ Carry is now uniformly defined (borrow convention). Add `ADC/SBC` and
 `ROLC/RORC` isel patterns for i128 add/sub chains. Match the RTL semantics:
 `ADC = a+b+C`, `SBC = a-b-C`, `C` after `SUB` = borrow (§1.3).
 
-### 2.4 Assembler / encoder (`KlaussCPUMCCodeEmitter.cpp`, AsmParser)
+### 2.4 Assembler / encoder (`KlaussCPUInstrInfo.td` encodings, AsmParser)
 - Encoding is stable, so you may keep every current mnemonic. Optional cleanup:
   alias `JMPE→JMPZ` / `JMPNE→JMPNZ` and stop emitting the redundant equality
   form. If you retire any mnemonic, update the emitter + mnemonic table together.

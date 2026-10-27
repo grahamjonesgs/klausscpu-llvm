@@ -121,7 +121,8 @@ make the hazard table and IRQ path clean.
 - **Carry-consuming patterns:** with carry uniformly defined, `ADC/SBC` and
   rotate-through-carry isel patterns become safe to add (i128 add/sub chains).
 - **Keep encoder/assembler in lockstep** — any retired/aliased branch opcode
-  must update `KlaussCPUMCCodeEmitter.cpp` + the AsmParser mnemonic table.
+  must update its `.td` encoding (`KlaussCPUInstrInfo.td`) + the AsmParser
+  mnemonic table.
 - **Regression:** extend `flag-reuse.ll` and add a `cmp-branch.ll` pinning the
   new condition→branch mapping.
 

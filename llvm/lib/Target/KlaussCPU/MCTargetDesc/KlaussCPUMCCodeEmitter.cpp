@@ -24,7 +24,6 @@
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
-#include "llvm/Support/ErrorHandling.h"
 
 #define GET_INSTRINFO_ENUM
 #include "KlaussCPUGenInstrInfo.inc"
@@ -105,7 +104,13 @@ void KlaussCPUMCCodeEmitter::getMachineOpValue(
     Op = static_cast<uint64_t>(MO.getImm());
     return;
   }
-  llvm_unreachable("Unhandled expression!");
+  // An operand with no EncoderMethod has no fixup to resolve a symbol with.
+  // The parser accepts any expression in an immediate slot, so diagnose it
+  // here rather than encode a wrong value.
+  assert(MO.isExpr() && "operand must be reg, imm or expr");
+  Ctx.reportError(MI.getLoc(), "operand must be a constant: no relocation "
+                               "exists for a symbol in this field");
+  Op = 0;
 }
 
 void KlaussCPUMCCodeEmitter::getImmOrFixup(const MCInst &MI, unsigned OpNo,

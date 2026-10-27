@@ -397,6 +397,7 @@ class RV_ld<bits<32> word0, string asmstr, list<dag> pat = [],
 }
 
 // Store a register to an absolute address: data in rd, address in word 1.
+// No Defs: stores leave FLAGS alone (class-7 decode sets no fmask).
 class RV_st<bits<32> word0, string asmstr>
     : KCInst64<word0, (outs), (ins GPR:$rs_data, simm32_abs:$addr), asmstr> {
   bits<4>  rs_data;
