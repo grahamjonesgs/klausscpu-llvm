@@ -185,7 +185,7 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPURegisterInfo.h/.cpp getCalleeSavedRegs, getReservedRegs, eliminateFrameIndex
 ├── KlaussCPUFrameLowering.h/.cpp emitPrologue / emitEpilogue
 ├── KlaussCPUISelLowering.h/.cpp  LowerFormalArguments, LowerReturn, KlaussCPUISD nodes
-├── KlaussCPUISelDAGToDAG.cpp   SelectionDAGISelLegacy pass; SelectCode() dispatch
+├── KlaussCPUISelDAGToDAG.cpp   SelectionDAGISelLegacy pass; SelectCode() + C++ for BR_CC, SELECT_CC, frame-index loads/stores
 ├── KlaussCPUAsmPrinter.cpp     MachineInstr → MCInst → text assembly
 ├── KlaussCPUFlagReuse.cpp      A3a: post-RA peephole, CMPRV Rd,0+JMPE/NE → JMPZ/NZ (default on)
 ├── KlaussCPUTargetTransformInfo.h/.cpp  TTI — M8 unroll budget gated on branch density, no peel
@@ -257,7 +257,7 @@ SelectionDAGTargetInfo    TSI;
 
 ### Global address / large-constant materialization (step 13)
 - `DAG.getTargetGlobalAddress(same_params)` is **CSE-deduplicated** — calling it twice returns the *same* `SDNode*`. If you then call `getMachineNode(SETR, DL, MVT::i64, SDValue(tga_node, 0))` and `ReplaceNode(tga_node, setr_node)`, `ReplaceAllUsesWith` rewrites SETR's own operand from `tga_node` to `setr_node` → self-referential machine instruction `%0 = SETR %0` → RegAllocFast crash `"no reload in start block. Missing vreg def?"`.
-- **Fix — ADDR wrapper node:** `LowerGlobalAddress` / `LowerExternalSymbol` wrap the TargetGlobalAddress in a `KlaussCPUISD::ADDR` node. `Select()` then replaces `ADDR` (not TGA) with `SETR(TGA)`. `ReplaceAllUsesWith(ADDR, SETR)` never touches TGA → no circular reference.
+- **Fix — ADDR wrapper node:** `LowerGlobalAddress` / `LowerExternalSymbol` wrap the TargetGlobalAddress in a `KlaussCPUISD::ADDR` node (`LEAPC` under PIC), which the `(KlaussCPUAddr tglobaladdr)` → `SETR` pattern selects: `ADDR` (not TGA) is the node replaced → no circular reference.
 - Call-site callee addresses **bypass `LowerOperation`** — `LowerCall` calls `DAG.getTargetGlobalAddress()` directly, and the bare TGA is consumed by the `CALL_I` tablegen pattern. Never wrap call-target TGAs in ADDR.
 - `SETR64` is a single 12-byte instruction for 64-bit constants: `rd = (hi32 << 32) | lo32`. Use it for any i64 constant that does not fit in a simm32. Global addresses are always ≤ 32 bits and use SETR, not SETR64.
 - `SDUse` iterators: `for (auto UI = N->use_begin(); UI != N->use_end(); ++UI)` — `*UI` is an `SDUse&`. Access the user node via `UI->getUser()` (arrow, not dot).

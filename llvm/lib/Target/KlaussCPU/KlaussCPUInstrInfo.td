@@ -35,6 +35,34 @@ def KlaussCPUCallNode : SDNode<"KlaussCPUISD::CALL", SDT_KlaussCPUCall,
                                [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                                 SDNPVariadic]>;
 
+// Call frame setup/teardown (ADJCALLSTACKDOWN/UP).  LowerCall builds them
+// with getCALLSEQ_START/END, whose operands are pointer-sized (i64) target
+// constants.
+def SDT_KlaussCPUCallSeqStart : SDCallSeqStart<[SDTCisVT<0, i64>,
+                                                SDTCisVT<1, i64>]>;
+def SDT_KlaussCPUCallSeqEnd   : SDCallSeqEnd<[SDTCisVT<0, i64>,
+                                              SDTCisVT<1, i64>]>;
+def callseq_start : SDNode<"ISD::CALLSEQ_START", SDT_KlaussCPUCallSeqStart,
+                           [SDNPHasChain, SDNPOutGlue]>;
+def callseq_end   : SDNode<"ISD::CALLSEQ_END", SDT_KlaussCPUCallSeqEnd,
+                           [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]>;
+
+// Address of a global, external symbol, block address or jump table, from
+// LowerGlobalAddress & co: SETR (ABS32 fixup) or, under PIC, LEAPC (PCREL32).
+// The wrapper keeps the target symbol node, which CSEs, from being the node
+// that selection replaces.
+def KlaussCPUAddr  : SDNode<"KlaussCPUISD::ADDR", SDTIntUnaryOp>;
+def KlaussCPULeaPC : SDNode<"KlaussCPUISD::LEAPC", SDTIntUnaryOp>;
+
+//===----------------------------------------------------------------------===//
+// Instruction selection predicates
+//===----------------------------------------------------------------------===//
+
+def IsPIC  : Predicate<"TM.isPositionIndependent()">;
+def NotPIC : Predicate<"!TM.isPositionIndependent()">;
+// -mllvm -klausscpu-w32-alu (KlaussCPUISelDAGToDAG.cpp), on by default.
+def UseW32Alu : Predicate<"EnableW32Alu">;
+
 
 //===----------------------------------------------------------------------===//
 // Assembler operand match classes
@@ -697,16 +725,14 @@ def XORR   : RRR<0x45800000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
 
 // ISA v3 D3: 32-bit "W" ops — the 64-bit op with its result sign-extended
 // from bit 31 (RV64-style: C `int` arithmetic stays sign-extended without a
-// following SEXTW). Class 1 / class 2 (2-word) / class A with W [19]. Selected
-// in KlaussCPUDAGToDAGISel::Select (-mllvm -klausscpu-w32-alu=false).
-// (No isel Pattern, so side effects are stated explicitly — see SETR64.)
-let hasSideEffects = 0 in {
+// following SEXTW). Class 1 / class 2 (2-word) / class A with W [19].
+// Selected by the W-op patterns (-mllvm -klausscpu-w32-alu=false turns
+// them off).
 def ADDW   : RRR<0x44280000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "addw\t$rd, $rs1, $rs2">;
 def SUBW   : RRR<0x44680000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "subw\t$rd, $rs1, $rs2">;
 def ADDIW  : RRV_alu<0x88380000, "addiw\t$rd, $rs, $imm">;
 let SchedRW = [WriteMul] in
 def MULW   : RRR<0x68880000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "mulw\t$rd, $rs1, $rs2">;
-}
 
 // Multiply (EX-serialized, ~5c — M8)
 let SchedRW = [WriteMul] in {
@@ -928,12 +954,11 @@ class Pseudo<dag outs, dag ins, list<dag> pattern = []>
 }
 
 // Call-frame setup/destroy — consumed by eliminateCallFramePseudoInstr.
-// No tablegen patterns: ISD::CALLSEQ_START/END are matched in
-// KlaussCPUDAGToDAGISel::Select() to avoid i32-type-set inference issues
-// (KlaussCPU has no i32 register class).
 let Defs = [SP], Uses = [SP], hasSideEffects = 1 in {
-def ADJCALLSTACKDOWN : Pseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2)>;
-def ADJCALLSTACKUP   : Pseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2)>;
+def ADJCALLSTACKDOWN : Pseudo<(outs), (ins i64imm:$amt1, i64imm:$amt2),
+                              [(callseq_start timm:$amt1, timm:$amt2)]>;
+def ADJCALLSTACKUP   : Pseudo<(outs), (ins i64imm:$amt1, i64imm:$amt2),
+                              [(callseq_end timm:$amt1, timm:$amt2)]>;
 }
 
 // SELECT without CMOV: KlaussCPUISD::SELECT_CC (lhs, rhs, cc, t, f) selects
@@ -999,10 +1024,9 @@ def JMPR_R  : R_ind<0x60800000, (ins GPR:$reg), "jmpr\t$reg"> {
 // RV: register ← immediate  (SETR and in-place RV ops)
 //===----------------------------------------------------------------------===//
 
-// Constant materialisation.  Explicitly side-effect free and rematerializable:
-// SETR64/LEAPC have no isel Pattern, so TableGen would otherwise guess
-// hasSideEffects=1, which blocks MachineLICM hoisting, MachineCSE and remat
-// (a 64-bit constant in a loop would be re-emitted, or spilled, every trip).
+// Constant materialisation: side-effect free and rematerializable, so
+// MachineLICM can hoist it, MachineCSE merge it and the register allocator
+// rematerialize it instead of spilling it.
 let hasSideEffects = 0, isReMaterializable = 1 in {
 // Load 32-bit immediate (sign-extended to 64 bits)
 let isAsCheapAsAMove = 1, isMoveImm = 1 in
@@ -1034,8 +1058,7 @@ def ROLV    : ShiftImmN<0x50E04000, "rolv">;
 def RORV    : ShiftImmN<0x51204000, "rorv">;
 
 // reg+imm32 add: rd = rs + sign_extend(imm32). Two distinct regs; sign-extends.
-// Replaces the SETR+ADDR two-instruction sequence for frame-address materialisation.
-// Pattern deferred: simm32_imm is not yet defined here; see isel patterns section.
+// Also materialises a frame address in one instruction (see AddrFI).
 def ADDI : RRV_alu<0x88300000, "addi\t$rd, $rs, $imm">;
 
 // Compare register to immediate — flags only (see CMPRR_I on side effects)
@@ -1087,26 +1110,43 @@ def : MnemonicAlias<"ldidx16_s", "ldidx16s">;
 def : MnemonicAlias<"ldidx32_s", "ldidx32s">;
 
 //===----------------------------------------------------------------------===//
-// Load / store isel patterns
-//
-// FrameIndex-based loads/stores are handled in KlaussCPUDAGToDAGISel::Select()
-// (C++ code), because the TargetFrameIndex operand type (i64 after promotion)
-// cannot be matched directly against a GPR in a tablegen pattern without a
-// ComplexPattern.  These tablegen patterns cover the general register+offset
-// case where the address is already in a GPR.
+// Constant, address and load / store isel patterns
 //
 // simm32_imm: matches a 64-bit immediate that fits in a signed 32-bit field,
 // used as the offset in LDIDX64 / STIDX64.
 //===----------------------------------------------------------------------===//
 
 def simm32_imm : ImmLeaf<i64, [{return isInt<32>(Imm);}]>;
+def nonsimm32_imm : ImmLeaf<i64, [{return !isInt<32>(Imm);}]>;
 
-// Materialize a signed 32-bit constant into a GPR using SETR.
-// Large 64-bit constants (outside simm32) use SETR64 in Select().
+// SETR64's halves: rd = (hi32 << 32) | lo32, each printed signed.
+def Lo32XForm : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(SignExtend64<32>(N->getZExtValue()),
+                                   SDLoc(N), MVT::i64);
+}]>;
+def Hi32XForm : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(SignExtend64<32>(N->getZExtValue() >> 32),
+                                   SDLoc(N), MVT::i64);
+}]>;
+
+// Materialize a signed 32-bit constant into a GPR using SETR, any other
+// 64-bit constant with one 12-byte SETR64.
 def : Pat<(i64 simm32_imm:$imm), (SETR simm32_imm:$imm)>;
+def : Pat<(i64 nonsimm32_imm:$imm),
+          (SETR64 (Lo32XForm imm:$imm), (Hi32XForm imm:$imm))>;
 
 // Register + signed-32-bit constant addition → ADDI (one instruction).
 def : Pat<(i64 (add GPR:$rs, simm32_imm:$imm)), (ADDI GPR:$rs, simm32_imm:$imm)>;
+
+// A frame index as a value: ADDI rd, FI, 0 (AddrFI gives the
+// TargetFrameIndex, which eliminateFrameIndex rewrites to the frame register,
+// adding the slot offset to the immediate).  A load or store straight off a
+// frame index uses it as the base with offset 0, selected in
+// KlaussCPUDAGToDAGISel::Select.  A frame index plus a constant is not
+// folded: the address is the ADDI's result.
+def AddrFI : ComplexPattern<iPTR, 1, "SelectAddrFI", [frameindex]>;
+
+def : Pat<(i64 AddrFI:$fi), (ADDI AddrFI:$fi, 0)>;
 
 //===----------------------------------------------------------------------===//
 // Immediate-form ALU patterns
@@ -1171,10 +1211,6 @@ def : Pat<(add GPR:$rs, -1), (DECR GPR:$rs)>;
 // which already lowers through ROLV/RORV — byte-identical to ROLR1/RORR1 (and
 // additionally updates carry).  SHLR1/SHRR1 remain as assembler-only mnemonics.
 
-// Global addresses and external symbols are materialized in C++ Select()
-// via SETR (non-call uses) to avoid the "leaf node not emitted" crash.
-// Call-site uses are handled directly by the CALL_I patterns below.
-
 // 64-bit load from a GPR base with no offset.
 def : Pat<(i64 (load (i64 GPR:$base))),
           (LDIDX64 GPR:$base, 0)>;
@@ -1192,8 +1228,7 @@ def : Pat<(store (i64 GPR:$val), (add (i64 GPR:$base), simm32_imm:$off)),
           (STIDX64 GPR:$val, GPR:$base, simm32_imm:$off)>;
 
 // Sub-word zero-extending loads from a plain GPR address (no offset).
-// Frame-index-based sub-word loads are handled in KlaussCPUDAGToDAGISel::Select()
-// which emits LDIDX8/16/32 (base+offset) so eliminateFrameIndex can rewrite normally.
+// A frame-index address takes LDIDX8/16/32 instead (see AddrFI).
 def : Pat<(i64 (zextloadi8  (i64 GPR:$addr))), (MEMGET8  GPR:$addr)>;
 def : Pat<(i64 (zextloadi16 (i64 GPR:$addr))), (MEMGET16 GPR:$addr)>;
 def : Pat<(i64 (zextloadi32 (i64 GPR:$addr))), (MEMGET32 GPR:$addr)>;
@@ -1298,6 +1333,12 @@ def CALLREL : Vcall<0xA3000000, "callrel\t$target", PCRelCallTarget32>;
 // Class 2 LEA: word 1 = simm32, FK_KlaussCPU_PCREL32 for a symbol.
 let hasSideEffects = 0, isReMaterializable = 1 in
 def LEAPC   : RV_ld<0x8B800000, "leapc\t$rd, $imm", [], pcrel_simm32>;
+
+// Symbol addresses (see KlaussCPUAddr).
+foreach sym = [tglobaladdr, texternalsym, tblockaddress, tjumptable] in {
+def : Pat<(KlaussCPUAddr sym:$sym), (SETR sym:$sym)>;
+def : Pat<(KlaussCPULeaPC sym:$sym), (LEAPC sym:$sym)>;
+}
 
 //===----------------------------------------------------------------------===//
 // Special / system
@@ -1452,18 +1493,61 @@ def : MnemonicAlias<"stidx64a", "stidx64">;
 // Call patterns — matched from KlaussCPUISD::CALL nodes emitted by LowerCall.
 //===----------------------------------------------------------------------===//
 
-// Direct call to a global address or external symbol (non-PIC mode).
-// PIC direct calls (CALLREL) are intercepted in KlaussCPUDAGToDAGISel::Select()
-// before SelectCode() reaches these patterns.
+// Direct call to a global address or external symbol: CALL_I, or CALLREL
+// under PIC.  The register operands LowerCall attaches (the node is
+// variadic) become the call's implicit uses.
 // Callee is i64 (global address zero-extended into a GPR; encoder takes [31:0]).
-def : Pat<(KlaussCPUCallNode (i64 tglobaladdr:$func)),
-          (CALL_I tglobaladdr:$func)>;
-def : Pat<(KlaussCPUCallNode (i64 texternalsym:$func)),
-          (CALL_I texternalsym:$func)>;
+foreach func = [tglobaladdr, texternalsym] in {
+let Predicates = [NotPIC] in
+def : Pat<(KlaussCPUCallNode (i64 func:$func)), (CALL_I func:$func)>;
+let Predicates = [IsPIC] in
+def : Pat<(KlaussCPUCallNode (i64 func:$func)), (CALLREL func:$func)>;
+}
 
 // Indirect call via register (function pointer).
 def : Pat<(KlaussCPUCallNode (i64 GPR:$func)),
           (CALLR_R GPR:$func)>;
+
+// Unconditional and indirect branches.  BR_CC (compare glued to a
+// conditional jump) is selected in KlaussCPUDAGToDAGISel::Select.
+let Predicates = [NotPIC] in
+def : Pat<(br bb:$target), (JMP bb:$target)>;
+let Predicates = [IsPIC] in
+def : Pat<(br bb:$target), (JMPREL bb:$target)>;
+def : Pat<(brind GPR:$reg), (JMPR_R GPR:$reg)>;
+
+// __builtin_trap halts the core; __builtin_debugtrap is the debugger's
+// software breakpoint.
+def : Pat<(trap), (HALT_I)>;
+def : Pat<(debugtrap), (TRAP_I)>;
+
+// ISA v3 D3: (sext_inreg (add|sub|mul a, b), i32) → the W op, which drops
+// the SEXTW.  Only when the inner op has no other use (else it is computed
+// anyway and the SEXTW costs nothing extra).  An add of a simm32 constant
+// takes ADDIW; the register forms take no constant operand (any other
+// constant keeps the 64-bit op and its SEXTW).
+def w32_addi : PatFrag<(ops node:$a, node:$b), (add node:$a, node:$b), [{
+  return N->hasOneUse() && isa<ConstantSDNode>(N->getOperand(1));
+}]>;
+class W32RegOp<SDNode op>
+    : PatFrag<(ops node:$a, node:$b), (op node:$a, node:$b), [{
+  return N->hasOneUse() && !isa<ConstantSDNode>(N->getOperand(0)) &&
+         !isa<ConstantSDNode>(N->getOperand(1));
+}]>;
+def w32_add : W32RegOp<add>;
+def w32_sub : W32RegOp<sub>;
+def w32_mul : W32RegOp<mul>;
+
+let Predicates = [UseW32Alu] in {
+def : Pat<(sext_inreg (w32_addi GPR:$rs, simm32_imm:$imm), i32),
+          (ADDIW GPR:$rs, simm32_imm:$imm)>;
+def : Pat<(sext_inreg (w32_add GPR:$rs1, GPR:$rs2), i32),
+          (ADDW GPR:$rs1, GPR:$rs2)>;
+def : Pat<(sext_inreg (w32_sub GPR:$rs1, GPR:$rs2), i32),
+          (SUBW GPR:$rs1, GPR:$rs2)>;
+def : Pat<(sext_inreg (w32_mul GPR:$rs1, GPR:$rs2), i32),
+          (MULW GPR:$rs1, GPR:$rs2)>;
+}
 
 // Sign-extending byte/halfword loads — pure GPR address (no base+offset needed).
 def : Pat<(i64 (sextloadi8  (i64 GPR:$addr))), (LDIDX8_S  GPR:$addr, 0)>;

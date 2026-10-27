@@ -20,14 +20,13 @@ enum NodeType : unsigned {
   RET_GLUE, // function return with optional return-value glue
   CALL,     // direct/indirect call
   ADDR,     // materialise a global address via SETR (non-PIC)
-            //   (i64) = ADDR (TargetGlobalAddress/TargetExternalSymbol)
-            // Lowered to SETR by Select().  ADDR wrapper is necessary because
-            // TargetGlobalAddress CSEs — passing it directly to getMachineNode
-            // and then calling ReplaceNode on it would cause a self-referential
-            // SETR instruction ("%0 = SETR %0").
+            //   (i64) = ADDR (TargetGlobalAddress/TargetExternalSymbol/...)
+            // Selected to SETR by a pattern.  The wrapper is necessary because
+            // TargetGlobalAddress CSEs: selecting it in place would replace it
+            // in the SETR's own operand ("%0 = SETR %0").
   LEAPC,    // materialise a global address via LEAPC (PIC mode)
-            //   (i64) = LEAPC (TargetGlobalAddress/TargetExternalSymbol)
-            // Lowered to LEAPC by Select().  Same CSE-safe wrapper as ADDR.
+            //   (i64) = LEAPC (TargetGlobalAddress/TargetExternalSymbol/...)
+            // Selected to LEAPC by a pattern.  Same wrapper as ADDR.
   SELECT_CC, // (lhs:i64, rhs:i64, cc:CondCode, trueV:i64, falseV:i64) -> i64
             // Selected to SELECT_CC_RR/RI, then expanded to compare +
             // conditional jump + PHI by EmitInstrWithCustomInserter.
