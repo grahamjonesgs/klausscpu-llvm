@@ -27,7 +27,8 @@ describe earlier states of the backend and are superseded by this file.
 | Sign-extending loads | i8/i16/i32: hardware (`LDIDX8_S`/`LDIDX16_S`/`LDIDX32_S`) |
 | Load/store addressing | `[r]` (`MEMGETn`/`MEMSETn`), `r + simm32` (`LDIDXn`/`STIDXn`, 1-word short form for a small scaled offset), `r + r` at every width (`LDIDXnR`/`LDIDXn_SR`/`STIDXnR`, MODE=11); 16/32-bit forms other than `MEMGET32` force-align the EA |
 | 32-bit ops | `ADDW`/`SUBW`/`ADDIW`/`MULW`, `CMPRRW`/`CMPRVW`, boolean `CMPxxRW`/`CMPxxVW` (ISA v3 D2/D3) |
-| Immediates | each class 2/3 op exists with a sign- and a zero-extended imm32 (SGN bit); isel picks the one that holds the constant: `SETR`/`SETRU` (MOV), `ADDI`/`ADDV`/`MINUSV`, `ANDI`/`ANDV` (and OR/XOR), `CMPRV`/`CMPRVU`; boolean compares (`setcc` as a value) `CMPxxV` with a simm32; `SETR64` only for a value neither reaches |
+| Immediates | each class 2/3 op exists with a sign- and a zero-extended imm32 (SGN bit); isel picks the one that holds the constant: `SETR`/`SETRU` (MOV), `ADDI`/`ADDV`/`MINUSV`, `ANDI`/`ANDV` (and OR/XOR), `CMPRV`/`CMPRVU`; boolean compares (`setcc` as a value) `CMPxxV` with a simm32; `SETR64` only for a value neither reaches.  An add of -255..-129 (a frame address too) is `MINUSV` of the negation, whose short form reaches it |
+| Multiply by a constant | `MULV` (simm32; EX-serialised, `WriteMul`); a constant 2^N+1, 2^N-1 or 1-2^N that is not a simm32 becomes `SHLV` + `ADDR`/`SUBR` (`decomposeMulByConstant`); for a simm32 one only with `-klausscpu-mul-imm-shift-add` (one more instruction than `MULV`, fewer cycles) |
 | Addresses | 32-bit, zero-extended in a register: `SETRU sym` (static), `LEAPC` (PIC); `sym+off` is folded only for `off` in [0, 2^31), other offsets are a separate add so a negative S + off stays negative; `R_KLAUSSCPU_ABS64` data is the exact 64-bit S + A (lld) |
 | Indirect branch / call | `JMPR` / `CALLR`; jump tables are off by default (`-klausscpu-min-jump-table-entries=N` enables them) |
 | `llvm.trap` / `llvm.debugtrap` | `HALT` / `TRAP` (the debugger's breakpoint) |
@@ -64,7 +65,8 @@ not an assembler error.  SETR accepts [-2^31, 2^32) and the CPU sign-extends
 the imm32: `setr rX, 0xFFFFFFFF` loads -1 (kept for the runtime's
 `setr r0, 0xF00F0000` MMIO idiom); `setru` zero-extends.  `setr rX, 128..255`
 compresses to the zero-extending short `setru` (same value), so the asm
-printer and disassembler show `setru` there.
+printer and disassembler show `setru` there; likewise `addi`/`andi`/`ori`/
+`xori` with 128..255 become the short `addv`/`andv`/`orv`/`xorv`.
 
 The disassembler is `-gen-disassembler` with one table per width
 (`--specialize-decoders-per-bitwidth`: 32/64/96 bits); `getInstruction` picks
@@ -225,7 +227,9 @@ when clobbered.
   (`selectFrameAddr`).  `eliminateFrameIndex` adds the slot offset to the
   folded offset; a frame index anywhere else (or a sum that overflows
   simm32) gets the slot address in a scavenged register (`ADDI`, which
-  clobbers FLAGS).
+  clobbers FLAGS).  A frame-address `ADDI` 129..255 bytes below the frame
+  register becomes `MINUSV` (1-word short form) while its FLAGS def is
+  dead.
 - Shifts and bit fields are patterns over four more ComplexPatterns:
   `shamt` (`selectShiftMask`, as in RISC-V: the amount register of
   SHLR/SHRR/SARR/ROLR/RORR loses an `and` keeping bits [5:0], the
@@ -262,6 +266,7 @@ when clobbered.
 | `-klausscpu-fold-fi-offset` | on | fold frame index + constant into the access / ADDI offset |
 | `-klausscpu-min-jump-table-entries` | 0 (off) | jump tables from N cases |
 | `-klausscpu-pref-loop-align` | 16 | loop-header alignment in bytes |
+| `-klausscpu-mul-imm-shift-add` | off | multiply by a simm32 2^N±1 / 1-2^N as shift + add/sub when the schedule model rates MULV slower |
 | `-klausscpu-unroll-branch-density-gate` | on | scale the unroll budget for branchy loops |
 
 ---

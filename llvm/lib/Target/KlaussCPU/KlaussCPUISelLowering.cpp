@@ -60,6 +60,15 @@ static cl::opt<bool> GroupSelects(
     cl::desc("Share one compare and branch between consecutive selects on "
              "the same condition"));
 
+// decomposeMulByConstant: also trade a MULV for a shift and an add/sub when
+// the schedule model makes the pair faster (one more instruction, the same
+// size).
+static cl::opt<bool> MulImmShiftAdd(
+    "klausscpu-mul-imm-shift-add", cl::Hidden, cl::init(false),
+    cl::desc("Expand a multiply by a simm32 constant 2^N+1, 2^N-1 or 1-2^N "
+             "into a shift and an add/sub when the schedule model rates "
+             "MULV slower"));
+
 // Generated calling convention functions.  Must be included inside namespace
 // llvm because the generated code uses unqualified names (MVT, CCState, etc.).
 namespace llvm {
@@ -68,7 +77,7 @@ namespace llvm {
 
 KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
                                                    const KlaussCPUSubtarget &STI)
-    : TargetLowering(TM, STI) {
+    : TargetLowering(TM, STI), Subtarget(STI) {
 
   // ---- Register class setup ----
   addRegisterClass(MVT::i64, &KlaussCPU::GPRRegClass);
@@ -323,6 +332,68 @@ bool KlaussCPUTargetLowering::isZExtFree(SDValue Val, EVT VT2) const {
       return true;
   }
   return TargetLowering::isZExtFree(Val, VT2);
+}
+
+// The DAGCombiner calls this for (mul x, C) and, on true, expands C =
+// 2^N + 1, 2^N - 1 or 1 - 2^N into (x << N) + x, (x << N) - x or
+// x - (x << N): two ALU ops, both 1 word.  Only those shapes are accepted:
+// -(2^N + 1) needs a NEGR and a constant with trailing zeros a second
+// shift, each one more instruction.
+//
+// A constant that is not a simm32 has no MULV: it costs SETRU/SETR64 and
+// MULR, 2 instructions and 3-4 words, so the 2-word pair is smaller and
+// faster.  (In a loop MachineLICM may hoist the constant, leaving one MULR
+// against the pair: one instruction more, but still fewer cycles.)  A
+// simm32 constant is one 2-word MULV: the pair is the same size and one
+// instruction more, so it is used only on request
+// (-klausscpu-mul-imm-shift-add) and when the schedule model rates the
+// multiply slower than the dependent shift and add (5 against 2 + 2 cycles
+// in KlaussCPUSchedule.td).
+bool KlaussCPUTargetLowering::decomposeMulByConstant(LLVMContext &Context,
+                                                     EVT VT, SDValue C) const {
+  if (!VT.isScalarInteger() || VT.getSizeInBits() > 64)
+    return false;
+  const APInt &Imm = cast<ConstantSDNode>(C)->getAPIntValue();
+  // The combiner expands |C| (preferring the add form: 3 = 2 + 1 = 4 - 1)
+  // and negates a negative C's result; only the sub form's negation folds,
+  // into x - (x << N).
+  APInt MulC = Imm.abs();
+  bool AddForm = (MulC - 1).isPowerOf2();
+  bool SubForm = (MulC + 1).isPowerOf2();
+  if (Imm.isNegative() ? AddForm || !SubForm : !AddForm && !SubForm)
+    return false;
+  if (!Imm.isSignedIntN(32))
+    return true;
+  if (!MulImmShiftAdd)
+    return false;
+  const MCSchedModel &SM = Subtarget.getSchedModel();
+  if (!SM.hasInstrSchedModel())
+    return false;
+  const KlaussCPUInstrInfo &TII = *Subtarget.getInstrInfo();
+  auto Latency = [&](unsigned Opc) {
+    return SM.computeInstrLatency(Subtarget, TII.get(Opc).getSchedClass());
+  };
+  return Latency(KlaussCPU::MULV) >
+         Latency(KlaussCPU::SHLV) + Latency(KlaussCPU::ADDR);
+}
+
+// An add of C is one instruction while C is an imm32 that ADDI, ADDV or
+// MINUSV takes; any other C needs a SETR64.
+static bool isAddImmediate(const APInt &C) {
+  return C.getBitWidth() <= 64 &&
+         (C.isSignedIntN(32) || C.isIntN(32) || (-C).isIntN(32));
+}
+
+// (mul (add x, c1), c2) -> (add (mul x, c2), c1 * c2) is worse when c1 is an
+// add immediate and c1 * c2 is not.
+bool KlaussCPUTargetLowering::isMulAddWithConstProfitable(
+    SDValue AddNode, SDValue ConstNode) const {
+  EVT VT = AddNode.getValueType();
+  if (VT.isVector() || VT.getScalarSizeInBits() > 64)
+    return true;
+  const APInt &C1 = AddNode.getConstantOperandAPInt(1);
+  const APInt &C2 = cast<ConstantSDNode>(ConstNode)->getAPIntValue();
+  return !isAddImmediate(C1) || isAddImmediate(C1 * C2);
 }
 
 void KlaussCPUTargetLowering::ReplaceNodeResults(

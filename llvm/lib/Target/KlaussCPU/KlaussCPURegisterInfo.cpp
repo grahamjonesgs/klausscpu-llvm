@@ -167,6 +167,15 @@ bool KlaussCPURegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     if (isInt<32>(Offset)) {
       MI.getOperand(FIOperandNum).ChangeToRegister(FrameReg, false);
       MI.getOperand(FIOperandNum + 1).ChangeToImmediate(Offset);
+      // A frame address 129..255 bytes below the frame register: MINUSV of
+      // the negated offset compresses to 1 word, ADDI only down to -128.
+      // The result is the same; C would be the borrow instead of the carry,
+      // so only while the FLAGS def is dead (isel never reads it).
+      if (MI.getOpcode() == KlaussCPU::ADDI && Offset >= -255 &&
+          Offset <= -129 && MI.registerDefIsDead(KlaussCPU::FLAGS, this)) {
+        MI.setDesc(TII.get(KlaussCPU::MINUSV));
+        MI.getOperand(FIOperandNum + 1).setImm(-Offset);
+      }
       return false;
     }
     // The sum overflows simm32.  Isel folds at most a 512 MiB offset onto a

@@ -70,6 +70,13 @@ public:
   // instead of emitting a separate ZEXTW/ZEXTB/ZEXTH.
   bool isZExtFree(SDValue Val, EVT VT2) const override;
 
+  // Multiply by a constant: MULV takes a simm32, holds EX for the multiplier
+  // latency and has no short form; a shift and an add/sub may be cheaper.
+  bool decomposeMulByConstant(LLVMContext &Context, EVT VT,
+                              SDValue C) const override;
+  bool isMulAddWithConstProfitable(SDValue AddNode,
+                                   SDValue ConstNode) const override;
+
   SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
 
   void ReplaceNodeResults(SDNode *N, SmallVectorImpl<SDValue> &Results,
@@ -95,6 +102,8 @@ public:
                      SmallVectorImpl<SDValue> &InVals) const override;
 
 private:
+  const KlaussCPUSubtarget &Subtarget;
+
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerExternalSymbol(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;

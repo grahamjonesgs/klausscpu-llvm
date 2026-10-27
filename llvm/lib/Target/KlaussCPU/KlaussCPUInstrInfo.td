@@ -1052,9 +1052,14 @@ def XORI    : RV_imm<0x89900000, "xori"> { let Defs = []; }
 def SHLV    : ShiftImmN<0x50204000, "shlv">;
 def SHRV    : ShiftImmN<0x50604000, "shrv">;
 def SHRAV   : ShiftImmN<0x50A04000, "shrav">;
+// The immediate forms use the same EX-serialised multiplier and divider as
+// MULR/DIVR (pipeline_core.sv class A decode: U_MUL/U_DIV/U_MOD for LEN=10).
+let SchedRW = [WriteMul] in
 def MULV    : RV_imm<0xA8800000, "mulv">;
+let SchedRW = [WriteDiv] in {
 def DIVV    : RV_imm<0xA9800000, "divv">;
 def MODV    : RV_imm<0xAA800000, "modv">;
+}
 
 // Rotate by immediate (count = imm[5:0]); v2: single word.  Register-amount
 // forms are ROLR/RORR_R.
@@ -1165,6 +1170,14 @@ def : Pat<(i64 (add GPR:$rs, simm32_imm:$imm)), (ADDI GPR:$rs, simm32_imm:$imm)>
 def : Pat<(i64 (add GPR:$rs, uimm32_nonsimm32_imm:$imm)),
           (ADDV GPR:$rs, uimm32_nonsimm32_imm:$imm)>;
 def : Pat<(i64 (add GPR:$rs, neg_uimm32_nonsimm32_imm:$imm)),
+          (MINUSV GPR:$rs, (NegImm imm:$imm))>;
+// -255..-129: MINUSV of 129..255 compresses to the 1-word MINUSV_SH, where
+// ADDI's short form only reaches -128.  The value, Z, S and V are ADDI's; C
+// is the borrow instead of the carry, and nothing reads the C of an `add`.
+def neg_uimm8_nonsimm8_imm
+    : ImmLeaf<i64, [{return Imm >= -255 && Imm <= -129;}]>;
+let AddedComplexity = 1 in
+def : Pat<(i64 (add GPR:$rs, neg_uimm8_nonsimm8_imm:$imm)),
           (MINUSV GPR:$rs, (NegImm imm:$imm))>;
 
 // A frame index, or a frame index plus a constant (KlaussCPUDAGToDAGISel::
@@ -1935,6 +1948,13 @@ def : CompressPat<(CMPRV_I GPR:$rs, simm8_lsl0:$imm),
 foreach op = ["ADDV", "MINUSV", "ANDV", "ORV", "XORV"] in
 def : CompressPat<(!cast<KCInst64>(op) GPR:$rd, GPR:$rs, uimm8:$imm),
                   (!cast<KCInst32>(op # "_SH") GPR:$rd, GPR:$rs, uimm8:$imm)>;
+// 128..255 (after the simm8 patterns above): the zero-extending short twin
+// adds / masks with the same value and writes the same flags.
+foreach op = [["ADDI", "ADDV"], ["ANDI", "ANDV"], ["ORI", "ORV"],
+              ["XORI", "XORV"]] in
+def : CompressPat<(!cast<KCInst64>(op[0]) GPR:$rd, GPR:$rs, uimm8:$imm),
+                  (!cast<KCInst32>(op[1] # "_SH") GPR:$rd, GPR:$rs,
+                                                  uimm8:$imm)>;
 
 foreach ld = [["LDIDX8", "0"], ["LDIDX8_S", "0"], ["LDIDX16", "1"],
               ["LDIDX16_S", "1"], ["LDIDX32", "2"], ["LDIDX32_S", "2"],
