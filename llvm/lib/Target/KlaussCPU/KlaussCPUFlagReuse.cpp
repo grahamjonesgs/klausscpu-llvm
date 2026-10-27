@@ -3,8 +3,9 @@
 // KlaussCPU LLVM backend — A3a: arithmetic Z-flag reuse (post-RA peephole).
 //
 // A `(X == 0)` / `(X != 0)` branch whose X is produced by a flag-setting
-// arithmetic op does not need a compare: that op already set the hardware
-// Z flag to `(X == 0)`.  This pass rewrites the already-scheduled triple
+// op (arithmetic, a shift, a multiply, ...; setsZeroFlagAsResult) does not
+// need a compare: that op already set the hardware Z flag to `(X == 0)`.
+// This pass rewrites the already-scheduled sequence
 //
 //     <arith> Rd, ...        ; sets Z = (Rd == 0)  (and S/C/V)
 //     cmprv   Rd, 0          ; CMP is now SUB-without-writeback → re-derives
@@ -16,8 +17,8 @@
 //     <arith> Rd, ...
 //     jmpz/jmpnz  <target>   ; reads Z
 //
-// deleting the 8-byte CMPRV and its execute cycles from every matching loop
-// iteration.  On a fetch-bound core (fetch = 59-75% of cycles) that directly
+// deleting the CMPRV and its execute cycles from every matching loop
+// iteration.  Instructions that write no flag may sit between the three.  On a fetch-bound core (fetch = 59-75% of cycles) that directly
 // cuts fetched words per iteration.
 //
 // Why a post-RA MI peephole and not a DAG-level rewrite: dropping the compare
@@ -25,15 +26,15 @@
 // which is unschedulable whenever the arithmetic result also feeds a loop
 // back-edge (its CopyToReg has nowhere to land) — it deadlocks the DAG
 // scheduler.  Operating on the final, already-scheduled instruction stream
-// avoids that entirely, and adjacency in that stream is itself the proof that
-// no flag-clobbering instruction sits between the producer and the branch.
+// avoids that entirely; the modelled FLAGS defs show that no flag-clobbering
+// instruction sits between the producer and the branch.
 //
 // Flag model (post-unification — see FLAG_UNIFICATION_CHANGES / RTL fbb77d7):
 // there is ONE flags register Z/S/C/V.  Equality is Z for BOTH arithmetic ops
 // and CMP (CMP is now SUB without writeback), so JMPE and JMPZ read the very
 // same bit.  This pass canonicalises the branch to JMPZ/JMPNZ and drops the
-// compare; it fires only when the producer is an arithmetic op whose Z is
-// exactly `(result == 0)`.  (Before unification JMPE read a *separate*
+// compare; it fires only when the producer is an op whose Z is exactly
+// `(result == 0)`.  (Before unification JMPE read a *separate*
 // equal_flag that arithmetic did not set — which is why this was gated OFF;
 // that hazard no longer exists.)  Only Z matches: the arithmetic op's C and V
 // are not those of `CMP Rd, 0`, so the pass also requires that no instruction
@@ -72,16 +73,51 @@ static cl::opt<bool> EnableArithFlagReuse(
 
 namespace {
 
-// An arithmetic op sets Z = (result == 0).  Only opcodes whose result
-// register is exactly the value being tested for zero qualify.  Kept
-// deliberately narrow: every entry must be an op that (a) writes its result to
-// operand 0 and (b) is documented to set Z on that result.
+// An op that sets Z = (result == 0), with the result in operand 0.  The CPU
+// sets Z from the value it writes back (pipeline_core.sv: wb_zval, Z =
+// (wb_value == 0), for every flag writer but BTST) whenever the op's flag
+// mask has Z: ADD/SUB and their W and immediate forms, INC/DEC, the shifts
+// and rotates (F = 1 in every template), NEG/NOT/ABS/SEXTB/SEXTH/ZEXTB/
+// ZEXTH/POPCNT (F = 1), BEXTR and MUL.  Not DIV/MOD: a zero divisor writes
+// only V.  The runtime's test_flags checks Z == (rd == 0) for each of these
+// on the emulator or the board (gen_test_flags.py reads this list).
 static bool setsZeroFlagAsResult(unsigned Opc) {
   switch (Opc) {
-  case KlaussCPU::INCR:   // rd = rs1 + 1
-  case KlaussCPU::DECR:   // rd = rs1 - 1
-  case KlaussCPU::ADDR:   // rd = rs1 + rs2
-  case KlaussCPU::SUBR:   // rd = rs1 - rs2
+  case KlaussCPU::INCR:
+  case KlaussCPU::DECR:
+  case KlaussCPU::ADDR:
+  case KlaussCPU::SUBR:
+  case KlaussCPU::ADDW:
+  case KlaussCPU::SUBW:
+  case KlaussCPU::ADDI:
+  case KlaussCPU::ADDIW:
+  case KlaussCPU::ADDV:
+  case KlaussCPU::MINUSV:
+  case KlaussCPU::NEGR:
+  case KlaussCPU::NOTR:
+  case KlaussCPU::ABSR:
+  case KlaussCPU::SEXTB:
+  case KlaussCPU::SEXTH:
+  case KlaussCPU::ZEXTB:
+  case KlaussCPU::ZEXTH:
+  case KlaussCPU::POPCNT:
+  case KlaussCPU::SHLR:
+  case KlaussCPU::SHRR:
+  case KlaussCPU::SARR:
+  case KlaussCPU::ROLR:
+  case KlaussCPU::RORR_R:
+  case KlaussCPU::SHLV:
+  case KlaussCPU::SHRV:
+  case KlaussCPU::SHRAV:
+  case KlaussCPU::ROLV:
+  case KlaussCPU::RORV:
+  case KlaussCPU::BEXTR:
+  case KlaussCPU::MULR:
+  case KlaussCPU::MULUR:
+  case KlaussCPU::MULHR:
+  case KlaussCPU::MULHUR:
+  case KlaussCPU::MULV:
+  case KlaussCPU::MULW:
     return true;
   default:
     return false;

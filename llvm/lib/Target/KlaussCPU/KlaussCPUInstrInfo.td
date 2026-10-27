@@ -375,7 +375,7 @@ class RRR<bits<32> word0, dag outs, dag ins, string asmstr,
   let Inst{11-8} = rd;
   let Inst{7-4}  = rs1;
   let Inst{3-0}  = rs2;
-  let Defs       = [FLAGS];   // arith/cmp/shift/mul/div set flags (bitwise over-marked; safe)
+  let Defs       = [FLAGS];   // see "Which instructions write FLAGS"
   let SchedRW    = [WriteALU, WriteFlags];
 }
 
@@ -451,7 +451,7 @@ class R_inplace<bits<32> word0, string asmstr, list<dag> pat = []>
   bits<4> rd;
   let Inst{11-8}  = rd;
   let Constraints = "$rd = $rs1";
-  let Defs        = [FLAGS];   // inc/dec/neg/shift-by-1/sext set flags (over-marked; safe)
+  let Defs        = [FLAGS];   // see "Which instructions write FLAGS"
   let SchedRW     = [WriteALU, WriteFlags];
 }
 
@@ -467,7 +467,7 @@ class R_unary<bits<32> word0, string mnem, list<dag> pat = []>
   bits<4> rs1;
   let Inst{11-8} = rd;
   let Inst{7-4}  = rs1;
-  let Defs       = [FLAGS];   // inc/dec/neg/sext/... set flags (over-marked; safe)
+  let Defs       = [FLAGS];   // see "Which instructions write FLAGS"
   let SchedRW    = [WriteALU, WriteFlags];
 }
 
@@ -514,7 +514,7 @@ class ShiftImmN<bits<32> word0, string mnem, list<dag> pat = []>
   let Inst{20-15} = imm;
   let Inst{11-8}  = rd;
   let Inst{7-4}   = rs;
-  let Defs        = [FLAGS];   // shlv/shrv/rolv/rorv set flags
+  let Defs        = [FLAGS];   // see "Which instructions write FLAGS"
   let SchedRW     = [WriteALU, WriteFlags];
 }
 
@@ -563,7 +563,7 @@ class RV_imm<bits<32> word0, string mnem, Operand immop = simm32>
   let Inst{63-32} = imm;
   let Inst{11-8}  = rd;
   let Inst{7-4}   = rs;
-  let Defs        = [FLAGS];   // addv/minusv set flags (bitwise-imm over-marked; safe)
+  let Defs        = [FLAGS];   // see "Which instructions write FLAGS"
   let SchedRW     = [WriteALU, WriteFlags];
 }
 
@@ -712,6 +712,32 @@ class V64_imm<bits<32> word0, string asmstr>
 }
 
 //===----------------------------------------------------------------------===//
+// Which instructions write FLAGS
+//
+// The register formats default to Defs = [FLAGS], the safe side: a missing
+// def is a miscompile (the schedulers, FlagReuse and FuseCmpBr move or
+// delete compares across instructions that do not define FLAGS), a spare
+// one only costs freedom.  The instructions whose decode sets no flag write
+// mask (pipeline_core.sv f_decode_raw `d.fmask`, committed at WB through
+// `wb_fmask`) clear it, and the FLAGS half of their SchedRW, in a
+// `let Defs = []<Register>, SchedRW = [WriteALU]` block:
+//   - AND/OR/XOR in either form, MIN/MAX(U): class 1/2 ops with [21] = 0
+//     (`{4'd4..10, 1'b0}`); the boolean compares (class 3 B = 1, U_BOOL);
+//   - the bit set/clear/toggle ops and BTSTRR, and the shift-by-one
+//     SHLR1/SHRR1/SHRAR: class 4 with F [14] = 0;
+//   - BSWAP/BITREV/CLZ/CTZ/SEXTW/ZEXTW and GETF (SETFR): class 5 with
+//     F [19] = 0.
+// What the others write: ADD/SUB/ADC/SBC/INC/DEC/CMP and the W forms Z S C
+// V; a shift or rotate (F = 1 in every template) Z, a rotate by an embedded
+// 1 Z C (U_ROT1); BTST/BEXTR/NEG/NOT/ZEXTB/ZEXTH/POPCNT Z; SEXTB/SEXTH Z S;
+// ABS Z V; MUL Z S V; DIV/MOD Z V (V only for a zero divisor); IRET all
+// four.  Z is (result == 0) for all of them but BTST (Z = ~bit), and DIV/MOD
+// by zero leaves it.  test_flags in the runtime repo (baremetal/programs,
+// generated from this file by gen_test_flags.py) checks every instruction
+// on the emulator or the board against these defs.
+//===----------------------------------------------------------------------===//
+
+//===----------------------------------------------------------------------===//
 // ALU — 3-register (RRR)
 //===----------------------------------------------------------------------===//
 
@@ -723,7 +749,8 @@ def SUBR   : RRR<0x44600000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "subr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (sub GPR:$rs1, GPR:$rs2))]>;
 
-// Bitwise
+// Bitwise (no flags)
+let Defs = []<Register>, SchedRW = [WriteALU] in {
 def ANDR   : RRR<0x45000000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "andr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (and GPR:$rs1, GPR:$rs2))]>;
@@ -733,6 +760,7 @@ def ORR    : RRR<0x45400000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
 def XORR   : RRR<0x45800000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "xorr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (xor GPR:$rs1, GPR:$rs2))]>;
+}
 
 // ISA v3 D3: 32-bit "W" ops — the 64-bit op with its result sign-extended
 // from bit 31 (RV64-style: C `int` arithmetic stays sign-extended without a
@@ -793,7 +821,9 @@ def RORR_R : RRR<0x51004000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "rorr\t$rd, $rs1, $rs2">;
 }
 
-// Compare-and-materialise: rd = (rs1 cond rs2) ? 1 : 0
+// Compare-and-materialise: rd = (rs1 cond rs2) ? 1 : 0, flags untouched
+// (class 3 B = 1).  Min / max write no flags either.
+let Defs = []<Register>, SchedRW = [WriteALU] in {
 def CMPEQR  : RRR<0x4C200000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                  "cmpeqr\t$rd, $rs1, $rs2",
                  [(set GPR:$rd, (i64 (setcc GPR:$rs1, GPR:$rs2, SETEQ)))]>;
@@ -825,7 +855,6 @@ def CMPUGER : RRR<0x4DE00000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                  "cmpuger\t$rd, $rs1, $rs2",
                  [(set GPR:$rd, (i64 (setcc GPR:$rs1, GPR:$rs2, SETUGE)))]>;
 
-// Min / Max
 def MINR   : RRR<0x45C00000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "minr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (smin GPR:$rs1, GPR:$rs2))]>;
@@ -838,6 +867,7 @@ def MINUR  : RRR<0x46400000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
 def MAXUR  : RRR<0x46800000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "maxur\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (umax GPR:$rs1, GPR:$rs2))]>;
+}
 
 //===----------------------------------------------------------------------===//
 // ALU — 2-register (RR)
@@ -907,12 +937,17 @@ def NEGR    : R_unary<0x54480000, "negr",
                 [(set GPR:$rd, (ineg GPR:$rs1))]>;
 def ABSR    : R_unary<0x54C80000, "absr",
                 [(set GPR:$rd, (abs GPR:$rs1))]>;
+// Shift by 1 with F = 0: no flags (SHLV/SHRV by 1 write Z).
+let Defs = []<Register>, SchedRW = [WriteALU] in {
 def SHLR1   : R_unary<0x50208000, "shlr1">;
 def SHRR1   : R_unary<0x50608000, "shrr1">;
+}
 def NOTR    : R_unary<0x54880000, "notr",
                 [(set GPR:$rd, (not GPR:$rs1))]>;
 def POPCNT  : R_unary<0x56080000, "popcnt",
                 [(set GPR:$rd, (ctpop GPR:$rs1))]>;
+// F = 0: no flags.
+let Defs = []<Register>, SchedRW = [WriteALU] in {
 def CLZ     : R_unary<0x56400000, "clz",
                 [(set GPR:$rd, (ctlz GPR:$rs1))]>;
 def CTZ     : R_unary<0x56800000, "ctz",
@@ -921,6 +956,7 @@ def BITREV  : R_unary<0x55C00000, "bitrev",
                 [(set GPR:$rd, (bitreverse GPR:$rs1))]>;
 def BSWAP_R : R_unary<0x55800000, "bswap",
                 [(set GPR:$rd, (bswap GPR:$rs1))]>;
+}
 
 // Sign-extend to 64 bits (arch doc §7.2; hardware extends to 64)
 def SEXTB   : R_unary<0x55080000, "sextb",
@@ -932,10 +968,13 @@ def SEXTH   : R_unary<0x55180000, "sexth",
 def ZEXTB   : R_unary<0x55480000, "zextb">;
 def ZEXTH   : R_unary<0x55580000, "zexth">;
 
-// Sign/zero-extend 32→64 bits (hardware fixed April 2026)
+// Sign/zero-extend 32→64 bits (hardware fixed April 2026); F = 0, unlike
+// the byte and halfword forms: no flags.
+let Defs = []<Register>, SchedRW = [WriteALU] in {
 def SEXTW   : R_unary<0x55200000, "sextw",
                 [(set GPR:$rd, (sext_inreg GPR:$rs1, i32))]>;
 def ZEXTW   : R_unary<0x55600000, "zextw">;
+}
 
 //===----------------------------------------------------------------------===//
 // Pseudo-instructions (not emitted to the binary; eliminated by PEI)
@@ -1061,16 +1100,18 @@ def SETR64  : V64_ld<0xCBC00000, "setr64\t$rd, $lo, $hi">;
 // imm32 of ADDV/MINUSV/ANDV/ORV/XORV and sign-extends the MULV/DIVV/MODV one.
 def ADDV    : RV_imm<0x88200000, "addv", uimm32>;
 def MINUSV  : RV_imm<0x88600000, "minusv", uimm32>;
+// The CPU writes no flags for AND/OR/XOR (no fmask).
+let Defs = []<Register>, SchedRW = [WriteALU] in {
 def ANDV    : RV_imm<0x89000000, "andv", uimm32>;
 def ORV     : RV_imm<0x89400000, "orv", uimm32>;
 def XORV    : RV_imm<0x89800000, "xorv", uimm32>;
 // The same bitwise ops with a sign-extended imm32 (SGN=1: pipeline_core.sv
 // f_decode_raw class 2 `{4'd4..6,1'b0}`, ex_b): a mask with the high 32 bits
-// set, e.g. the `& -8` of an alignment round-up.  The CPU writes no flags for
-// AND/OR/XOR (no fmask).
-def ANDI    : RV_imm<0x89100000, "andi"> { let Defs = []; }
-def ORI     : RV_imm<0x89500000, "ori">  { let Defs = []; }
-def XORI    : RV_imm<0x89900000, "xori"> { let Defs = []; }
+// set, e.g. the `& -8` of an alignment round-up.
+def ANDI    : RV_imm<0x89100000, "andi">;
+def ORI     : RV_imm<0x89500000, "ori">;
+def XORI    : RV_imm<0x89900000, "xori">;
+}
 // Shift by immediate (count = imm[5:0]); v2: single word, count embedded.
 def SHLV    : ShiftImmN<0x50204000, "shlv">;
 def SHRV    : ShiftImmN<0x50604000, "shrv">;
@@ -1378,11 +1419,11 @@ def : Pat<(add GPR:$rs, -1), (DECR GPR:$rs)>;
 
 // Shift-by-1 needs no special case under v2: SHLV/SHRV with an embedded count
 // are single-word (they were 2-word in v1, which is the only reason SHLR1/SHRR1
-// were preferred then).  `(shl x, 1)` / `(srl x, 1)` now fold into the general
-// SHLV/SHRV patterns above; the sole delta from SHLR1/SHRR1 is that SHLV/SHRV
-// also set the Z flag, which LLVM does not model.  This mirrors rotate-by-1,
-// which already lowers through ROLV/RORV — byte-identical to ROLR1/RORR1 (and
-// additionally updates carry).  SHLR1/SHRR1 remain as assembler-only mnemonics.
+// were preferred then).  `(shl x, 1)` / `(srl x, 1)` fold into the general
+// SHLV/SHRV patterns above; the delta from SHLR1/SHRR1 is that SHLV/SHRV
+// also set the Z flag (F = 1), so they define FLAGS where SHLR1/SHRR1 do not.
+// Rotate-by-1 lowers through ROLV/RORV, byte-identical to ROLR1/RORR1 (Z and
+// C).  SHLR1/SHRR1 remain as assembler-only mnemonics.
 
 // 64-bit load from a GPR base with no offset.
 def : Pat<(i64 (load (i64 GPR:$base))),
@@ -1566,6 +1607,8 @@ let isReturn = 1, isTerminator = 1, isBarrier = 1 in
 def RET_I   : I0<0x65800000, (outs), (ins), "ret", [(KlaussCPURetGlue)]>;
 def NOP_I   : I0<0x6C000000, (outs), (ins), "nop">;
 def HALT_I  : I0<0x6C010000, (outs), (ins), "halt">;
+// IRET restores the flags the interrupt saved (all four).
+let Defs = [FLAGS] in
 def IRET_I  : I0<0x65C00000, (outs), (ins), "iret">;
 
 // TRAP — software trap (v2 class B, OP 4: 0x6C040000).  The core parks
@@ -1596,27 +1639,38 @@ def WAIT_I  : I0<0x6C020000, (outs), (ins), "wait">;
 // ── RRR (rd, rs1, rs2) ─────────────────────────────────────────────────────
 def ADDC   : RRR<0x44A00000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "addc\t$rd, $rs1, $rs2"> { let Uses = [FLAGS]; } // reads carry-in
 def SUBC   : RRR<0x44E00000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "subc\t$rd, $rs1, $rs2"> { let Uses = [FLAGS]; } // reads borrow-in
+// The bit ops by register position have F = 0: no flags.
+let Defs = []<Register>, SchedRW = [WriteALU] in {
 def BSETRR : RRR<0x52000000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "bsetrr\t$rd, $rs1, $rs2">;
 def BCLRRR : RRR<0x52400000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "bclrrr\t$rd, $rs1, $rs2">;
 def BTGLRR : RRR<0x52800000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "btglrr\t$rd, $rs1, $rs2">;
 def BTSTRR : RRR<0x52C00000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2), "btstrr\t$rd, $rs1, $rs2">;
+}
 
 // ── R in-place (rd = f(rd); 2-address) ─────────────────────────────────────
+// GETF: rd = {Z, Z, C, V} << 60.  It reads the flags and, with F = 0,
+// writes none.
+let Defs = []<Register>, Uses = [FLAGS], SchedRW = [WriteALU] in
 def SETFR : R_inplace<0x57000000, "setfr\t$rd">;
+let Defs = []<Register>, SchedRW = [WriteALU] in {
 // Same encoding as SHLR1, which is the spelling the disassembler prints.
 let isAsmParserOnly = 1 in
 def SHLAR : R_unary<0x50208000, "shlar">;
 def SHRAR : R_unary<0x50A08000, "shrar">;
+}
 def ROLR1 : R_unary<0x50E0C000, "rolr1">;
 def RORR1 : R_unary<0x5120C000, "rorr1">;
 def ROLCR : R_unary<0x5160C000, "rolcr"> { let Uses = [FLAGS]; } // rotate through carry
 def RORCR : R_unary<0x51A0C000, "rorcr"> { let Uses = [FLAGS]; } // rotate through carry
 
 // ── Bit ops by embedded position N, bit-field extract / deposit ────────────
-// Bit set/clear/toggle by embedded position N — v2: single word.
+// Bit set/clear/toggle by embedded position N — v2: single word; F = 0,
+// no flags.
+let Defs = []<Register>, SchedRW = [WriteALU] in {
 def BSET  : ShiftImmN<0x52200000, "bset">;
 def BCLR  : ShiftImmN<0x52600000, "bclr">;
 def BTGL  : ShiftImmN<0x52A00000, "btgl">;
+}
 // Bit-field extract / deposit: 2 words, the field descriptor in imm32
 // (start [4:0], len [12:8]; 32-bit fields, result's upper half zero).
 //   BEXTR rd, rs1, imm       rd = (rs1 >> start) & mask(len)   (sets Z)
@@ -1749,6 +1803,9 @@ def JMPO  : Vbr_cond<0xA0180000, "jmpo\t$target">;
 def JMPNO : Vbr_cond<0xA01C0000, "jmpno\t$target">;
 
 // ── Vcall (conditional calls) ───────────────────────────────────────────────
+// They read the flags; taken, they clobber what a call does.
+let Uses = [SP, FLAGS],
+    Defs = [R0, R1, R2, R3, R8, R9, R10, R11, R12, R13, R14, FLAGS] in {
 def CALLZ  : Vcall<0xA2080000, "callz\t$target">;
 def CALLNZ : Vcall<0xA20C0000, "callnz\t$target">;
 def CALLE  : Vcall<0xA2480000, "calle\t$target">;
@@ -1757,6 +1814,7 @@ def CALLC  : Vcall<0xA2100000, "callc\t$target">;
 def CALLNC : Vcall<0xA2140000, "callnc\t$target">;
 def CALLO  : Vcall<0xA2180000, "callo\t$target">;
 def CALLNO : Vcall<0xA21C0000, "callno\t$target">;
+}
 
 // ── V64 (push 64-bit immediate; 12-byte) ────────────────────────────────────
 def PUSHV64 : V64_imm<0xE4400000, "pushv64\t$lo, $hi"> { let mayStore = 1; }
@@ -1991,12 +2049,12 @@ def SETRU_SH   : ShortRdImm<SETRU, "setru\t$rd, $imm", uimm8>;
 def ANDI_SH    : ShortRdRsImm<ANDI, "andi\t$rd, $rs, $imm">;
 def ORI_SH     : ShortRdRsImm<ORI, "ori\t$rd, $rs, $imm">;
 def XORI_SH    : ShortRdRsImm<XORI, "xori\t$rd, $rs, $imm">;
-let Defs = [FLAGS] in {
-def ADDV_SH    : ShortRdRsImm<ADDV, "addv\t$rd, $rs, $imm", uimm8>;
-def MINUSV_SH  : ShortRdRsImm<MINUSV, "minusv\t$rd, $rs, $imm", uimm8>;
 def ANDV_SH    : ShortRdRsImm<ANDV, "andv\t$rd, $rs, $imm", uimm8>;
 def ORV_SH     : ShortRdRsImm<ORV, "orv\t$rd, $rs, $imm", uimm8>;
 def XORV_SH    : ShortRdRsImm<XORV, "xorv\t$rd, $rs, $imm", uimm8>;
+let Defs = [FLAGS] in {
+def ADDV_SH    : ShortRdRsImm<ADDV, "addv\t$rd, $rs, $imm", uimm8>;
+def MINUSV_SH  : ShortRdRsImm<MINUSV, "minusv\t$rd, $rs, $imm", uimm8>;
 def ADDI_SH    : ShortRdRsImm<ADDI, "addi\t$rd, $rs, $imm">;
 def CMPRV_SH   : ShortRsImm<CMPRV_I, "cmprv\t$rs, $imm">;
 }

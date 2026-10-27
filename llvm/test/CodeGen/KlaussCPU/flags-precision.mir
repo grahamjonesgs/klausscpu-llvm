@@ -1,0 +1,685 @@
+# Precise FLAGS defs (KlaussCPUInstrInfo.td, "Which instructions write FLAGS").
+#
+# * The MIR parser rejects an instruction whose implicit operands miss one of
+#   its description's, so the instructions below without `implicit-def $flags`
+#   pin that they do not define FLAGS (the CPU writes no flag for them:
+#   pipeline_core.sv f_decode_raw, an empty fmask), and SETFR's
+#   `implicit $flags` that GETF reads them.
+# * FlagReuse takes the Z of an `ADDR` across all of them (they used to be
+#   FLAGS writers, which ended its search), and the Z of every op whose Z is
+#   (result == 0); not that of DIV/MOD (a zero divisor writes only V), and not
+#   across a FLAGS writer or from an op that writes no flag.
+# * FuseCmpBr fuses a compare with a branch across instructions that write no
+#   flag, but not across one that reads them.
+#
+# RUN: llc -march=klausscpu -run-pass=klausscpu-flag-reuse -verify-machineinstrs \
+# RUN:   %s -o - | FileCheck %s --check-prefix=REUSE
+# RUN: llc -march=klausscpu -run-pass=klausscpu-cmp-br-fuse -verify-machineinstrs \
+# RUN:   %s -o - | FileCheck %s --check-prefix=FUSE
+
+# REUSE-LABEL: name: reuse_across_no_flag_ops
+# REUSE:       $r12 = ADDR $r0, $r1, implicit-def $flags
+# REUSE-NEXT:  $r3 = ANDR $r0, $r1
+# REUSE-NEXT:  $r3 = ORR $r3, $r1
+# REUSE-NEXT:  $r3 = XORR $r3, $r1
+# REUSE-NEXT:  $r3 = MINR $r3, $r1
+# REUSE-NEXT:  $r3 = MAXR $r3, $r1
+# REUSE-NEXT:  $r3 = MINUR $r3, $r1
+# REUSE-NEXT:  $r3 = MAXUR $r3, $r1
+# REUSE-NEXT:  $r3 = ANDV $r3, 255
+# REUSE-NEXT:  $r3 = ORV $r3, 256
+# REUSE-NEXT:  $r3 = XORV $r3, 7
+# REUSE-NEXT:  $r3 = ANDI $r3, -8
+# REUSE-NEXT:  $r3 = ORI $r3, -16
+# REUSE-NEXT:  $r3 = XORI $r3, -1000
+# REUSE-NEXT:  $r3 = CMPEQR $r3, $r1
+# REUSE-NEXT:  $r3 = CMPNER $r3, $r1
+# REUSE-NEXT:  $r3 = CMPLTR $r3, $r1
+# REUSE-NEXT:  $r3 = CMPGER $r3, $r1
+# REUSE-NEXT:  $r3 = CMPLER $r3, $r1
+# REUSE-NEXT:  $r3 = CMPGTR $r3, $r1
+# REUSE-NEXT:  $r3 = CMPULTR $r3, $r1
+# REUSE-NEXT:  $r3 = CMPUGER $r3, $r1
+# REUSE-NEXT:  $r3 = CMPULER $r3, $r1
+# REUSE-NEXT:  $r3 = CMPUGTR $r3, $r1
+# REUSE-NEXT:  $r3 = CMPEQV $r3, 5
+# REUSE-NEXT:  $r3 = CMPLTRW $r3, $r1
+# REUSE-NEXT:  $r3 = CLZ $r3
+# REUSE-NEXT:  $r3 = CTZ $r3
+# REUSE-NEXT:  $r3 = BITREV $r3
+# REUSE-NEXT:  $r3 = BSWAP_R $r3
+# REUSE-NEXT:  $r3 = SEXTW $r3
+# REUSE-NEXT:  $r3 = ZEXTW $r3
+# REUSE-NEXT:  $r3 = SHLR1 $r3
+# REUSE-NEXT:  $r3 = SHRR1 $r3
+# REUSE-NEXT:  $r3 = SHRAR $r3
+# REUSE-NEXT:  $r3 = BSET $r3, 5
+# REUSE-NEXT:  $r3 = BCLR $r3, 6
+# REUSE-NEXT:  $r3 = BTGL $r3, 7
+# REUSE-NEXT:  $r3 = BSETRR $r3, $r1
+# REUSE-NEXT:  $r3 = BCLRRR $r3, $r1
+# REUSE-NEXT:  $r3 = BTGLRR $r3, $r1
+# REUSE-NEXT:  $r3 = BTSTRR $r3, $r1
+# REUSE-NEXT:  $r3 = BDEP $r3, $r1, 2052
+# REUSE-NEXT:  $r3 = COPY_R $r1
+# REUSE-NEXT:  $r3 = LDIDX64 $r2, 8
+# REUSE-NEXT:  STIDX64 $r3, $r2, 16
+# REUSE-NEXT:  $r3 = SETR 5
+# REUSE-NEXT:  $r3 = SETR64 1, 2
+# REUSE-NEXT:  JMPZ %bb.2, implicit killed $flags
+---
+name:            reuse_across_no_flag_ops
+tracksRegLiveness: true
+liveins:
+  - { reg: '$r0' }
+  - { reg: '$r1' }
+  - { reg: '$r2' }
+body:             |
+  bb.0:
+    successors: %bb.2, %bb.1
+    liveins: $r0, $r1, $r2
+
+    $r12 = ADDR $r0, $r1, implicit-def dead $flags
+    $r3 = ANDR $r0, $r1
+    $r3 = ORR $r3, $r1
+    $r3 = XORR $r3, $r1
+    $r3 = MINR $r3, $r1
+    $r3 = MAXR $r3, $r1
+    $r3 = MINUR $r3, $r1
+    $r3 = MAXUR $r3, $r1
+    $r3 = ANDV $r3, 255
+    $r3 = ORV $r3, 256
+    $r3 = XORV $r3, 7
+    $r3 = ANDI $r3, -8
+    $r3 = ORI $r3, -16
+    $r3 = XORI $r3, -1000
+    $r3 = CMPEQR $r3, $r1
+    $r3 = CMPNER $r3, $r1
+    $r3 = CMPLTR $r3, $r1
+    $r3 = CMPGER $r3, $r1
+    $r3 = CMPLER $r3, $r1
+    $r3 = CMPGTR $r3, $r1
+    $r3 = CMPULTR $r3, $r1
+    $r3 = CMPUGER $r3, $r1
+    $r3 = CMPULER $r3, $r1
+    $r3 = CMPUGTR $r3, $r1
+    $r3 = CMPEQV $r3, 5
+    $r3 = CMPLTRW $r3, $r1
+    $r3 = CLZ $r3
+    $r3 = CTZ $r3
+    $r3 = BITREV $r3
+    $r3 = BSWAP_R $r3
+    $r3 = SEXTW $r3
+    $r3 = ZEXTW $r3
+    $r3 = SHLR1 $r3
+    $r3 = SHRR1 $r3
+    $r3 = SHRAR $r3
+    $r3 = BSET $r3, 5
+    $r3 = BCLR $r3, 6
+    $r3 = BTGL $r3, 7
+    $r3 = BSETRR $r3, $r1
+    $r3 = BCLRRR $r3, $r1
+    $r3 = BTGLRR $r3, $r1
+    $r3 = BTSTRR $r3, $r1
+    $r3 = BDEP $r3, $r1, 2052
+    $r3 = COPY_R $r1
+    $r3 = LDIDX64 $r2, 8
+    STIDX64 $r3, $r2, 16
+    $r3 = SETR 5
+    $r3 = SETR64 1, 2
+    CMPRV_I $r12, 0, implicit-def $flags
+    JMPE %bb.2, implicit killed $flags
+
+  bb.1:
+    liveins: $r3
+
+    $r12 = COPY_R killed $r3
+    RET_I implicit killed $r12
+
+  bb.2:
+    liveins: $r12
+
+    RET_I implicit killed $r12
+
+# REUSE-LABEL: name: z_producers
+# REUSE:       $r12 = ADDI $r0, 100, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = ADDV $r0, 3000000000, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = MINUSV $r0, 200, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = ADDW $r0, $r1, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = SUBW $r0, $r1, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = ADDIW $r0, -1, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = NEGR $r0, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = NOTR $r0, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = ABSR $r0, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = SEXTB $r0, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = SEXTH $r0, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = ZEXTB $r0, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = ZEXTH $r0, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = POPCNT $r0, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = SHLR $r0, $r1, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = SHRR $r0, $r1, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = SARR $r0, $r1, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = ROLR $r0, $r1, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = RORR_R $r0, $r1, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = SHLV $r0, 3, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = SHRV $r0, 3, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = SHRAV $r0, 3, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = ROLV $r0, 1, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = RORV $r0, 9, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = BEXTR $r0, 2052, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = MULR $r0, $r1, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = MULUR $r0, $r1, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = MULHR $r0, $r1, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = MULHUR $r0, $r1, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = MULV $r0, -3, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE:       $r12 = MULW $r0, $r1, implicit-def $flags
+# REUSE-NEXT:  JMPZ %bb.32, implicit killed $flags
+# REUSE-NOT:   CMPRV
+---
+name:            z_producers
+tracksRegLiveness: true
+liveins:
+  - { reg: '$r0' }
+  - { reg: '$r1' }
+body:             |
+  bb.0:
+    successors: %bb.32, %bb.1
+    liveins: $r0, $r1
+
+    $r12 = ADDI $r0, 100, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.1:
+    successors: %bb.32, %bb.2
+    liveins: $r0, $r1
+
+    $r12 = ADDV $r0, 3000000000, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.2:
+    successors: %bb.32, %bb.3
+    liveins: $r0, $r1
+
+    $r12 = MINUSV $r0, 200, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.3:
+    successors: %bb.32, %bb.4
+    liveins: $r0, $r1
+
+    $r12 = ADDW $r0, $r1, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.4:
+    successors: %bb.32, %bb.5
+    liveins: $r0, $r1
+
+    $r12 = SUBW $r0, $r1, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.5:
+    successors: %bb.32, %bb.6
+    liveins: $r0, $r1
+
+    $r12 = ADDIW $r0, -1, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.6:
+    successors: %bb.32, %bb.7
+    liveins: $r0, $r1
+
+    $r12 = NEGR $r0, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.7:
+    successors: %bb.32, %bb.8
+    liveins: $r0, $r1
+
+    $r12 = NOTR $r0, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.8:
+    successors: %bb.32, %bb.9
+    liveins: $r0, $r1
+
+    $r12 = ABSR $r0, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.9:
+    successors: %bb.32, %bb.10
+    liveins: $r0, $r1
+
+    $r12 = SEXTB $r0, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.10:
+    successors: %bb.32, %bb.11
+    liveins: $r0, $r1
+
+    $r12 = SEXTH $r0, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.11:
+    successors: %bb.32, %bb.12
+    liveins: $r0, $r1
+
+    $r12 = ZEXTB $r0, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.12:
+    successors: %bb.32, %bb.13
+    liveins: $r0, $r1
+
+    $r12 = ZEXTH $r0, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.13:
+    successors: %bb.32, %bb.14
+    liveins: $r0, $r1
+
+    $r12 = POPCNT $r0, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.14:
+    successors: %bb.32, %bb.15
+    liveins: $r0, $r1
+
+    $r12 = SHLR $r0, $r1, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.15:
+    successors: %bb.32, %bb.16
+    liveins: $r0, $r1
+
+    $r12 = SHRR $r0, $r1, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.16:
+    successors: %bb.32, %bb.17
+    liveins: $r0, $r1
+
+    $r12 = SARR $r0, $r1, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.17:
+    successors: %bb.32, %bb.18
+    liveins: $r0, $r1
+
+    $r12 = ROLR $r0, $r1, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.18:
+    successors: %bb.32, %bb.19
+    liveins: $r0, $r1
+
+    $r12 = RORR_R $r0, $r1, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.19:
+    successors: %bb.32, %bb.20
+    liveins: $r0, $r1
+
+    $r12 = SHLV $r0, 3, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.20:
+    successors: %bb.32, %bb.21
+    liveins: $r0, $r1
+
+    $r12 = SHRV $r0, 3, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.21:
+    successors: %bb.32, %bb.22
+    liveins: $r0, $r1
+
+    $r12 = SHRAV $r0, 3, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.22:
+    successors: %bb.32, %bb.23
+    liveins: $r0, $r1
+
+    $r12 = ROLV $r0, 1, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.23:
+    successors: %bb.32, %bb.24
+    liveins: $r0, $r1
+
+    $r12 = RORV $r0, 9, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.24:
+    successors: %bb.32, %bb.25
+    liveins: $r0, $r1
+
+    $r12 = BEXTR $r0, 2052, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.25:
+    successors: %bb.32, %bb.26
+    liveins: $r0, $r1
+
+    $r12 = MULR $r0, $r1, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.26:
+    successors: %bb.32, %bb.27
+    liveins: $r0, $r1
+
+    $r12 = MULUR $r0, $r1, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.27:
+    successors: %bb.32, %bb.28
+    liveins: $r0, $r1
+
+    $r12 = MULHR $r0, $r1, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.28:
+    successors: %bb.32, %bb.29
+    liveins: $r0, $r1
+
+    $r12 = MULHUR $r0, $r1, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.29:
+    successors: %bb.32, %bb.30
+    liveins: $r0, $r1
+
+    $r12 = MULV $r0, -3, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.30:
+    successors: %bb.32, %bb.31
+    liveins: $r0, $r1
+
+    $r12 = MULW $r0, $r1, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.32, implicit killed $flags
+
+  bb.31:
+    liveins: $r0
+
+    $r12 = COPY_R killed $r0
+    RET_I implicit killed $r12
+
+  bb.32:
+    liveins: $r1
+
+    $r12 = COPY_R killed $r1
+    RET_I implicit killed $r12
+
+# REUSE-LABEL: name: no_reuse
+# REUSE:       $r12 = DIVR $r0, $r1, implicit-def dead $flags
+# REUSE-NEXT:  CMPRV_I killed $r12, 0, implicit-def $flags
+# REUSE-NEXT:  JMPE %bb.12, implicit killed $flags
+# REUSE:       $r12 = DIVUR $r0, $r1, implicit-def dead $flags
+# REUSE-NEXT:  CMPRV_I killed $r12, 0, implicit-def $flags
+# REUSE-NEXT:  JMPE %bb.12, implicit killed $flags
+# REUSE:       $r12 = MODR $r0, $r1, implicit-def dead $flags
+# REUSE-NEXT:  CMPRV_I killed $r12, 0, implicit-def $flags
+# REUSE-NEXT:  JMPE %bb.12, implicit killed $flags
+# REUSE:       $r12 = MODUR $r0, $r1, implicit-def dead $flags
+# REUSE-NEXT:  CMPRV_I killed $r12, 0, implicit-def $flags
+# REUSE-NEXT:  JMPE %bb.12, implicit killed $flags
+# REUSE:       $r12 = DIVV $r0, 7, implicit-def dead $flags
+# REUSE-NEXT:  CMPRV_I killed $r12, 0, implicit-def $flags
+# REUSE-NEXT:  JMPE %bb.12, implicit killed $flags
+# REUSE:       $r12 = MODV $r0, 7, implicit-def dead $flags
+# REUSE-NEXT:  CMPRV_I killed $r12, 0, implicit-def $flags
+# REUSE-NEXT:  JMPE %bb.12, implicit killed $flags
+# REUSE:       BTST $r0, 3, implicit-def dead $flags
+# REUSE-NEXT:  CMPRV_I killed $r12, 0, implicit-def $flags
+# REUSE-NEXT:  JMPE %bb.12, implicit killed $flags
+# REUSE:       $r12 = SHLR1 $r0
+# REUSE-NEXT:  CMPRV_I killed $r12, 0, implicit-def $flags
+# REUSE-NEXT:  JMPE %bb.12, implicit killed $flags
+# REUSE:       $r12 = ZEXTW $r0
+# REUSE-NEXT:  CMPRV_I killed $r12, 0, implicit-def $flags
+# REUSE-NEXT:  JMPE %bb.12, implicit killed $flags
+# REUSE:       $r12 = CLZ $r0
+# REUSE-NEXT:  CMPRV_I killed $r12, 0, implicit-def $flags
+# REUSE-NEXT:  JMPE %bb.12, implicit killed $flags
+# REUSE:       $r12 = ANDR $r0, $r1
+# REUSE-NEXT:  CMPRV_I killed $r12, 0, implicit-def $flags
+# REUSE-NEXT:  JMPE %bb.12, implicit killed $flags
+---
+name:            no_reuse
+tracksRegLiveness: true
+liveins:
+  - { reg: '$r0' }
+  - { reg: '$r1' }
+body:             |
+  bb.0:
+    successors: %bb.12, %bb.1
+    liveins: $r0, $r1
+
+    $r12 = DIVR $r0, $r1, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.12, implicit killed $flags
+
+  bb.1:
+    successors: %bb.12, %bb.2
+    liveins: $r0, $r1
+
+    $r12 = DIVUR $r0, $r1, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.12, implicit killed $flags
+
+  bb.2:
+    successors: %bb.12, %bb.3
+    liveins: $r0, $r1
+
+    $r12 = MODR $r0, $r1, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.12, implicit killed $flags
+
+  bb.3:
+    successors: %bb.12, %bb.4
+    liveins: $r0, $r1
+
+    $r12 = MODUR $r0, $r1, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.12, implicit killed $flags
+
+  bb.4:
+    successors: %bb.12, %bb.5
+    liveins: $r0, $r1
+
+    $r12 = DIVV $r0, 7, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.12, implicit killed $flags
+
+  bb.5:
+    successors: %bb.12, %bb.6
+    liveins: $r0, $r1
+
+    $r12 = MODV $r0, 7, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.12, implicit killed $flags
+
+  bb.6:
+    successors: %bb.12, %bb.7
+    liveins: $r0, $r1
+
+    $r12 = ADDR $r0, $r1, implicit-def dead $flags
+    BTST $r0, 3, implicit-def dead $flags
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.12, implicit killed $flags
+
+  bb.7:
+    successors: %bb.12, %bb.8
+    liveins: $r0, $r1
+
+    $r12 = SHLR1 $r0
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.12, implicit killed $flags
+
+  bb.8:
+    successors: %bb.12, %bb.9
+    liveins: $r0, $r1
+
+    $r12 = ZEXTW $r0
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.12, implicit killed $flags
+
+  bb.9:
+    successors: %bb.12, %bb.10
+    liveins: $r0, $r1
+
+    $r12 = CLZ $r0
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.12, implicit killed $flags
+
+  bb.10:
+    successors: %bb.12, %bb.11
+    liveins: $r0, $r1
+
+    $r12 = ANDR $r0, $r1
+    CMPRV_I killed $r12, 0, implicit-def $flags
+    JMPE %bb.12, implicit killed $flags
+
+  bb.11:
+    liveins: $r0
+
+    $r12 = COPY_R killed $r0
+    RET_I implicit killed $r12
+
+  bb.12:
+    liveins: $r1
+
+    $r12 = COPY_R killed $r1
+    RET_I implicit killed $r12
+
+# FUSE-LABEL: name: fuse_across_no_flag_ops
+# FUSE:       $r3 = ANDR $r2, $r2
+# FUSE-NEXT:  $r3 = SEXTW $r3
+# FUSE-NEXT:  $r3 = CMPEQR $r3, $r2
+# FUSE-NEXT:  FBR_RR $r0, $r1, 1, %bb.2
+# FUSE-NOT:   CMPRR_I
+---
+name:            fuse_across_no_flag_ops
+tracksRegLiveness: true
+liveins:
+  - { reg: '$r0' }
+  - { reg: '$r1' }
+  - { reg: '$r2' }
+body:             |
+  bb.0:
+    successors: %bb.2, %bb.1
+    liveins: $r0, $r1, $r2
+
+    CMPRR_I $r0, $r1, implicit-def $flags
+    $r3 = ANDR $r2, $r2
+    $r3 = SEXTW $r3
+    $r3 = CMPEQR $r3, $r2
+    JMPLT %bb.2, implicit killed $flags
+
+  bb.1:
+    liveins: $r3
+
+    $r12 = COPY_R killed $r3
+    RET_I implicit killed $r12
+
+  bb.2:
+    liveins: $r0
+
+    $r12 = COPY_R killed $r0
+    RET_I implicit killed $r12
+
+# FUSE-LABEL: name: no_fuse_across_getf
+# FUSE:       CMPRR_I $r0, $r1, implicit-def $flags
+# FUSE-NEXT:  $r3 = SETFR $r3, implicit $flags
+# FUSE-NEXT:  JMPLT %bb.2, implicit killed $flags
+---
+name:            no_fuse_across_getf
+tracksRegLiveness: true
+liveins:
+  - { reg: '$r0' }
+  - { reg: '$r1' }
+  - { reg: '$r3' }
+body:             |
+  bb.0:
+    successors: %bb.2, %bb.1
+    liveins: $r0, $r1, $r3
+
+    CMPRR_I $r0, $r1, implicit-def $flags
+    $r3 = SETFR $r3, implicit $flags
+    JMPLT %bb.2, implicit killed $flags
+
+  bb.1:
+    liveins: $r3
+
+    $r12 = COPY_R killed $r3
+    RET_I implicit killed $r12
+
+  bb.2:
+    liveins: $r0
+
+    $r12 = COPY_R killed $r0
+    RET_I implicit killed $r12
+
+...

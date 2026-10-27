@@ -21,20 +21,20 @@ define i64 @shl_ge64(i128 %x, i64 %n, i1 %c0, i64 %b0, i1 %c1, i64 %b1, i1 %c2, 
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    ldidx64 r2, r15, 40
 ; CHECK-NEXT:  .LBB0_2:
-; CHECK-NEXT:    andv r13, r12, 1
 ; CHECK-NEXT:    ldidx64 r14, r15, 80
+; CHECK-NEXT:    andv r13, r12, 1
 ; CHECK-NEXT:    fbri r11, 0, 8, .LBB0_4
 ; CHECK-NEXT:  # %bb.3:
 ; CHECK-NEXT:    ldidx64 r2, r15, 56
 ; CHECK-NEXT:  .LBB0_4:
-; CHECK-NEXT:    andv r14, r14, 1
 ; CHECK-NEXT:    ldidx64 r12, r15, 96
+; CHECK-NEXT:    andv r14, r14, 1
 ; CHECK-NEXT:    fbri r13, 0, 8, .LBB0_6
 ; CHECK-NEXT:  # %bb.5:
 ; CHECK-NEXT:    ldidx64 r2, r15, 72
 ; CHECK-NEXT:  .LBB0_6:
-; CHECK-NEXT:    andv r12, r12, 1
 ; CHECK-NEXT:    ldidx64 r13, r15, 112
+; CHECK-NEXT:    andv r12, r12, 1
 ; CHECK-NEXT:    fbri r14, 0, 8, .LBB0_8
 ; CHECK-NEXT:  # %bb.7:
 ; CHECK-NEXT:    ldidx64 r2, r15, 88
@@ -91,20 +91,20 @@ define i64 @lshr_ge64(i128 %x, i64 %n, i1 %c0, i64 %b0, i1 %c1, i64 %b1, i1 %c2,
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    ldidx64 r2, r15, 40
 ; CHECK-NEXT:  .LBB1_2:
-; CHECK-NEXT:    andv r13, r12, 1
 ; CHECK-NEXT:    ldidx64 r14, r15, 80
+; CHECK-NEXT:    andv r13, r12, 1
 ; CHECK-NEXT:    fbri r11, 0, 8, .LBB1_4
 ; CHECK-NEXT:  # %bb.3:
 ; CHECK-NEXT:    ldidx64 r2, r15, 56
 ; CHECK-NEXT:  .LBB1_4:
-; CHECK-NEXT:    andv r14, r14, 1
 ; CHECK-NEXT:    ldidx64 r12, r15, 96
+; CHECK-NEXT:    andv r14, r14, 1
 ; CHECK-NEXT:    fbri r13, 0, 8, .LBB1_6
 ; CHECK-NEXT:  # %bb.5:
 ; CHECK-NEXT:    ldidx64 r2, r15, 72
 ; CHECK-NEXT:  .LBB1_6:
-; CHECK-NEXT:    andv r12, r12, 1
 ; CHECK-NEXT:    ldidx64 r13, r15, 112
+; CHECK-NEXT:    andv r12, r12, 1
 ; CHECK-NEXT:    fbri r14, 0, 8, .LBB1_8
 ; CHECK-NEXT:  # %bb.7:
 ; CHECK-NEXT:    ldidx64 r2, r15, 88
@@ -160,20 +160,20 @@ define i64 @ashr_ge64(i128 %x, i64 %n, i1 %c0, i64 %b0, i1 %c1, i64 %b1, i1 %c2,
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    ldidx64 r2, r15, 40
 ; CHECK-NEXT:  .LBB2_2:
-; CHECK-NEXT:    andv r13, r12, 1
 ; CHECK-NEXT:    ldidx64 r14, r15, 80
+; CHECK-NEXT:    andv r13, r12, 1
 ; CHECK-NEXT:    fbri r11, 0, 8, .LBB2_4
 ; CHECK-NEXT:  # %bb.3:
 ; CHECK-NEXT:    ldidx64 r2, r15, 56
 ; CHECK-NEXT:  .LBB2_4:
-; CHECK-NEXT:    andv r14, r14, 1
 ; CHECK-NEXT:    ldidx64 r12, r15, 96
+; CHECK-NEXT:    andv r14, r14, 1
 ; CHECK-NEXT:    fbri r13, 0, 8, .LBB2_6
 ; CHECK-NEXT:  # %bb.5:
 ; CHECK-NEXT:    ldidx64 r2, r15, 72
 ; CHECK-NEXT:  .LBB2_6:
-; CHECK-NEXT:    andv r12, r12, 1
 ; CHECK-NEXT:    ldidx64 r13, r15, 112
+; CHECK-NEXT:    andv r12, r12, 1
 ; CHECK-NEXT:    fbri r14, 0, 8, .LBB2_8
 ; CHECK-NEXT:  # %bb.7:
 ; CHECK-NEXT:    ldidx64 r2, r15, 88

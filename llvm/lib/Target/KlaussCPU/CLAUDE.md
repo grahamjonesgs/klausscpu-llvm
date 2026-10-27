@@ -102,7 +102,10 @@ ordinary instruction:
    `EncoderMethod` in `KlaussCPUMCCodeEmitter.cpp` plus the fixup kind in
    `KlaussCPUFixupKinds.h` / `KlaussCPUAsmBackend.cpp`).
 3. Set `Defs = [FLAGS]` / `Uses = [FLAGS]`, `mayLoad`, `mayStore`,
-   `hasSideEffects` and `SchedRW` to what the RTL does.  An instruction with
+   `hasSideEffects` and `SchedRW` to what the RTL does (the register
+   formats default to `Defs = [FLAGS]`; one whose decode sets no flag write
+   mask goes in a `let Defs = []<Register>, SchedRW = [WriteALU]` block),
+   then regenerate the runtime's flags test (see Flags).  An instruction with
    no isel pattern (one selected in C++, e.g. the W compares) must state
    `hasSideEffects = 0` explicitly: otherwise TableGen guesses 1, which
    blocks MachineCSE/LICM/sinking and splits select groups.
@@ -117,13 +120,30 @@ ordinary instruction:
 There is one flag register, Z/S/C/V (`FLAGS` in `KlaussCPURegisterInfo.td`,
 in no allocatable class).  `CMP` is `SUB` without writeback; every branch
 condition is derived from Z/S/C/V (EQ = Z, signed LT = S^V, unsigned
-ULT = C, borrow polarity as on x86).  Every flag-writing instruction declares
-`Defs = [FLAGS]`, conditional branches `Uses = [FLAGS]`, calls and inline asm
-clobber FLAGS, and the BR_CC compare is glued to its branch at isel.  Two
-pre-emit passes rely on this liveness:
+ULT = C, borrow polarity as on x86).  Exactly the instructions whose RTL
+decode sets a flag write mask (`pipeline_core.sv` f_decode_raw `fmask`)
+declare `Defs = [FLAGS]`: ADD/SUB/ADC/SBC/INC/DEC/CMP and their W and
+immediate forms, the shifts and rotates (F = 1 in every template), BTST,
+BEXTR, NEG/NOT/ABS/SEXTB/SEXTH/ZEXTB/ZEXTH/POPCNT, MUL/DIV/MOD and IRET.
+AND/OR/XOR (every form), MIN/MAX, the boolean compares, the bit set/clear/
+toggle ops, SHLR1/SHRR1/SHRAR, BSWAP/BITREV/CLZ/CTZ/SEXTW/ZEXTW, moves,
+loads, stores and branches write none, so the schedulers may put them
+between a compare and its branch.  A missing def is a miscompile:
+`test_flags` in the runtime repo (`baremetal/programs/gen_test_flags.py`
+generates it from this backend's records and checks them against its
+table of the RTL's flag masks) runs every instruction with the flags all
+clear and all set and fails if a flag outside its table entry changes, or
+if an op FlagReuse trusts does not set Z = (rd == 0); it passes on the
+emulator and on the board.  Conditional branches and GETF (`setfr`)
+`Uses = [FLAGS]`, calls and inline asm clobber FLAGS, and the BR_CC
+compare is glued to its branch at isel.  Two pre-emit passes rely on this
+liveness:
 
 - `KlaussCPUFlagReuse` (pre-emit, default on): drops a `CMPRV Rd, 0` before
-  `JMPE`/`JMPNE` when the arithmetic op that wrote Rd already set Z.
+  `JMPE`/`JMPNE` when the op that wrote Rd, the nearest FLAGS writer before
+  the compare, already set Z = (Rd == 0) (`setsZeroFlagAsResult`: add/sub,
+  INC/DEC, the shifts, NEG/NOT/ABS/extensions/POPCNT, BEXTR, MUL; not
+  DIV/MOD, whose zero divisor writes only V).
 - `KlaussCPUFuseCmpBr` (pre-emit, default on): fuses a compare and its
   conditional branch into the 1-word ISA v3 `FBR_RR`/`FBR_RI` (64-bit only:
   FBR has no width bit, so `CMPRRW`/`CMPRVW` never fuse).  It scans back

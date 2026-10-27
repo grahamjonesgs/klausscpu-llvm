@@ -125,3 +125,55 @@ neg:
   store volatile i64 3, ptr %p2
   ret void
 }
+
+; Any op whose Z is (result == 0) qualifies, here a multiply and a shift (the
+; CPU sets Z from the written-back value: see setsZeroFlagAsResult).  The
+; branch then needs no compare even with fusion on, where it would otherwise
+; be a fused FBR.
+define i64 @mul_eq0(i64 %a, i64 %b) {
+; OFF-LABEL: mul_eq0:
+; OFF:         mulr r{{[0-9]+}}, r0, r1
+; OFF-NEXT:    cmprv r{{[0-9]+}}, 0
+; OFF-NEXT:    jmp{{n?}}e{{(rel)?}} .LBB4_
+;
+; ON-LABEL: mul_eq0:
+; ON:         mulr r{{[0-9]+}}, r0, r1
+; ON-NEXT:    jmp{{n?}}z{{(rel)?}} .LBB4_
+; ON-NOT:     cmprv
+;
+; FUSE-LABEL: mul_eq0:
+; FUSE:         mulr r{{[0-9]+}}, r0, r1
+; FUSE-NEXT:    jmp{{n?}}z{{(rel)?}} .LBB4_
+; FUSE-NOT:     fbr
+  %m = mul i64 %a, %b
+  %c = icmp eq i64 %m, 0
+  br i1 %c, label %t, label %f
+t:
+  ret i64 42
+f:
+  ret i64 %m
+}
+
+define i64 @shl_ne0(i64 %a) {
+; OFF-LABEL: shl_ne0:
+; OFF:         shlv r{{[0-9]+}}, r0, 3
+; OFF-NEXT:    cmprv r{{[0-9]+}}, 0
+; OFF-NEXT:    jmp{{n?}}e{{(rel)?}} .LBB5_
+;
+; ON-LABEL: shl_ne0:
+; ON:         shlv r{{[0-9]+}}, r0, 3
+; ON-NEXT:    jmp{{n?}}z{{(rel)?}} .LBB5_
+; ON-NOT:     cmprv
+;
+; FUSE-LABEL: shl_ne0:
+; FUSE:         shlv r{{[0-9]+}}, r0, 3
+; FUSE-NEXT:    jmp{{n?}}z{{(rel)?}} .LBB5_
+; FUSE-NOT:     fbr
+  %s = shl i64 %a, 3
+  %c = icmp ne i64 %s, 0
+  br i1 %c, label %t, label %f
+t:
+  ret i64 %s
+f:
+  ret i64 42
+}
