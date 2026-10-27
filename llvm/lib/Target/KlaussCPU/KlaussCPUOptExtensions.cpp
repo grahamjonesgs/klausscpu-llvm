@@ -37,6 +37,13 @@
 // made on the current code, so removing one extension can only keep another
 // from being removed, never make a removal wrong.
 //
+// Rules 2 and 3 change values above bit N that no instruction reads, but a
+// debug value may: the variable can be wider than the bits its code uses.  A
+// debug value of the removed extension's result describes the source with
+// the extension in its DIExpression (rule 2); one of any other register whose
+// high bits change (the readers the rule followed, the PHI of rule 3) is set
+// undef unless it describes a variable of at most N bits.
+//
 // -mllvm -klausscpu-opt-extensions=false disables it.
 //
 //===----------------------------------------------------------------------===//
@@ -45,10 +52,12 @@
 #include "KlaussCPUSubtarget.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/MathExtras.h"
@@ -372,9 +381,12 @@ static unsigned getReadWidth(const MachineInstr &MI, unsigned OpNo,
   }
 }
 
-// Whether everything that reads Reg reads only its low Bits bits.
+// Whether everything that reads Reg reads only its low Bits bits.  Reached,
+// if given, collects Reg and the registers followed from it, whose values
+// change above bit Bits once Reg's do.
 static bool onlyLowBitsRead(Register Reg, unsigned Bits,
-                            const MachineRegisterInfo &MRI) {
+                            const MachineRegisterInfo &MRI,
+                            SmallVectorImpl<Register> *Reached = nullptr) {
   SmallVector<Register, 8> Worklist{Reg};
   SmallSet<Register, 16> Visited;
   while (!Worklist.empty()) {
@@ -385,6 +397,8 @@ static bool onlyLowBitsRead(Register Reg, unsigned Bits,
       continue;
     if (Visited.size() > 32)
       return false;
+    if (Reached)
+      Reached->push_back(R);
     for (const MachineOperand &MO : MRI.use_nodbg_operands(R)) {
       const MachineInstr &UseMI = *MO.getParent();
       Register Through;
@@ -407,20 +421,24 @@ static bool onlyLowBitsRead(Register Reg, unsigned Bits,
 // block, which becomes the incoming value instead; nothing is added.  This is
 // the loop `idx = (u32)b[idx]`, whose loaded index is zero-extended in the
 // latch for another use and again, through the PHI, at the top of the loop.
+// Changed is set to the PHI and the registers followed from it, whose values
+// change above bit Bits.
 static bool extendPHIInputs(MachineInstr &Ext, unsigned Bits, bool ZExt,
-                            MachineRegisterInfo &MRI) {
+                            MachineRegisterInfo &MRI,
+                            SmallVectorImpl<Register> &Changed) {
   Register Src = Ext.getOperand(1).getReg();
   MachineInstr *Phi = MRI.getVRegDef(Src);
   if (!Phi || !Phi->isPHI())
     return false;
   unsigned Opc = Ext.getOpcode();
+  Changed.assign(1, Src);
   for (const MachineOperand &MO : MRI.use_nodbg_operands(Src)) {
     const MachineInstr &UseMI = *MO.getParent();
     if (UseMI.getOpcode() == Opc)
       continue;
     Register Through;
     unsigned W = getReadWidth(UseMI, UseMI.getOperandNo(&MO), Through);
-    if (Through ? !onlyLowBitsRead(Through, Bits, MRI) : W > Bits)
+    if (Through ? !onlyLowBitsRead(Through, Bits, MRI, &Changed) : W > Bits)
       return false;
   }
   SmallVector<std::pair<unsigned, Register>, 4> NewInputs;
@@ -454,6 +472,52 @@ static bool extendPHIInputs(MachineInstr &Ext, unsigned Bits, bool ZExt,
   return true;
 }
 
+// Rule 2: Dst, the extension of Src, is replaced by Src, whose bits from Bits
+// up differ.  Its debug values describe Src extended instead.
+static void extendDebugValues(Register Dst, Register Src, unsigned Bits,
+                              bool ZExt, MachineRegisterInfo &MRI) {
+  for (MachineOperand &MO : make_early_inc_range(MRI.use_operands(Dst))) {
+    MachineInstr &DbgMI = *MO.getParent();
+    if (!DbgMI.isDebugValue())
+      continue;
+    const DIExpression *Expr = DbgMI.getDebugExpression();
+    if (DbgMI.isIndirectDebugValue() || Expr->isEntryValue()) {
+      DbgMI.setDebugValueUndef();
+      continue;
+    }
+    DIExpression::ExtOps Ops = DIExpression::getExtOps(Bits, 64, !ZExt);
+    DbgMI.getDebugExpressionOp().setMetadata(DIExpression::appendOpsToArg(
+        Expr, Ops, DbgMI.getDebugOperandIndex(&MO), /*StackValue=*/true));
+    MO.setReg(Src);
+  }
+}
+
+// Whether DbgMI shows its register's low Bits bits and no more: a plain
+// DBG_VALUE of a register location, of a variable (or piece) that size or
+// smaller.
+static bool showsLowBitsOnly(const MachineInstr &DbgMI, unsigned Bits) {
+  if (!DbgMI.isNonListDebugValue() || DbgMI.isIndirectDebugValue())
+    return false;
+  const DIExpression *Expr = DbgMI.getDebugExpression();
+  for (auto Op : Expr->expr_ops())
+    if (Op.getOp() != dwarf::DW_OP_LLVM_fragment)
+      return false;
+  std::optional<uint64_t> Size = DbgMI.getDebugVariable()->getSizeInBits();
+  if (auto Frag = Expr->getFragmentInfo())
+    Size = Frag->SizeInBits;
+  return Size && *Size <= Bits;
+}
+
+// The debug values of Regs, whose bits from Bits up change, become undef
+// where they show those bits.
+static void dropWideDebugValues(ArrayRef<Register> Regs, unsigned Bits,
+                                MachineRegisterInfo &MRI) {
+  for (Register R : Regs)
+    for (MachineInstr &DbgMI : MRI.use_instructions(R))
+      if (DbgMI.isDebugValue() && !showsLowBitsOnly(DbgMI, Bits))
+        DbgMI.setDebugValueUndef();
+}
+
 bool KlaussCPUOptExtensions::runOnMachineFunction(MachineFunction &MF) {
   if (!EnableOptExtensions || skipFunction(MF.getFunction()))
     return false;
@@ -471,14 +535,19 @@ bool KlaussCPUOptExtensions::runOnMachineFunction(MachineFunction &MF) {
       if (!Dst.isVirtual() || !Src.isVirtual() ||
           MRI.getRegClass(Dst) != MRI.getRegClass(Src))
         continue;
-      if (isExtended(Src, Bits, IsZExt, MRI))
+      // Registers whose bits from Bits up change (rules 2 and 3).
+      SmallVector<Register, 8> Altered;
+      if (isExtended(Src, Bits, IsZExt, MRI)) {
         ++NumExtendedSource;
-      else if (onlyLowBitsRead(Dst, Bits, MRI))
+      } else if (onlyLowBitsRead(Dst, Bits, MRI, &Altered)) {
         ++NumNarrowUsers;
-      else if (extendPHIInputs(MI, Bits, IsZExt, MRI))
+        extendDebugValues(Dst, Src, Bits, IsZExt, MRI);
+      } else if (extendPHIInputs(MI, Bits, IsZExt, MRI, Altered)) {
         ++NumPHIInputs;
-      else
+      } else {
         continue;
+      }
+      dropWideDebugValues(Altered, Bits, MRI);
       LLVM_DEBUG(dbgs() << "Removing " << MI);
       MRI.replaceRegWith(Dst, Src);
       MRI.clearKillFlags(Src);

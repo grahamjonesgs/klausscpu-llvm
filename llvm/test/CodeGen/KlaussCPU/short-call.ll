@@ -13,8 +13,9 @@
 
 ; Every direct call, PIC or static, to a function or a libcall, is the 1-word
 ; short call (ISA v3 A1, LINK=1, word 0 0x63000000 | simm18): resolved by the
-; assembler in the same section, else an R_KLAUSSCPU_CALL18 relocation that
-; lld resolves (through a thunk when the callee is out of reach).  With
+; assembler for a static callee in the same section, else (a global callee in
+; the same section too) an R_KLAUSSCPU_CALL18 relocation that lld resolves
+; (through a thunk when the callee is out of reach).  With
 ; -klausscpu-short-calls=false calls are the 2-word CALLREL (PIC) / CALL.
 
 declare i64 @ext(i64)

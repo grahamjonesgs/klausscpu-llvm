@@ -19,8 +19,9 @@
 //     the 2-word PC-relative form, so it never reaches the object writer.
 //
 //   FK_KlaussCPU_CALL18 — ISA v3 A1 short call, the field of PCREL18.  A
-//     callee in the same section is resolved here (and the call relaxed to
-//     CALLREL should it be out of range); any other becomes
+//     local (static) callee in the same section is resolved here (and the
+//     call relaxed to CALLREL should it be out of range); any other, a
+//     global or weak one in the same section too, becomes
 //     R_KLAUSSCPU_CALL18, (S + A - P) / 4 with P the instruction, which lld
 //     routes through a range-extension thunk when it does not reach.
 //

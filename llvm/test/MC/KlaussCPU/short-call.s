@@ -10,8 +10,8 @@
 # RUN: llvm-mc -triple=klausscpu %s | FileCheck %s --check-prefix=ASM
 
 # ISA v3 A1 short call (word 0 0x63000000 | simm18, pushes PC+4): a call to
-# a symbol, `call` or `callrel`, is the 1-word short call.  A callee in the
-# same section is resolved here, and the call relaxed to the 2-word CALLREL
+# a symbol, `call` or `callrel`, is the 1-word short call.  A local callee in
+# the same section is resolved here, and the call relaxed to the 2-word CALLREL
 # when it is out of reach; any other callee is an R_KLAUSSCPU_CALL18
 # relocation at the instruction (the linker adds a thunk when out of
 # reach).  A literal displacement and a conditional call stay long.  It
@@ -72,4 +72,22 @@ far:
 
         .section .text.other,"ax"
 other:
+        ret
+## A global or weak callee in the same section keeps its relocation, since
+## the link may override it; only a local one is resolved here.
+# CHECK-LABEL: <other>:
+# CHECK-NEXT:   0: 00 00 80 65   ret
+# CHECK-NEXT:   4: 00 00 00 63   callrel 0x4 <other+0x4>
+# CHECK-NEXT:        00000004:  R_KLAUSSCPU_CALL18 gfn
+# CHECK-NEXT:   8: 00 00 00 63   callrel 0x8 <other+0x8>
+# CHECK-NEXT:        00000008:  R_KLAUSSCPU_CALL18 wfn
+# CHECK-NEXT:   c: fd ff 03 63   callrel 0x0 <other>
+        callrel gfn
+        callrel wfn
+        callrel other
+        .globl gfn
+gfn:
+        ret
+        .weak wfn
+wfn:
         ret

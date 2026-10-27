@@ -30,7 +30,7 @@ describe earlier states of the backend and are superseded by this file.
 | Immediates | each class 2/3 op exists with a sign- and a zero-extended imm32 (SGN bit); isel picks the one that holds the constant: `SETR`/`SETRU` (MOV), `ADDI`/`ADDV`/`MINUSV`, `ANDI`/`ANDV` (and OR/XOR), `CMPRV`/`CMPRVU`; boolean compares (`setcc` as a value) `CMPxxV` with a simm32; `SETR64` only for a value neither reaches.  An add of -255..-129 (a frame address too) is `MINUSV` of the negation, whose short form reaches it |
 | Multiply by a constant | `MULV` (simm32; EX-serialised, `WriteMul`); a constant 2^N+1, 2^N-1 or 1-2^N that is not a simm32 becomes `SHLV` + `ADDR`/`SUBR` (`decomposeMulByConstant`); for a simm32 one only with `-klausscpu-mul-imm-shift-add` (one more instruction than `MULV`, fewer cycles) |
 | Addresses | 32-bit, zero-extended in a register: `SETRU sym` (static), `LEAPC` (PIC); `sym+off` is folded only for `off` in [0, 2^31), other offsets are a separate add so a negative S + off stays negative; `R_KLAUSSCPU_ABS64` data is the exact 64-bit S + A (lld) |
-| Direct call | the 1-word short `CALL` (ISA v3 A1, LINK=1: PC + 4·simm18, ±512 KiB, pushes PC+4; written `callrel`) for every call to a symbol: resolved by the assembler in its own section (relaxed to the 2-word `CALLREL` if out of reach), else an `R_KLAUSSCPU_CALL18` relocation, for which lld calls an out-of-reach callee through a `jmprel` thunk.  Code a loader without thunks relocates (Zephyr LLEXT) is built with `-mllvm -klausscpu-short-calls=false` (2-word `CALL` / `CALLREL`) |
+| Direct call | the 1-word short `CALL` (ISA v3 A1, LINK=1: PC + 4·simm18, ±512 KiB, pushes PC+4; written `callrel`) for every call to a symbol: resolved by the assembler for a local (static) callee in its own section (relaxed to the 2-word `CALLREL` if out of reach), else (a global or weak callee too, which the link may override) an `R_KLAUSSCPU_CALL18` relocation, for which lld calls an out-of-reach callee through a `jmprel` thunk.  Code a loader without thunks relocates (Zephyr LLEXT) is built with `-mllvm -klausscpu-short-calls=false` (2-word `CALL` / `CALLREL`) |
 | Indirect branch / call | `JMPR` / `CALLR` |
 | Switches | a compare tree, or a jump table from 12 cases (clusters) at 40% density (the board break-even): a 4-byte-aligned table of absolute 32-bit block addresses (`EK_Custom32`, `R_KLAUSSCPU_ABS32`, also under PIC: only the base is PC-relative, `LEAPC`), dispatched by `LDIDX32R` + `JMPR` (`LowerBR_JT`) |
 | `llvm.trap` / `llvm.debugtrap` | both `TRAP`: an abnormal stop (crash dump; `stop = Trap` in the emulator; a debug halt with SIGTRAP under the debugger).  `HALT` is the clean stop the runtime ends a program with (exit status in R12) |
@@ -50,8 +50,9 @@ instruction into its 1-word short form through the `CompressPat`s
 immediate fits, or when a branch or call target is a symbol; the asm backend
 relaxes a short branch by expanding its pattern again (`KlaussCPU::uncompress`)
 when its target is out of reach or not resolved in the same section, and a
-short call only when it is resolved and out of reach: otherwise the call keeps
-its `FK_KlaussCPU_CALL18` fixup, which becomes `R_KLAUSSCPU_CALL18`.  The
+short call only when it is resolved (a local callee in the same section) and
+out of reach: otherwise the call keeps its `FK_KlaussCPU_CALL18` fixup, which
+becomes `R_KLAUSSCPU_CALL18`.  The
 `short-forms` / `short-branches` / `short-calls` subtarget features gate this
 (each implies the one before); every CPU has them, and
 `-mllvm -klausscpu-short-forms=false` / `-klausscpu-short-branches=false` /
@@ -310,6 +311,11 @@ when clobbered.
   through COPY, PHI and bitwise/min/max ops), whose result is read only in
   its low bits, or whose PHI source can take the same extension already
   made in each predecessor instead (`opt-extensions.mir`, `ext-phi.ll`).
+  The last two change bits no instruction reads but a debug value may: a
+  debug value of the removed extension describes the source with the
+  extension in its DIExpression (`DW_OP_LLVM_convert`), and one of another
+  register whose high bits change is set undef unless its variable fits in
+  the low bits (`DebugInfo/KlaussCPU/opt-extensions-dbg.ll`).
 - Before the post-RA scheduler: FuseCmpBr's loop constants; pre-emit passes:
   FlagReuse, then FuseCmpBr (see Flags), then CalleeSavedCFI (see CFI).
 - TTI (`KlaussCPUTargetTransformInfo.cpp`): moderate partial/runtime

@@ -1590,8 +1590,14 @@ void KlaussCPUThunk::writeTo(uint8_t *buf) {
 }
 
 void KlaussCPUThunk::addSymbols(ThunkSection &isec) {
-  addSymbol(ctx.saver.save("__KlaussCPUThunk_" + destination.getName()),
-            STT_FUNC, 0, isec);
+  // A static callee in another section is called through its section symbol,
+  // which has no name: name the thunk after the section and the offset.
+  std::string name = destination.getName().str();
+  if (name.empty())
+    if (auto *d = dyn_cast<Defined>(&destination); d && d->section)
+      name = (d->section->name + "+0x" +
+              Twine::utohexstr(d->value + addend)).str();
+  addSymbol(ctx.saver.save("__KlaussCPUThunk_" + name), STT_FUNC, 0, isec);
 }
 
 Thunk::Thunk(Ctx &ctx, Symbol &d, int64_t a)
