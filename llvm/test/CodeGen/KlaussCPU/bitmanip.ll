@@ -119,11 +119,14 @@ define i64 @mulh_u(i64 %a, i64 %b) {
   ret i64 %r
 }
 
-; i32 rotate must NOT use the 64-bit ROLR (a 64-bit register rotate is not a
-; 32-bit rotate) — shift-pair expansion expected.
+; A 64-bit register rotate is not a 32-bit rotate: an i32 rotate uses ROLR
+; only on %a copied into both halves (see shift-rotate-bitfield.ll).
 define i32 @rotl32(i32 %a, i32 %n) {
 ; CHECK-LABEL: rotl32:
-; CHECK-NOT: rolr
+; CHECK:      zextw r12, r0
+; CHECK-NEXT: shlv r14, r0, 32
+; CHECK-NEXT: orr r12, r14, r12
+; CHECK-NEXT: rolr r12, r12, r1
   %r = call i32 @llvm.fshl.i32(i32 %a, i32 %a, i32 %n)
   ret i32 %r
 }

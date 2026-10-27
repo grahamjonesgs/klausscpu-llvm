@@ -31,6 +31,8 @@ describe earlier states of the backend and are superseded by this file.
 | Addresses | 32-bit, zero-extended in a register: `SETRU sym` (static), `LEAPC` (PIC); `sym+off` is folded only for `off` in [0, 2^31), other offsets are a separate add so a negative S + off stays negative; `R_KLAUSSCPU_ABS64` data is the exact 64-bit S + A (lld) |
 | Indirect branch / call | `JMPR` / `CALLR`; jump tables are off by default (`-klausscpu-min-jump-table-entries=N` enables them) |
 | `llvm.trap` / `llvm.debugtrap` | `HALT` / `TRAP` (the debugger's breakpoint) |
+| Shifts / rotates | 64-bit only; a register amount uses only rs2[5:0], so isel drops masks/extensions of it (`shamt`); an i32 rotate is a 64-bit rotate of the value copied into both halves (`ROLW`/`RORW`) |
+| Bit fields | `BEXTR` for `(x >> s) & (2^l - 1)` with s, l in [1, 31]; other fields and high/low masks beyond an imm32 as a shift pair |
 
 ### Instruction encoding
 
@@ -224,6 +226,14 @@ when clobbered.
   folded offset; a frame index anywhere else (or a sum that overflows
   simm32) gets the slot address in a scavenged register (`ADDI`, which
   clobbers FLAGS).
+- Shifts and bit fields are patterns over four more ComplexPatterns:
+  `shamt` (`selectShiftMask`, as in RISC-V: the amount register of
+  SHLR/SHRR/SARR/ROLR/RORR loses an `and` keeping bits [5:0] and the
+  zero-extension of an i32 amount; 64k - X becomes NEGR, 63 - X / X ^ 63
+  NOTR), `Dup32` (the `ORR (SHLV x, 32), zext(x)` operand of the 32-bit
+  rotate nodes `ROLW`/`RORW` that `ReplaceNodeResults` makes from an i32
+  rotl/rotr), `BitFieldExtract` (BEXTR) and `FieldShiftPair`.  The
+  128-bit `*_PARTS` lowering tests bit 6 of the amount.
 - Scheduling: the M8 model (`KlaussCPUSchedule.td`, CPU `generic`, the
   default) drives the machine scheduler and the post-RA scheduler, which runs
   from **-O1** up (`getOptLevelToEnablePostRAScheduler`).  `-mcpu=no-sched`
@@ -346,8 +356,8 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPUInstrInfo.h/.cpp   branch analysis, copies, spills, flagsDeadAfter
 ├── KlaussCPURegisterInfo.h/.cpp reserved regs, stack realignment, eliminateFrameIndex
 ├── KlaussCPUFrameLowering.h/.cpp prologue/epilogue, CFI, base pointer, getFrameIndexReference
-├── KlaussCPUISelLowering.h/.cpp  calls/args/returns, varargs, SELECT_CC, BR_JT, DAG combines
-├── KlaussCPUISelDAGToDAG.cpp   SelectCode() + C++ for BR_CC, SELECT_CC, W SETCC; AddrFI; inline-asm 'm'
+├── KlaussCPUISelLowering.h/.cpp  calls/args/returns, varargs, SELECT_CC, BR_JT, i32 rotates, i128 shifts, DAG combines
+├── KlaussCPUISelDAGToDAG.cpp   SelectCode() + C++ for BR_CC, SELECT_CC, W SETCC; AddrFI, shift/bit-field ComplexPatterns; inline-asm 'm'
 ├── KlaussCPUMachineFunctionInfo.h  per-function state (vararg frame index)
 ├── KlaussCPUAsmPrinter.cpp     MachineInstr → MCInst (+ CompressPat), inline-asm operand printing
 ├── KlaussCPUFlagReuse.cpp      pre-emit: CMPRV Rd,0 + JMPE/NE → JMPZ/NZ (default on)

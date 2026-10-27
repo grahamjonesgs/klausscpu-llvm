@@ -5,8 +5,10 @@
 // Instruction selection is the tablegen-generated SelectCode() (from
 // KlaussCPUGenDAGISel.inc), driven by the isel patterns in
 // KlaussCPUInstrInfo.td.  This file holds the pass scaffolding, the
-// ComplexPattern hook (SelectAddrFI), the inline-asm memory operand hook and
-// the nodes Select() handles itself:
+// ComplexPattern hooks (SelectAddrFI/SelectAddrFIMem for frame addresses;
+// selectShiftMask, selectDup32, selectBitFieldExtract and
+// selectFieldShiftPair for shifts, 32-bit rotates and bit fields), the
+// inline-asm memory operand hook and the nodes Select() handles itself:
 //   BR_CC, KlaussCPUISD::SELECT_CC, SETCC: they pick the 32-bit W compare by
 //     looking at how each operand was extended and whether stripping the
 //     extension removes an instruction (SETCC otherwise falls back to the
@@ -22,6 +24,7 @@
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/KnownBits.h"
 #include "llvm/Support/MathExtras.h"
 
 // KlaussCPU:: opcode enum (CMPRR_I, LDIDX64, STIDX64, etc.) is visible
@@ -226,6 +229,12 @@ public:
   bool selectFrameAddr(SDValue Addr, unsigned Scale, SDValue &Base,
                        SDValue &Offset);
   bool frameOffsetFitsShortForm(int FI, int64_t C, unsigned Scale);
+
+  bool selectShiftMask(SDValue N, SDValue &ShAmt);
+  bool selectDup32(SDValue N, SDValue &Hi, SDValue &Lo);
+  bool selectBitFieldExtract(SDValue N, SDValue &Src, SDValue &Field);
+  bool selectFieldShiftPair(SDValue N, SDValue &Src, SDValue &Shl,
+                            SDValue &Srl);
 
   bool SelectInlineAsmMemoryOperand(const SDValue &Op,
                                     InlineAsm::ConstraintCode ConstraintID,
@@ -475,6 +484,148 @@ bool KlaussCPUDAGToDAGISel::selectFrameAddr(SDValue Addr, unsigned Scale,
     return false;
   Base = CurDAG->getTargetFrameIndex(FIN->getIndex(), MVT::i64);
   Offset = CurDAG->getTargetConstant(C, SDLoc(Addr), MVT::i64);
+  return true;
+}
+
+// shamt: the amount register of SHLR/SHRR/SARR/ROLR/RORR_R.  The CPU uses
+// only its bits [5:0], so whatever leaves those bits alone is dropped, as in
+// RISCVDAGToDAGISel::selectShiftMask.  A shift by 64 or more is poison and a
+// rotate is modulo 64, so the result is the same for every amount the IR
+// allows.
+//
+// An `and` that keeps bits [5:0] (the `& 63` of a rotate or funnel shift,
+// the zero-extension of a promoted i32 amount) is dropped.
+// SimplifyDemandedBits may have cleared mask bits that are known zero anyway.
+static SDValue stripShiftMask(SDValue V, SelectionDAG &DAG) {
+  if (V.getOpcode() != ISD::AND || !isa<ConstantSDNode>(V.getOperand(1)))
+    return V;
+  const APInt ShMask(64, 63);
+  const APInt &AndMask = V.getConstantOperandAPInt(1);
+  if (!ShMask.isSubsetOf(AndMask) &&
+      !ShMask.isSubsetOf(AndMask | DAG.computeKnownBits(V.getOperand(0)).Zero))
+    return V;
+  return V.getOperand(0);
+}
+
+bool KlaussCPUDAGToDAGISel::selectShiftMask(SDValue N, SDValue &ShAmt) {
+  ShAmt = stripShiftMask(N, *CurDAG);
+  // The low bits of a sum, difference or xor depend only on the low bits of
+  // its operands, so an inner mask goes too.  X + 64k shifts by X; 64k - X
+  // by -X and 64k-1 - X (or X ^ 63) by ~X: one unary op instead of a
+  // constant and a SUBR.
+  unsigned NewOpc = 0;
+  SDValue X;
+  if (ShAmt.getOpcode() == ISD::ADD &&
+      isa<ConstantSDNode>(ShAmt.getOperand(1))) {
+    if (ShAmt.getConstantOperandVal(1) % 64 == 0)
+      ShAmt = stripShiftMask(ShAmt.getOperand(0), *CurDAG);
+  } else if (ShAmt.getOpcode() == ISD::SUB &&
+             isa<ConstantSDNode>(ShAmt.getOperand(0))) {
+    uint64_t Imm = ShAmt.getConstantOperandVal(0) % 64;
+    if (Imm == 0 || Imm == 63) {
+      NewOpc = Imm == 0 ? KlaussCPU::NEGR : KlaussCPU::NOTR;
+      X = ShAmt.getOperand(1);
+    }
+  } else if (ShAmt.getOpcode() == ISD::XOR &&
+             isa<ConstantSDNode>(ShAmt.getOperand(1)) &&
+             ShAmt.getConstantOperandVal(1) % 64 == 63) {
+    NewOpc = KlaussCPU::NOTR;
+    X = ShAmt.getOperand(0);
+  }
+  if (NewOpc)
+    ShAmt = SDValue(CurDAG->getMachineNode(NewOpc, SDLoc(ShAmt), MVT::i64,
+                                           stripShiftMask(X, *CurDAG)),
+                    0);
+  return true;
+}
+
+// Dup32: the two halves of ORR (SHLV Hi, 32), Lo, which copies N[31:0] into
+// both halves of a register for a 32-bit rotate.  Lo must be N zero-extended
+// from 32 bits: an explicit `and N', 0xFFFFFFFF` (then Hi is N', so the
+// SHLV does not wait for the ZEXTW), N itself when its upper half is known
+// zero or it is a load of at most 32 bits (every one of which zero-extends,
+// extloads included: see isZExtFree), or a new ZEXTW.
+bool KlaussCPUDAGToDAGISel::selectDup32(SDValue N, SDValue &Hi, SDValue &Lo) {
+  Hi = Lo = N;
+  if (N.getOpcode() == ISD::AND && isa<ConstantSDNode>(N.getOperand(1)) &&
+      N.getConstantOperandVal(1) == 0xFFFFFFFFu) {
+    Hi = N.getOperand(0);
+    return true;
+  }
+  if (auto *LD = dyn_cast<LoadSDNode>(N);
+      LD && LD->getExtensionType() != ISD::SEXTLOAD &&
+      LD->getMemoryVT().getSizeInBits() <= 32)
+    return true;
+  if (!CurDAG->MaskedValueIsZero(N, APInt::getHighBitsSet(64, 32)))
+    Lo = SDValue(
+        CurDAG->getMachineNode(KlaussCPU::ZEXTW, SDLoc(N), MVT::i64, N), 0);
+  return true;
+}
+
+// BitFieldExtract: BEXTR rd, rs, {len[12:8], start[4:0]} computes
+// rd = (rs >> start) & (2^len - 1) for start, len in [0, 31] (the CPU's
+// field descriptor; pipeline_core.sv U_BEXTR).  Matched for
+//   (and (srl x, start), 2^len - 1)
+//   (srl (and x, M), start)  with M >> start = 2^len - 1 (a zero-extended
+//                            i32 shift; the bits of M below start are
+//                            shifted out)
+// with start >= 1 (a mask alone is one ANDV).  The inner node must have no
+// other use, or it stays and BEXTR saves nothing.
+bool KlaussCPUDAGToDAGISel::selectBitFieldExtract(SDValue N, SDValue &Src,
+                                                  SDValue &Field) {
+  unsigned Opc = N.getOpcode();
+  if ((Opc != ISD::AND && Opc != ISD::SRL) ||
+      !isa<ConstantSDNode>(N.getOperand(1)))
+    return false;
+  SDValue Inner = N.getOperand(0);
+  if (Inner.getOpcode() != (Opc == ISD::AND ? ISD::SRL : ISD::AND) ||
+      !Inner.hasOneUse() || !isa<ConstantSDNode>(Inner.getOperand(1)))
+    return false;
+  uint64_t Start, Mask;
+  if (Opc == ISD::AND) {
+    Start = Inner.getConstantOperandVal(1);
+    Mask = N.getConstantOperandVal(1);
+  } else {
+    Start = N.getConstantOperandVal(1);
+    if (Start >= 64)
+      return false;
+    Mask = Inner.getConstantOperandVal(1) >> Start;
+  }
+  if (Start < 1 || Start > 31 || !isMask_64(Mask))
+    return false;
+  unsigned Len = llvm::popcount(Mask);
+  if (Len > 31)
+    return false;
+  Src = Inner.getOperand(0);
+  Field = CurDAG->getTargetConstant((Len << 8) | Start, SDLoc(N), MVT::i64);
+  return true;
+}
+
+// FieldShiftPair: (and (srl x, start), 2^len - 1) that BEXTR cannot take
+// (start or len above 31) and whose mask is not 1 word (ANDV with a uimm8,
+// ZEXTB/H/W): (x << (64 - start - len)) >> (64 - len), two 1-word shifts
+// instead of SHRV and a 2-word ANDV, or a SETR64 + ANDR, e.g. the exponent
+// of a double, (x >> 52) & 0x7FF.
+bool KlaussCPUDAGToDAGISel::selectFieldShiftPair(SDValue N, SDValue &Src,
+                                                 SDValue &Shl, SDValue &Srl) {
+  if (N.getOpcode() != ISD::AND || !isa<ConstantSDNode>(N.getOperand(1)))
+    return false;
+  SDValue Sh = N.getOperand(0);
+  if (Sh.getOpcode() != ISD::SRL || !Sh.hasOneUse() ||
+      !isa<ConstantSDNode>(Sh.getOperand(1)))
+    return false;
+  uint64_t Start = Sh.getConstantOperandVal(1);
+  uint64_t Mask = N.getConstantOperandVal(1);
+  if (!isMask_64(Mask) || Mask <= 0xFF || Mask == 0xFFFF ||
+      Mask == 0xFFFFFFFF)
+    return false;
+  unsigned Len = llvm::popcount(Mask);
+  if ((Start >= 1 && Start <= 31 && Len <= 31) || Start + Len >= 64)
+    return false;
+  SDLoc DL(N);
+  Src = Sh.getOperand(0);
+  Shl = CurDAG->getTargetConstant(64 - Start - Len, DL, MVT::i64);
+  Srl = CurDAG->getTargetConstant(64 - Len, DL, MVT::i64);
   return true;
 }
 

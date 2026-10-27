@@ -54,6 +54,10 @@ def callseq_end   : SDNode<"ISD::CALLSEQ_END", SDT_KlaussCPUCallSeqEnd,
 def KlaussCPUAddr  : SDNode<"KlaussCPUISD::ADDR", SDTIntUnaryOp>;
 def KlaussCPULeaPC : SDNode<"KlaussCPUISD::LEAPC", SDTIntUnaryOp>;
 
+// 32-bit rotates of the low half (ReplaceNodeResults for an i32 rotl/rotr).
+def KlaussCPURolW : SDNode<"KlaussCPUISD::ROLW", SDTIntShiftOp>;
+def KlaussCPURorW : SDNode<"KlaussCPUISD::RORW", SDTIntShiftOp>;
+
 //===----------------------------------------------------------------------===//
 // Instruction selection predicates
 //===----------------------------------------------------------------------===//
@@ -747,25 +751,22 @@ def MODUR  : RRR<0x6A000000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 [(set GPR:$rd, (urem GPR:$rs1, GPR:$rs2))]>;
 }
 
-// Shifts
+// Shifts and rotates by a register amount.  Selected by the shamt patterns
+// below (the CPU reads only rs2[5:0]).  Rotates come from ISD::ROTL/ROTR
+// (i64 Legal in ISelLowering; Rust's u64::rotate_left/right and hash/crypto
+// kernels hit these hard) and from the 32-bit rotate nodes.
+let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in {
 def SHLR   : RRR<0x50004000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
-                "shlr\t$rd, $rs1, $rs2",
-                [(set GPR:$rd, (shl GPR:$rs1, GPR:$rs2))]>;
+                "shlr\t$rd, $rs1, $rs2">;
 def SHRR   : RRR<0x50404000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
-                "shrr\t$rd, $rs1, $rs2",
-                [(set GPR:$rd, (srl GPR:$rs1, GPR:$rs2))]>;
+                "shrr\t$rd, $rs1, $rs2">;
 def SARR   : RRR<0x50804000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
-                "sarr\t$rd, $rs1, $rs2",
-                [(set GPR:$rd, (sra GPR:$rs1, GPR:$rs2))]>;
-
-// Rotate — selected from ISD::ROTL/ROTR (i64 Legal in ISelLowering).
-// Rust's u64::rotate_left/right and hash/crypto kernels hit these hard.
+                "sarr\t$rd, $rs1, $rs2">;
 def ROLR   : RRR<0x50C04000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
-                "rolr\t$rd, $rs1, $rs2",
-                [(set GPR:$rd, (rotl GPR:$rs1, GPR:$rs2))]>;
+                "rolr\t$rd, $rs1, $rs2">;
 def RORR_R : RRR<0x51004000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
-                "rorr\t$rd, $rs1, $rs2",
-                [(set GPR:$rd, (rotr GPR:$rs1, GPR:$rs2))]>;
+                "rorr\t$rd, $rs1, $rs2">;
+}
 
 // Compare-and-materialise: rd = (rs1 cond rs2) ? 1 : 0
 def CMPEQR  : RRR<0x4C200000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
@@ -1208,6 +1209,19 @@ def : Pat<(shl GPR:$rs, uimm6:$sh), (SHLV  GPR:$rs, uimm6:$sh)>;
 def : Pat<(srl GPR:$rs, uimm6:$sh), (SHRV  GPR:$rs, uimm6:$sh)>;
 def : Pat<(sra GPR:$rs, uimm6:$sh), (SHRAV GPR:$rs, uimm6:$sh)>;
 
+// Shift or rotate by a register amount.  The CPU uses only rs2[5:0]
+// (pipeline_core.sv ex_shcnt = ex_b[5:0]; klausscc emu/exec.rs
+// exec_shift_bit `& 0x3F`), so selectShiftMask drops what cannot change
+// those bits: an `and` that keeps them (the `& 63` of a rotate or funnel
+// shift, the zero-extension of a promoted i32 amount), X + 64k, and turns
+// 64k - X into NEGR and 64k-1 - X into NOTR.
+def shamt : ComplexPattern<i64, 1, "selectShiftMask", [], [], 0>;
+def : Pat<(shl  GPR:$rs1, shamt:$rs2), (SHLR   GPR:$rs1, shamt:$rs2)>;
+def : Pat<(srl  GPR:$rs1, shamt:$rs2), (SHRR   GPR:$rs1, shamt:$rs2)>;
+def : Pat<(sra  GPR:$rs1, shamt:$rs2), (SARR   GPR:$rs1, shamt:$rs2)>;
+def : Pat<(rotl GPR:$rs1, shamt:$rs2), (ROLR   GPR:$rs1, shamt:$rs2)>;
+def : Pat<(rotr GPR:$rs1, shamt:$rs2), (RORR_R GPR:$rs1, shamt:$rs2)>;
+
 // Bitwise op with a mask that fits in unsigned 32 bits (imm is zero-extended).
 // Masks that are neither a zero- nor a sign-extended imm32 fall through to
 // SETR64 + ANDR/ORR/XORR.
@@ -1220,6 +1234,31 @@ def negsimm32_imm
 def : Pat<(and GPR:$rs, negsimm32_imm:$i), (ANDI GPR:$rs, negsimm32_imm:$i)>;
 def : Pat<(or  GPR:$rs, negsimm32_imm:$i), (ORI  GPR:$rs, negsimm32_imm:$i)>;
 def : Pat<(xor GPR:$rs, negsimm32_imm:$i), (XORI GPR:$rs, negsimm32_imm:$i)>;
+// A mask of the high 64-k bits (k >= 32) or of the low k bits (k > 32),
+// which no imm32 reaches: a shift pair (2 words) instead of SETR64 + ANDR
+// (4 words, the same count).  Only for a constant with no other use in the
+// block: a shared SETR64 serves every AND with one more instruction.
+def highmask64_imm : PatLeaf<(imm), [{
+  uint64_t V = N->getZExtValue();
+  return N->hasOneUse() && V != 0 && isMask_64(~V) && llvm::countr_zero(V) >= 32;
+}]>;
+def lowmask64_imm : PatLeaf<(imm), [{
+  uint64_t V = N->getZExtValue();
+  return N->hasOneUse() && isMask_64(V) && llvm::popcount(V) > 32 &&
+         llvm::popcount(V) < 64;
+}]>;
+def TrailingZeros : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(llvm::countr_zero(N->getZExtValue()),
+                                   SDLoc(N), MVT::i64);
+}]>;
+def LeadingZeros : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(llvm::countl_zero(N->getZExtValue()),
+                                   SDLoc(N), MVT::i64);
+}]>;
+def : Pat<(and GPR:$rs, highmask64_imm:$m),
+          (SHLV (SHRV GPR:$rs, (TrailingZeros imm:$m)), (TrailingZeros imm:$m))>;
+def : Pat<(and GPR:$rs, lowmask64_imm:$m),
+          (SHRV (SHLV GPR:$rs, (LeadingZeros imm:$m)), (LeadingZeros imm:$m))>;
 
 // Multiply by a signed-32 constant (imm is sign-extended).
 def : Pat<(mul GPR:$rs, simm32_imm:$i), (MULV GPR:$rs, simm32_imm:$i)>;
@@ -1263,6 +1302,22 @@ defm CMPUGT : BoolCompare<0x4E600000, "cmpugt", SETUGT>;
 // Rotate by a constant amount (0–63) → ROLV/RORV (count = imm[5:0]).
 def : Pat<(rotl GPR:$rs, uimm6:$sh), (ROLV GPR:$rs, uimm6:$sh)>;
 def : Pat<(rotr GPR:$rs, uimm6:$sh), (RORV GPR:$rs, uimm6:$sh)>;
+
+// A 32-bit rotate is the 64-bit rotate of x[31:0] copied into both halves,
+// ORR (SHLV x, 32), zext(x): a rotate of a value that repeats every 32 bits
+// leaves the 32-bit rotate in each half, for any amount modulo 32.  Dup32
+// gives (x, zext(x)), taking the zero-extension from an explicit
+// `and 0xFFFFFFFF`, a load or known-zero upper bits when it can (no ZEXTW),
+// and the duplicated value is shared (CSE) by the rotates of one x.
+def Dup32 : ComplexPattern<i64, 2, "selectDup32", [], [], 0>;
+def : Pat<(KlaussCPURolW (Dup32 GPR:$hi, GPR:$lo), uimm6:$sh),
+          (ROLV (ORR (SHLV GPR:$hi, 32), GPR:$lo), uimm6:$sh)>;
+def : Pat<(KlaussCPURorW (Dup32 GPR:$hi, GPR:$lo), uimm6:$sh),
+          (RORV (ORR (SHLV GPR:$hi, 32), GPR:$lo), uimm6:$sh)>;
+def : Pat<(KlaussCPURolW (Dup32 GPR:$hi, GPR:$lo), shamt:$sh),
+          (ROLR (ORR (SHLV GPR:$hi, 32), GPR:$lo), shamt:$sh)>;
+def : Pat<(KlaussCPURorW (Dup32 GPR:$hi, GPR:$lo), shamt:$sh),
+          (RORR_R (ORR (SHLV GPR:$hi, 32), GPR:$lo), shamt:$sh)>;
 
 // (x & 0xFFFFFFFF) is exactly a 32→64 zero-extend → single 4-byte ZEXTW.
 // AddedComplexity beats the ANDV pattern above for this specific mask.
@@ -1512,6 +1567,24 @@ def BTGL  : ShiftImmN<0x52A00000, "btgl">;
 // BEXTR's rs2 field must be 0 (the template's), which the CPU checks.
 def BEXTR : RV_imm<0x93000000, "bextr", uimm32>;
 def BDEP  : RRRV<0x93400000, "bdep", uimm32>;
+
+// Bit-field extract, (x >> start) & (2^len - 1) and the (x & M) >> start
+// form of a zero-extended i32 shift, with start and len in [1, 31]: one
+// BEXTR (selectBitFieldExtract) instead of a shift and a mask.  The field
+// may take bits from x[63:32] (the CPU shifts the full register:
+// pipeline_core.sv U_BEXTR, klausscc emu/exec.rs exec_bit_field).
+def BitFieldExtract : ComplexPattern<i64, 2, "selectBitFieldExtract",
+                                     [and, srl]>;
+let AddedComplexity = 5 in
+def : Pat<(BitFieldExtract GPR:$rs, uimm32:$field),
+          (BEXTR GPR:$rs, uimm32:$field)>;
+// The fields BEXTR cannot take, as a shift pair when the mask would take a
+// 2-word ANDV or a SETR64 (selectFieldShiftPair).
+def FieldShiftPair : ComplexPattern<i64, 3, "selectFieldShiftPair", [and]>;
+let AddedComplexity = 5 in
+def : Pat<(FieldShiftPair GPR:$rs, uimm6:$shl, uimm6:$srl),
+          (SHRV (SHLV GPR:$rs, uimm6:$shl), uimm6:$srl)>;
+
 // Bit-test by embedded position N — v2: single word, flag-only.
 def BTST  : BitTestImmN<0x52E00000, "btst\t$rs, $imm">;
 

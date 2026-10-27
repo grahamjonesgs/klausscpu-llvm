@@ -144,43 +144,41 @@ define i128 @shl128(i128 %a, i128 %b) nounwind {
 ; CHECK-LABEL: shl128:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    addi r12, r2, -64
-; CHECK-NEXT:    fbri r12, 0, 9, .LBB3_2
-; CHECK-NEXT:  # %bb.1:
-; CHECK-NEXT:    setr r12, 63
-; CHECK-NEXT:    shrv r14, r0, 1
-; CHECK-NEXT:    shlr r13, r1, r2
-; CHECK-NEXT:    subr r12, r12, r2
-; CHECK-NEXT:    shrr r12, r14, r12
-; CHECK-NEXT:    orr r11, r13, r12
+; CHECK-NEXT:    andv r14, r2, 64
 ; CHECK-NEXT:    shlr r12, r0, r2
+; CHECK-NEXT:    fbri r14, 0, 8, .LBB3_2
+; CHECK-NEXT:  # %bb.1:
+; CHECK-NEXT:    notr r14, r2
+; CHECK-NEXT:    shrv r13, r0, 1
+; CHECK-NEXT:    shlr r11, r1, r2
+; CHECK-NEXT:    shrr r14, r13, r14
+; CHECK-NEXT:    orr r11, r11, r14
 ; CHECK-NEXT:    leaveret
 ; CHECK-NEXT:  .LBB3_2:
-; CHECK-NEXT:    shlr r11, r0, r12
+; CHECK-NEXT:    copy r11, r12
 ; CHECK-NEXT:    setr r12, 0
 ; CHECK-NEXT:    leaveret
 ;
 ; NOGROUP-LABEL: shl128:
 ; NOGROUP:       # %bb.0:
 ; NOGROUP-NEXT:    enter 0
-; NOGROUP-NEXT:    addi r12, r2, -64
-; NOGROUP-NEXT:    fbri r12, 0, 9, .LBB3_2
-; NOGROUP-NEXT:  # %bb.1:
-; NOGROUP-NEXT:    setr r14, 63
-; NOGROUP-NEXT:    shrv r13, r0, 1
-; NOGROUP-NEXT:    shlr r11, r1, r2
-; NOGROUP-NEXT:    subr r14, r14, r2
-; NOGROUP-NEXT:    shrr r14, r13, r14
-; NOGROUP-NEXT:    orr r11, r11, r14
-; NOGROUP-NEXT:    fbri r12, 0, 1, .LBB3_4
-; NOGROUP-NEXT:  .LBB3_5:
-; NOGROUP-NEXT:    setr r12, 0
-; NOGROUP-NEXT:    leaveret
-; NOGROUP-NEXT:  .LBB3_2:
-; NOGROUP-NEXT:    shlr r11, r0, r12
-; NOGROUP-NEXT:    fbri r12, 0, 9, .LBB3_5
-; NOGROUP-NEXT:  .LBB3_4:
+; NOGROUP-NEXT:    andv r14, r2, 64
 ; NOGROUP-NEXT:    shlr r12, r0, r2
+; NOGROUP-NEXT:    fbri r14, 0, 8, .LBB3_2
+; NOGROUP-NEXT:  # %bb.1:
+; NOGROUP-NEXT:    notr r13, r2
+; NOGROUP-NEXT:    shrv r11, r0, 1
+; NOGROUP-NEXT:    shlr r10, r1, r2
+; NOGROUP-NEXT:    shrr r13, r11, r13
+; NOGROUP-NEXT:    orr r11, r10, r13
+; NOGROUP-NEXT:    fbri r14, 0, 8, .LBB3_4
+; NOGROUP-NEXT:    jmprel .LBB3_5
+; NOGROUP-NEXT:  .LBB3_2:
+; NOGROUP-NEXT:    copy r11, r12
+; NOGROUP-NEXT:    fbri r14, 0, 0, .LBB3_5
+; NOGROUP-NEXT:  .LBB3_4:
+; NOGROUP-NEXT:    setr r12, 0
+; NOGROUP-NEXT:  .LBB3_5:
 ; NOGROUP-NEXT:    leaveret
   %r = shl i128 %a, %b
   ret i128 %r

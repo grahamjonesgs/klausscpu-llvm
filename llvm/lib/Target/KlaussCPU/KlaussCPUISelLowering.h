@@ -30,6 +30,10 @@ enum NodeType : unsigned {
   SELECT_CC, // (lhs:i64, rhs:i64, cc:CondCode, trueV:i64, falseV:i64) -> i64
             // Selected to SELECT_CC_RR/RI, then expanded to compare +
             // conditional jump + PHI by EmitInstrWithCustomInserter.
+  ROLW,     // (x:i64, amt:i64) -> i64: low 32 bits = rotl32(x[31:0], amt),
+  RORW,     // rotr32; the upper 32 bits are the same 32 bits (not an
+            // extension).  From ReplaceNodeResults for an i32 ROTL/ROTR;
+            // selected to a 64-bit rotate of x copied into both halves.
 };
 } // namespace KlaussCPUISD
 
@@ -67,6 +71,9 @@ public:
   bool isZExtFree(SDValue Val, EVT VT2) const override;
 
   SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
+
+  void ReplaceNodeResults(SDNode *N, SmallVectorImpl<SDValue> &Results,
+                          SelectionDAG &DAG) const override;
 
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                 bool IsVarArg,

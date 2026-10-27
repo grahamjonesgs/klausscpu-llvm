@@ -205,13 +205,17 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   // PerformDAGCombine.
   setTargetDAGCombine(ISD::AND);
 
-  // Hardware 64-bit rotate (ROLR/RORR). 32-bit rotates stay Expand: a 64-bit
-  // register rotate is not a 32-bit rotate, so promoted i32 rotl/rotr must
-  // lower to the shift-pair form instead.
+  // Hardware 64-bit rotate (ROLR/RORR, ROLV/RORV).  There is no 32-bit
+  // rotate, but a 64-bit rotate of a value whose two halves are equal is a
+  // 32-bit rotate in each half: ReplaceNodeResults turns an i32 rotl/rotr
+  // into ROLW/RORW, which select to that (3-4 instructions, the duplicated
+  // value shared by every rotate of the same x, as in SHA-256's sigma
+  // functions; the generic shift pair takes 4 for a constant amount and 7
+  // for a variable one).
   setOperationAction(ISD::ROTL, MVT::i64, Legal);
   setOperationAction(ISD::ROTR, MVT::i64, Legal);
-  setOperationAction(ISD::ROTL, MVT::i32, Expand);
-  setOperationAction(ISD::ROTR, MVT::i32, Expand);
+  setOperationAction(ISD::ROTL, MVT::i32, Custom);
+  setOperationAction(ISD::ROTR, MVT::i32, Custom);
 
   // Hardware absolute value (ABSR).
   setOperationAction(ISD::ABS, MVT::i64, Legal);
@@ -321,6 +325,29 @@ bool KlaussCPUTargetLowering::isZExtFree(SDValue Val, EVT VT2) const {
   return TargetLowering::isZExtFree(Val, VT2);
 }
 
+void KlaussCPUTargetLowering::ReplaceNodeResults(
+    SDNode *N, SmallVectorImpl<SDValue> &Results, SelectionDAG &DAG) const {
+  switch (N->getOpcode()) {
+  case ISD::ROTL:
+  case ISD::ROTR: {
+    // An i32 rotate: amounts are modulo 32 and so are ROLW/RORW's (the
+    // CPU uses amount[5:0], and the duplicated value repeats every 32 bits).
+    assert(N->getValueType(0) == MVT::i32 && "unexpected rotate type");
+    SDLoc DL(N);
+    SDValue X = DAG.getNode(ISD::ANY_EXTEND, DL, MVT::i64, N->getOperand(0));
+    SDValue Amt =
+        DAG.getNode(ISD::ANY_EXTEND, DL, MVT::i64, N->getOperand(1));
+    unsigned Opc =
+        N->getOpcode() == ISD::ROTL ? KlaussCPUISD::ROLW : KlaussCPUISD::RORW;
+    SDValue Res = DAG.getNode(Opc, DL, MVT::i64, X, Amt);
+    Results.push_back(DAG.getNode(ISD::TRUNCATE, DL, MVT::i32, Res));
+    return;
+  }
+  default:
+    llvm_unreachable("KlaussCPU: unexpected node to custom-legalize");
+  }
+}
+
 SDValue KlaussCPUTargetLowering::PerformDAGCombine(SDNode *N,
                                                    DAGCombinerInfo &DCI) const {
   SelectionDAG &DAG = DCI.DAG;
@@ -362,6 +389,18 @@ SDValue KlaussCPUTargetLowering::PerformDAGCombine(SDNode *N,
   return SDValue();
 }
 
+// The halves of a 128-bit shift by Shamt in [0, 128).  Bit 6 of Shamt picks
+// the case; the shifts themselves only see Shamt[5:0] (the shamt pattern
+// drops the `& 127` of a promoted amount and the CPU masks the rest), so
+// Shamt - 64 shifts by the same amount as Shamt, and 63 - Shamt is ~Shamt.
+static SDValue getShiftPartsCond(SDValue Shamt, const SDLoc &DL,
+                                 SelectionDAG &DAG) {
+  EVT VT = Shamt.getValueType();
+  SDValue Bit6 = DAG.getNode(ISD::AND, DL, VT, Shamt,
+                             DAG.getConstant(64, DL, VT));
+  return DAG.getSetCC(DL, VT, Bit6, DAG.getConstant(0, DL, VT), ISD::SETEQ);
+}
+
 SDValue KlaussCPUTargetLowering::LowerShiftLeftParts(SDValue Op,
                                                        SelectionDAG &DAG) const {
   SDLoc DL(Op);
@@ -370,28 +409,26 @@ SDValue KlaussCPUTargetLowering::LowerShiftLeftParts(SDValue Op,
   SDValue Shamt = Op.getOperand(2);
   EVT VT = MVT::i64;
 
-  // if (Shamt - 64) < 0:   // Shamt < 64
+  // if Shamt < 64:
   //   new_Lo = Lo << Shamt
-  //   new_Hi = (Hi << Shamt) | (Lo >> 1 >> (63 - Shamt))
+  //   new_Hi = (Hi << Shamt) | ((Lo >> 1) >> (63 ^ Shamt))
   // else:
   //   new_Lo = 0
-  //   new_Hi = Lo << (Shamt - 64)
+  //   new_Hi = Lo << Shamt   (Shamt[5:0] = Shamt - 64)
 
   SDValue Zero       = DAG.getConstant(0, DL, VT);
   SDValue One        = DAG.getConstant(1, DL, VT);
-  SDValue Minus64    = DAG.getSignedConstant(-64, DL, VT);
   SDValue SixtyThree = DAG.getConstant(63, DL, VT);
-  SDValue ShamtMinus64  = DAG.getNode(ISD::ADD, DL, VT, Shamt, Minus64);
-  SDValue SixtyThreeMShamt = DAG.getNode(ISD::SUB, DL, VT, SixtyThree, Shamt);
+  SDValue SixtyThreeMShamt = DAG.getNode(ISD::XOR, DL, VT, Shamt, SixtyThree);
 
   SDValue LoTrue       = DAG.getNode(ISD::SHL, DL, VT, Lo, Shamt);
   SDValue ShiftRight1Lo = DAG.getNode(ISD::SRL, DL, VT, Lo, One);
   SDValue ShiftRightLo  = DAG.getNode(ISD::SRL, DL, VT, ShiftRight1Lo, SixtyThreeMShamt);
   SDValue ShiftLeftHi   = DAG.getNode(ISD::SHL, DL, VT, Hi, Shamt);
   SDValue HiTrue  = DAG.getNode(ISD::OR,  DL, VT, ShiftLeftHi, ShiftRightLo);
-  SDValue HiFalse = DAG.getNode(ISD::SHL, DL, VT, Lo, ShamtMinus64);
+  SDValue HiFalse = DAG.getNode(ISD::SHL, DL, VT, Lo, Shamt);
 
-  SDValue CC = DAG.getSetCC(DL, VT, ShamtMinus64, Zero, ISD::SETLT);
+  SDValue CC = getShiftPartsCond(Shamt, DL, DAG);
   Lo = DAG.getNode(ISD::SELECT, DL, VT, CC, LoTrue, Zero);
   Hi = DAG.getNode(ISD::SELECT, DL, VT, CC, HiTrue, HiFalse);
 
@@ -408,31 +445,29 @@ SDValue KlaussCPUTargetLowering::LowerShiftRightParts(SDValue Op,
   SDValue Shamt = Op.getOperand(2);
   EVT VT = MVT::i64;
 
-  // if (Shamt - 64) < 0:   // Shamt < 64
-  //   new_Lo = (Lo >> Shamt) | ((Hi << 1) << (63 - Shamt))
+  // if Shamt < 64:
+  //   new_Lo = (Lo >> Shamt) | ((Hi << 1) << (63 ^ Shamt))
   //   new_Hi = Hi >> Shamt  (arithmetic for SRA, logical for SRL)
   // else:
-  //   new_Lo = Hi >> (Shamt - 64)  (arithmetic for SRA, logical for SRL)
+  //   new_Lo = Hi >> Shamt  (Shamt[5:0] = Shamt - 64; arithmetic for SRA)
   //   new_Hi = IsSRA ? Hi >> 63 : 0
 
   unsigned ShiftRightOp = IsSRA ? ISD::SRA : ISD::SRL;
 
   SDValue Zero       = DAG.getConstant(0, DL, VT);
   SDValue One        = DAG.getConstant(1, DL, VT);
-  SDValue Minus64    = DAG.getSignedConstant(-64, DL, VT);
   SDValue SixtyThree = DAG.getConstant(63, DL, VT);
-  SDValue ShamtMinus64    = DAG.getNode(ISD::ADD, DL, VT, Shamt, Minus64);
-  SDValue SixtyThreeMShamt = DAG.getNode(ISD::SUB, DL, VT, SixtyThree, Shamt);
+  SDValue SixtyThreeMShamt = DAG.getNode(ISD::XOR, DL, VT, Shamt, SixtyThree);
 
   SDValue ShiftRightLo = DAG.getNode(ISD::SRL, DL, VT, Lo, Shamt);
   SDValue ShiftLeftHi1 = DAG.getNode(ISD::SHL, DL, VT, Hi, One);
   SDValue ShiftLeftHi  = DAG.getNode(ISD::SHL, DL, VT, ShiftLeftHi1, SixtyThreeMShamt);
   SDValue LoTrue  = DAG.getNode(ISD::OR,          DL, VT, ShiftRightLo, ShiftLeftHi);
   SDValue HiTrue  = DAG.getNode(ShiftRightOp,     DL, VT, Hi, Shamt);
-  SDValue LoFalse = DAG.getNode(ShiftRightOp,     DL, VT, Hi, ShamtMinus64);
+  SDValue LoFalse = HiTrue;
   SDValue HiFalse = IsSRA ? DAG.getNode(ISD::SRA, DL, VT, Hi, SixtyThree) : Zero;
 
-  SDValue CC = DAG.getSetCC(DL, VT, ShamtMinus64, Zero, ISD::SETLT);
+  SDValue CC = getShiftPartsCond(Shamt, DL, DAG);
   Lo = DAG.getNode(ISD::SELECT, DL, VT, CC, LoTrue, LoFalse);
   Hi = DAG.getNode(ISD::SELECT, DL, VT, CC, HiTrue, HiFalse);
 
@@ -762,6 +797,8 @@ KlaussCPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case KlaussCPUISD::ADDR:     return "KlaussCPUISD::ADDR";
   case KlaussCPUISD::LEAPC:    return "KlaussCPUISD::LEAPC";
   case KlaussCPUISD::SELECT_CC: return "KlaussCPUISD::SELECT_CC";
+  case KlaussCPUISD::ROLW:     return "KlaussCPUISD::ROLW";
+  case KlaussCPUISD::RORW:     return "KlaussCPUISD::RORW";
   default: return nullptr;
   }
 }
