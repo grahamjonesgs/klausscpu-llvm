@@ -174,8 +174,8 @@ private:
   KindTy Kind;
   SMLoc  StartLoc, EndLoc;
   // Owns its storage: the mnemonic token is lower-cased from the source text
-  // (which may be UPPERCASE per opcode_select.vh), so it cannot alias the
-  // original buffer.
+  // (which may be UPPERCASE, as the ISA map spells it), so it cannot alias
+  // the original buffer.
   std::string    Tok;
   MCRegister     RegNum;
   // Immediate: the value.  Register: the symbol reading of its name, or null.
@@ -401,9 +401,9 @@ bool KlaussCPUAsmParser::parseInstruction(ParseInstructionInfo & /*Info*/,
                                            StringRef Name, SMLoc NameLoc,
                                            OperandVector &Operands) {
   // The .td AsmStrings (and therefore the match table) are lower-case, while
-  // opcode_select.vh spells mnemonics in UPPERCASE.  Lower the mnemonic here so
-  // assembly written in either case (ADDR / addr / AddR) matches.  Registers
-  // are already case-folded in matchRegisterByName().
+  // the ISA map (ISA_ENCODING_V2_MAP.md) spells mnemonics in UPPERCASE.  Lower
+  // the mnemonic here so assembly written in either case (ADDR / addr / AddR)
+  // matches.  Registers are already case-folded in matchRegisterByName().
   Operands.push_back(KlaussCPUOperand::createToken(Name.lower(), NameLoc));
   // The match tables (and so MatchOperandParserImpl) use the lower-case name.
   StringRef Mnemonic =

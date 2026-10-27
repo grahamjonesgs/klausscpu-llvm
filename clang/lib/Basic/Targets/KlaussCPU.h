@@ -30,7 +30,7 @@ public:
     IntPtrType  = SignedLong;
     IntMaxType  = SignedLong;
     Int64Type   = SignedLong;
-    resetDataLayout("e-m:e-p:64:64-i64:64-i128:128-n32:64");
+    resetDataLayout();
     TLSSupported = false;
     // No hardware FP.
     HasFloat128 = false;

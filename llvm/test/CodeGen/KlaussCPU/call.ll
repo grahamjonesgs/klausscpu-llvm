@@ -56,7 +56,7 @@ define i64 @callee_saved_live_across_call(i64 %x) {
   ret i64 %r
 }
 
-; Prologue/epilogue: push R15, getsp R15, (addsp), setsp R15, pop R15.
+; Prologue/epilogue: enter N ... leaveret.
 define i64 @leaf(i64 %a, i64 %b) {
 ; CHECK-LABEL: leaf:
 ; CHECK:       # %bb.0:

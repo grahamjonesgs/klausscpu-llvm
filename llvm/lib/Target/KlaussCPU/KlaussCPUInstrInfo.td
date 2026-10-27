@@ -307,13 +307,8 @@ class KCInst<int size, bits<32> word0, dag outs, dag ins, string asmstr,
   let DecoderNamespace = "KlaussCPU";
   let SchedRW          = [WriteALU];   // default; overridden per format (M8)
   // Word-0 template (operand fields zero); the short forms derive theirs
-  // from their 2-word twin's.
+  // from their 2-word twin's.  Its LEN must match Size.
   bits<32> Word0 = word0;
-  // Retired v1 peripheral opcodes keep their v1 word (LEN=00, which the v2
-  // CPU traps on); every other template's LEN must match Size.  They do not
-  // disassemble.
-  bit isRetiredV1 = 0;
-  let isAsmParserOnly = isRetiredV1;
 }
 
 class KCInst32<bits<32> word0, dag outs, dag ins, string asmstr,
@@ -321,8 +316,7 @@ class KCInst32<bits<32> word0, dag outs, dag ins, string asmstr,
     : KCInst<4, word0, outs, ins, asmstr, pat> {
   field bits<32> Inst = word0;
   field bits<32> SoftFail = 0;
-  assert !or(isRetiredV1, !eq(word0{31-30}, 0b01)),
-         NAME # ": a 1-word template needs LEN=01";
+  assert !eq(word0{31-30}, 0b01), NAME # ": a 1-word template needs LEN=01";
 }
 
 // imm32 / target in word 1.
@@ -332,8 +326,7 @@ class KCInst64<bits<32> word0, dag outs, dag ins, string asmstr,
   field bits<64> Inst;
   field bits<64> SoftFail = 0;
   let Inst{31-0} = word0;
-  assert !or(isRetiredV1, !eq(word0{31-30}, 0b10)),
-         NAME # ": a 2-word template needs LEN=10";
+  assert !eq(word0{31-30}, 0b10), NAME # ": a 2-word template needs LEN=10";
 }
 
 // imm64: lo32 in word 1, hi32 in word 2.
@@ -471,17 +464,6 @@ class R_out<bits<32> word0, dag outs, string asmstr, list<dag> pat = []>
     : KCInst32<word0, outs, (ins), asmstr, pat> {
   bits<4> reg;
   let Inst{11-8} = reg;
-}
-
-// Retired v1 peripheral op (LED / 7-seg / RGB): the v1 word with the
-// register in [3:0].  LEN=00, so the v2 CPU traps (ERR_INV_OPCODE) if one
-// executes, which is the intended fail-fast behaviour; they exist only so
-// old hand-written inline asm still assembles.  Codegen never emits them.
-class RetiredV1_R<bits<32> word0, string asmstr>
-    : KCInst32<word0, (outs), (ins GPR:$reg), asmstr> {
-  bits<4> reg;
-  let Inst{3-0}   = reg;
-  let isRetiredV1 = 1;
 }
 
 //===----------------------------------------------------------------------===//
@@ -892,7 +874,7 @@ def MEMSET16 : RRst<0x5D000000, "memset16\t$rs_data, $rs_addr">;
 def MEMSET32 : RRst<0x5E000000, "memset32\t$rs_data, $rs_addr">;
 
 //===----------------------------------------------------------------------===//
-// ALU — single-register in-place (2-address: $rd = $rs1)
+// ALU — unary: rd = f(rs1)
 //===----------------------------------------------------------------------===//
 
 def INCR    : R_unary<0x57880000, "incr">;
@@ -1073,7 +1055,7 @@ def CMPRV_I : RV_cmp<0x8C100000, "cmprv\t$rs, $imm">;
 // rs1 = base, word 1 = offset32.  Sub-word loads zero-extend unless SGN=1.
 //
 // IMPORTANT: ldidx64/stidx64 (0x9B300000/0x9F300000) are the *force-aligned*
-// hardware variants (A=1, vh LDIDX64A/STIDX64A) — the RTL computes
+// hardware variants (A=1, ISA map LDIDX64A/STIDX64A) — the RTL computes
 // (rs1 + imm) & ~7 before the bus access.  The non-aligned forms are
 // ldidx64u/stidx64u (A=0).  Using the force-aligned form is only safe because
 // LLVM never emits a misaligned i64 access: allowsMisalignedMemoryAccesses()
@@ -1102,8 +1084,8 @@ def LDIDX16_S : RRV_ld<0x99A00000, "ldidx16s\t$rd, $base, $offset">  { let mayLo
 // MODE=01, a combination the v2 RTL already implements).
 def LDIDX32_S : RRV_ld<0x9AA00000, "ldidx32s\t$rd, $base, $offset">  { let mayLoad = 1; }
 
-// Accept the canonical opcode_select.vh spelling of the signed sub-word loads
-// (LDIDX8_S / LDIDX16_S) as assembler aliases for the printed mnemonics.
+// Accept the ISA map's spelling of the signed indexed loads (LDIDX8_S /
+// LDIDX16_S / LDIDX32_S) as assembler aliases for the printed mnemonics.
 // Mnemonics reach the matcher lower-cased, so the alias keys are lower-case.
 def : MnemonicAlias<"ldidx8_s",  "ldidx8s">;
 def : MnemonicAlias<"ldidx16_s", "ldidx16s">;
@@ -1157,8 +1139,8 @@ def : Pat<(i64 AddrFI:$fi), (ADDI AddrFI:$fi, 0)>;
 // KlaussCPU because the core is fetch-bound — fewer fetched words ≈ fewer
 // cycles.
 //
-// Extension semantics come straight from opcode_select.vh and gate each
-// pattern — getting these wrong would silently miscompile:
+// Extension semantics (ISA_ENCODING_V2_MAP §2, SGN) gate each pattern —
+// getting these wrong would silently miscompile:
 //   SHLV/SHRV/SHRAV : shift count is imm[5:0]            → uimm6   (0–63)
 //   ANDV/ORV/XORV   : imm32 is ZERO-extended to 64 bits  → uimm32_imm (hi32==0)
 //   MULV            : imm32 is SIGN-extended to 64 bits   → simm32_imm
@@ -1196,7 +1178,7 @@ def : Pat<(and GPR:$rs, 0xFF),   (ZEXTB GPR:$rs)>;
 def : Pat<(and GPR:$rs, 0xFFFF), (ZEXTH GPR:$rs)>;
 }
 
-// INCR/DECR: add ±1 as a single 4-byte op that also sets zero_flag (consumed
+// INCR/DECR: add ±1 as a single 4-byte op that also sets Z (consumed
 // by the KlaussCPUFlagReuse peephole).  AddedComplexity so they beat ADDV/ADDI.
 let AddedComplexity = 2 in {
 def : Pat<(add GPR:$rs,  1), (INCR GPR:$rs)>;
@@ -1306,23 +1288,24 @@ def CALL_I  : Vcall<0xA2000000, "call\t$target">;
 def JMPREL   : Vbr_uncond<0xA1000000, "jmprel\t$target", [],
                           PCRelTarget32>;
 
-// PC-relative conditional branches — flag sources same as absolute counterparts
-def JMPZREL   : Vbr_relcond<0xA1080000, "jmpzrel\t$target">;   // zero_flag
-def JMPNZREL  : Vbr_relcond<0xA10C0000, "jmpnzrel\t$target">;  // !zero_flag
-def JMPEREL   : Vbr_relcond<0xA1480000, "jmperel\t$target">;   // equal_flag
-def JMPNEREL  : Vbr_relcond<0xA14C0000, "jmpnerel\t$target">;  // !equal_flag
-def JMPCREL   : Vbr_relcond<0xA1100000, "jmpcrel\t$target">;   // carry_flag
-def JMPNCREL  : Vbr_relcond<0xA1140000, "jmpncrel\t$target">;  // !carry_flag
-def JMPSREL   : Vbr_relcond<0xA1200000, "jmpsrel\t$target">;   // sign_flag
-def JMPNSREL  : Vbr_relcond<0xA1240000, "jmpnsrel\t$target">;  // !sign_flag
-def JMPLTREL  : Vbr_relcond<0xA1280000, "jmpltrel\t$target">;  // less_flag
-def JMPLEREL  : Vbr_relcond<0xA1300000, "jmplerel\t$target">;  // less|equal
-def JMPGTREL  : Vbr_relcond<0xA1340000, "jmpgtrel\t$target">;  // !less&!equal
-def JMPGEREL  : Vbr_relcond<0xA12C0000, "jmpgerel\t$target">;  // !less_flag
-def JMPULTREL : Vbr_relcond<0xA1380000, "jmpultrel\t$target">; // ult_flag
-def JMPULEREL : Vbr_relcond<0xA1400000, "jmpulerel\t$target">; // ult|equal
-def JMPUGTREL : Vbr_relcond<0xA1440000, "jmpugtrel\t$target">; // !ult&!equal
-def JMPUGEREL : Vbr_relcond<0xA13C0000, "jmpugerel\t$target">; // !ult_flag
+// PC-relative conditional branches: the conditions of their absolute twins,
+// derived from the one Z/S/C/V flag set (EQ = Z, LT = S^V, ULT = C, ...).
+def JMPZREL   : Vbr_relcond<0xA1080000, "jmpzrel\t$target">;
+def JMPNZREL  : Vbr_relcond<0xA10C0000, "jmpnzrel\t$target">;
+def JMPEREL   : Vbr_relcond<0xA1480000, "jmperel\t$target">;
+def JMPNEREL  : Vbr_relcond<0xA14C0000, "jmpnerel\t$target">;
+def JMPCREL   : Vbr_relcond<0xA1100000, "jmpcrel\t$target">;
+def JMPNCREL  : Vbr_relcond<0xA1140000, "jmpncrel\t$target">;
+def JMPSREL   : Vbr_relcond<0xA1200000, "jmpsrel\t$target">;
+def JMPNSREL  : Vbr_relcond<0xA1240000, "jmpnsrel\t$target">;
+def JMPLTREL  : Vbr_relcond<0xA1280000, "jmpltrel\t$target">;
+def JMPLEREL  : Vbr_relcond<0xA1300000, "jmplerel\t$target">;
+def JMPGTREL  : Vbr_relcond<0xA1340000, "jmpgtrel\t$target">;
+def JMPGEREL  : Vbr_relcond<0xA12C0000, "jmpgerel\t$target">;
+def JMPULTREL : Vbr_relcond<0xA1380000, "jmpultrel\t$target">;
+def JMPULEREL : Vbr_relcond<0xA1400000, "jmpulerel\t$target">;
+def JMPUGTREL : Vbr_relcond<0xA1440000, "jmpugtrel\t$target">;
+def JMPUGEREL : Vbr_relcond<0xA13C0000, "jmpugerel\t$target">;
 
 // PC-relative direct call: push PC+8 (return addr), PC += sign_ext(imm32)
 let Uses = [SP],
@@ -1364,34 +1347,13 @@ let hasSideEffects = 1 in
 def WAIT_I  : I0<0x6C020000, (outs), (ins), "wait">;
 
 //===----------------------------------------------------------------------===//
-// Peripheral I-O instructions (hasSideEffects prevents reordering/elimination)
-//
-// UART is memory-mapped (MMIO at 0xF001_0000) and accessed via ordinary
-// volatile loads/stores — there are no UART opcodes/intrinsics anymore.
-//===----------------------------------------------------------------------===//
-
-let hasSideEffects = 1 in {
-  // ── Retired v1 peripheral opcodes (LEN=00 v1 words; see RetiredV1_R)
-  // Set 16 on-board LEDs from register bits [15:0].
-  def LEDR_R      : RetiredV1_R<0x00003000, "ledr\t$reg">;
-  // Set 7-seg display 1 from register.
-  def SEG7_1R_R   : RetiredV1_R<0x00003020, "7seg1r\t$reg">;
-  // Set 7-seg display 2 from register.
-  def SEG7_2R_R   : RetiredV1_R<0x00003030, "7seg2r\t$reg">;
-  // Set both 7-seg displays from register.
-  def SEG7R_R     : RetiredV1_R<0x00003040, "7segr\t$reg">;
-  // Blank both 7-seg displays.
-  let isRetiredV1 = 1 in
-  def SEG7BLANK_I : I0<0x00003073, (outs), (ins), "7segblank">;
-}
-
-//===----------------------------------------------------------------------===//
-// Assembler-only opcodes — full opcode_select.vh coverage
+// Assembler-only opcodes
 //
 // These instructions are NOT emitted by the code generator (no isel Pattern);
-// they exist so hand-written `.s` / inline-asm can name every hardware opcode
-// in opcode_select.vh.  Their word-0 templates are from ISA_ENCODING_V2_MAP,
-// so the bytes match the hardware-verified `klausscc` assembler.
+// they exist so hand-written `.s` / inline-asm can name the rest of the ISA
+// (ISA_ENCODING_V2_MAP.md).  The LED / 7-segment / RGB opcodes of ISA v1 no
+// longer exist (those peripherals, like the UART, are memory-mapped), so
+// they are not defined: their mnemonics are assembler errors.
 //===----------------------------------------------------------------------===//
 
 // ── RRR (rd, rs1, rs2) ─────────────────────────────────────────────────────
@@ -1436,9 +1398,9 @@ def MEMSET64RR : RRst<0x5F000000, "memset64rr\t$rs_data, $rs_addr">;
 def MEMREADR : RV_ld<0x9B400000, "memreadr\t$rd, $imm", [], uimm32_abs> { let mayLoad = 1; }
 def MEMSETR  : RV_st<0x9F400000, "memsetr\t$rs_data, $addr"> { let mayStore = 1; }
 
-// ── RRV 64-bit indexed: non-aligned (vh LDIDX64/STIDX64 = 0x0C/0x0D) and
-//    register-offset (vh LDIDX64R/STIDX64R).  NOTE: LLVM's ldidx64/stidx64 are
-//    the *force-aligned* 0xFC/0xFD (= vh LDIDX64A/STIDX64A); aliases below.
+// ── RRV 64-bit indexed: non-aligned (ISA map LDIDX64/STIDX64, A=0) and
+//    register-offset (LDIDX64R/STIDX64R).  NOTE: LLVM's ldidx64/stidx64 are
+//    the *force-aligned* forms (ISA map LDIDX64A/STIDX64A); aliases below.
 //    For the *R variants the offset is a second register (EA = base + offset).
 def LDIDX64U : RRV_ld<0x9B200000, "ldidx64u\t$rd, $base, $offset">;
 def STIDX64U : RRV_st<0x9F200000, "stidx64u\t$rs_data, $base, $offset">;
@@ -1464,28 +1426,21 @@ def CALLNO : Vcall<0xA21C0000, "callno\t$target">;
 // ── V64 (push 64-bit immediate; 12-byte) ────────────────────────────────────
 def PUSHV64 : V64_imm<0xE4400000, "pushv64\t$lo, $hi"> { let mayStore = 1; }
 
-// ── Peripheral / timing ops (side-effecting) ────────────────────────────────
+// ── Delay and LCD ops (side-effecting) ──────────────────────────────────────
 let hasSideEffects = 1 in {
   // R_in (single source register)
   def DELAYR   : R_in<0x6C050000, (ins GPR:$reg), "delayr\t$reg">;
-  def RGB1R    : RetiredV1_R<0x00003050, "rgb1r\t$reg">;   // retired v1
-  def RGB2R    : RetiredV1_R<0x00003060, "rgb2r\t$reg">;   // retired v1
   def LCDDATAR : R_in<0x71000000, (ins GPR:$reg), "lcddatar\t$reg">;
   // V (fixed op32 + imm32)
   def DELAYV   : Vsp<0xAC050000, "delayv\t$imm", imm32>;
-  let isRetiredV1 = 1 in {   // v1 words (LEN=00), see RetiredV1_R
-  def LEDV     : Vsp<0x00003070, "ledv\t$imm", imm32>;
-  def RGB1V    : Vsp<0x00003074, "rgb1v\t$imm", imm32>;
-  def RGB2V    : Vsp<0x00003075, "rgb2v\t$imm", imm32>;
-  }
-  def LCD      : Vsp<0xB2000000, "lcd\t$imm", imm32>;
+  def LCD      : Vsp<0xB2000000, "lcd\t$imm", imm32>;   // ISA map LCDRST
   def LCDCMDV  : Vsp<0xB0000000, "lcdcmdv\t$imm", imm32>;
   def LCDDATAV : Vsp<0xB1000000, "lcddatav\t$imm", imm32>;
 }
 
-// ── Mnemonic aliases for the canonical opcode_select.vh spellings ───────────
-// 0xFC/0xFD are the force-aligned 64-bit indexed ops (= vh LDIDX64A/STIDX64A);
-// LLVM already defines them as ldidx64/stidx64.
+// ── Mnemonic aliases for the ISA map's spellings ────────────────────────────
+// The force-aligned 64-bit indexed ops (ISA map LDIDX64A/STIDX64A) are
+// LLVM's ldidx64/stidx64.
 def : MnemonicAlias<"ldidx64a", "ldidx64">;
 def : MnemonicAlias<"stidx64a", "stidx64">;
 

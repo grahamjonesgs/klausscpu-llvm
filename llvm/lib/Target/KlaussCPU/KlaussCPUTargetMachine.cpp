@@ -2,7 +2,8 @@
 //
 // KlaussCPU LLVM backend — target machine implementation.
 //
-// DataLayout: e-m:e-p:64:64-i64:64-i128:128-n32:64
+// DataLayout (Triple::computeDataLayout, TargetDataLayout.cpp):
+//   e-m:e-p:64:64-i64:64-i128:128-n32:64
 //   e         = little-endian (memory bus and register file)
 //   m:e       = ELF name mangling
 //   p:64:64   = pointers are 64-bit (GPR-width); the hardware only uses bits
@@ -35,15 +36,12 @@ namespace llvm {
 FunctionPass *createKlaussCPUISelDag(KlaussCPUTargetMachine &TM);
 FunctionPass *createKlaussCPUFlagReusePass();
 FunctionPass *createKlaussCPUFuseCmpBrPass();
+void initializeKlaussCPUDAGToDAGISelLegacyPass(PassRegistry &);
 void initializeKlaussCPUFlagReusePass(PassRegistry &);
 void initializeKlaussCPUFuseCmpBrPass(PassRegistry &);
 } // namespace llvm
 
 using namespace llvm;
-
-// KlaussCPU DataLayout string — fixed for this architecture.
-static const char KlaussCPUDataLayout[] =
-    "e-m:e-p:64:64-i64:64-i128:128-n32:64";
 
 extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void
 LLVMInitializeKlaussCPUTarget() {
@@ -51,6 +49,7 @@ LLVMInitializeKlaussCPUTarget() {
   // Register the target's MachineFunction passes so MIR tests can run them
   // with -run-pass.
   PassRegistry &PR = *PassRegistry::getPassRegistry();
+  initializeKlaussCPUDAGToDAGISelLegacyPass(PR);
   initializeKlaussCPUFlagReusePass(PR);
   initializeKlaussCPUFuseCmpBrPass(PR);
 }
@@ -72,8 +71,9 @@ KlaussCPUTargetMachine::KlaussCPUTargetMachine(
     const Target &T, const Triple &TT, StringRef CPU, StringRef FS,
     const TargetOptions &Options, std::optional<Reloc::Model> RM,
     std::optional<CodeModel::Model> CM, CodeGenOptLevel OL, bool JIT)
-    : CodeGenTargetMachineImpl(T, KlaussCPUDataLayout, TT, getEffectiveCPU(CPU), FS,
-                                Options, getEffectiveRelocModel(RM),
+    : CodeGenTargetMachineImpl(T, TT.computeDataLayout(), TT,
+                                getEffectiveCPU(CPU), FS, Options,
+                                getEffectiveRelocModel(RM),
                                 getEffectiveCodeModel(CM, CodeModel::Small), OL),
       Subtarget(TT, getEffectiveCPU(CPU), FS, *this),
       TLOF(std::make_unique<TargetLoweringObjectFileELF>()) {
@@ -129,7 +129,7 @@ bool KlaussCPUPassConfig::addInstSelector() {
 }
 
 void KlaussCPUPassConfig::addPreEmitPass() {
-  // A3a — arithmetic zero_flag reuse.  Runs on the final (post-RA, post-
+  // A3a — arithmetic Z-flag reuse.  Runs on the final (post-RA, post-
   // scheduling) instruction stream so adjacency is meaningful.  On by default;
   // -klausscpu-arith-flag-reuse=false disables it.
   addPass(createKlaussCPUFlagReusePass());

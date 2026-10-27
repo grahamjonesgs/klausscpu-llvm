@@ -7,7 +7,7 @@
 //   - No CMOV                      → SELECT must be expanded
 //   - No atomics                   → setMaxAtomicSizeInBitsSupported(0);
 //                                    AtomicExpand makes __atomic_* libcalls
-//   - No sign-extending loads      → SEXTLOAD i8/i16/i32 → Expand
+//   - Sign-extending loads         → LDIDX8_S / LDIDX16_S / LDIDX32_S
 //   - Hardware integer ops         → div, mul-high, min/max, setcc are Legal
 //
 //===----------------------------------------------------------------------===//
@@ -729,9 +729,10 @@ KlaussCPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
 //===----------------------------------------------------------------------===//
 // Formal arguments — callee side
 //
-// Stack layout (from callee's incoming SP):
-//   [SP+0..SP+7]   return address (written by CALL, SP unchanged)
-//   [SP+8..SP+31]  reserved
+// Stack layout (from the callee's incoming SP, which CALL has decremented
+// by 8 to push the return address):
+//   [SP+0..SP+7]   return address
+//   [SP+8..SP+31]  reserved: home area for R1-R3 (varargs)
 //   [SP+32..]      stack arguments (8 bytes each)
 //
 // We pre-reserve 32 bytes in CCState so stack args land at offset ≥ 32.
@@ -873,11 +874,10 @@ SDValue KlaussCPUTargetLowering::LowerReturn(
 //===----------------------------------------------------------------------===//
 // Call — outgoing side
 //
-// CALL instruction stores return address at [SP+0] without changing SP.
-// Callee sees:  [SP+0..7]=ret_addr, [SP+8..31]=reserved, [SP+32..]=stack args.
-// Since SP is unchanged across the call boundary, the caller writes stack args
-// to the same offsets.  We pre-reserve 32 bytes in CCState (matching the callee
-// side) so the first stack arg is assigned offset 32.
+// CALL pushes the return address (SP -= 8), so the callee's incoming SP is
+// the caller's SP - 8.  Callee sees: [SP+0..7] = return address,
+// [SP+8..31] = reserved, [SP+32..] = stack args; the caller therefore stores
+// stack args from its SP + 24 and pre-reserves 24 bytes in CCState.
 //===----------------------------------------------------------------------===//
 
 SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
@@ -894,9 +894,7 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
   CallingConv::ID CallConv   = CLI.CallConv;
   bool          IsVarArg     = CLI.IsVarArg;
   MachineFunction &MF        = DAG.getMachineFunction();
-  // Pointers are now 64-bit (DataLayout p:64:64) so GPRs can hold them natively.
-  // SP is still a 32-bit hardware register; copy it as i32 and zero-extend
-  // to i64 for address arithmetic.
+  // Pointers are 64-bit (DataLayout p:64:64), so GPRs hold them natively.
   MVT PtrVT  = getPointerTy(DAG.getDataLayout()); // MVT::i64
   MVT CallVT = MVT::i64;                          // GPR-width callee operand
 
@@ -905,7 +903,7 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
   CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
   // CALL pre-decrements SP by 8 (stores return address at [SP-8], SP -= 8).
   // So incoming_SP = CallerSP - 8.  From the caller's GETSP_R perspective:
-  //   [GETSP+0..7]   = return address slot  (== incoming_SP - 8..+7 )
+  //   [GETSP-8..-1]  = return address slot  (incoming_SP +0..+7)
   //   [GETSP+0..23]  = reserved area for R1-R3 saves (incoming_SP +8..+31)
   //   [GETSP+24..]   = stack args (incoming_SP +32 onwards)
   // The callee pre-reserves 32 bytes from incoming_SP.  The caller's GETSP
@@ -914,7 +912,7 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
   CCInfo.AllocateStack(24, Align(8));
   CCInfo.AnalyzeCallOperands(CLI.Outs, CC_KlaussCPU);
 
-  unsigned StackSize = CCInfo.getStackSize(); // ≥ 32
+  unsigned StackSize = CCInfo.getStackSize(); // ≥ 24
 
   // ---- Make private copies of byval arguments ----------------------------
   // A byval argument is passed as a pointer (CC_KlaussCPU treats it as an
@@ -985,7 +983,7 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
       RegsToPass.push_back({VA.getLocReg(), Arg});
     } else {
       assert(VA.isMemLoc());
-      // Offset already includes the 32-byte pre-reservation.
+      // Offset already includes the 24-byte pre-reservation.
       SDValue Addr = DAG.getNode(ISD::ADD, DL, PtrVT, SP,
                                   DAG.getConstant(VA.getLocMemOffset(), DL, PtrVT));
       MemOpChains.push_back(

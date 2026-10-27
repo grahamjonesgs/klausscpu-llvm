@@ -6,7 +6,7 @@
 declare void @use_ptr(ptr)
 declare i64 @fill(ptr, i64)
 
-; Prologue: push r15; getsp r15; addsp -N.  Epilogue: setsp r15; pop r15.
+; Prologue: enter N (push r15; r15 = sp; sp -= 8*N).  Epilogue: leaveret.
 define i64 @with_alloca(i64 %x) {
 ; CHECK-LABEL: with_alloca:
 ; CHECK:       # %bb.0:

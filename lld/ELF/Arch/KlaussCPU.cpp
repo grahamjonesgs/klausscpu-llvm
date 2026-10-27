@@ -24,6 +24,10 @@
 //                             field (`.quad A − B`, e.g. InstrProf's
 //                             __profd_* CounterPtr).
 //
+// Only static links are supported: there are no dynamic relocation types.
+// Code loaded at run time is relocated by its loader, from an ET_REL object
+// (Zephyr llext) or from the RELA sections kept by --emit-relocs.
+//
 //===----------------------------------------------------------------------===//
 
 #include "Symbols.h"

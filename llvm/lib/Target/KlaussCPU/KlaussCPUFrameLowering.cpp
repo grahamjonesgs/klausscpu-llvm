@@ -2,28 +2,33 @@
 //
 // KlaussCPU LLVM backend — frame lowering implementation.
 //
-// Frame layout (stack grows down):
+// Frame layout (stack grows down).  CALL pushes the return address, so the
+// callee is entered with SP (the incoming SP) pointing at it:
 //
 //   High addresses (caller)
-//   ┌──────────────┐  ← CallerSP  (before call)
-//   │  Stack args  │    [CallerSP+32..CallerSP+32+N*8]
-//   ├──────────────┤  ← [CallerSP+32]  (first stack arg)
-//   │   (reserved) │    [CallerSP+8..CallerSP+31]
-//   ├──────────────┤  ← [CallerSP+8]
-//   │  Return addr │    [CallerSP+0..CallerSP+7]  (saved by CALL instruction)
-//   ├──────────────┤  ← CalleeSP_on_entry  (= CallerSP after CALL)
-//   │   Saved R15  │  ← PUSH R15 decrements SP, then stores R15
-//   ├──────────────┤  ← R15 = GETSP after push (frame pointer)
-//   │   Locals     │    [R15 - MFI.getStackSize() .. R15 - 8]
-//   └──────────────┤  ← SP after ADDSP -N (bottom of frame)
+//   ┌──────────────┐
+//   │  Stack args  │    [incoming SP+32 ..]  (8-byte slots)
+//   ├──────────────┤
+//   │   (reserved) │    [incoming SP+8 .. +31]  R1-R3 home area (varargs)
+//   ├──────────────┤
+//   │  Return addr │    [incoming SP+0 .. +7]   (written by CALL)
+//   ├──────────────┤  ← incoming SP
+//   │   Saved R15  │    [R15+0 .. +7]
+//   ├──────────────┤  ← R15 = incoming SP - 8  (frame pointer)
+//   │ Callee-saved │
+//   │ Locals, call │    [R15 - stack size .. R15 - 8]
+//   │ frames       │
+//   └──────────────┘  ← SP after the prologue
 //
-// Prologue:  PUSH R15      ; save caller's frame pointer
-//            GETSP R15     ; R15 ← new frame base
-//            ADDSP -N      ; allocate N bytes of locals  (omitted if N == 0)
-//
-// Epilogue:  SETSP R15     ; restore SP to frame base  (discards locals)
-//            POP R15       ; restore caller's R15
-//            (RET is emitted by the KlaussCPURetGlue pattern)
+// Prologue:  ENTER N       ; push R15; R15 = SP; SP -= 8*N   (N = size / 8)
+//            <callee-saved spills, R15-relative>
+// Epilogue:  <callee-saved reloads>
+//            LEAVERET      ; SP = R15; pop R15; RET   (LEAVE in front of any
+//                          ; other terminator, e.g. IRET)
+// A frame too large for ENTER's 22-bit field is set up with PUSH R15;
+// GETSP R15; ADDSP -size (LEAVE still tears it down).  With
+// -klausscpu-enter-leave=false every frame uses that prologue and the
+// epilogue SETSP R15; POP R15.
 //
 // Stack realignment.  The ABI keeps SP 8-byte aligned, so R15 is only 8-byte
 // aligned.  A function with a local aligned to A > 8 (_Alignas(32), an

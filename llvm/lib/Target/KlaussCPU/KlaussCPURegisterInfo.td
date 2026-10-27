@@ -9,17 +9,19 @@
 // register outside the GPR class so LLVM can reference it symbolically in
 // frame lowering without ever allocating it.
 //
-// Calling convention (observed from rcc / klausscc):
+// Calling convention (KlaussCPUCallingConv.td):
 //   arg 0–3    : A B C D  (R0–R3)   caller-saved
-//   arg 4+     : [CallerSP+32+n*8]  → [P+48+n*8] inside callee
-//   return val : M        (R12)     caller-saved
+//   arg 4+     : [incoming SP+32+n*8] = [P+40+n*8] inside the callee
+//   return val : M, L     (R12, R11) caller-saved
 //   callee-saved: E F G H (R4–R7)  + P (R15 / frame pointer)
 //   temporaries : I J K L N O      (R8–R11, R13–R14)  caller-saved
 //
 // Frame pointer convention:
-//   LLVM always emits a frame pointer (P = R15).  All frame-slot accesses use
-//   P as the base register (LDIDX64 / STIDX64 rd, P, offset).  SP is only
-//   touched by the prologue (GETSP P; ADDSP -N) and epilogue (SETSP P; POP P).
+//   LLVM always emits a frame pointer (P = R15).  Frame-slot accesses use P
+//   as the base register (LDIDX64 / STIDX64 rd, P, offset), or the base
+//   pointer R7 for the locals of a function that realigns its stack.  SP is
+//   set by the prologue (ENTER) and epilogue (LEAVE / LEAVERET), and moved by
+//   dynamic allocas.
 
 class KlaussCPUReg<bits<4> Enc, string n, list<string> alt = []>
     : Register<n, alt> {
@@ -44,7 +46,7 @@ let Namespace = "KlaussCPU" in {
   def R6  : KlaussCPUReg<6,  "r6",  ["g"]>, DwarfRegNum<[6]>;    // G
   def R7  : KlaussCPUReg<7,  "r7",  ["h"]>, DwarfRegNum<[7]>;    // H
 
-  // Caller-saved temporaries (not used by rcc as arg/return regs)
+  // Caller-saved temporaries (R11 is also the second return register)
   def R8  : KlaussCPUReg<8,  "r8",  ["i"]>, DwarfRegNum<[8]>;    // I
   def R9  : KlaussCPUReg<9,  "r9",  ["j"]>, DwarfRegNum<[9]>;    // J
   def R10 : KlaussCPUReg<10, "r10", ["k"]>, DwarfRegNum<[10]>;   // K
