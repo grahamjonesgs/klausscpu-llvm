@@ -26,8 +26,8 @@ describe earlier states of the backend and are superseded by this file.
 | Atomics | none — `setMaxAtomicSizeInBitsSupported(0)`; AtomicExpand turns every atomic op into an `__atomic_*` libcall, fences are compiler barriers |
 | Sign-extending loads | i8/i16/i32: hardware (`LDIDX8_S`/`LDIDX16_S`/`LDIDX32_S`) |
 | Load/store addressing | `[r]` (`MEMGETn`/`MEMSETn`), `r + simm32` (`LDIDXn`/`STIDXn`, 1-word short form for a small scaled offset), `r + r` at every width (`LDIDXnR`/`LDIDXn_SR`/`STIDXnR`, MODE=11); 16/32-bit forms other than `MEMGET32` force-align the EA |
-| 32-bit ops | `ADDW`/`SUBW`/`ADDIW`/`MULW`, `CMPRRW`/`CMPRVW` (ISA v3 D2/D3) |
-| Immediates | each class 2/3 op exists with a sign- and a zero-extended imm32 (SGN bit); isel picks the one that holds the constant: `SETR`/`SETRU` (MOV), `ADDI`/`ADDV`/`MINUSV`, `ANDI`/`ANDV` (and OR/XOR), `CMPRV`/`CMPRVU`; `SETR64` only for a value neither reaches |
+| 32-bit ops | `ADDW`/`SUBW`/`ADDIW`/`MULW`, `CMPRRW`/`CMPRVW`, boolean `CMPxxRW`/`CMPxxVW` (ISA v3 D2/D3) |
+| Immediates | each class 2/3 op exists with a sign- and a zero-extended imm32 (SGN bit); isel picks the one that holds the constant: `SETR`/`SETRU` (MOV), `ADDI`/`ADDV`/`MINUSV`, `ANDI`/`ANDV` (and OR/XOR), `CMPRV`/`CMPRVU`; boolean compares (`setcc` as a value) `CMPxxV` with a simm32; `SETR64` only for a value neither reaches |
 | Addresses | 32-bit, zero-extended in a register: `SETRU sym` (static), `LEAPC` (PIC); `sym+off` is folded only for `off` in [0, 2^31), other offsets are a separate add so a negative S + off stays negative; `R_KLAUSSCPU_ABS64` data is the exact 64-bit S + A (lld) |
 | Indirect branch / call | `JMPR` / `CALLR`; jump tables are off by default (`-klausscpu-min-jump-table-entries=N` enables them) |
 | `llvm.trap` / `llvm.debugtrap` | `HALT` / `TRAP` (the debugger's breakpoint) |
@@ -205,11 +205,12 @@ when clobbered.
 
 - Instruction selection is the generated `SelectCode` from the `.td`
   patterns; `KlaussCPUISelDAGToDAG.cpp` keeps only BR_CC / `SELECT_CC`
-  (glued compare, 32-bit W-compare choice: `tryW32Compare` takes the W form
-  when an operand's 32-bit extension then dies, i.e. it feeds nothing but
-  compares of the same operands and condition).  A frame index, or a frame
-  index plus a constant in [-2^29, 2^29) (`add` or disjoint `or`), is the
-  `AddrFI` / `AddrFIMem` ComplexPattern `(TargetFrameIndex, offset)`: one
+  (glued compare) and the 32-bit W-compare choice for those and SETCC:
+  `tryW32Compare` takes the W form when an operand's 32-bit extension then
+  dies, i.e. it feeds nothing but compares of the same operands and
+  condition.  A frame index, or a frame index plus a constant in
+  [-2^29, 2^29) (`add` or disjoint `or`), is the `AddrFI` / `AddrFIMem`
+  ComplexPattern `(TargetFrameIndex, offset)`: one
   `ADDI rd, FI, offset` as a value, or the base and offset of an
   `LDIDXn`/`STIDXn` frame access.  The constant is folded when the access is
   likely to stay in 1-word short-form reach of R15 (estimated from the locals
@@ -343,7 +344,7 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPURegisterInfo.h/.cpp reserved regs, stack realignment, eliminateFrameIndex
 ├── KlaussCPUFrameLowering.h/.cpp prologue/epilogue, CFI, base pointer, getFrameIndexReference
 ├── KlaussCPUISelLowering.h/.cpp  calls/args/returns, varargs, SELECT_CC, BR_JT, DAG combines
-├── KlaussCPUISelDAGToDAG.cpp   SelectCode() + C++ for BR_CC, SELECT_CC; AddrFI; inline-asm 'm'
+├── KlaussCPUISelDAGToDAG.cpp   SelectCode() + C++ for BR_CC, SELECT_CC, W SETCC; AddrFI; inline-asm 'm'
 ├── KlaussCPUMachineFunctionInfo.h  per-function state (vararg frame index)
 ├── KlaussCPUAsmPrinter.cpp     MachineInstr → MCInst (+ CompressPat), inline-asm operand printing
 ├── KlaussCPUFlagReuse.cpp      pre-emit: CMPRV Rd,0 + JMPE/NE → JMPZ/NZ (default on)
@@ -471,10 +472,12 @@ the `klausscpu-runtime` repo root; see its READMEs for build/run detail:
   `*(uint32_t *)(buf + i)` with odd `i` no longer gets away with it; `buf + 4`
   (`LDIDX32`) never did.  Use `memcpy` or a packed struct for unaligned data.
 - **The klausscc assembler/disassembler table (`src/isa/table.rs`) only names
-  `LDIDX64R`/`STIDX64R` among the MODE=11 forms, and none of the opposite-SGN
+  `LDIDX64R`/`STIDX64R` among the MODE=11 forms, none of the opposite-SGN
   immediate forms (`setru`, `cmprvu`, `andi`/`ori`/`xori` and their short
-  forms).**  The emulator executes them correctly (generic decode), but
-  klausscc disassembly and crash dumps do not name them; extend the table there.
+  forms), and none of the boolean compare-immediate / W boolean compares
+  (`cmpltv`, `cmpltrw`, `cmpltvw`, …).**  The emulator executes them
+  correctly (generic decode), but klausscc disassembly and crash dumps do
+  not name them; extend the table there.
 - **A data initializer `sym + A` with `A` outside int32 does not assemble.**
   `uintptr_t q = (uintptr_t)&arr + 0x80000000UL;` at file scope emits
   `.quad arr+2147483648`, which MC rejects with `relocation addend out of

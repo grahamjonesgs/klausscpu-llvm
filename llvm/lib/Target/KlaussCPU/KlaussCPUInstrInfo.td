@@ -1224,6 +1224,39 @@ def : Pat<(xor GPR:$rs, negsimm32_imm:$i), (XORI GPR:$rs, negsimm32_imm:$i)>;
 // Multiply by a signed-32 constant (imm is sign-extended).
 def : Pat<(mul GPR:$rs, simm32_imm:$i), (MULV GPR:$rs, simm32_imm:$i)>;
 
+// Boolean compares (class 3 B=1: rd = 0/1, flags untouched) beyond the
+// register forms CMPEQR..CMPUGER: the 2-word compare with a sign-extended
+// imm32 (`cmpltv rd, rs, imm`: the reg form's template with LEN=10, SGN=1)
+// and the ISA v3 D2 32-bit forms, W [19] on the reg form (`cmpltrw`) and the
+// 2-word form (`cmpltvw`), which order the low 32 bits of both operands.
+// ISA_ENCODING_V2_MAP.md §5 ("boolean compare-immediate (B=1, LEN=10)") and
+// §7.3; RTL pipeline_core.sv f_decode_raw class 3 (B=1 -> U_BOOL with
+// f_cmp_op(PRED, INV), no fmask), id_b_imm / id_b_sext (imm32, extended per
+// SGN), id_w + f_wsh (W: both operands shifted left 32 before the EX
+// compare).  The W forms are chosen in C++ (KlaussCPUDAGToDAGISel, as for
+// CMPRRW/CMPRVW); the immediate form by the patterns here.
+multiclass BoolCompare<bits<32> rr, string mn, CondCode cc> {
+  defvar imm = !or(!and(rr, 0x3FFFFFFF), 0x80100000);
+  let Defs = []<Register> in {
+    def V  : RV_imm<imm, mn # "v">;
+    def RW : RRR<!or(rr, 0x00080000), (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
+                 mn # "rw\t$rd, $rs1, $rs2">;
+    def VW : RV_imm<!or(imm, 0x00080000), mn # "vw">;
+  }
+  def : Pat<(i64 (setcc GPR:$rs, simm32_imm:$imm, cc)),
+            (!cast<Instruction>(NAME # "V") GPR:$rs, simm32_imm:$imm)>;
+}
+defm CMPEQ  : BoolCompare<0x4C200000, "cmpeq",  SETEQ>;
+defm CMPNE  : BoolCompare<0x4C600000, "cmpne",  SETNE>;
+defm CMPLT  : BoolCompare<0x4CA00000, "cmplt",  SETLT>;
+defm CMPGE  : BoolCompare<0x4CE00000, "cmpge",  SETGE>;
+defm CMPLE  : BoolCompare<0x4D200000, "cmple",  SETLE>;
+defm CMPGT  : BoolCompare<0x4D600000, "cmpgt",  SETGT>;
+defm CMPULT : BoolCompare<0x4DA00000, "cmpult", SETULT>;
+defm CMPUGE : BoolCompare<0x4DE00000, "cmpuge", SETUGE>;
+defm CMPULE : BoolCompare<0x4E200000, "cmpule", SETULE>;
+defm CMPUGT : BoolCompare<0x4E600000, "cmpugt", SETUGT>;
+
 // Rotate by a constant amount (0–63) → ROLV/RORV (count = imm[5:0]).
 def : Pat<(rotl GPR:$rs, uimm6:$sh), (ROLV GPR:$rs, uimm6:$sh)>;
 def : Pat<(rotr GPR:$rs, uimm6:$sh), (RORV GPR:$rs, uimm6:$sh)>;

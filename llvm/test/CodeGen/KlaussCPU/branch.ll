@@ -71,8 +71,7 @@ define i64 @ne_const(i64 %a) {
 ; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    .cfi_def_cfa r15, 16
 ; CHECK-NEXT:    .cfi_offset r15, -16
-; CHECK-NEXT:    setr r12, 42
-; CHECK-NEXT:    cmpner r12, r0, r12
+; CHECK-NEXT:    cmpnev r12, r0, 42
 ; CHECK-NEXT:    leaveret
   %c = icmp ne i64 %a, 42
   %r = select i1 %c, i64 1, i64 0

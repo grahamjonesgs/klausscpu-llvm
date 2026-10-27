@@ -6,13 +6,14 @@
 // KlaussCPUGenDAGISel.inc), driven by the isel patterns in
 // KlaussCPUInstrInfo.td.  This file holds the pass scaffolding, the
 // ComplexPattern hook (SelectAddrFI), the inline-asm memory operand hook and
-// the two nodes Select() handles itself:
-//   BR_CC, KlaussCPUISD::SELECT_CC: they pick the 32-bit W compare by looking
-//     at how each operand was extended and whether stripping the extension
-//     removes an instruction.  BR_CC also glues the compare (which defines
-//     only FLAGS) to its conditional jump; as a pattern that would need a
-//     FLAGS-producing compare node, and the W-compare choice would still be
-//     C++, so both nodes stay here.
+// the nodes Select() handles itself:
+//   BR_CC, KlaussCPUISD::SELECT_CC, SETCC: they pick the 32-bit W compare by
+//     looking at how each operand was extended and whether stripping the
+//     extension removes an instruction (SETCC otherwise falls back to the
+//     patterns).  BR_CC also glues the compare (which defines only FLAGS) to
+//     its conditional jump; as a pattern that would need a FLAGS-producing
+//     compare node, and the W-compare choice would still be C++, so these
+//     nodes stay here.
 //
 //===----------------------------------------------------------------------===//
 
@@ -70,8 +71,8 @@ struct Ext32 {
 
 static Ext32 classifyExt32(SDValue V);
 
-/// Is every use of Ext a compare operand of a BR_CC or SELECT_CC node that
-/// compares LHS with RHS under CC?  tryW32Compare strips Ext from each of
+/// Is every use of Ext a compare operand of a BR_CC, SELECT_CC or SETCC node
+/// that compares LHS with RHS under CC?  tryW32Compare strips Ext from each of
 /// them alike, so Ext dies.  Several selects on one condition (which the
 /// custom inserter then expands with one shared compare) are the usual case.
 static bool onlyFeedsCompare(SDNode *Ext, SDValue LHS, SDValue RHS,
@@ -79,7 +80,8 @@ static bool onlyFeedsCompare(SDNode *Ext, SDValue LHS, SDValue RHS,
   for (const SDUse &U : Ext->uses()) {
     const SDNode *User = U.getUser();
     unsigned LHSNo;
-    if (User->getOpcode() == KlaussCPUISD::SELECT_CC)
+    if (User->getOpcode() == KlaussCPUISD::SELECT_CC ||
+        User->getOpcode() == ISD::SETCC)
       LHSNo = 0;
     else if (User->getOpcode() == ISD::BR_CC)
       LHSNo = 2;
@@ -129,6 +131,23 @@ static bool tryW32Compare(ISD::CondCode CC, SDValue &LHS, SDValue &RHS) {
   if (!RC)
     RHS = R.Inner;
   return true;
+}
+
+// The boolean W compare (register or immediate form) for CC, or 0.
+static unsigned getBoolCompareW(ISD::CondCode CC, bool Imm) {
+  switch (CC) {
+  case ISD::SETEQ:  return Imm ? KlaussCPU::CMPEQVW  : KlaussCPU::CMPEQRW;
+  case ISD::SETNE:  return Imm ? KlaussCPU::CMPNEVW  : KlaussCPU::CMPNERW;
+  case ISD::SETLT:  return Imm ? KlaussCPU::CMPLTVW  : KlaussCPU::CMPLTRW;
+  case ISD::SETGE:  return Imm ? KlaussCPU::CMPGEVW  : KlaussCPU::CMPGERW;
+  case ISD::SETLE:  return Imm ? KlaussCPU::CMPLEVW  : KlaussCPU::CMPLERW;
+  case ISD::SETGT:  return Imm ? KlaussCPU::CMPGTVW  : KlaussCPU::CMPGTRW;
+  case ISD::SETULT: return Imm ? KlaussCPU::CMPULTVW : KlaussCPU::CMPULTRW;
+  case ISD::SETUGE: return Imm ? KlaussCPU::CMPUGEVW : KlaussCPU::CMPUGERW;
+  case ISD::SETULE: return Imm ? KlaussCPU::CMPULEVW : KlaussCPU::CMPULERW;
+  case ISD::SETUGT: return Imm ? KlaussCPU::CMPUGTVW : KlaussCPU::CMPUGTRW;
+  default:          return 0;
+  }
 }
 
 static Ext32 classifyExt32(SDValue V) {
@@ -353,6 +372,26 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
         {LHS, RHS, Jmp, N->getOperand(3), N->getOperand(4)});
     ReplaceNode(N, Res);
     return;
+  }
+
+  // ---- ISD::SETCC → ISA v3 D2 boolean W compare -------------------------
+  // CMPccRW / CMPccVW when stripping the operands' 32-bit extensions removes
+  // an instruction; otherwise the patterns pick CMPccR / CMPccV.
+  if (N->getOpcode() == ISD::SETCC &&
+      N->getOperand(0).getValueType() == MVT::i64) {
+    SDValue LHS = N->getOperand(0);
+    SDValue RHS = N->getOperand(1);
+    ISD::CondCode CC = cast<CondCodeSDNode>(N->getOperand(2))->get();
+    if (unsigned Opc = getBoolCompareW(CC, isa<ConstantSDNode>(RHS));
+        Opc && tryW32Compare(CC, LHS, RHS)) {
+      SDLoc DL(N);
+      if (auto *C = dyn_cast<ConstantSDNode>(RHS))
+        RHS = CurDAG->getTargetConstant(
+            static_cast<int32_t>(C->getZExtValue()), DL, MVT::i64);
+      ReplaceNode(N, CurDAG->getMachineNode(Opc, DL, N->getValueType(0), LHS,
+                                            RHS));
+      return;
+    }
   }
 
   // Delegate everything else to the tablegen-generated SelectCode().
