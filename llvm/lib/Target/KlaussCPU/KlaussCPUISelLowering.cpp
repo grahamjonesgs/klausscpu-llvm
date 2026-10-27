@@ -34,6 +34,7 @@
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <optional>
@@ -77,6 +78,13 @@ static cl::opt<bool> MulImmShiftAdd(
     cl::desc("Expand a multiply by a simm32 constant 2^N+1, 2^N-1 or 1-2^N "
              "into a shift and an add/sub when the schedule model rates "
              "MULV slower"));
+
+// allowsMisalignedMemoryAccesses: an under-aligned 32-bit load is one
+// MEMGET32 instead of byte loads + SHLV + ORR.
+static cl::opt<bool> UnalignedLoad32(
+    "klausscpu-unaligned-load32", cl::Hidden, cl::init(true),
+    cl::desc("Load an under-aligned 32-bit value with one MEMGET32 (also "
+             "the halves of an under-aligned 64-bit load)"));
 
 // Generated calling convention functions.  Must be included inside namespace
 // llvm because the generated code uses unqualified names (MVT, CCState, etc.).
@@ -493,6 +501,107 @@ bool KlaussCPUTargetLowering::isMulAddWithConstProfitable(
   const APInt &C1 = AddNode.getConstantOperandAPInt(1);
   const APInt &C2 = cast<ConstantSDNode>(ConstNode)->getAPIntValue();
   return !isAddImmediate(C1) || isAddImmediate(C1 * C2);
+}
+
+// The widest access an inline memcpy / memmove / memset may use: the one
+// both the destination and the source are aligned for, where a source
+// below 4-byte alignment still allows 4 (MEMGET32, see
+// allowsMisalignedMemoryAccesses; other misaligned accesses are split).
+// The generic choice looks at the destination only, so a copy into a stack
+// object, which getMemcpyLoadsAndStores realigns to the chosen width, from
+// a 4-aligned source took i64 loads that were each split into two LDIDX32 +
+// SHLV + ORR.  A constant source is stored as immediates (no loads), so
+// only the destination matters there.
+EVT KlaussCPUTargetLowering::getOptimalMemOpType(
+    LLVMContext &Context, const MemOp &Op,
+    const AttributeList &FuncAttributes) const {
+  Align A = Op.isFixedDstAlign() ? Op.getDstAlign() : Align(8);
+  if (Op.isMemcpy() && !Op.isMemcpyStrSrc()) {
+    Align SrcA = Op.getSrcAlign();
+    if (UnalignedLoad32 && SrcA < Align(4))
+      SrcA = Align(4);
+    A = std::min(A, SrcA);
+  }
+  if (A >= Align(8))
+    return MVT::i64;
+  if (A >= Align(4))
+    return MVT::i32;
+  if (A >= Align(2))
+    return MVT::i16;
+  return MVT::i8;
+}
+
+// MEMGET32 ([r]) reads a 32-bit word at any address: within a doubleword
+// from the one read, across doublewords from the next one in the same
+// 16-byte line or a second read (pipeline_core.sv:564 decode to U_LOAD32,
+// :1001 EA = rs1 unaligned, :1187 issue address not aligned, :1230-1234
+// span / second read, :1351-1366 lanes; klausscc load_align_mask).  Every
+// other 16/32-bit load and every store force-aligns its EA, so only a
+// non-volatile 32-bit load qualifies; the isel patterns for those other
+// 32-bit loads take only naturally aligned ones (KlaussCPUInstrInfo.td).  An
+// under-aligned i64 load is split into two such 32-bit loads.  Volatile
+// loads keep byte accesses (an MMIO register is never under-aligned).
+bool KlaussCPUTargetLowering::allowsMisalignedMemoryAccesses(
+    EVT VT, unsigned AddrSpace, Align Alignment, MachineMemOperand::Flags Flags,
+    unsigned *Fast) const {
+  if (!UnalignedLoad32 || VT != MVT::i32 ||
+      !(Flags & MachineMemOperand::MOLoad) ||
+      (Flags & (MachineMemOperand::MOStore | MachineMemOperand::MOVolatile)))
+    return false;
+  if (Fast)
+    *Fast = 1;
+  return true;
+}
+
+// A copy from an under-aligned source that needs more accesses than the
+// limit at the source's width is still inline if it fits at the
+// destination's width, with each under-aligned load split (byte or word
+// loads + SHLV + ORR): more instructions than the narrow copy, fewer than
+// the call.
+bool KlaussCPUTargetLowering::findOptimalMemOpLowering(
+    LLVMContext &Context, std::vector<EVT> &MemOps, unsigned Limit,
+    const MemOp &Op, unsigned DstAS, unsigned SrcAS,
+    const AttributeList &FuncAttributes, EVT *LargestVT) const {
+  if (TargetLowering::findOptimalMemOpLowering(
+          Context, MemOps, Limit, Op, DstAS, SrcAS, FuncAttributes, LargestVT))
+    return true;
+  if (!Op.isMemcpy() || Op.isMemcpyStrSrc())
+    return false;
+  MemOps.clear();
+  // MemcpyStrSrc makes getOptimalMemOpType size the accesses by the
+  // destination alone; the caller still loads from the source.
+  MemOp DstWidth =
+      MemOp::Copy(Op.size(), !Op.isFixedDstAlign(),
+                  Op.isFixedDstAlign() ? Op.getDstAlign() : Op.getSrcAlign(),
+                  Op.getSrcAlign(), /*IsVolatile=*/!Op.allowOverlap(),
+                  /*MemcpyStrSrc=*/true);
+  return TargetLowering::findOptimalMemOpLowering(Context, MemOps, Limit,
+                                                  DstWidth, DstAS, SrcAS,
+                                                  FuncAttributes, LargestVT);
+}
+
+// A memcpy from a constant global stores the bytes as immediates: one
+// SETR / SETRU / SETR64 per access, no slower than the load it replaces
+// (load-use latency 3) and with no address to materialise for the source.
+bool KlaussCPUTargetLowering::shouldConvertConstantLoadToIntImm(
+    const APInt &Imm, Type *Ty) const {
+  return Imm.getBitWidth() <= 64;
+}
+
+// CodeGenPrepare raises a stack object, or a global defined in this module,
+// that a memcpy / memmove / memset reads or writes at an 8-aligned offset
+// to 8-byte alignment when 8 bytes or more of it are accessed, so the
+// inline expansion moves 8 bytes per load/store (a 4-aligned int array and
+// its constant initialiser otherwise copy 4 at a time).  The stack is
+// 8-aligned, so no frame needs realigning for it.
+bool KlaussCPUTargetLowering::shouldAlignPointerArgs(CallInst *CI,
+                                                     unsigned &MinSize,
+                                                     Align &PrefAlign) const {
+  if (!isa<MemIntrinsic>(CI))
+    return false;
+  MinSize = 8;
+  PrefAlign = Align(8);
+  return true;
 }
 
 void KlaussCPUTargetLowering::ReplaceNodeResults(
@@ -950,7 +1059,9 @@ SDValue KlaussCPUTargetLowering::LowerVASTART(SDValue Op,
 // va_arg, leaving the upper 32 bits of the destination register undefined.
 // This custom lowering always reads a full 8-byte slot, then truncates the
 // result to the requested type — matching what the caller stored when it
-// promoted the argument.
+// promoted the argument.  Every slot is 8 bytes and 8-aligned (va_start
+// points at one, no argument type is aligned beyond 8, and an i128 va_arg
+// is split into two i64 ones), so the pointer is never realigned.
 SDValue KlaussCPUTargetLowering::LowerVAARG(SDValue Op,
                                               SelectionDAG &DAG) const {
   SDNode *Node  = Op.getNode();
@@ -961,26 +1072,19 @@ SDValue KlaussCPUTargetLowering::LowerVAARG(SDValue Op,
   SDLoc DL(Node);
 
   // Step 1: load the current argument pointer stored inside va_list.
-  SDValue APRaw = DAG.getLoad(MVT::i64, DL, Chain, VAPtr, MachinePointerInfo(SV));
-  Chain = APRaw.getValue(1);
+  SDValue AP = DAG.getLoad(MVT::i64, DL, Chain, VAPtr, MachinePointerInfo(SV));
+  Chain = AP.getValue(1);
 
-  // Step 2: align to 8 (all slots are i64-sized): ptr = (ptr + 7) & -8
-  SDValue AP = DAG.getNode(
-      ISD::AND, DL, MVT::i64,
-      DAG.getNode(ISD::ADD, DL, MVT::i64, APRaw,
-                  DAG.getConstant(7, DL, MVT::i64)),
-      DAG.getConstant(-8LL, DL, MVT::i64));
-
-  // Step 3: advance the va_list pointer by 8 and store it back.
+  // Step 2: advance the va_list pointer by 8 and store it back.
   SDValue Next = DAG.getNode(ISD::ADD, DL, MVT::i64, AP,
                               DAG.getConstant(8, DL, MVT::i64));
   Chain = DAG.getStore(Chain, DL, Next, VAPtr, MachinePointerInfo(SV));
 
-  // Step 4: load the full 8-byte slot.
+  // Step 3: load the full 8-byte slot.
   SDValue Val = DAG.getLoad(MVT::i64, DL, Chain, AP, MachinePointerInfo());
   Chain = Val.getValue(1);
 
-  // Step 5: truncate to the requested type if narrower than i64.
+  // Step 4: truncate to the requested type if narrower than i64.
   if (VT != MVT::i64)
     Val = DAG.getNode(ISD::TRUNCATE, DL, VT, Val);
 

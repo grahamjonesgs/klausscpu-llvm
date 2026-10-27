@@ -238,22 +238,14 @@ define i64 @local_array(i64 %i) nounwind {
 }
 declare void @fill(ptr)
 
-; Under-aligned: never the force-aligned register-offset form.
+; Under-aligned: never the force-aligned register-offset form, but MEMGET32,
+; which reads an unaligned word.
 define i64 @unaligned_i32(ptr %p, i64 %i) nounwind {
 ; CHECK-LABEL: unaligned_i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    addr r12, r0, r1
-; CHECK-NEXT:    ldidx8r r14, r0, r1
-; CHECK-NEXT:    ldidx8 r13, r12, 1
-; CHECK-NEXT:    ldidx8 r11, r12, 2
-; CHECK-NEXT:    ldidx8 r12, r12, 3
-; CHECK-NEXT:    shlv r13, r13, 8
-; CHECK-NEXT:    shlv r11, r11, 16
-; CHECK-NEXT:    shlv r12, r12, 24
-; CHECK-NEXT:    orr r14, r13, r14
-; CHECK-NEXT:    orr r12, r12, r11
-; CHECK-NEXT:    orr r12, r12, r14
+; CHECK-NEXT:    memget32 r12, r12
 ; CHECK-NEXT:    leaveret
   %a = getelementptr i8, ptr %p, i64 %i
   %v = load i32, ptr %a, align 1

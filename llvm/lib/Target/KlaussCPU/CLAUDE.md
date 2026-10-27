@@ -25,7 +25,8 @@ describe earlier states of the backend and are superseded by this file.
 | CMOV | none — `select` becomes a `SELECT_CC_RR/RI` pseudo, expanded to compare + branch; a run of selects on the same condition shares one compare/branch (one PHI each) |
 | Atomics | no instructions — "forced atomics" (as RISC-V `+forced-atomics`), **atomic within one core only**: an aligned atomic load/store of 1/2/4/8 bytes is the plain access (patterns), a fence a compiler barrier, every RMW / cmpxchg a `__sync_*_N` libcall (LibCall actions) that the runtime's `src/atomic.c` runs with `INT_MASK` saved/zeroed/restored; FP / `uinc_wrap` / `udec_wrap` / `usub_*` RMWs are cmpxchg loops (`shouldExpandAtomicRMWInIR`); wider or misaligned atomics are `__atomic_*` libcalls (not provided).  Sub-word libcall values go in any-extended and come back zero-extended.  Clang inlines atomics up to 64 bits (`MaxAtomicInlineWidth`).  Nothing makes them atomic against core 2 (AMP), whose DDR view also bypasses core 1's D-cache |
 | Sign-extending loads | i8/i16/i32: hardware (`LDIDX8_S`/`LDIDX16_S`/`LDIDX32_S`) |
-| Load/store addressing | `[r]` (`MEMGETn`/`MEMSETn`), `r + simm32` (`LDIDXn`/`STIDXn`, 1-word short form for a small scaled offset), `r + r` at every width (`LDIDXnR`/`LDIDXn_SR`/`STIDXnR`, MODE=11), an absolute imm32 at every width (`LDABSn`/`LDABSn_S`/`STABSn`, `MEMREADR`/`MEMSETR`, MODE=10, 2 words) for a naturally aligned constant address such as an MMIO register; 16/32-bit forms other than `MEMGET32` force-align the EA |
+| Load/store addressing | `[r]` (`MEMGETn`/`MEMSETn`), `r + simm32` (`LDIDXn`/`STIDXn`, 1-word short form for a small scaled offset), `r + r` at every width (`LDIDXnR`/`LDIDXn_SR`/`STIDXnR`, MODE=11), an absolute imm32 at every width (`LDABSn`/`LDABSn_S`/`STABSn`, `MEMREADR`/`MEMSETR`, MODE=10, 2 words) for a naturally aligned constant address such as an MMIO register; 16/32-bit forms other than `MEMGET32` force-align the EA, so an under-aligned non-volatile 32-bit load is `MEMGET32` of the computed address (`allowsMisalignedMemoryAccesses`, loads only; an under-aligned i64 load is two of them), every other under-aligned access is split |
+| C environment | hosted by default (the driver no longer adds `-ffreestanding`): `memcpy`/`memset`/`memmove` of a constant size are intrinsics, inline up to 8 accesses (4 under optsize) at the width both sides' alignment allows (a source below 4-byte alignment still allows 4, `MEMGET32`); a constant source is stored as immediates (`shouldConvertConstantLoadToIntImm`); stack objects and module globals they touch get 8-byte alignment (`shouldAlignPointerArgs`).  `printf`/`fprintf` are not turned into `puts`/`putchar`/`fputc`/`fputs`/`fwrite` (`TargetLibraryInfo`: each would link another stdio function for UART-bound output).  Code that implements the C library (picolibc, compiler-rt, crt0's BSS loop, kernels) is built `-ffreestanding` / `no_builtin` |
 | 32-bit ops | `ADDW`/`SUBW`/`ADDIW`/`MULW`, `CMPRRW`/`CMPRVW`, boolean `CMPxxRW`/`CMPxxVW` (ISA v3 D2/D3) |
 | Immediates | each class 2/3 op exists with a sign- and a zero-extended imm32 (SGN bit); isel picks the one that holds the constant: `SETR`/`SETRU` (MOV), `ADDI`/`ADDV`/`MINUSV`, `ANDI`/`ANDV` (and OR/XOR), `CMPRV`/`CMPRVU`; boolean compares (`setcc` as a value) `CMPxxV` with a simm32; `SETR64` only for a value neither reaches.  An add of -255..-129 (a frame address too) is `MINUSV` of the negation, whose short form reaches it |
 | Multiply by a constant | `MULV` (simm32; EX-serialised, `WriteMul`); a constant 2^N+1, 2^N-1 or 1-2^N that is not a simm32 becomes `SHLV` + `ADDR`/`SUBR` (`decomposeMulByConstant`); for a simm32 one only with `-klausscpu-mul-imm-shift-add` (one more instruction than `MULV`, fewer cycles) |
@@ -159,7 +160,11 @@ pre-emit passes rely on this liveness:
   in its own frame (`LowerCall`), so the callee may modify it.
 - **Varargs**: the caller reserves `[incoming_SP+8..31]` as a home area for
   R1–R3; a variadic callee stores the unnamed register args there, so they
-  are contiguous with the stack args and `va_arg` walks 8-byte slots.  R0 has
+  are contiguous with the stack args and `va_arg` walks 8-byte slots, never
+  realigned (nothing is aligned beyond 8; an i128 takes two).  Clang emits
+  the walk as IR (`clang/lib/CodeGen/Targets/KlaussCPU.cpp`, an aggregate's
+  slot holds its address), so the pointer can stay in a register; the IR
+  `va_arg` of other frontends is `LowerVAARG` (full slot + truncate).  R0 has
   no home slot (it would be the return address), so a variadic function
   with no named parameter (C23 `f(...)`) is diagnosed as unsupported.
 - No tail calls.
@@ -390,6 +395,7 @@ when clobbered.
 | `-klausscpu-const-addr-base` / `-klausscpu-const-addr-base-min` | on / 3 | KlaussCPUConstAddrBase; fewest absolute accesses that share a base |
 | `-klausscpu-const-addr-base-loop-call-min` | 6 | fewest absolute accesses in a loop nest that holds a call that share a base set in its preheader |
 | `-klausscpu-pref-loop-align` | 16 | loop-header alignment in bytes |
+| `-klausscpu-unaligned-load32` | on | an under-aligned non-volatile 32-bit load is one `MEMGET32` (=false: byte loads + shifts) |
 | `-klausscpu-mul-imm-shift-add` | off | multiply by a simm32 2^N±1 / 1-2^N as shift + add/sub when the schedule model rates MULV slower |
 | `-klausscpu-unroll-branch-density-gate` | on | scale the unroll budget for branchy loops |
 
@@ -523,8 +529,11 @@ llvm/lib/Target/KlaussCPU/
 ```
 
 Outside this directory: `clang/lib/Basic/Targets/KlaussCPU.*` and
-`clang/lib/Driver/ToolChains/KlaussCPU.*` (clang target + driver, which adds
-`-ffreestanding` and links with `ld.lld -m elf32klausscpu`),
+`clang/lib/Driver/ToolChains/KlaussCPU.*` (clang target + driver, which
+compiles hosted and links with `ld.lld -m elf32klausscpu`),
+`clang/lib/CodeGen/Targets/KlaussCPU.cpp` (argument classification as
+DefaultABIInfo; `va_arg`), `llvm/lib/Analysis/TargetLibraryInfo.cpp` (no
+synthesised stdio calls),
 `lld/ELF/Arch/KlaussCPU.cpp` (relocations; `R_KLAUSSCPU_CALL18` range and
 thunk decision) with the `jmprel` call thunk in `lld/ELF/Thunks.cpp`,
 `llvm/include/llvm/BinaryFormat/ELFRelocs/KlaussCPU.def`,
@@ -620,8 +629,9 @@ the `klausscpu-runtime` repo root; see its READMEs for build/run detail:
   or writes the aligned-down address.**  Every 16/32-bit load and store except
   `MEMGET32` (`[r]` 32-bit, `U_LOAD32`) clears the low address bits in hardware
   (`pipeline_core.sv` U_LOAD issue address / store byte enables).  That is UB in
-  C (`*(uint32_t *)(buf + 1)`), and the backend only splits accesses whose IR
-  alignment is below natural (`allowsMisalignedMemoryAccesses` is false).  Since
+  C (`*(uint32_t *)(buf + 1)`), and the backend only splits (or, for a
+  32-bit load, makes `MEMGET32`) accesses whose IR alignment is below
+  natural (`allowsMisalignedMemoryAccesses`).  Since
   `r + r` selects `LDIDX32R` instead of `ADDR` + `MEMGET32`, a type-punned
   `*(uint32_t *)(buf + i)` with odd `i` no longer gets away with it; `buf + 4`
   (`LDIDX32`) never did.  Use `memcpy` or a packed struct for unaligned data.
@@ -655,7 +665,9 @@ the `klausscpu-runtime` repo root; see its READMEs for build/run detail:
   (`sizeof(int)`=4 for `%d`) and `VA_STACK_ALIGN`, which does not match
   KlaussCPU's uniform 8-byte vararg slots.  This is separate from the fixed
   `va_arg` load-width bug (`HISTORY.md`, "Fixed issues";
-  `shouldReduceLoadWidth` returns false) — the *direct* `cbvprintf`/`printk`
+  `shouldReduceLoadWidth` returns false; clang now emits a 32-bit load of
+  the slot for an `int` `va_arg`, `MEMGET32`/`LDIDX32`, confirmed on the
+  board) — the *direct* `cbvprintf`/`printk`
   path works; verify whether the packaged path needs a KlaussCPU
   `VA_STACK_ALIGN` definition.  Production `ssh_shell` already silences it
   (`CONFIG_LLEXT_LOG_LEVEL_WRN`).  Use `%lu`, not `%llu`: `long` is 64-bit

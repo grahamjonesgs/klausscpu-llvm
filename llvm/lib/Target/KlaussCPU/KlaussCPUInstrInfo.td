@@ -887,14 +887,12 @@ def MEMGET32 : RR1<0x5A000000, (outs GPR:$rd), (ins GPR:$rs),
 // hardware (mem16[rs2 & ~1], mem32[rs2 & ~3] — CPU_ARCHITECTURE.md §8.1). An
 // under-aligned store writes the *aligned* slot with NO fault → silent memory
 // corruption, not a trap. These (and STIDX16/STIDX32 below) are only safe
-// because allowsMisalignedMemoryAccesses() is left at its default (false), so
+// because allowsMisalignedMemoryAccesses() allows no misaligned store, so
 // the legalizer expands every under-aligned i16/i32 store to byte ops (MEMSET8/
-// STIDX8) and never selects a masking store on an unaligned address.
-// If misaligned access is ever enabled (e.g. to get cheap unaligned i32 *loads*
-// for crypto), scope that permission to the LOAD path only — do NOT let the
-// store path reach these opcodes on an unaligned address; route unaligned
-// stores through STIDX8/MEMSET8, or switch to a HW store that faults instead of
-// masking. (Same invariant as the force-aligned LDIDX64/STIDX64 note above.)
+// STIDX8) and never selects a masking store on an unaligned address.  It
+// allows only an under-aligned 32-bit *load*, which isel makes a MEMGET32
+// (unaligned-tolerant); keep any future permission to the load path too.
+// (Same invariant as the force-aligned LDIDX64/STIDX64 note above.)
 def MEMSET8  : RRst<0x5C000000, "memset8\t$rs_data, $rs_addr">;
 def MEMSET16 : RRst<0x5D000000, "memset16\t$rs_data, $rs_addr">;
 def MEMSET32 : RRst<0x5E000000, "memset32\t$rs_data, $rs_addr">;
@@ -1116,8 +1114,8 @@ def CMPRVU_I : RV_cmp<0x8C000000, "cmprvu\t$rs, $imm", uimm32>;
 // (rs1 + imm) & ~7 before the bus access.  The non-aligned forms are
 // ldidx64u/stidx64u (A=0).  Using the force-aligned form is only safe because
 // LLVM never emits a misaligned i64 access: allowsMisalignedMemoryAccesses()
-// is left at its default (false), so under-aligned i64 loads/stores are
-// expanded to byte ops by the legalizer.  If misaligned i64 access is ever
+// is false for i64, so under-aligned i64 loads/stores are expanded by the
+// legalizer (loads to two 32-bit MEMGET32 halves, stores to byte ops).  If misaligned i64 access is ever
 // enabled, switch these to the A=0 forms first (and confirm the HW handles a
 // 64-bit read spanning two cache lines).
 //===----------------------------------------------------------------------===//
@@ -1127,8 +1125,9 @@ def STIDX64 : RRV_st<0x9F300000, "stidx64\t$rs_data, $base, $offset">;
 
 def LDIDX32 : RRV_ld<0x9A200000, "ldidx32\t$rd, $base, $offset">;
 // STIDX32/STIDX16 mask addr&~3 / addr&~1 like MEMSET32/16 — safe only while
-// allowsMisalignedMemoryAccesses()==false. See the alignment warning above the
-// MEMSET8/16/32 defs before enabling any unaligned store path.
+// allowsMisalignedMemoryAccesses() allows no misaligned store. See the
+// alignment warning above the MEMSET8/16/32 defs.  LDIDX32 masks addr&~3
+// too: its patterns take only aligned loads (zextloadi32_a4, ...).
 def STIDX32 : RRV_st<0x9E200000, "stidx32\t$rs_data, $base, $offset">;
 
 def LDIDX16   : RRV_ld<0x99200000, "ldidx16\t$rd, $base, $offset">   { let mayLoad = 1; }
@@ -1401,6 +1400,22 @@ def : Pat<(store (i64 GPR:$val), (i64 GPR:$base)),
 def : Pat<(store (i64 GPR:$val), (add (i64 GPR:$base), simm32_imm:$off)),
           (STIDX64 GPR:$val, GPR:$base, simm32_imm:$off)>;
 
+// 32-bit loads.  Only MEMGET32 ([r]) reads an unaligned word
+// (pipeline_core.sv:1001, :1187, :1230-1234, :1351-1366); every other 32-bit
+// load force-aligns its EA (:1189).  allowsMisalignedMemoryAccesses lets an
+// under-aligned non-volatile 32-bit load reach isel, so the base + offset,
+// reg + reg and frame-index forms take only naturally aligned ones; an
+// under-aligned one is MEMGET32 of the computed address (+ SEXTW: MEMGET32
+// has no sign-extending form, :564).
+let IsLoad = 1, MinAlignment = 4 in {
+def zextloadi32_a4 : PatFrag<(ops node:$ptr), (zextloadi32 node:$ptr)>;
+def extloadi32_a4  : PatFrag<(ops node:$ptr), (extloadi32 node:$ptr)>;
+def sextloadi32_a4 : PatFrag<(ops node:$ptr), (sextloadi32 node:$ptr)>;
+}
+def sextloadi32_unaligned : PatFrag<(ops node:$ptr), (sextloadi32 node:$ptr), [{
+  return cast<LoadSDNode>(N)->getAlign() < Align(4);
+}]>;
+
 // Sub-word zero-extending loads from a plain GPR address (no offset).
 def : Pat<(i64 (zextloadi8  (i64 GPR:$addr))), (MEMGET8  GPR:$addr)>;
 def : Pat<(i64 (zextloadi16 (i64 GPR:$addr))), (MEMGET16 GPR:$addr)>;
@@ -1418,9 +1433,9 @@ def : Pat<(i64 (zextloadi16 (add (i64 GPR:$base), simm32_imm:$off))),
           (LDIDX16 GPR:$base, simm32_imm:$off)>;
 def : Pat<(i64 (extloadi16  (add (i64 GPR:$base), simm32_imm:$off))),
           (LDIDX16 GPR:$base, simm32_imm:$off)>;
-def : Pat<(i64 (zextloadi32 (add (i64 GPR:$base), simm32_imm:$off))),
+def : Pat<(i64 (zextloadi32_a4 (add (i64 GPR:$base), simm32_imm:$off))),
           (LDIDX32 GPR:$base, simm32_imm:$off)>;
-def : Pat<(i64 (extloadi32  (add (i64 GPR:$base), simm32_imm:$off))),
+def : Pat<(i64 (extloadi32_a4  (add (i64 GPR:$base), simm32_imm:$off))),
           (LDIDX32 GPR:$base, simm32_imm:$off)>;
 
 // Truncating stores to a plain GPR address (no offset).
@@ -1451,9 +1466,9 @@ multiclass FrameStorePat<PatFrag st, Instruction Inst> {
 }
 let AddedComplexity = 10 in {
 defm : FrameLoadPat<load,        LDIDX64>;
-defm : FrameLoadPat<zextloadi32, LDIDX32>;
-defm : FrameLoadPat<extloadi32,  LDIDX32>;
-defm : FrameLoadPat<sextloadi32, LDIDX32_S>;
+defm : FrameLoadPat<zextloadi32_a4, LDIDX32>;
+defm : FrameLoadPat<extloadi32_a4,  LDIDX32>;
+defm : FrameLoadPat<sextloadi32_a4, LDIDX32_S>;
 defm : FrameLoadPat<zextloadi16, LDIDX16>;
 defm : FrameLoadPat<extloadi16,  LDIDX16>;
 defm : FrameLoadPat<sextloadi16, LDIDX16_S>;
@@ -1840,9 +1855,11 @@ def : Pat<(i64 (sextloadi16 (add (i64 GPR:$base), simm32_imm:$off))),
           (LDIDX16_S GPR:$base, simm32_imm:$off)>;
 
 // ISA v3 D1: sign-extending 32-bit load (replaces LDIDX32 + SEXTW).
-def : Pat<(i64 (sextloadi32 (i64 GPR:$addr))), (LDIDX32_S GPR:$addr, 0)>;
-def : Pat<(i64 (sextloadi32 (add (i64 GPR:$base), simm32_imm:$off))),
+def : Pat<(i64 (sextloadi32_a4 (i64 GPR:$addr))), (LDIDX32_S GPR:$addr, 0)>;
+def : Pat<(i64 (sextloadi32_a4 (add (i64 GPR:$base), simm32_imm:$off))),
           (LDIDX32_S GPR:$base, simm32_imm:$off)>;
+def : Pat<(i64 (sextloadi32_unaligned (i64 GPR:$addr))),
+          (SEXTW (MEMGET32 GPR:$addr))>;
 
 //===----------------------------------------------------------------------===//
 // ISA v3 short 1-word forms (ISA_V3_PROPOSAL.md §3, A3/A4/A5).
@@ -2217,7 +2234,8 @@ def : Pat<(and GPR:$rs, SingleZeroBitImm:$b),
 // 64-bit load/store at (base + index register) → 1-word LDIDX64R/STIDX64R
 // instead of ADDR + 2-word LDIDX64/STIDX64 (e.g. `p[i]` after the index
 // shift).  EA is not force-aligned (A=0), which is fine: LLVM never emits an
-// under-aligned i64 access (allowsMisalignedMemoryAccesses() is false).
+// under-aligned i64 access (allowsMisalignedMemoryAccesses() is false for
+// i64).
 def : Pat<(i64 (load (add (i64 GPR:$base), (i64 GPR:$idx)))),
           (LDIDX64R GPR:$base, GPR:$idx)>;
 def : Pat<(store (i64 GPR:$val), (add (i64 GPR:$base), (i64 GPR:$idx))),
@@ -2226,8 +2244,9 @@ def : Pat<(store (i64 GPR:$val), (add (i64 GPR:$base), (i64 GPR:$idx))),
 // The same for the sub-word accesses (`s[i]`, `a[i]` of char/short/int, the
 // jump-table entry load): 1-word LDIDX{8,16,32}[_S]R / STIDX{8,16,32}R
 // instead of ADDR + MEMGETn / MEMSETn.  The 16/32-bit forms force-align
-// their EA, as LDIDX16/32 and STIDX16/32 do; every such access LLVM emits is
-// naturally aligned (allowsMisalignedMemoryAccesses() is false).
+// their EA, as LDIDX16/32 and STIDX16/32 do, so they take only naturally
+// aligned accesses (allowsMisalignedMemoryAccesses allows none but an
+// under-aligned 32-bit load, which the _a4 fragments exclude).
 multiclass RegRegLoadPat<PatFrag ld, Instruction Inst> {
   def : Pat<(i64 (ld (add (i64 GPR:$base), (i64 GPR:$idx)))),
             (Inst GPR:$base, GPR:$idx)>;
@@ -2238,9 +2257,9 @@ defm : RegRegLoadPat<sextloadi8,  LDIDX8_SR>;
 defm : RegRegLoadPat<zextloadi16, LDIDX16R>;
 defm : RegRegLoadPat<extloadi16,  LDIDX16R>;
 defm : RegRegLoadPat<sextloadi16, LDIDX16_SR>;
-defm : RegRegLoadPat<zextloadi32, LDIDX32R>;
-defm : RegRegLoadPat<extloadi32,  LDIDX32R>;
-defm : RegRegLoadPat<sextloadi32, LDIDX32_SR>;
+defm : RegRegLoadPat<zextloadi32_a4, LDIDX32R>;
+defm : RegRegLoadPat<extloadi32_a4,  LDIDX32R>;
+defm : RegRegLoadPat<sextloadi32_a4, LDIDX32_SR>;
 def : Pat<(truncstorei8  (i64 GPR:$val), (add (i64 GPR:$base), (i64 GPR:$idx))),
           (STIDX8R  GPR:$val, GPR:$base, GPR:$idx)>;
 def : Pat<(truncstorei16 (i64 GPR:$val), (add (i64 GPR:$base), (i64 GPR:$idx))),

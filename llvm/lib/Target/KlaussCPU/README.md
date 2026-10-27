@@ -48,7 +48,8 @@ llvm-objdump -d foo.o                                      # disassembler
 llc -march=klausscpu foo.ll
 ```
 
-The clang driver adds `-ffreestanding` and links with `ld.lld`.  `int` is
+The clang driver compiles hosted (pass `-ffreestanding` for code that
+implements the C library) and links with `ld.lld`.  `int` is
 32-bit; `long`, `long long` and pointers are 64-bit.  The assembler takes
 mnemonics in either case, registers `r0`–`r15` or `a`–`p`, and GAS
 directives.

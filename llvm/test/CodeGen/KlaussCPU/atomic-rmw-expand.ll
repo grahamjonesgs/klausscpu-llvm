@@ -240,32 +240,30 @@ define i32 @add_i32_misaligned(ptr %p, i32 %x) nounwind {
 ; CHECK-LABEL: add_i32_misaligned:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 11
-; CHECK-NEXT:    ldidx16 r12, r0, 2
-; CHECK-NEXT:    memget16 r14, r0
+; CHECK-NEXT:    memget32 r12, r0
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; CHECK-NEXT:    shlv r12, r12, 16
 ; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
 ; CHECK-NEXT:    stidx64 r6, r15, -24 # 8-byte Folded Spill
 ; CHECK-NEXT:    stidx64 r7, r15, -32 # 8-byte Folded Spill
-; CHECK-NEXT:    copy r5, r1
-; CHECK-NEXT:    orr r12, r12, r14
-; CHECK-NEXT:    setr r4, 5
+; CHECK-NEXT:    copy r4, r0
+; CHECK-NEXT:    setr r5, 5
 ; CHECK-NEXT:    addi r6, r15, -36
 ; CHECK-NEXT:    addi r7, r15, -40
-; CHECK-NEXT:    stidx64 r0, r15, -48 # 8-byte Folded Spill
+; CHECK-NEXT:    stidx64 r1, r15, -48 # 8-byte Folded Spill
 ; CHECK-NEXT:    .p2align 4
 ; CHECK-NEXT:  .LBB7_1: # %atomicrmw.start
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
-; CHECK-NEXT:    addr r14, r12, r5
+; CHECK-NEXT:    ldidx64 r14, r15, -48 # 8-byte Folded Reload
 ; CHECK-NEXT:    stidx32 r12, r15, -36
+; CHECK-NEXT:    setr r0, 4
+; CHECK-NEXT:    addr r14, r12, r14
+; CHECK-NEXT:    copy r1, r4
 ; CHECK-NEXT:    stidx32 r14, r15, -40
 ; CHECK-NEXT:    getsp r12
-; CHECK-NEXT:    ldidx64 r1, r15, -48 # 8-byte Folded Reload
-; CHECK-NEXT:    setr r0, 4
 ; CHECK-NEXT:    copy r2, r6
 ; CHECK-NEXT:    copy r3, r7
-; CHECK-NEXT:    stidx64 r4, r12, 32
-; CHECK-NEXT:    stidx64 r4, r12, 24
+; CHECK-NEXT:    stidx64 r5, r12, 32
+; CHECK-NEXT:    stidx64 r5, r12, 24
 ; CHECK-NEXT:    callrel __atomic_compare_exchange
 ; CHECK-NEXT:    copy r14, r12
 ; CHECK-NEXT:    ldidx32 r12, r15, -36

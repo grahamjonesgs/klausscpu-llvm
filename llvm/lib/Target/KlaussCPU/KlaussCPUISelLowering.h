@@ -56,9 +56,11 @@ public:
   // 64-bit register class, so narrowing saves no register, and the combine
   // turns LowerVAARG's deliberate full-8-byte-slot load + truncate
   // ((trunc (ldidx64 slot)) for an i32 va_arg) into a register-addressed
-  // 32-bit MEMGET32 load.  MEMGET32 reads the wrong slot for va_arg's
-  // computed pointers (hardware-confirmed: mixed-width printf "%u" garbles
-  // while "%lu" via ldidx64 is correct), so always keep the wide load.
+  // 32-bit MEMGET32 load.  MEMGET32 read the wrong slot for va_arg's
+  // computed pointers (hardware-confirmed in 2026-06: mixed-width printf
+  // "%u" garbled while "%lu" via ldidx64 was correct), so always keep the
+  // wide load.  (Clang now emits a 32-bit load of the slot itself for an
+  // int va_arg, MEMGET32 / LDIDX32, which passes on the current board.)
   bool shouldReduceLoadWidth(SDNode *Load, ISD::LoadExtType ExtTy, EVT NewVT,
                              std::optional<unsigned> ByteOffset) const override {
     return false;
@@ -84,6 +86,26 @@ public:
                               SDValue C) const override;
   bool isMulAddWithConstProfitable(SDValue AddNode,
                                    SDValue ConstNode) const override;
+
+  // Under-aligned 32-bit loads (MEMGET32) and inline memcpy / memset /
+  // memmove (see the .cpp): the access width both sides' alignment allows,
+  // constant sources as immediates, and 8-byte alignment for the stack
+  // objects and globals they copy.
+  EVT getOptimalMemOpType(LLVMContext &Context, const MemOp &Op,
+                          const AttributeList &FuncAttributes) const override;
+  bool findOptimalMemOpLowering(LLVMContext &Context, std::vector<EVT> &MemOps,
+                                unsigned Limit, const MemOp &Op, unsigned DstAS,
+                                unsigned SrcAS,
+                                const AttributeList &FuncAttributes,
+                                EVT *LargestVT = nullptr) const override;
+  bool allowsMisalignedMemoryAccesses(EVT VT, unsigned AddrSpace,
+                                      Align Alignment,
+                                      MachineMemOperand::Flags Flags,
+                                      unsigned *Fast) const override;
+  bool shouldConvertConstantLoadToIntImm(const APInt &Imm,
+                                         Type *Ty) const override;
+  bool shouldAlignPointerArgs(CallInst *CI, unsigned &MinSize,
+                              Align &PrefAlign) const override;
 
   SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
 

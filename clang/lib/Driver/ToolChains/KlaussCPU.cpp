@@ -49,13 +49,6 @@ void KlaussCPUToolChain::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
   // for KlaussCPU.
 }
 
-void KlaussCPUToolChain::addClangTargetOptions(const ArgList &DriverArgs,
-                                                ArgStringList &CC1Args,
-                                                Action::OffloadKind) const {
-  if (!DriverArgs.hasArg(options::OPT_ffreestanding))
-    CC1Args.push_back("-ffreestanding");
-}
-
 Tool *KlaussCPUToolChain::buildLinker() const {
   return new tools::klausscpu::Linker(*this);
 }

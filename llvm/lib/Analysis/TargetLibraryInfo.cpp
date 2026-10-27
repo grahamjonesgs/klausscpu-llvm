@@ -156,6 +156,18 @@ static void initializeLibCalls(TargetLibraryInfoImpl &TLI, const Triple &T,
     return;
   }
 
+  // KlaussCPU is bare metal with stdio on a UART that every character waits
+  // for: do not turn printf / fprintf into puts, putchar, fputc, fputs or
+  // fwrite.  Each would link another C library function into the program
+  // for no measurable gain.
+  if (T.getArch() == Triple::klausscpu) {
+    TLI.setUnavailable(LibFunc_puts);
+    TLI.setUnavailable(LibFunc_putchar);
+    TLI.setUnavailable(LibFunc_fputc);
+    TLI.setUnavailable(LibFunc_fputs);
+    TLI.setUnavailable(LibFunc_fwrite);
+  }
+
   // memset_pattern{4,8,16} is only available on iOS 3.0 and Mac OS X 10.5 and
   // later. All versions of watchOS support it.
   if (T.isMacOSX()) {

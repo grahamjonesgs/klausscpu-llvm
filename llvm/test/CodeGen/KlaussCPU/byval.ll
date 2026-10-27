@@ -18,21 +18,22 @@ declare void @take5(i64, i64, i64, i64, ptr byval(%struct.S) align 8)
 declare void @takel(ptr byval(%struct.L) align 8)
 declare void @use(ptr)
 
-; Copied to a stack object; R0 gets the copy, not @cs.  The copy reads @cs
-; (in whatever order the scheduler picks) and R0 is never overwritten.
+; Copied to a stack object; R0 gets the copy, not @cs.  The copy stores
+; @cs's constant initialiser as immediates (in whatever order the scheduler
+; picks) and R0 is never overwritten.
 define void @pass_const() {
 ; CHECK-LABEL: pass_const:
 ; CHECK:         enter 7
 ; CHECK-NOT:     {{(setr|copy) r0,}}
-; CHECK-DAG:     setru {{r([1-9]|1[0-5])}}, cs+24
-; CHECK-DAG:     setru {{r([1-9]|1[0-5])}}, cs+16
-; CHECK-DAG:     setru {{r([1-9]|1[0-5])}}, cs+8
-; CHECK-DAG:     setru {{r([1-9]|1[0-5])}}, cs{{$}}
+; CHECK-DAG:     setr [[W3:r([1-9]|1[0-5])]], 4
+; CHECK-DAG:     stidx64 [[W3]], r15, -8
+; CHECK-DAG:     setr [[W2:r([1-9]|1[0-5])]], 3
+; CHECK-DAG:     stidx64 [[W2]], r15, -16
+; CHECK-DAG:     setr [[W1:r([1-9]|1[0-5])]], 2
+; CHECK-DAG:     stidx64 [[W1]], r15, -24
+; CHECK-DAG:     setr [[W0:r([1-9]|1[0-5])]], 1
+; CHECK-DAG:     stidx64 [[W0]], r15, -32
 ; CHECK-DAG:     addi r0, r15, -32
-; CHECK-DAG:     stidx64 r12, r15, -8
-; CHECK-DAG:     stidx64 r12, r15, -16
-; CHECK-DAG:     stidx64 r12, r15, -24
-; CHECK-DAG:     stidx64 r12, r15, -32
 ; CHECK-NOT:     {{(setr|copy) r0,}}
 ; CHECK:         callrel take
   call void @take(ptr byval(%struct.S) align 8 @cs)
@@ -90,20 +91,24 @@ define void @pass_vla(i64 %n, ptr %p) {
   ret void
 }
 
-; Odd-size, align-1 byval: inlined as byte loads from the original and
-; stores into the copy, and R0 gets the copy's frame address.  The copy's
-; stores are R15-relative; their offsets, relative to the addi's, prove the
-; copy is what is passed.
+; Odd-size, align-1 byval: inlined as loads from the original and stores
+; into the copy, and R0 gets the copy's frame address.  The copy's stores
+; are R15-relative; their offsets, relative to the addi's, prove the copy is
+; what is passed.  The copy is realigned, so its stores are 4-byte (13 bytes)
+; and 2-byte (3 bytes) ones, and the under-aligned source is read with
+; MEMGET32 (unaligned-tolerant) or byte loads.
 declare void @take13(ptr byval([13 x i8]) align 1)
 declare void @take3(ptr byval({ i8, i8, i8 }) align 1)
 
 define void @pass_odd(ptr %p, ptr %q) {
 ; CHECK-LABEL: pass_odd:
+; CHECK-DAG:     memget32 {{r[0-9]+}}, r0
 ; CHECK-DAG:     stidx8 {{r[0-9]+}}, r15, [[#%d,E13:]]
 ; CHECK-DAG:     stidx32 {{r[0-9]+}}, r15, [[#%d,E13-4]]
+; CHECK-DAG:     stidx32 {{r[0-9]+}}, r15, [[#%d,E13-8]]
 ; CHECK-DAG:     addi r0, r15, [[#%d,E13-12]]
 ; CHECK-NOT:     {{(copy|addi|setr) r0,}}
-; CHECK:         stidx64 {{r[0-9]+}}, r15, [[#%d,E13-12]]
+; CHECK:         stidx32 {{r[0-9]+}}, r15, [[#%d,E13-12]]
 ; CHECK-NEXT:    callrel take13
 ; CHECK:         addi r0, r15, [[#%d,C3:]]
 ; CHECK-NOT:     {{(copy|addi|setr) r0,}}

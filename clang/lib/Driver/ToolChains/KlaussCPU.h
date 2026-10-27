@@ -4,7 +4,8 @@
 //
 // Selecting this toolchain (via -target klausscpu-unknown-elf) automatically:
 //   - restricts includes to Clang's own built-in headers only (no system libc)
-//   - enables -ffreestanding so the compiler makes no libc assumptions
+//   - leaves the C environment hosted (pass -ffreestanding for code that
+//     implements the C library itself, e.g. picolibc, compiler-rt, kernels)
 //   - uses lld as the linker with no default start files or standard libs
 //
 //===----------------------------------------------------------------------===//
@@ -50,11 +51,6 @@ public:
   // Only Clang's own built-in headers; never /usr/include.
   void AddClangSystemIncludeArgs(const llvm::opt::ArgList &DriverArgs,
                                   llvm::opt::ArgStringList &CC1Args) const override;
-
-  // Inject -ffreestanding so the compiler makes no libc assumptions.
-  void addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
-                              llvm::opt::ArgStringList &CC1Args,
-                              Action::OffloadKind) const override;
 
 protected:
   Tool *buildLinker() const override;
