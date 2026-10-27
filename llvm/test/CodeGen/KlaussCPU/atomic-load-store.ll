@@ -378,7 +378,7 @@ define i32 @load_i32_frame() nounwind {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 4
 ; CHECK-NEXT:    addi r0, r15, -4
-; CHECK-NEXT:    call use
+; CHECK-NEXT:    callrel use
 ; CHECK-NEXT:    ldidx32 r12, r15, -4
 ; CHECK-NEXT:    leaveret
 ;
@@ -386,7 +386,7 @@ define i32 @load_i32_frame() nounwind {
 ; O0:       # %bb.0:
 ; O0-NEXT:    enter 4
 ; O0-NEXT:    addi r0, r15, -4
-; O0-NEXT:    call use
+; O0-NEXT:    callrel use
 ; O0-NEXT:    ldidx32 r12, r15, -4
 ; O0-NEXT:    leaveret
   %s = alloca i32, align 4
@@ -401,7 +401,7 @@ define void @store_i8_frame(i8 %x) nounwind {
 ; CHECK-NEXT:    enter 4
 ; CHECK-NEXT:    stidx8 r0, r15, -1
 ; CHECK-NEXT:    addi r0, r15, -1
-; CHECK-NEXT:    call use
+; CHECK-NEXT:    callrel use
 ; CHECK-NEXT:    leaveret
 ;
 ; O0-LABEL: store_i8_frame:
@@ -410,7 +410,7 @@ define void @store_i8_frame(i8 %x) nounwind {
 ; O0-NEXT:    # kill: def $r12 killed $r0
 ; O0-NEXT:    stidx8 r0, r15, -1
 ; O0-NEXT:    addi r0, r15, -1
-; O0-NEXT:    call use
+; O0-NEXT:    callrel use
 ; O0-NEXT:    leaveret
   %s = alloca i8, align 1
   store atomic i8 %x, ptr %s seq_cst, align 1
@@ -452,14 +452,14 @@ define i128 @load_i128(ptr %p) nounwind {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    setr r1, 5
-; CHECK-NEXT:    call __atomic_load_16
+; CHECK-NEXT:    callrel __atomic_load_16
 ; CHECK-NEXT:    leaveret
 ;
 ; O0-LABEL: load_i128:
 ; O0:       # %bb.0:
 ; O0-NEXT:    enter 3
 ; O0-NEXT:    setr r1, 5
-; O0-NEXT:    call __atomic_load_16
+; O0-NEXT:    callrel __atomic_load_16
 ; O0-NEXT:    leaveret
   %v = load atomic i128, ptr %p seq_cst, align 16
   ret i128 %v
@@ -470,7 +470,7 @@ define void @store_i128(ptr %p, i128 %x) nounwind {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    setr r3, 5
-; CHECK-NEXT:    call __atomic_store_16
+; CHECK-NEXT:    callrel __atomic_store_16
 ; CHECK-NEXT:    leaveret
 ;
 ; O0-LABEL: store_i128:
@@ -479,7 +479,7 @@ define void @store_i128(ptr %p, i128 %x) nounwind {
 ; O0-NEXT:    # kill: def $r12 killed $r2
 ; O0-NEXT:    # kill: def $r12 killed $r1
 ; O0-NEXT:    setr r3, 5
-; O0-NEXT:    call __atomic_store_16
+; O0-NEXT:    callrel __atomic_store_16
 ; O0-NEXT:    leaveret
   store atomic i128 %x, ptr %p seq_cst, align 16
   ret void
@@ -493,7 +493,7 @@ define i32 @load_i32_misaligned(ptr %p) nounwind {
 ; CHECK-NEXT:    addi r2, r15, -4
 ; CHECK-NEXT:    setr r0, 4
 ; CHECK-NEXT:    setr r3, 5
-; CHECK-NEXT:    call __atomic_load
+; CHECK-NEXT:    callrel __atomic_load
 ; CHECK-NEXT:    ldidx32 r12, r15, -4
 ; CHECK-NEXT:    leaveret
 ;
@@ -504,7 +504,7 @@ define i32 @load_i32_misaligned(ptr %p) nounwind {
 ; O0-NEXT:    setr r0, 4
 ; O0-NEXT:    addi r2, r15, -4
 ; O0-NEXT:    setr r3, 5
-; O0-NEXT:    call __atomic_load
+; O0-NEXT:    callrel __atomic_load
 ; O0-NEXT:    ldidx32 r12, r15, -4
 ; O0-NEXT:    leaveret
   %v = load atomic i32, ptr %p seq_cst, align 2
@@ -521,7 +521,7 @@ define void @store_i64_misaligned(ptr %p, i64 %x) nounwind {
 ; CHECK-NEXT:    setr r0, 8
 ; CHECK-NEXT:    copy r1, r12
 ; CHECK-NEXT:    setr r3, 5
-; CHECK-NEXT:    call __atomic_store
+; CHECK-NEXT:    callrel __atomic_store
 ; CHECK-NEXT:    leaveret
 ;
 ; O0-LABEL: store_i64_misaligned:
@@ -533,7 +533,7 @@ define void @store_i64_misaligned(ptr %p, i64 %x) nounwind {
 ; O0-NEXT:    setr r0, 8
 ; O0-NEXT:    addi r2, r15, -8
 ; O0-NEXT:    setr r3, 5
-; O0-NEXT:    call __atomic_store
+; O0-NEXT:    callrel __atomic_store
 ; O0-NEXT:    leaveret
   store atomic i64 %x, ptr %p seq_cst, align 4
   ret void

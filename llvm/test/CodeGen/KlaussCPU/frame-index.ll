@@ -67,7 +67,7 @@ define i64 @address_taken() nounwind {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 6
 ; CHECK-NEXT:    addi r0, r15, -24
-; CHECK-NEXT:    call use
+; CHECK-NEXT:    callrel use
 ; CHECK-NEXT:    ldidx64 r12, r15, -16
 ; CHECK-NEXT:    leaveret
   %st = alloca [3 x i64]
@@ -88,7 +88,7 @@ define i64 @field_offsets(i64 %a, i64 %b) nounwind {
 ; CHECK-NEXT:    addi r0, r15, -48
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r1
-; CHECK-NEXT:    call use
+; CHECK-NEXT:    callrel use
 ; CHECK-NEXT:    stidx8 r5, r15, -47
 ; CHECK-NEXT:    stidx16 r5, r15, -46
 ; CHECK-NEXT:    stidx32 r5, r15, -44
@@ -150,7 +150,7 @@ define void @address_plus_offset() nounwind {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 6
 ; CHECK-NEXT:    addi r0, r15, -8
-; CHECK-NEXT:    call use
+; CHECK-NEXT:    callrel use
 ; CHECK-NEXT:    leaveret
   %st = alloca [3 x i64]
   %q = getelementptr inbounds i8, ptr %st, i64 16
@@ -166,7 +166,7 @@ define i64 @or_offset(i32 %v) nounwind {
 ; CHECK-NEXT:    enter 5
 ; CHECK-NEXT:    stidx32 r0, r15, -12
 ; CHECK-NEXT:    addi r0, r15, -16
-; CHECK-NEXT:    call use
+; CHECK-NEXT:    callrel use
 ; CHECK-NEXT:    ldidx32 r12, r15, -12
 ; CHECK-NEXT:    leaveret
   %st = alloca [2 x i64], align 8
@@ -216,7 +216,7 @@ define void @far_many(i64 %v) nounwind {
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    addi r0, r15, -2056
-; CHECK-NEXT:    call use
+; CHECK-NEXT:    callrel use
 ; CHECK-NEXT:    addi r12, r15, -2088
 ; CHECK-NEXT:    stidx64 r4, r15, -2088
 ; CHECK-NEXT:    stidx64 r4, r12, 8
@@ -244,7 +244,7 @@ define void @far_few(i64 %v) nounwind {
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    addi r0, r15, -2056
-; CHECK-NEXT:    call use
+; CHECK-NEXT:    callrel use
 ; CHECK-NEXT:    stidx64 r4, r15, -2080
 ; CHECK-NEXT:    stidx64 r4, r15, -2072
 ; CHECK-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
@@ -268,7 +268,7 @@ define void @near_after_far(i64 %v) nounwind {
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    addi r0, r15, -40
-; CHECK-NEXT:    call use
+; CHECK-NEXT:    callrel use
 ; CHECK-NEXT:    stidx64 r4, r15, -72
 ; CHECK-NEXT:    stidx64 r4, r15, -64
 ; CHECK-NEXT:    stidx64 r4, r15, -56
@@ -298,7 +298,7 @@ define i64 @realigned(i64 %v) nounwind {
 ; CHECK-NEXT:    andi r7, r15, -32
 ; CHECK-NEXT:    stidx64 r0, r7, -40
 ; CHECK-NEXT:    addi r0, r7, -64
-; CHECK-NEXT:    call use
+; CHECK-NEXT:    callrel use
 ; CHECK-NEXT:    ldidx64 r12, r7, -40
 ; CHECK-NEXT:    ldidx64 r7, r15, -8 # 8-byte Folded Reload
 ; CHECK-NEXT:    leaveret
@@ -322,11 +322,11 @@ define i64 @with_vla(i64 %n, i64 %v) nounwind {
 ; CHECK-NEXT:    subr r0, r14, r12
 ; CHECK-NEXT:    setsp r0
 ; CHECK-NEXT:    addsp -24
-; CHECK-NEXT:    call use
+; CHECK-NEXT:    callrel use
 ; CHECK-NEXT:    addsp 24
 ; CHECK-NEXT:    addsp -24
 ; CHECK-NEXT:    addi r0, r15, -16
-; CHECK-NEXT:    call use
+; CHECK-NEXT:    callrel use
 ; CHECK-NEXT:    addsp 24
 ; CHECK-NEXT:    ldidx64 r12, r15, -8
 ; CHECK-NEXT:    leaveret

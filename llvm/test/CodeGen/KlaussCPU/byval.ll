@@ -34,7 +34,7 @@ define void @pass_const() {
 ; CHECK-DAG:     stidx64 r12, r15, -24
 ; CHECK-DAG:     stidx64 r12, r15, -32
 ; CHECK-NOT:     {{(setr|copy) r0,}}
-; CHECK:         call take
+; CHECK:         callrel take
   call void @take(ptr byval(%struct.S) align 8 @cs)
   ret void
 }
@@ -50,7 +50,7 @@ define void @pass_stack_slot(ptr %p) {
 ; CHECK-DAG:     stidx64 [[W0]], r15, -32
 ; CHECK-DAG:     getsp [[SP:r[0-9]+]]
 ; CHECK:         stidx64 [[COPY]], [[SP]], 24
-; CHECK-NEXT:    call take5
+; CHECK-NEXT:    callrel take5
   call void @take5(i64 10, i64 20, i64 30, i64 40, ptr byval(%struct.S) align 8 %p)
   ret void
 }
@@ -62,9 +62,9 @@ define void @pass_large() {
 ; CHECK-DAG:     copy r0, [[COPY]]
 ; CHECK-DAG:     setru r1, gl
 ; CHECK-DAG:     setr r2, 320
-; CHECK:         call memcpy
+; CHECK:         callrel memcpy
 ; CHECK-NEXT:    copy r0, [[COPY]]
-; CHECK-NEXT:    call takel
+; CHECK-NEXT:    callrel takel
   call void @takel(ptr byval(%struct.L) align 8 @gl)
   ret void
 }
@@ -72,7 +72,7 @@ define void @pass_large() {
 ; No reserved call frame: the copy is made before ADJCALLSTACKDOWN's addsp.
 define void @pass_vla(i64 %n, ptr %p) {
 ; CHECK-LABEL: pass_vla:
-; CHECK:         call use
+; CHECK:         callrel use
 ; CHECK-NEXT:    addsp 24
 ; CHECK-DAG:     ldidx64 [[W3:r[0-9]+]], [[P:r[0-9]+]], 24
 ; CHECK-DAG:     ldidx64 [[W0:r[0-9]+]], [[P]], 0
@@ -82,7 +82,7 @@ define void @pass_vla(i64 %n, ptr %p) {
 ; CHECK-NEXT:    getsp [[SP:r[0-9]+]]
 ; CHECK-NEXT:    addi [[COPY:r[0-9]+]], r15, -40
 ; CHECK:         stidx64 [[COPY]], [[SP]], 24
-; CHECK-NEXT:    call take5
+; CHECK-NEXT:    callrel take5
 ; CHECK-NEXT:    addsp 32
   %a = alloca i8, i64 %n, align 8
   call void @use(ptr %a)
@@ -104,13 +104,13 @@ define void @pass_odd(ptr %p, ptr %q) {
 ; CHECK-DAG:     addi r0, r15, [[#%d,E13-12]]
 ; CHECK-NOT:     {{(copy|addi|setr) r0,}}
 ; CHECK:         stidx64 {{r[0-9]+}}, r15, [[#%d,E13-12]]
-; CHECK-NEXT:    call take13
+; CHECK-NEXT:    callrel take13
 ; CHECK:         addi r0, r15, [[#%d,C3:]]
 ; CHECK-NOT:     {{(copy|addi|setr) r0,}}
 ; CHECK:         stidx8 {{r[0-9]+}}, r15, [[#%d,C3+2]]
 ; CHECK-NOT:     {{(copy|addi|setr) r0,}}
 ; CHECK:         stidx16 {{r[0-9]+}}, r15, [[#%d,C3]]
-; CHECK-NEXT:    call take3
+; CHECK-NEXT:    callrel take3
   call void @take13(ptr byval([13 x i8]) align 1 %p)
   call void @take3(ptr byval({ i8, i8, i8 }) align 1 %q)
   ret void
@@ -127,9 +127,9 @@ define void @pass_empty(ptr %p, ptr %q) {
 ; CHECK:         enter 4
 ; CHECK-NOT:     addi
 ; CHECK:         copy r4, r1
-; CHECK-NEXT:    call take_empty
+; CHECK-NEXT:    callrel take_empty
 ; CHECK-NEXT:    copy r0, r4
-; CHECK-NEXT:    call take_zla
+; CHECK-NEXT:    callrel take_zla
   call void @take_empty(ptr byval({}) align 1 %p)
   call void @take_zla(ptr byval([0 x i32]) align 4 %q)
   ret void

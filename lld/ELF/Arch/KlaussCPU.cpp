@@ -24,6 +24,14 @@
 //   R_KLAUSSCPU_PC64   (5) — 64-bit PC-relative data, as PC32 for an 8-byte
 //                             field (`.quad A − B`, e.g. InstrProf's
 //                             __profd_* CounterPtr).
+//   R_KLAUSSCPU_CALL18 (6) — ISA v3 short CALL (word 0 0x63000000): simm18
+//                             word displacement (S + A − P) / 4 in word0[17:0],
+//                             P = the instruction (r_offset).  It reaches
+//                             ±512 KiB; a callee further away is called
+//                             through a thunk, `jmprel S + A` (Thunks.cpp),
+//                             placed within reach.  The thunk returns
+//                             nothing itself: the callee returns straight to
+//                             the call's PC + 4.
 //
 // Only static links are supported: there are no dynamic relocation types.
 // Code loaded at run time is relocated by its loader, from an ET_REL object
@@ -51,6 +59,12 @@ public:
                      const uint8_t *loc) const override;
   void relocate(uint8_t *loc, const Relocation &rel,
                 uint64_t val) const override;
+  bool needsThunk(RelExpr expr, RelType type, const InputFile *file,
+                  uint64_t branchAddr, const Symbol &s,
+                  int64_t a) const override;
+  uint32_t getThunkSectionSpacing() const override;
+  bool inBranchRange(RelType type, uint64_t src,
+                     uint64_t dst) const override;
 };
 } // namespace
 
@@ -59,6 +73,7 @@ KlaussCPU::KlaussCPU(Ctx &ctx) : TargetInfo(ctx) {
   // big-endian).  Its LEN field [31:30] of the LE word 0x11F00000 is 00, so
   // the v2 CPU raises ERR_INV_OPCODE if it is ever executed.
   trapInstr = {0x00, 0x00, 0xF0, 0x11};
+  needsThunks = true;
 }
 
 RelExpr KlaussCPU::getRelExpr(RelType type, const Symbol &s,
@@ -72,6 +87,7 @@ RelExpr KlaussCPU::getRelExpr(RelType type, const Symbol &s,
   case R_KLAUSSCPU_PCREL32:
   case R_KLAUSSCPU_PC32:
   case R_KLAUSSCPU_PC64:
+  case R_KLAUSSCPU_CALL18:
     return R_PC;
   default:
     Err(ctx) << getErrorLoc(ctx, loc) << "unrecognized relocation " << type;
@@ -127,9 +143,41 @@ void KlaussCPU::relocate(uint8_t *loc, const Relocation &rel,
     // exactly the 64-bit difference.
     write64le(loc, val);
     break;
+  case R_KLAUSSCPU_CALL18:
+    // val = S + A − P with P the instruction itself.  A callee out of reach
+    // was redirected to a thunk (needsThunk), so this only fails for a
+    // misaligned target.
+    checkAlignment(ctx, loc, val, 4, rel);
+    checkInt(ctx, loc, static_cast<int64_t>(val), 20, rel);
+    write32le(loc, (read32le(loc) & ~0x3FFFFu) |
+                       (static_cast<uint32_t>(val >> 2) & 0x3FFFFu));
+    break;
   default:
     llvm_unreachable("unrecognized KlaussCPU relocation");
   }
+}
+
+// A short call whose callee is out of reach goes through a thunk.  An
+// undefined weak callee resolves to address 0, which the thunk reaches as
+// CALLREL would have.
+bool KlaussCPU::needsThunk(RelExpr expr, RelType type, const InputFile *file,
+                           uint64_t branchAddr, const Symbol &s,
+                           int64_t a) const {
+  if (type != R_KLAUSSCPU_CALL18)
+    return false;
+  return !inBranchRange(type, branchAddr, s.getVA(ctx, a));
+}
+
+// ThunkSections every 448 KiB keep one within the ±512 KiB reach of every
+// short call, with 64 KiB to spare for the thunks themselves.
+uint32_t KlaussCPU::getThunkSectionSpacing() const {
+  return 512 * 1024 - 0x10000;
+}
+
+bool KlaussCPU::inBranchRange(RelType type, uint64_t src, uint64_t dst) const {
+  if (type != R_KLAUSSCPU_CALL18)
+    return true;
+  return isInt<20>(static_cast<int64_t>(dst - src));
 }
 
 void elf::setKlaussCPUTargetInfo(Ctx &ctx) {

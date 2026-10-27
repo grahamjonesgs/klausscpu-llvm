@@ -19,7 +19,7 @@ define void @two_vlas(i64 %n, i64 %m) {
 ; CHECK:         getsp [[SP2:r[0-9]+]]
 ; CHECK:         subr [[B:r[0-9]+]], [[SP2]], {{r[0-9]+}}
 ; CHECK-NEXT:    setsp [[B]]
-; CHECK:         call use
+; CHECK:         callrel use
   %a = alloca i8, i64 %n, align 8
   %b = alloca i8, i64 %m, align 8
   call void @use(ptr %a, ptr %b)
@@ -30,12 +30,12 @@ define void @two_vlas(i64 %n, i64 %m) {
 ; SP read *after* ADJCALLSTACKDOWN's addsp.
 define void @vla_stackargs(i64 %n) {
 ; CHECK-LABEL: vla_stackargs:
-; CHECK:         call use
+; CHECK:         callrel use
 ; CHECK:         addsp -40
 ; CHECK-NEXT:    getsp [[SP:r[0-9]+]]
 ; CHECK:         stidx64 {{r[0-9]+}}, [[SP]], 32
 ; CHECK-NEXT:    stidx64 {{r[0-9]+}}, [[SP]], 24
-; CHECK-NEXT:    call many
+; CHECK-NEXT:    callrel many
 ; CHECK-NEXT:    addsp 40
   %a = alloca i8, i64 %n, align 8
   call void @use(ptr %a, ptr %a)
@@ -48,7 +48,7 @@ define void @no_stackargs(ptr %p) {
 ; CHECK-LABEL: no_stackargs:
 ; CHECK:         getsp r15
 ; CHECK-NOT:     getsp
-; CHECK:         call use
+; CHECK:         callrel use
   call void @use(ptr %p, ptr %p)
   ret void
 }

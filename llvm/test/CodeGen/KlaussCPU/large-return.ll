@@ -26,7 +26,7 @@ define i64 @call_ret3(i64 %a) nounwind {
 ; CHECK-NEXT:    enter 6
 ; CHECK-NEXT:    copy r1, r0
 ; CHECK-NEXT:    addi r0, r15, -24
-; CHECK-NEXT:    call ret3
+; CHECK-NEXT:    callrel ret3
 ; CHECK-NEXT:    ldidx64 r12, r15, -8
 ; CHECK-NEXT:    leaveret
   %r = call { i64, i64, i64 } @ret3(i64 %a)

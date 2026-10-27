@@ -42,12 +42,14 @@ FunctionPass *createKlaussCPUEarlyIVIncPass();
 FunctionPass *createKlaussCPUFlagReusePass();
 FunctionPass *createKlaussCPUFuseCmpBrPass(bool LoopConstsOnly = false);
 FunctionPass *createKlaussCPUJumpTableHoistPass();
+FunctionPass *createKlaussCPUOptExtensionsPass();
 void initializeKlaussCPUCalleeSavedCFIPass(PassRegistry &);
 void initializeKlaussCPUDAGToDAGISelLegacyPass(PassRegistry &);
 void initializeKlaussCPUEarlyIVIncPass(PassRegistry &);
 void initializeKlaussCPUFlagReusePass(PassRegistry &);
 void initializeKlaussCPUFuseCmpBrPass(PassRegistry &);
 void initializeKlaussCPUJumpTableHoistPass(PassRegistry &);
+void initializeKlaussCPUOptExtensionsPass(PassRegistry &);
 } // namespace llvm
 
 using namespace llvm;
@@ -64,6 +66,7 @@ LLVMInitializeKlaussCPUTarget() {
   initializeKlaussCPUFlagReusePass(PR);
   initializeKlaussCPUFuseCmpBrPass(PR);
   initializeKlaussCPUJumpTableHoistPass(PR);
+  initializeKlaussCPUOptExtensionsPass(PR);
 }
 
 static Reloc::Model getEffectiveRelocModel(std::optional<Reloc::Model> RM) {
@@ -133,6 +136,10 @@ KlaussCPUTargetMachine::createMachineScheduler(MachineSchedContext *C) const {
 // Pass configuration
 //===----------------------------------------------------------------------===//
 
+static cl::opt<cl::boolOrDefault>
+    EnableGlobalMerge("klausscpu-enable-global-merge", cl::Hidden,
+                      cl::desc("Enable the global merge pass"));
+
 namespace {
 class KlaussCPUPassConfig : public TargetPassConfig {
 public:
@@ -144,7 +151,9 @@ public:
   }
 
   void addIRPasses() override;
+  bool addPreISel() override;
   bool addInstSelector() override;
+  void addMachineSSAOptimization() override;
   void addPreRegAlloc() override;
   void addPreSched2() override;
   void addPreEmitPass() override;
@@ -175,9 +184,25 @@ void KlaussCPUPassConfig::addIRPasses() {
     addPass(createKlaussCPUEarlyIVIncPass());
 }
 
+bool KlaussCPUPassConfig::addPreISel() {
+  if ((getOptLevel() != CodeGenOptLevel::None &&
+       EnableGlobalMerge == cl::BOU_UNSET) ||
+      EnableGlobalMerge == cl::BOU_TRUE)
+    addPass(createGlobalMergePass(TM, /*MaxOffset=*/1016,
+                                  /*OnlyOptimizeForSize=*/false,
+                                  /*MergeExternalByDefault=*/false));
+  return false;
+}
+
 bool KlaussCPUPassConfig::addInstSelector() {
   addPass(createKlaussCPUISelDag(getKlaussCPUTargetMachine()));
   return false;
+}
+
+void KlaussCPUPassConfig::addMachineSSAOptimization() {
+  TargetPassConfig::addMachineSSAOptimization();
+  // Extensions made redundant across blocks (KlaussCPUOptExtensions.cpp).
+  addPass(createKlaussCPUOptExtensionsPass());
 }
 
 void KlaussCPUPassConfig::addPreRegAlloc() {

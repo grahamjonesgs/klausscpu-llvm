@@ -17,11 +17,11 @@
         copy    p, m
 
 # Targets and addresses are symbols.
-# CHECK: call b                     # encoding: [0x00,0x00,0x00,0xa2,A,A,A,A]
-# CHECK-NEXT:                       #   fixup A - offset: 4, value: b, kind: FK_KlaussCPU_ABS32
+# CHECK: callrel b                  # encoding: [A,A,0b000000AA,0x63]
+# CHECK-NEXT:                       #   fixup A - offset: 0, value: b, kind: FK_KlaussCPU_CALL18
         call    b
-# CHECK: callrel sp                 # encoding: [0x00,0x00,0x00,0xa3,A,A,A,A]
-# CHECK-NEXT:                       #   fixup A - offset: 4, value: sp, kind: FK_KlaussCPU_PCREL32
+# CHECK: callrel sp                 # encoding: [A,A,0b000000AA,0x63]
+# CHECK-NEXT:                       #   fixup A - offset: 0, value: sp, kind: FK_KlaussCPU_CALL18
         callrel sp
 # CHECK: setr r12, flags            # encoding: [0x00,0x0c,0xd0,0x8b,A,A,A,A]
 # CHECK-NEXT:                       #   fixup A - offset: 4, value: flags, kind: FK_KlaussCPU_ABS32
@@ -46,12 +46,12 @@ b:
         ret
 
 # RELOC:      Section ({{.*}}) .rela.text {
-# RELOC-NEXT:   0xC R_KLAUSSCPU_ABS32 b 0x0
-# RELOC-NEXT:   0x14 R_KLAUSSCPU_PCREL32 sp 0x0
-# RELOC-NEXT:   0x1C R_KLAUSSCPU_ABS32 flags 0x0
-# RELOC-NEXT:   0x24 R_KLAUSSCPU_PCREL32 K 0x0
-# RELOC-NEXT:   0x2C R_KLAUSSCPU_ABS32 ra 0x8
-# RELOC-NEXT:   0x34 R_KLAUSSCPU_ABS32 r7 0x0
+# RELOC-NEXT:   0x8 R_KLAUSSCPU_CALL18 b 0x0
+# RELOC-NEXT:   0xC R_KLAUSSCPU_CALL18 sp 0x0
+# RELOC-NEXT:   0x14 R_KLAUSSCPU_ABS32 flags 0x0
+# RELOC-NEXT:   0x1C R_KLAUSSCPU_PCREL32 K 0x0
+# RELOC-NEXT:   0x24 R_KLAUSSCPU_ABS32 ra 0x8
+# RELOC-NEXT:   0x2C R_KLAUSSCPU_ABS32 r7 0x0
 # RELOC-NEXT: }
 
 .ifdef ERR

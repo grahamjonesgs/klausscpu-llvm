@@ -30,6 +30,7 @@ describe earlier states of the backend and are superseded by this file.
 | Immediates | each class 2/3 op exists with a sign- and a zero-extended imm32 (SGN bit); isel picks the one that holds the constant: `SETR`/`SETRU` (MOV), `ADDI`/`ADDV`/`MINUSV`, `ANDI`/`ANDV` (and OR/XOR), `CMPRV`/`CMPRVU`; boolean compares (`setcc` as a value) `CMPxxV` with a simm32; `SETR64` only for a value neither reaches.  An add of -255..-129 (a frame address too) is `MINUSV` of the negation, whose short form reaches it |
 | Multiply by a constant | `MULV` (simm32; EX-serialised, `WriteMul`); a constant 2^N+1, 2^N-1 or 1-2^N that is not a simm32 becomes `SHLV` + `ADDR`/`SUBR` (`decomposeMulByConstant`); for a simm32 one only with `-klausscpu-mul-imm-shift-add` (one more instruction than `MULV`, fewer cycles) |
 | Addresses | 32-bit, zero-extended in a register: `SETRU sym` (static), `LEAPC` (PIC); `sym+off` is folded only for `off` in [0, 2^31), other offsets are a separate add so a negative S + off stays negative; `R_KLAUSSCPU_ABS64` data is the exact 64-bit S + A (lld) |
+| Direct call | the 1-word short `CALL` (ISA v3 A1, LINK=1: PC + 4·simm18, ±512 KiB, pushes PC+4; written `callrel`) for every call to a symbol: resolved by the assembler in its own section (relaxed to the 2-word `CALLREL` if out of reach), else an `R_KLAUSSCPU_CALL18` relocation, for which lld calls an out-of-reach callee through a `jmprel` thunk.  Code a loader without thunks relocates (Zephyr LLEXT) is built with `-mllvm -klausscpu-short-calls=false` (2-word `CALL` / `CALLREL`) |
 | Indirect branch / call | `JMPR` / `CALLR` |
 | Switches | a compare tree, or a jump table from 12 cases (clusters) at 40% density (the board break-even): a 4-byte-aligned table of absolute 32-bit block addresses (`EK_Custom32`, `R_KLAUSSCPU_ABS32`, also under PIC: only the base is PC-relative, `LEAPC`), dispatched by `LDIDX32R` + `JMPR` (`LowerBR_JT`) |
 | `llvm.trap` / `llvm.debugtrap` | both `TRAP`: an abnormal stop (crash dump; `stop = Trap` in the emulator; a debug halt with SIGTRAP under the debugger).  `HALT` is the clean stop the runtime ends a program with (exit status in R12) |
@@ -46,11 +47,15 @@ forms derive theirs from the 2-word twin), emitted by `-gen-emitter`'s
 `getBinaryCodeForInstr`.  The AsmPrinter and AsmParser turn a 2-word
 instruction into its 1-word short form through the `CompressPat`s
 (`-gen-compress-inst-emitter`, `KlaussCPU::compress`) when its literal
-immediate fits, or when a branch target is a symbol; the asm backend relaxes
-a short branch by expanding its pattern again (`KlaussCPU::uncompress`).  The
-`short-forms` / `short-branches` subtarget features gate this; every CPU has
-them, and `-mllvm -klausscpu-short-forms=false` /
-`-klausscpu-short-branches=false` turn them off (overriding `-mattr`).  The
+immediate fits, or when a branch or call target is a symbol; the asm backend
+relaxes a short branch by expanding its pattern again (`KlaussCPU::uncompress`)
+when its target is out of reach or not resolved in the same section, and a
+short call only when it is resolved and out of reach: otherwise the call keeps
+its `FK_KlaussCPU_CALL18` fixup, which becomes `R_KLAUSSCPU_CALL18`.  The
+`short-forms` / `short-branches` / `short-calls` subtarget features gate this
+(each implies the one before); every CPU has them, and
+`-mllvm -klausscpu-short-forms=false` / `-klausscpu-short-branches=false` /
+`-klausscpu-short-calls=false` turn them off (overriding `-mattr`).  The
 short instructions carry the same predicates, so without the feature the
 disassembler does not decode them and the AsmPrinter's predicate verifier
 rejects one.  Since the target has a feature table, an unknown `-mattr`
@@ -295,6 +300,16 @@ when clobbered.
   block in front of its compare, where they fill bubbles; the dispatch block
   is left with the dependent `LDIDX32R` + `JMPR` (`jump-table-hoist.ll`,
   `.mir`).  It runs after MachineSink, which would sink them back.
+- Before instruction selection (-O1 and up): GlobalMerge merges the internal
+  (static) globals of a module, up to 1016 bytes (the reach of a 64-bit
+  short-form access), so neighbouring statics share one `LEAPC`/`SETRU`
+  base; external globals are not merged (`global-merge.ll`).
+- After the generic machine SSA optimisations (-O1 and up):
+  `KlaussCPUOptExtensions` deletes a `ZEXTB/H/W` or `SEXTB/H/W` whose
+  source is already extended (extending loads, W ops, compares, constants,
+  through COPY, PHI and bitwise/min/max ops), whose result is read only in
+  its low bits, or whose PHI source can take the same extension already
+  made in each predecessor instead (`opt-extensions.mir`, `ext-phi.ll`).
 - Before the post-RA scheduler: FuseCmpBr's loop constants; pre-emit passes:
   FlagReuse, then FuseCmpBr (see Flags), then CalleeSavedCFI (see CFI).
 - TTI (`KlaussCPUTargetTransformInfo.cpp`): moderate partial/runtime
@@ -330,7 +345,9 @@ when clobbered.
 
 | Option | Default | Effect |
 |---|---|---|
-| `-klausscpu-short-forms` / `-klausscpu-short-branches` | on | ISA v3 1-word forms (override `-mattr`) |
+| `-klausscpu-short-forms` / `-klausscpu-short-branches` / `-klausscpu-short-calls` | on | ISA v3 1-word forms, branches, calls (override `-mattr`) |
+| `-klausscpu-enable-global-merge` | on at -O1+ | GlobalMerge of internal globals |
+| `-klausscpu-opt-extensions` | on | KlaussCPUOptExtensions |
 | `-klausscpu-enter-leave` / `-klausscpu-leaveret` | on | ENTER/LEAVE frames, LEAVE+RET → LEAVERET |
 | `-klausscpu-fuse-cmp-br` | on | FBR fused compare-and-branch |
 | `-klausscpu-fuse-loop-const` | on | FBR for a loop compare with a non-simm4 constant, via a free register set in the preheader |
@@ -453,6 +470,7 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPUEarlyIVInc.cpp     IR, after LSR: loop counter counts from Init - C so its increment can issue early
 ├── KlaussCPUFlagReuse.cpp      pre-emit: CMPRV Rd,0 + JMPE/NE → JMPZ/NZ (default on)
 ├── KlaussCPUJumpTableHoist.cpp pre-RA: jump-table base and entry offset into the range-check block
+├── KlaussCPUOptExtensions.cpp  pre-RA (SSA): redundant sign/zero extensions
 ├── KlaussCPUFuseCmpBr.cpp      pre-emit: compare + branch → ISA v3 FBR (default on); pre-sched2 instance: loop constants
 ├── KlaussCPUCalleeSavedCFI.cpp pre-emit: a callee-saved register's .cfi_offset behind its scheduled spill
 ├── KlaussCPUTargetTransformInfo.h/.cpp  TTI — M8 unroll budget gated on branch density, no peel; LSR cost order, register count
@@ -467,8 +485,8 @@ llvm/lib/Target/KlaussCPU/
 │   ├── KlaussCPUMCAsmInfo.h/.cpp  MCAsmInfoELF subclass
 │   ├── KlaussCPUInstPrinter.h/.cpp printInst / printOperand; uses GenAsmWriter.inc
 │   ├── KlaussCPUMCCodeEmitter.cpp  generated getBinaryCodeForInstr (encodings = .td Inst fields) + fixup operand hooks
-│   ├── KlaussCPUFixupKinds.h   ABS32, PCREL32, PCREL18 (short branch), PCREL13 (FBR)
-│   ├── KlaussCPUAsmBackend.cpp fixups, ELF relocations, short-branch relaxation, NOP fill
+│   ├── KlaussCPUFixupKinds.h   ABS32, PCREL32, PCREL18 (short branch), PCREL13 (FBR), CALL18 (short call)
+│   ├── KlaussCPUAsmBackend.cpp fixups, ELF relocations, short-branch / short-call relaxation, NOP fill
 │   └── KlaussCPUMCTargetDesc.h/.cpp  LLVMInitializeKlaussCPUTargetMC; MCInstrAnalysis; generated CompressPat compress/uncompress
 ├── TargetInfo/
 │   ├── KlaussCPUTargetInfo.h   declares getTheKlaussCPUTarget()
@@ -479,7 +497,9 @@ llvm/lib/Target/KlaussCPU/
 Outside this directory: `clang/lib/Basic/Targets/KlaussCPU.*` and
 `clang/lib/Driver/ToolChains/KlaussCPU.*` (clang target + driver, which adds
 `-ffreestanding` and links with `ld.lld -m elf32klausscpu`),
-`lld/ELF/Arch/KlaussCPU.cpp`, `llvm/include/llvm/BinaryFormat/ELFRelocs/KlaussCPU.def`,
+`lld/ELF/Arch/KlaussCPU.cpp` (relocations; `R_KLAUSSCPU_CALL18` range and
+thunk decision) with the `jmprel` call thunk in `lld/ELF/Thunks.cpp`,
+`llvm/include/llvm/BinaryFormat/ELFRelocs/KlaussCPU.def`,
 `llvm/lib/TargetParser/TargetDataLayout.cpp` (the DataLayout),
 `lldb/source/Plugins/ABI/KlaussCPU/`.
 `llvm/CMakeLists.txt`: `KlaussCPU` in `LLVM_ALL_EXPERIMENTAL_TARGETS`.
@@ -594,7 +614,7 @@ the `klausscpu-runtime` repo root; see its READMEs for build/run detail:
   `LDIDX64A`/`STIDX64A` and `ldidx64u`/`stidx64u` its `LDIDX64`/`STIDX64`,
   `ldidx8s` is `LDIDX8_S`, `fbr`/`fbri` are `BEQ`…`BUGTI`, `lcd` is
   `LCDRST`, and klausscc names the 1-word forms LLVM picks by value with a
-  `.S` suffix (`jmpzrel` near is `JMPZ.S`).
+  `.S` suffix (`jmpzrel` near is `JMPZ.S`, the short `callrel` `CALL.S`).
 - **A data initializer `sym + A` with `A` outside int32 does not assemble.**
   `uintptr_t q = (uintptr_t)&arr + 0x80000000UL;` at file scope emits
   `.quad arr+2147483648`, which MC rejects with `relocation addend out of

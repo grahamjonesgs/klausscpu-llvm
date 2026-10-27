@@ -12,7 +12,7 @@ define i8 @xchg_i8(ptr %p, i8 %x) nounwind {
 ; CHECK-LABEL: xchg_i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_lock_test_and_set_1
+; CHECK-NEXT:    callrel __sync_lock_test_and_set_1
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw xchg ptr %p, i8 %x seq_cst
   ret i8 %v
@@ -22,7 +22,7 @@ define i16 @xchg_i16(ptr %p, i16 %x) nounwind {
 ; CHECK-LABEL: xchg_i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_lock_test_and_set_2
+; CHECK-NEXT:    callrel __sync_lock_test_and_set_2
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw xchg ptr %p, i16 %x seq_cst
   ret i16 %v
@@ -32,7 +32,7 @@ define i32 @xchg_i32(ptr %p, i32 %x) nounwind {
 ; CHECK-LABEL: xchg_i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_lock_test_and_set_4
+; CHECK-NEXT:    callrel __sync_lock_test_and_set_4
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw xchg ptr %p, i32 %x seq_cst
   ret i32 %v
@@ -42,7 +42,7 @@ define i64 @xchg_i64(ptr %p, i64 %x) nounwind {
 ; CHECK-LABEL: xchg_i64:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_lock_test_and_set_8
+; CHECK-NEXT:    callrel __sync_lock_test_and_set_8
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw xchg ptr %p, i64 %x seq_cst
   ret i64 %v
@@ -52,7 +52,7 @@ define i8 @add_i8(ptr %p, i8 %x) nounwind {
 ; CHECK-LABEL: add_i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_add_1
+; CHECK-NEXT:    callrel __sync_fetch_and_add_1
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw add ptr %p, i8 %x seq_cst
   ret i8 %v
@@ -62,7 +62,7 @@ define i16 @add_i16(ptr %p, i16 %x) nounwind {
 ; CHECK-LABEL: add_i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_add_2
+; CHECK-NEXT:    callrel __sync_fetch_and_add_2
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw add ptr %p, i16 %x seq_cst
   ret i16 %v
@@ -72,7 +72,7 @@ define i32 @add_i32(ptr %p, i32 %x) nounwind {
 ; CHECK-LABEL: add_i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_add_4
+; CHECK-NEXT:    callrel __sync_fetch_and_add_4
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw add ptr %p, i32 %x seq_cst
   ret i32 %v
@@ -82,7 +82,7 @@ define i64 @add_i64(ptr %p, i64 %x) nounwind {
 ; CHECK-LABEL: add_i64:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_add_8
+; CHECK-NEXT:    callrel __sync_fetch_and_add_8
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw add ptr %p, i64 %x seq_cst
   ret i64 %v
@@ -92,7 +92,7 @@ define i8 @sub_i8(ptr %p, i8 %x) nounwind {
 ; CHECK-LABEL: sub_i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_sub_1
+; CHECK-NEXT:    callrel __sync_fetch_and_sub_1
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw sub ptr %p, i8 %x seq_cst
   ret i8 %v
@@ -102,7 +102,7 @@ define i16 @sub_i16(ptr %p, i16 %x) nounwind {
 ; CHECK-LABEL: sub_i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_sub_2
+; CHECK-NEXT:    callrel __sync_fetch_and_sub_2
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw sub ptr %p, i16 %x seq_cst
   ret i16 %v
@@ -112,7 +112,7 @@ define i32 @sub_i32(ptr %p, i32 %x) nounwind {
 ; CHECK-LABEL: sub_i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_sub_4
+; CHECK-NEXT:    callrel __sync_fetch_and_sub_4
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw sub ptr %p, i32 %x seq_cst
   ret i32 %v
@@ -122,7 +122,7 @@ define i64 @sub_i64(ptr %p, i64 %x) nounwind {
 ; CHECK-LABEL: sub_i64:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_sub_8
+; CHECK-NEXT:    callrel __sync_fetch_and_sub_8
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw sub ptr %p, i64 %x seq_cst
   ret i64 %v
@@ -132,7 +132,7 @@ define i8 @and_i8(ptr %p, i8 %x) nounwind {
 ; CHECK-LABEL: and_i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_and_1
+; CHECK-NEXT:    callrel __sync_fetch_and_and_1
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw and ptr %p, i8 %x seq_cst
   ret i8 %v
@@ -142,7 +142,7 @@ define i16 @and_i16(ptr %p, i16 %x) nounwind {
 ; CHECK-LABEL: and_i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_and_2
+; CHECK-NEXT:    callrel __sync_fetch_and_and_2
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw and ptr %p, i16 %x seq_cst
   ret i16 %v
@@ -152,7 +152,7 @@ define i32 @and_i32(ptr %p, i32 %x) nounwind {
 ; CHECK-LABEL: and_i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_and_4
+; CHECK-NEXT:    callrel __sync_fetch_and_and_4
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw and ptr %p, i32 %x seq_cst
   ret i32 %v
@@ -162,7 +162,7 @@ define i64 @and_i64(ptr %p, i64 %x) nounwind {
 ; CHECK-LABEL: and_i64:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_and_8
+; CHECK-NEXT:    callrel __sync_fetch_and_and_8
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw and ptr %p, i64 %x seq_cst
   ret i64 %v
@@ -172,7 +172,7 @@ define i8 @nand_i8(ptr %p, i8 %x) nounwind {
 ; CHECK-LABEL: nand_i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_nand_1
+; CHECK-NEXT:    callrel __sync_fetch_and_nand_1
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw nand ptr %p, i8 %x seq_cst
   ret i8 %v
@@ -182,7 +182,7 @@ define i16 @nand_i16(ptr %p, i16 %x) nounwind {
 ; CHECK-LABEL: nand_i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_nand_2
+; CHECK-NEXT:    callrel __sync_fetch_and_nand_2
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw nand ptr %p, i16 %x seq_cst
   ret i16 %v
@@ -192,7 +192,7 @@ define i32 @nand_i32(ptr %p, i32 %x) nounwind {
 ; CHECK-LABEL: nand_i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_nand_4
+; CHECK-NEXT:    callrel __sync_fetch_and_nand_4
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw nand ptr %p, i32 %x seq_cst
   ret i32 %v
@@ -202,7 +202,7 @@ define i64 @nand_i64(ptr %p, i64 %x) nounwind {
 ; CHECK-LABEL: nand_i64:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_nand_8
+; CHECK-NEXT:    callrel __sync_fetch_and_nand_8
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw nand ptr %p, i64 %x seq_cst
   ret i64 %v
@@ -212,7 +212,7 @@ define i8 @or_i8(ptr %p, i8 %x) nounwind {
 ; CHECK-LABEL: or_i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_or_1
+; CHECK-NEXT:    callrel __sync_fetch_and_or_1
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw or ptr %p, i8 %x seq_cst
   ret i8 %v
@@ -222,7 +222,7 @@ define i16 @or_i16(ptr %p, i16 %x) nounwind {
 ; CHECK-LABEL: or_i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_or_2
+; CHECK-NEXT:    callrel __sync_fetch_and_or_2
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw or ptr %p, i16 %x seq_cst
   ret i16 %v
@@ -232,7 +232,7 @@ define i32 @or_i32(ptr %p, i32 %x) nounwind {
 ; CHECK-LABEL: or_i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_or_4
+; CHECK-NEXT:    callrel __sync_fetch_and_or_4
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw or ptr %p, i32 %x seq_cst
   ret i32 %v
@@ -242,7 +242,7 @@ define i64 @or_i64(ptr %p, i64 %x) nounwind {
 ; CHECK-LABEL: or_i64:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_or_8
+; CHECK-NEXT:    callrel __sync_fetch_and_or_8
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw or ptr %p, i64 %x seq_cst
   ret i64 %v
@@ -252,7 +252,7 @@ define i8 @xor_i8(ptr %p, i8 %x) nounwind {
 ; CHECK-LABEL: xor_i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_xor_1
+; CHECK-NEXT:    callrel __sync_fetch_and_xor_1
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw xor ptr %p, i8 %x seq_cst
   ret i8 %v
@@ -262,7 +262,7 @@ define i16 @xor_i16(ptr %p, i16 %x) nounwind {
 ; CHECK-LABEL: xor_i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_xor_2
+; CHECK-NEXT:    callrel __sync_fetch_and_xor_2
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw xor ptr %p, i16 %x seq_cst
   ret i16 %v
@@ -272,7 +272,7 @@ define i32 @xor_i32(ptr %p, i32 %x) nounwind {
 ; CHECK-LABEL: xor_i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_xor_4
+; CHECK-NEXT:    callrel __sync_fetch_and_xor_4
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw xor ptr %p, i32 %x seq_cst
   ret i32 %v
@@ -282,7 +282,7 @@ define i64 @xor_i64(ptr %p, i64 %x) nounwind {
 ; CHECK-LABEL: xor_i64:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_xor_8
+; CHECK-NEXT:    callrel __sync_fetch_and_xor_8
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw xor ptr %p, i64 %x seq_cst
   ret i64 %v
@@ -292,7 +292,7 @@ define i8 @max_i8(ptr %p, i8 %x) nounwind {
 ; CHECK-LABEL: max_i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_max_1
+; CHECK-NEXT:    callrel __sync_fetch_and_max_1
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw max ptr %p, i8 %x seq_cst
   ret i8 %v
@@ -302,7 +302,7 @@ define i16 @max_i16(ptr %p, i16 %x) nounwind {
 ; CHECK-LABEL: max_i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_max_2
+; CHECK-NEXT:    callrel __sync_fetch_and_max_2
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw max ptr %p, i16 %x seq_cst
   ret i16 %v
@@ -312,7 +312,7 @@ define i32 @max_i32(ptr %p, i32 %x) nounwind {
 ; CHECK-LABEL: max_i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_max_4
+; CHECK-NEXT:    callrel __sync_fetch_and_max_4
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw max ptr %p, i32 %x seq_cst
   ret i32 %v
@@ -322,7 +322,7 @@ define i64 @max_i64(ptr %p, i64 %x) nounwind {
 ; CHECK-LABEL: max_i64:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_max_8
+; CHECK-NEXT:    callrel __sync_fetch_and_max_8
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw max ptr %p, i64 %x seq_cst
   ret i64 %v
@@ -332,7 +332,7 @@ define i8 @min_i8(ptr %p, i8 %x) nounwind {
 ; CHECK-LABEL: min_i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_min_1
+; CHECK-NEXT:    callrel __sync_fetch_and_min_1
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw min ptr %p, i8 %x seq_cst
   ret i8 %v
@@ -342,7 +342,7 @@ define i16 @min_i16(ptr %p, i16 %x) nounwind {
 ; CHECK-LABEL: min_i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_min_2
+; CHECK-NEXT:    callrel __sync_fetch_and_min_2
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw min ptr %p, i16 %x seq_cst
   ret i16 %v
@@ -352,7 +352,7 @@ define i32 @min_i32(ptr %p, i32 %x) nounwind {
 ; CHECK-LABEL: min_i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_min_4
+; CHECK-NEXT:    callrel __sync_fetch_and_min_4
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw min ptr %p, i32 %x seq_cst
   ret i32 %v
@@ -362,7 +362,7 @@ define i64 @min_i64(ptr %p, i64 %x) nounwind {
 ; CHECK-LABEL: min_i64:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_min_8
+; CHECK-NEXT:    callrel __sync_fetch_and_min_8
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw min ptr %p, i64 %x seq_cst
   ret i64 %v
@@ -372,7 +372,7 @@ define i8 @umax_i8(ptr %p, i8 %x) nounwind {
 ; CHECK-LABEL: umax_i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_umax_1
+; CHECK-NEXT:    callrel __sync_fetch_and_umax_1
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw umax ptr %p, i8 %x seq_cst
   ret i8 %v
@@ -382,7 +382,7 @@ define i16 @umax_i16(ptr %p, i16 %x) nounwind {
 ; CHECK-LABEL: umax_i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_umax_2
+; CHECK-NEXT:    callrel __sync_fetch_and_umax_2
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw umax ptr %p, i16 %x seq_cst
   ret i16 %v
@@ -392,7 +392,7 @@ define i32 @umax_i32(ptr %p, i32 %x) nounwind {
 ; CHECK-LABEL: umax_i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_umax_4
+; CHECK-NEXT:    callrel __sync_fetch_and_umax_4
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw umax ptr %p, i32 %x seq_cst
   ret i32 %v
@@ -402,7 +402,7 @@ define i64 @umax_i64(ptr %p, i64 %x) nounwind {
 ; CHECK-LABEL: umax_i64:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_umax_8
+; CHECK-NEXT:    callrel __sync_fetch_and_umax_8
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw umax ptr %p, i64 %x seq_cst
   ret i64 %v
@@ -412,7 +412,7 @@ define i8 @umin_i8(ptr %p, i8 %x) nounwind {
 ; CHECK-LABEL: umin_i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_umin_1
+; CHECK-NEXT:    callrel __sync_fetch_and_umin_1
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw umin ptr %p, i8 %x seq_cst
   ret i8 %v
@@ -422,7 +422,7 @@ define i16 @umin_i16(ptr %p, i16 %x) nounwind {
 ; CHECK-LABEL: umin_i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_umin_2
+; CHECK-NEXT:    callrel __sync_fetch_and_umin_2
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw umin ptr %p, i16 %x seq_cst
   ret i16 %v
@@ -432,7 +432,7 @@ define i32 @umin_i32(ptr %p, i32 %x) nounwind {
 ; CHECK-LABEL: umin_i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_umin_4
+; CHECK-NEXT:    callrel __sync_fetch_and_umin_4
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw umin ptr %p, i32 %x seq_cst
   ret i32 %v
@@ -442,7 +442,7 @@ define i64 @umin_i64(ptr %p, i64 %x) nounwind {
 ; CHECK-LABEL: umin_i64:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_umin_8
+; CHECK-NEXT:    callrel __sync_fetch_and_umin_8
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw umin ptr %p, i64 %x seq_cst
   ret i64 %v
@@ -453,7 +453,7 @@ define i32 @add_i32_monotonic(ptr %p, i32 %x) nounwind {
 ; CHECK-LABEL: add_i32_monotonic:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_add_4
+; CHECK-NEXT:    callrel __sync_fetch_and_add_4
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw add ptr %p, i32 %x monotonic
   ret i32 %v
@@ -463,7 +463,7 @@ define i32 @add_i32_singlethread(ptr %p, i32 %x) nounwind {
 ; CHECK-LABEL: add_i32_singlethread:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_add_4
+; CHECK-NEXT:    callrel __sync_fetch_and_add_4
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw add ptr %p, i32 %x syncscope("singlethread") acq_rel
   ret i32 %v
@@ -474,7 +474,7 @@ define i64 @add_i8_zext(ptr %p, i8 %x) nounwind {
 ; CHECK-LABEL: add_i8_zext:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_add_1
+; CHECK-NEXT:    callrel __sync_fetch_and_add_1
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw add ptr %p, i8 %x seq_cst
   %e = zext i8 %v to i64
@@ -485,7 +485,7 @@ define i64 @add_i32_sext(ptr %p, i32 %x) nounwind {
 ; CHECK-LABEL: add_i32_sext:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_fetch_and_add_4
+; CHECK-NEXT:    callrel __sync_fetch_and_add_4
 ; CHECK-NEXT:    sextw r12, r12
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw add ptr %p, i32 %x seq_cst
@@ -501,7 +501,7 @@ define i16 @sub_i16_global_const() nounwind {
 ; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    setru r0, g
 ; CHECK-NEXT:    setr r1, 1
-; CHECK-NEXT:    call __sync_fetch_and_sub_2
+; CHECK-NEXT:    callrel __sync_fetch_and_sub_2
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw sub ptr @g, i16 1 seq_cst
   ret i16 %v
@@ -512,7 +512,7 @@ define void @or_i64_unused(ptr %p) nounwind {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    setr r1, 4
-; CHECK-NEXT:    call __sync_fetch_and_or_8
+; CHECK-NEXT:    callrel __sync_fetch_and_or_8
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw or ptr %p, i64 4 seq_cst
   ret void

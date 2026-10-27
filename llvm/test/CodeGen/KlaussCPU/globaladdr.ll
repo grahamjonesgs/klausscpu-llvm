@@ -84,7 +84,7 @@ define i64 @call_ext_and_use() {
 ; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    .cfi_def_cfa r15, 16
 ; CHECK-NEXT:    .cfi_offset r15, -16
-; CHECK-NEXT:    call ext
+; CHECK-NEXT:    callrel ext
 ; CHECK-NEXT:    setru r12, g_i64
 ; CHECK-NEXT:    ldidx64 r12, r12, 0
 ; CHECK-NEXT:    leaveret

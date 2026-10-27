@@ -30,7 +30,7 @@ define void @pass_local_addr() {
 ; CHECK-NEXT:    .cfi_def_cfa r15, 16
 ; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    addi r0, r15, -8
-; CHECK-NEXT:    call use_ptr
+; CHECK-NEXT:    callrel use_ptr
 ; CHECK-NEXT:    leaveret
   %buf = alloca i64
   call void @use_ptr(ptr %buf)
@@ -68,7 +68,7 @@ define i64 @spill_across_call(i64 %a) {
 ; CHECK-NEXT:    .cfi_offset r4, -24
 ; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    setr r0, 0
-; CHECK-NEXT:    call use_ptr
+; CHECK-NEXT:    callrel use_ptr
 ; CHECK-NEXT:    addi r12, r4, 3
 ; CHECK-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
 ; CHECK-NEXT:    leaveret

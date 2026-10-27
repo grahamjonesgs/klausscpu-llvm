@@ -17,7 +17,7 @@ define i64 @one_csr(i64 %x) nounwind {
 ; CHECK:         enter 4
 ; CHECK-NEXT:    setr r0, 3
 ; CHECK-NEXT:    stidx64 r4, r15, -8
-; CHECK-NEXT:    call g
+; CHECK-NEXT:    callrel g
   %a = call i64 @g(i64 3)
   %b = call i64 @g(i64 %a)
   %r = add i64 %a, %b
@@ -34,7 +34,7 @@ define i64 @one_csr_cfi(i64 %x) {
 ; CHECK-NEXT:    setr r0, 3
 ; CHECK-NEXT:    stidx64 r4, r15, -8
 ; CHECK-NEXT:    .cfi_offset r4, -24
-; CHECK-NEXT:    call g
+; CHECK-NEXT:    callrel g
   %a = call i64 @g(i64 3)
   %b = call i64 @g(i64 %a)
   %r = add i64 %a, %b
@@ -52,7 +52,7 @@ define i64 @two_csr_cfi(i64 %x, i64 %y) {
 ; CHECK-NEXT:    .cfi_offset r4, -24
 ; CHECK-NEXT:    stidx64 r5, r15, -16
 ; CHECK-NEXT:    .cfi_offset r5, -32
-; CHECK-NEXT:    call g
+; CHECK-NEXT:    callrel g
   %a = call i64 @g(i64 5)
   %b = call i64 @g(i64 %a)
   %c = call i64 @g(i64 %b)

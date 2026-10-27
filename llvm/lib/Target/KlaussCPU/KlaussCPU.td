@@ -4,8 +4,9 @@ include "llvm/Target/Target.td"
 //===----------------------------------------------------------------------===//
 // Subtarget features
 //
-// Both are on in every processor; -mllvm -klausscpu-short-forms=false /
-// -klausscpu-short-branches=false turn them off (KlaussCPUMCTargetDesc.cpp).
+// All are on in every processor; -mllvm -klausscpu-short-forms=false /
+// -klausscpu-short-branches=false / -klausscpu-short-calls=false turn them off
+// (KlaussCPUMCTargetDesc.cpp).
 //===----------------------------------------------------------------------===//
 
 // ISA v3 A3-A5: 1-word forms of the immediate ALU ops, SETR, CMPRV and the
@@ -26,6 +27,18 @@ def FeatureShortBranches
 def HasShortBranches : Predicate<"Subtarget->hasShortBranches()">,
                        AssemblerPredicate<(all_of FeatureShortBranches),
                                           "short-branches">;
+
+// ISA v3 A1 with LINK=1: 1-word PC-relative calls.  A call to a symbol in
+// another section becomes an R_KLAUSSCPU_CALL18 relocation, which lld
+// resolves through a range-extension thunk when the callee is out of reach;
+// code that a loader without thunks links (Zephyr LLEXT) turns this off.
+def FeatureShortCalls
+    : SubtargetFeature<"short-calls", "HasShortCalls", "true",
+                       "ISA v3 short 1-word PC-relative calls",
+                       [FeatureShortBranches]>;
+def HasShortCalls : Predicate<"Subtarget->hasShortCalls()">,
+                    AssemblerPredicate<(all_of FeatureShortCalls),
+                                       "short-calls">;
 
 include "KlaussCPURegisterInfo.td"
 include "KlaussCPUCallingConv.td"

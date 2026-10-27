@@ -90,12 +90,12 @@ define i64 @p() nounwind {
 ; STATIC-NEXT:    enter 4
 ; STATIC-NEXT:    setr r0, 3
 ; STATIC-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; STATIC-NEXT:    call b
+; STATIC-NEXT:    callrel b
 ; STATIC-NEXT:    copy r4, r12
-; STATIC-NEXT:    call sp
+; STATIC-NEXT:    callrel sp
 ; STATIC-NEXT:    setru r0, r1
 ; STATIC-NEXT:    addr r4, r4, r12
-; STATIC-NEXT:    call ra
+; STATIC-NEXT:    callrel ra
 ; STATIC-NEXT:    copy r12, r4
 ; STATIC-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
 ; STATIC-NEXT:    leaveret

@@ -76,6 +76,12 @@ public:
     getImmOrFixup(MI, OpNo, Op, Fixups, 0, KlaussCPU::FK_KlaussCPU_PCREL18,
                   /*PCRel=*/true);
   }
+  void getCall18OpValue(const MCInst &MI, unsigned OpNo, APInt &Op,
+                        SmallVectorImpl<MCFixup> &Fixups,
+                        const MCSubtargetInfo &STI) const {
+    getImmOrFixup(MI, OpNo, Op, Fixups, 0, KlaussCPU::FK_KlaussCPU_CALL18,
+                  /*PCRel=*/true);
+  }
   void getPCRel13OpValue(const MCInst &MI, unsigned OpNo, APInt &Op,
                          SmallVectorImpl<MCFixup> &Fixups,
                          const MCSubtargetInfo &STI) const {

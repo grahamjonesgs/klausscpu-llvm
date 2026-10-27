@@ -13,7 +13,7 @@ define i64 @call_4_args(i64 %a, i64 %b, i64 %c, i64 %d) {
 ; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    .cfi_def_cfa r15, 16
 ; CHECK-NEXT:    .cfi_offset r15, -16
-; CHECK-NEXT:    call ext
+; CHECK-NEXT:    callrel ext
 ; CHECK-NEXT:    leaveret
   %r = call i64 @ext(i64 %a, i64 %b, i64 %c, i64 %d)
   ret i64 %r
@@ -30,7 +30,7 @@ define i64 @call_5_args(i64 %a, i64 %b, i64 %c, i64 %d, i64 %e) {
 ; CHECK-NEXT:    ldidx64 r12, r15, 40
 ; CHECK-NEXT:    getsp r14
 ; CHECK-NEXT:    stidx64 r12, r14, 24
-; CHECK-NEXT:    call ext5
+; CHECK-NEXT:    callrel ext5
 ; CHECK-NEXT:    leaveret
   %r = call i64 @ext5(i64 %a, i64 %b, i64 %c, i64 %d, i64 %e)
   ret i64 %r
@@ -46,7 +46,7 @@ define i64 @callee_saved_live_across_call(i64 %x) {
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    .cfi_offset r4, -24
 ; CHECK-NEXT:    copy r4, r0
-; CHECK-NEXT:    call ext_void
+; CHECK-NEXT:    callrel ext_void
 ; CHECK-NEXT:    addi r12, r4, 3
 ; CHECK-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
 ; CHECK-NEXT:    leaveret

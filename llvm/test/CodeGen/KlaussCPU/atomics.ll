@@ -73,7 +73,7 @@ define i32 @fetch_add(i32 %x) nounwind {
 ; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    copy r1, r0
 ; CHECK-NEXT:    setru r0, counter
-; CHECK-NEXT:    call __sync_fetch_and_add_4
+; CHECK-NEXT:    callrel __sync_fetch_and_add_4
 ; CHECK-NEXT:    leaveret
 ;
 ; O0-LABEL: fetch_add:
@@ -82,7 +82,7 @@ define i32 @fetch_add(i32 %x) nounwind {
 ; O0-NEXT:    copy r1, r0
 ; O0-NEXT:    # kill: def $r0 killed $r1
 ; O0-NEXT:    setru r0, counter
-; O0-NEXT:    call __sync_fetch_and_add_4
+; O0-NEXT:    callrel __sync_fetch_and_add_4
 ; O0-NEXT:    leaveret
   %v = atomicrmw add ptr @counter, i32 %x seq_cst
   ret i32 %v
@@ -92,14 +92,14 @@ define i8 @xchg_i8(ptr %p, i8 %x) nounwind {
 ; CHECK-LABEL: xchg_i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_lock_test_and_set_1
+; CHECK-NEXT:    callrel __sync_lock_test_and_set_1
 ; CHECK-NEXT:    leaveret
 ;
 ; O0-LABEL: xchg_i8:
 ; O0:       # %bb.0:
 ; O0-NEXT:    enter 3
 ; O0-NEXT:    # kill: def $r12 killed $r1
-; O0-NEXT:    call __sync_lock_test_and_set_1
+; O0-NEXT:    callrel __sync_lock_test_and_set_1
 ; O0-NEXT:    leaveret
   %v = atomicrmw xchg ptr %p, i8 %x acq_rel
   ret i8 %v
@@ -112,7 +112,7 @@ define i32 @cas(i32 %expected, i32 %desired) nounwind {
 ; CHECK-NEXT:    copy r2, r1
 ; CHECK-NEXT:    copy r1, r0
 ; CHECK-NEXT:    setru r0, counter
-; CHECK-NEXT:    call __sync_val_compare_and_swap_4
+; CHECK-NEXT:    callrel __sync_val_compare_and_swap_4
 ; CHECK-NEXT:    leaveret
 ;
 ; O0-LABEL: cas:
@@ -123,7 +123,7 @@ define i32 @cas(i32 %expected, i32 %desired) nounwind {
 ; O0-NEXT:    # kill: def $r12 killed $r2
 ; O0-NEXT:    # kill: def $r0 killed $r1
 ; O0-NEXT:    setru r0, counter
-; O0-NEXT:    call __sync_val_compare_and_swap_4
+; O0-NEXT:    callrel __sync_val_compare_and_swap_4
 ; O0-NEXT:    leaveret
   %pair = cmpxchg ptr @counter, i32 %expected, i32 %desired seq_cst seq_cst
   %v = extractvalue { i32, i1 } %pair, 0

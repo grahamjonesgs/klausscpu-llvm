@@ -24,11 +24,11 @@ define float @fadd_f32(ptr %p, float %x) nounwind {
 ; CHECK-NEXT:    zextw r7, r6
 ; CHECK-NEXT:    copy r1, r5
 ; CHECK-NEXT:    copy r0, r7
-; CHECK-NEXT:    call __addsf3
+; CHECK-NEXT:    callrel __addsf3
 ; CHECK-NEXT:    copy r2, r12
 ; CHECK-NEXT:    copy r0, r4
 ; CHECK-NEXT:    copy r1, r6
-; CHECK-NEXT:    call __sync_val_compare_and_swap_4
+; CHECK-NEXT:    callrel __sync_val_compare_and_swap_4
 ; CHECK-NEXT:    copy r6, r12
 ; CHECK-NEXT:    fbr r12, r7, 8, .LBB0_1
 ; CHECK-NEXT:  # %bb.2: # %atomicrmw.end
@@ -58,11 +58,11 @@ define double @fmax_f64(ptr %p, double %x) nounwind {
 ; CHECK-NEXT:    copy r0, r12
 ; CHECK-NEXT:    copy r1, r5
 ; CHECK-NEXT:    copy r6, r12
-; CHECK-NEXT:    call fmax
+; CHECK-NEXT:    callrel fmax
 ; CHECK-NEXT:    copy r2, r12
 ; CHECK-NEXT:    copy r0, r4
 ; CHECK-NEXT:    copy r1, r6
-; CHECK-NEXT:    call __sync_val_compare_and_swap_8
+; CHECK-NEXT:    callrel __sync_val_compare_and_swap_8
 ; CHECK-NEXT:    fbr r12, r6, 8, .LBB1_1
 ; CHECK-NEXT:  # %bb.2: # %atomicrmw.end
 ; CHECK-NEXT:    ldidx64 r6, r15, -24 # 8-byte Folded Reload
@@ -90,7 +90,7 @@ define i32 @uinc_wrap_i32(ptr %p, i32 %x) nounwind {
 ; CHECK-NEXT:    copy r0, r4
 ; CHECK-NEXT:    copy r1, r12
 ; CHECK-NEXT:    zextw r6, r12
-; CHECK-NEXT:    call __sync_val_compare_and_swap_4
+; CHECK-NEXT:    callrel __sync_val_compare_and_swap_4
 ; CHECK-NEXT:    fbr r12, r6, 0, .LBB2_4
 ; CHECK-NEXT:  .LBB2_1: # %atomicrmw.start
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
@@ -128,7 +128,7 @@ define i16 @udec_wrap_i16(ptr %p, i16 %x) nounwind {
 ; CHECK-NEXT:    # in Loop: Header=BB3_1 Depth=1
 ; CHECK-NEXT:    copy r0, r4
 ; CHECK-NEXT:    copy r1, r12
-; CHECK-NEXT:    call __sync_val_compare_and_swap_2
+; CHECK-NEXT:    callrel __sync_val_compare_and_swap_2
 ; CHECK-NEXT:    fbr r12, r7, 0, .LBB3_6
 ; CHECK-NEXT:  .LBB3_1: # %atomicrmw.start
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
@@ -177,7 +177,7 @@ define i8 @usub_cond_i8(ptr %p, i8 %x) nounwind {
 ; CHECK-NEXT:    # in Loop: Header=BB4_1 Depth=1
 ; CHECK-NEXT:    copy r0, r4
 ; CHECK-NEXT:    copy r1, r12
-; CHECK-NEXT:    call __sync_val_compare_and_swap_1
+; CHECK-NEXT:    callrel __sync_val_compare_and_swap_1
 ; CHECK-NEXT:    fbr r12, r7, 0, .LBB4_5
 ; CHECK-NEXT:  .LBB4_1: # %atomicrmw.start
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
@@ -214,7 +214,7 @@ define i64 @usub_sat_i64(ptr %p, i64 %x) nounwind {
 ; CHECK-NEXT:    copy r0, r4
 ; CHECK-NEXT:    subr r2, r12, r5
 ; CHECK-NEXT:    copy r1, r6
-; CHECK-NEXT:    call __sync_val_compare_and_swap_8
+; CHECK-NEXT:    callrel __sync_val_compare_and_swap_8
 ; CHECK-NEXT:    fbr r12, r6, 8, .LBB5_1
 ; CHECK-NEXT:  # %bb.2: # %atomicrmw.end
 ; CHECK-NEXT:    ldidx64 r6, r15, -24 # 8-byte Folded Reload
@@ -230,7 +230,7 @@ define i128 @add_i128(ptr %p, i128 %x) nounwind {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    setr r3, 5
-; CHECK-NEXT:    call __atomic_fetch_add_16
+; CHECK-NEXT:    callrel __atomic_fetch_add_16
 ; CHECK-NEXT:    leaveret
   %v = atomicrmw add ptr %p, i128 %x seq_cst
   ret i128 %v
@@ -266,7 +266,7 @@ define i32 @add_i32_misaligned(ptr %p, i32 %x) nounwind {
 ; CHECK-NEXT:    copy r3, r7
 ; CHECK-NEXT:    stidx64 r4, r12, 32
 ; CHECK-NEXT:    stidx64 r4, r12, 24
-; CHECK-NEXT:    call __atomic_compare_exchange
+; CHECK-NEXT:    callrel __atomic_compare_exchange
 ; CHECK-NEXT:    copy r14, r12
 ; CHECK-NEXT:    ldidx32 r12, r15, -36
 ; CHECK-NEXT:    fbri r14, 0, 0, .LBB7_1

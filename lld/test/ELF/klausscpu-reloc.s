@@ -3,7 +3,8 @@
 ## PC-relative word-1 field to the address of the instruction itself, so
 ## R_KLAUSSCPU_PCREL32 stores S + A - P + 4 (P = instr + 4).  Data differences
 ## (PC32 / PC64) store S + A - P exactly.  Calls, jumps and LEAPC to absolute
-## symbols (.set, --defsym) must reach the absolute address.
+## symbols (.set, --defsym) must reach the absolute address.  The calls are
+## short calls (R_KLAUSSCPU_CALL18, see klausscpu-call18.s).
 
 # RUN: llvm-mc -triple=klausscpu -filetype=obj %s -o %t.o
 # RUN: echo 'SECTIONS { .text 0x20 : { *(.text) } .data 0x100 : { *(.data) } }' > %t.lds
@@ -14,11 +15,11 @@
 # CHECK:      <_start>:
 # CHECK-NEXT:   20: leapc r1, 0x1000
 # CHECK-NEXT:   28: callrel 0x1000
-# CHECK-NEXT:   30: jmprel 0x1000
-# CHECK-NEXT:   38: leapc r1, 0x1008
-# CHECK-NEXT:   40: callrel 0x2000
-# CHECK-NEXT:   48: leapc r2, 0x2010
-# CHECK-NEXT:   50: leapc r3, 0x100{{$}}
+# CHECK-NEXT:   2c: jmprel 0x1000
+# CHECK-NEXT:   34: leapc r1, 0x1008
+# CHECK-NEXT:   3c: callrel 0x2000
+# CHECK-NEXT:   40: leapc r2, 0x2010
+# CHECK-NEXT:   48: leapc r3, 0x100{{$}}
 
 ## 0x100: .long ext - .        = 0x2000 - 0x100 = 0x1f00
 ## 0x104: .quad ext - .        = 0x2000 - 0x104 = 0x1efc

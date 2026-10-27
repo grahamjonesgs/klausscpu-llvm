@@ -171,7 +171,7 @@ define i64 @mem_stack_past_limit(i64 %v) nounwind {
 
 define i64 @mem_stack_far(i64 %v) nounwind {
 ; CHECK-LABEL: mem_stack_far:
-; CHECK:         call use
+; CHECK:         callrel use
 ; CHECK:         addi [[A:r[0-9]+]], r{{[0-9]+}}, -2147483648
 ; CHECK-NEXT:    #APP
 ; CHECK-NEXT:    ldidx64 r{{[0-9]+}}, [[A]], 0
@@ -185,7 +185,7 @@ define i64 @mem_stack_far(i64 %v) nounwind {
 
 define i64 @mem_stack_far_clobber(i64 %v) nounwind {
 ; CHECK-LABEL: mem_stack_far_clobber:
-; CHECK:         call use
+; CHECK:         callrel use
 ; CHECK:         addi [[A:r[0-9]+]], r{{[0-9]+}}, -2147483648
 ; CHECK-NEXT:    #APP
 ; CHECK-NEXT:    ldidx64 r{{[0-9]+}}, [[A]], 0

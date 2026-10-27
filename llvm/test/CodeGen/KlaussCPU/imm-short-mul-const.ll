@@ -78,7 +78,7 @@ declare void @use(ptr)
 define void @frame_addr() nounwind {
 ; CHECK-LABEL: frame_addr:
 ; CHECK:       minusv r0, r15, 200 # encoding: [0xf0,0x80,0x6c,0x48]
-; CHECK:       call use
+; CHECK:       callrel use
   %buf = alloca [200 x i8], align 8
   call void @use(ptr %buf)
   ret void

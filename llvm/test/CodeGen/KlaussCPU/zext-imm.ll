@@ -150,7 +150,7 @@ define void @br_u32(i64 %a) nounwind {
 ; CHECK-NEXT:    cmprvu r0, 3735928559
 ; CHECK-NEXT:    jmpnerel .LBB8_2
 ; CHECK-NEXT:  # %bb.1: # %t
-; CHECK-NEXT:    call f
+; CHECK-NEXT:    callrel f
 ; CHECK-NEXT:  .LBB8_2: # %e
 ; CHECK-NEXT:    leaveret
 ;

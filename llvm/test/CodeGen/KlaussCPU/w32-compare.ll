@@ -15,7 +15,7 @@ define void @rr_both(i64 %a, i64 %b) nounwind {
 ; CHECK-NEXT:    cmprrw r0, r1
 ; CHECK-NEXT:    jmpgerel .LBB0_2
 ; CHECK-NEXT:  # %bb.1: # %t
-; CHECK-NEXT:    call f
+; CHECK-NEXT:    callrel f
 ; CHECK-NEXT:  .LBB0_2: # %e
 ; CHECK-NEXT:    leaveret
   %a1 = trunc i64 %a to i32
@@ -37,7 +37,7 @@ define void @rr_one(i32 signext %a, i64 %b) nounwind {
 ; CHECK-NEXT:    cmprrw r0, r1
 ; CHECK-NEXT:    jmpgerel .LBB1_2
 ; CHECK-NEXT:  # %bb.1: # %t
-; CHECK-NEXT:    call f
+; CHECK-NEXT:    callrel f
 ; CHECK-NEXT:  .LBB1_2: # %e
 ; CHECK-NEXT:    leaveret
   %b1 = trunc i64 %b to i32
@@ -58,7 +58,7 @@ define void @imm_large(i64 %a) nounwind {
 ; CHECK-NEXT:    cmprvw r0, 999
 ; CHECK-NEXT:    jmpgtrel .LBB2_2
 ; CHECK-NEXT:  # %bb.1: # %t
-; CHECK-NEXT:    call f
+; CHECK-NEXT:    callrel f
 ; CHECK-NEXT:  .LBB2_2: # %e
 ; CHECK-NEXT:    leaveret
   %a1 = trunc i64 %a to i32
@@ -79,7 +79,7 @@ define void @imm_small(i64 %a) nounwind {
 ; CHECK-NEXT:    cmprvw r0, 4
 ; CHECK-NEXT:    jmpgtrel .LBB3_2
 ; CHECK-NEXT:  # %bb.1: # %t
-; CHECK-NEXT:    call f
+; CHECK-NEXT:    callrel f
 ; CHECK-NEXT:  .LBB3_2: # %e
 ; CHECK-NEXT:    leaveret
   %a1 = trunc i64 %a to i32

@@ -18,6 +18,12 @@
 //     branch that is out of range or not resolvable in-section is RELAXED to
 //     the 2-word PC-relative form, so it never reaches the object writer.
 //
+//   FK_KlaussCPU_CALL18 — ISA v3 A1 short call, the field of PCREL18.  A
+//     callee in the same section is resolved here (and the call relaxed to
+//     CALLREL should it be out of range); any other becomes
+//     R_KLAUSSCPU_CALL18, (S + A - P) / 4 with P the instruction, which lld
+//     routes through a range-extension thunk when it does not reach.
+//
 //   FK_Data_{1,2,4,8} — data directives.  4- and 8-byte data have absolute
 //     (ABS32/ABS64) and PC-relative (PC32/PC64, no instruction +4) relocations;
 //     1- and 2-byte data must resolve at assembly time.
@@ -89,6 +95,8 @@ public:
       return ELF::R_KLAUSSCPU_ABS32;
     case KlaussCPU::FK_KlaussCPU_PCREL32:
       return ELF::R_KLAUSSCPU_PCREL32;
+    case KlaussCPU::FK_KlaussCPU_CALL18:
+      return ELF::R_KLAUSSCPU_CALL18;
     default:
       reportError(Fixup.getLoc(), "unsupported relocation type");
       return ELF::R_KLAUSSCPU_NONE;
@@ -112,6 +120,7 @@ public:
         {"FK_KlaussCPU_PCREL32",   0,         32,      0},
         {"FK_KlaussCPU_PCREL18",   0,         18,      0},
         {"FK_KlaussCPU_PCREL13",   8,         13,      0},
+        {"FK_KlaussCPU_CALL18",    0,         18,      0},
     };
     if (Kind >= FirstTargetFixupKind &&
         Kind < FirstTargetFixupKind + KlaussCPU::NumTargetFixupKinds)
@@ -199,6 +208,23 @@ public:
     case FK_Data_8:
       NumBytes = 8;
       break;
+    // FK_KlaussCPU_CALL18: short call, word displacement into word0[17:0].
+    // A resolved Value is target - PC (the fixup is at offset 0) and in range
+    // (fixupNeedsRelaxationAdvanced); unresolved, the relocation carries it.
+    case KlaussCPU::FK_KlaussCPU_CALL18: {
+      if (!IsResolved)
+        return;
+      int64_t V = static_cast<int64_t>(Value);
+      if ((V & 3) || !isInt<18>(V >> 2)) {
+        getContext().reportError(Fixup.getLoc(), "call target out of range");
+        return;
+      }
+      uint32_t Disp = static_cast<uint32_t>(V >> 2) & 0x3FFFFu;
+      Data[0] |= Disp & 0xFF;
+      Data[1] |= (Disp >> 8) & 0xFF;
+      Data[2] |= (Disp >> 16) & 0x03;
+      return;
+    }
     // FK_KlaussCPU_PCREL32: signed offset from the instruction address in the
     // word-1 slot.  A resolved Value is target − (instr+4) (the fixup is at
     // offset 4); unresolved, the relocation carries it and Value is 0.
@@ -230,12 +256,12 @@ public:
       Data[I] = static_cast<uint8_t>(Value >> (8 * I));
   }
 
-  // ── ISA v3 A1 short-branch relaxation ─────────────────────────────────────
+  // ── ISA v3 A1 short-branch / short-call relaxation ────────────────────────
 
-  // The short branches are the instructions whose CompressPat expands back
-  // (KlaussCPUInstrInfo.td); relaxing one is that expansion.  Only a symbolic
-  // operand has a fixup that can end up out of range, so an instruction
-  // without one is final whatever its patterns say.
+  // The short branches and the short call are the instructions whose
+  // CompressPat expands back (KlaussCPUInstrInfo.td); relaxing one is that
+  // expansion.  Only a symbolic operand has a fixup that can end up out of
+  // range, so an instruction without one is final whatever its patterns say.
   bool mayNeedRelaxation(unsigned Opcode, ArrayRef<MCOperand> Operands,
                          const MCSubtargetInfo &STI) const override {
     if (none_of(Operands, [](const MCOperand &Op) { return Op.isExpr(); }))
@@ -247,12 +273,18 @@ public:
     return KlaussCPU::uncompress(Long, Inst, STI);
   }
 
-  // Stay short only when the target is resolved (same section, local) and
-  // the word displacement fits simm18.
+  // A short branch stays short only when the target is resolved (same
+  // section, local) and the word displacement fits simm18.  A short call
+  // whose target is not resolved stays short too: the linker resolves its
+  // relocation.
   bool fixupNeedsRelaxationAdvanced(const MCFragment &, const MCFixup &Fixup,
                                     const MCValue &, uint64_t Value,
                                     bool Resolved) const override {
-    if (Fixup.getKind() != MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL18))
+    MCFixupKind Kind = Fixup.getKind();
+    if (Kind == MCFixupKind(KlaussCPU::FK_KlaussCPU_CALL18) && !Resolved)
+      return false;
+    if (Kind != MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL18) &&
+        Kind != MCFixupKind(KlaussCPU::FK_KlaussCPU_CALL18))
       return !Resolved;
     if (!Resolved)
       return true;
@@ -264,7 +296,7 @@ public:
                         const MCSubtargetInfo &STI) const override {
     MCInst Long;
     [[maybe_unused]] bool Success = KlaussCPU::uncompress(Long, Inst, STI);
-    assert(Success && "relaxing a non-short-branch");
+    assert(Success && "relaxing a non-short branch or call");
     Inst = std::move(Long);
   }
 

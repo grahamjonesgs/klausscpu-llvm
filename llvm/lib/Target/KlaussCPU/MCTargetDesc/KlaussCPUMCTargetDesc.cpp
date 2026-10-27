@@ -73,6 +73,11 @@ static cl::opt<bool> EnableShortBranches(
     cl::desc("Emit ISA v3 short 1-word PC-relative branches, relaxed when "
              "out of range (feature short-branches)"));
 
+static cl::opt<bool> EnableShortCalls(
+    "klausscpu-short-calls", cl::init(true), cl::Hidden,
+    cl::desc("Emit ISA v3 short 1-word PC-relative calls, resolved by the "
+             "linker through a thunk when out of range (feature short-calls)"));
+
 std::string KlaussCPU::getEffectiveFeatureString(StringRef FS) {
   std::string Res = FS.str();
   auto Override = [&Res](const cl::opt<bool> &Opt, StringRef Feature) {
@@ -82,8 +87,9 @@ std::string KlaussCPU::getEffectiveFeatureString(StringRef FS) {
       Res += ',';
     Res += (Opt ? "+" : "-") + Feature.str();
   };
-  // short-branches implies short-forms, so -short-forms, applied last, turns
-  // the branches off too.
+  // short-calls implies short-branches implies short-forms, so each one
+  // applied later turns the ones before it off too.
+  Override(EnableShortCalls, "short-calls");
   Override(EnableShortBranches, "short-branches");
   Override(EnableShortForms, "short-forms");
   return Res;

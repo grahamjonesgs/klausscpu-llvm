@@ -128,6 +128,11 @@ script self-verifies the loader invariants and now also does the section-merge
   mem* resolve against the kernel exports; and `ld.lld -r -u main` against
   the archive (member selection — `-r` cannot gc-sections). Skipping any of
   these turns 31 KB into 1.3 MB.
+- **LLEXT code needs long calls**: the 1-word short CALL reaches +-512 KiB
+  and lld bridges further calls with thunks, which the LLEXT loader cannot
+  add.  `klauss-build llext` and `hello-ext/.cargo/config.toml` pass
+  `-Cllvm-args=-klausscpu-short-calls=false`; `verify_llext` rejects an
+  `R_KLAUSSCPU_CALL18` that slips through.
 - **Rust `.llext` must merge per-function sections** (hardware-confirmed
   2026-06-15). Rust defaults to function-sections → 100+ `.text.<mangled>`
   sections; the KlaussCPU LLEXT loader only handles a C-like single-`.text`

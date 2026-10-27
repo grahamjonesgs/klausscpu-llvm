@@ -10,7 +10,7 @@ define i8 @cas_val_i8(ptr %p, i8 %e, i8 %n) nounwind {
 ; CHECK-LABEL: cas_val_i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_val_compare_and_swap_1
+; CHECK-NEXT:    callrel __sync_val_compare_and_swap_1
 ; CHECK-NEXT:    leaveret
   %pair = cmpxchg ptr %p, i8 %e, i8 %n seq_cst seq_cst
   %v = extractvalue { i8, i1 } %pair, 0
@@ -23,7 +23,7 @@ define i1 @cas_ok_i8(ptr %p, i8 %e, i8 %n) nounwind {
 ; CHECK-NEXT:    enter 4
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r1
-; CHECK-NEXT:    call __sync_val_compare_and_swap_1
+; CHECK-NEXT:    callrel __sync_val_compare_and_swap_1
 ; CHECK-NEXT:    zextb r14, r4
 ; CHECK-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
 ; CHECK-NEXT:    cmpeqr r12, r12, r14
@@ -37,7 +37,7 @@ define i16 @cas_val_i16(ptr %p, i16 %e, i16 %n) nounwind {
 ; CHECK-LABEL: cas_val_i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_val_compare_and_swap_2
+; CHECK-NEXT:    callrel __sync_val_compare_and_swap_2
 ; CHECK-NEXT:    leaveret
   %pair = cmpxchg ptr %p, i16 %e, i16 %n seq_cst seq_cst
   %v = extractvalue { i16, i1 } %pair, 0
@@ -50,7 +50,7 @@ define i1 @cas_ok_i16(ptr %p, i16 %e, i16 %n) nounwind {
 ; CHECK-NEXT:    enter 4
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r1
-; CHECK-NEXT:    call __sync_val_compare_and_swap_2
+; CHECK-NEXT:    callrel __sync_val_compare_and_swap_2
 ; CHECK-NEXT:    zexth r14, r4
 ; CHECK-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
 ; CHECK-NEXT:    cmpeqr r12, r12, r14
@@ -64,7 +64,7 @@ define i32 @cas_val_i32(ptr %p, i32 %e, i32 %n) nounwind {
 ; CHECK-LABEL: cas_val_i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_val_compare_and_swap_4
+; CHECK-NEXT:    callrel __sync_val_compare_and_swap_4
 ; CHECK-NEXT:    leaveret
   %pair = cmpxchg ptr %p, i32 %e, i32 %n seq_cst seq_cst
   %v = extractvalue { i32, i1 } %pair, 0
@@ -77,7 +77,7 @@ define i1 @cas_ok_i32(ptr %p, i32 %e, i32 %n) nounwind {
 ; CHECK-NEXT:    enter 4
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r1
-; CHECK-NEXT:    call __sync_val_compare_and_swap_4
+; CHECK-NEXT:    callrel __sync_val_compare_and_swap_4
 ; CHECK-NEXT:    cmpeqrw r12, r12, r4
 ; CHECK-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
 ; CHECK-NEXT:    leaveret
@@ -90,7 +90,7 @@ define i64 @cas_val_i64(ptr %p, i64 %e, i64 %n) nounwind {
 ; CHECK-LABEL: cas_val_i64:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_val_compare_and_swap_8
+; CHECK-NEXT:    callrel __sync_val_compare_and_swap_8
 ; CHECK-NEXT:    leaveret
   %pair = cmpxchg ptr %p, i64 %e, i64 %n seq_cst seq_cst
   %v = extractvalue { i64, i1 } %pair, 0
@@ -103,7 +103,7 @@ define i1 @cas_ok_i64(ptr %p, i64 %e, i64 %n) nounwind {
 ; CHECK-NEXT:    enter 4
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r1
-; CHECK-NEXT:    call __sync_val_compare_and_swap_8
+; CHECK-NEXT:    callrel __sync_val_compare_and_swap_8
 ; CHECK-NEXT:    cmpeqr r12, r12, r4
 ; CHECK-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
 ; CHECK-NEXT:    leaveret
@@ -116,7 +116,7 @@ define i32 @cas_weak_i32(ptr %p, i32 %e, i32 %n) nounwind {
 ; CHECK-LABEL: cas_weak_i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    call __sync_val_compare_and_swap_4
+; CHECK-NEXT:    callrel __sync_val_compare_and_swap_4
 ; CHECK-NEXT:    leaveret
   %pair = cmpxchg weak ptr %p, i32 %e, i32 %n monotonic monotonic
   %v = extractvalue { i32, i1 } %pair, 0
@@ -138,7 +138,7 @@ define void @cas_loop_inc(ptr %p) nounwind {
 ; CHECK-NEXT:    incr r2, r5
 ; CHECK-NEXT:    copy r0, r4
 ; CHECK-NEXT:    copy r1, r5
-; CHECK-NEXT:    call __sync_val_compare_and_swap_8
+; CHECK-NEXT:    callrel __sync_val_compare_and_swap_8
 ; CHECK-NEXT:    cmprr r12, r5
 ; CHECK-NEXT:    copy r5, r12
 ; CHECK-NEXT:    jmpnerel .LBB9_1
@@ -177,7 +177,7 @@ define i128 @cas_i128(ptr %p, i128 %e, i128 %n) nounwind {
 ; CHECK-NEXT:    copy r2, r12
 ; CHECK-NEXT:    stidx64 r13, r14, 32
 ; CHECK-NEXT:    stidx64 r13, r14, 24
-; CHECK-NEXT:    call __atomic_compare_exchange_16
+; CHECK-NEXT:    callrel __atomic_compare_exchange_16
 ; CHECK-NEXT:    ldidx64 r12, r7, -32
 ; CHECK-NEXT:    ldidx64 r11, r7, -24
 ; CHECK-NEXT:    ldidx64 r7, r15, -8 # 8-byte Folded Reload
@@ -202,7 +202,7 @@ define i32 @cas_i32_misaligned(ptr %p, i32 %e, i32 %n) nounwind {
 ; CHECK-NEXT:    copy r1, r12
 ; CHECK-NEXT:    stidx64 r13, r14, 32
 ; CHECK-NEXT:    stidx64 r13, r14, 24
-; CHECK-NEXT:    call __atomic_compare_exchange
+; CHECK-NEXT:    callrel __atomic_compare_exchange
 ; CHECK-NEXT:    ldidx32 r12, r15, -4
 ; CHECK-NEXT:    leaveret
   %pair = cmpxchg ptr %p, i32 %e, i32 %n seq_cst seq_cst, align 2

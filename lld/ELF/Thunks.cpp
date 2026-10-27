@@ -431,6 +431,18 @@ public:
   void addSymbols(ThunkSection &isec) override;
 };
 
+// KlaussCPU: a short call (R_KLAUSSCPU_CALL18, ±512 KiB) whose callee is out
+// of reach calls this instead: a PC-relative `jmprel` to the callee, so it is
+// position independent and the callee returns directly to the caller.
+class KlaussCPUThunk final : public Thunk {
+public:
+  KlaussCPUThunk(Ctx &ctx, Symbol &dest, int64_t addend)
+      : Thunk(ctx, dest, addend) {}
+  uint32_t size() override { return 8; }
+  void writeTo(uint8_t *buf) override;
+  void addSymbols(ThunkSection &isec) override;
+};
+
 // MIPS LA25 thunk
 class MipsThunk final : public Thunk {
 public:
@@ -1568,6 +1580,20 @@ void HexagonThunk::addSymbols(ThunkSection &isec) {
       STT_FUNC, 0, isec);
 }
 
+// KlaussCPU Target Thunks
+void KlaussCPUThunk::writeTo(uint8_t *buf) {
+  uint64_t s = destination.getVA(ctx, addend);
+  uint64_t p = getThunkTargetSym()->getVA(ctx);
+  // JMPREL (pipeline_core.sv U_JMP, brel: target = PC + imm32 of word 1).
+  write32(ctx, buf, 0xA1000000);
+  write32(ctx, buf + 4, static_cast<uint32_t>(s - p));
+}
+
+void KlaussCPUThunk::addSymbols(ThunkSection &isec) {
+  addSymbol(ctx.saver.save("__KlaussCPUThunk_" + destination.getName()),
+            STT_FUNC, 0, isec);
+}
+
 Thunk::Thunk(Ctx &ctx, Symbol &d, int64_t a)
     : ctx(ctx), destination(d), addend(a), offset(0) {
   destination.thunkAccessed = true;
@@ -1759,6 +1785,12 @@ static std::unique_ptr<Thunk> addThunkHexagon(Ctx &ctx,
   }
 }
 
+static std::unique_ptr<Thunk> addThunkKlaussCPU(Ctx &ctx, RelType type,
+                                                Symbol &s, int64_t a) {
+  assert(type == R_KLAUSSCPU_CALL18 && "unexpected relocation type for thunk");
+  return std::make_unique<KlaussCPUThunk>(ctx, s, a);
+}
+
 static std::unique_ptr<Thunk> addThunkMips(Ctx &ctx, RelType type, Symbol &s) {
   if ((s.stOther & STO_MIPS_MICROMIPS) && isMipsR6(ctx))
     return std::make_unique<MicroMipsR6Thunk>(ctx, s);
@@ -1830,9 +1862,11 @@ std::unique_ptr<Thunk> elf::addThunk(Ctx &ctx, const InputSection &isec,
     return addThunkPPC64(ctx, rel.type, s, a);
   case EM_HEXAGON:
     return addThunkHexagon(ctx, isec, rel, s);
+  case EM_KLAUSSCPU:
+    return addThunkKlaussCPU(ctx, rel.type, s, a);
   default:
-    llvm_unreachable(
-        "add Thunk only supported for ARM, AVR, Hexagon, Mips and PowerPC");
+    llvm_unreachable("add Thunk only supported for ARM, AVR, Hexagon, "
+                     "KlaussCPU, Mips and PowerPC");
   }
 }
 

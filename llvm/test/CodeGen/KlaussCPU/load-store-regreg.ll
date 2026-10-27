@@ -223,7 +223,7 @@ define i64 @local_array(i64 %i) nounwind {
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    copy r0, r5
-; CHECK-NEXT:    call fill
+; CHECK-NEXT:    callrel fill
 ; CHECK-NEXT:    shlv r12, r4, 1
 ; CHECK-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
 ; CHECK-NEXT:    ldidx16sr r12, r5, r12

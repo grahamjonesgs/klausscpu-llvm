@@ -251,6 +251,12 @@ def PCRelCallTarget32 : Operand<i64> {
   let DecoderMethod    = "decodeSImmOperand<32>";
   let ParserMatchClass = PCRel32AsmOperand;
   let OperandType      = "OPERAND_PCREL";
+  let MCOperandPredicate = [{
+    int64_t Imm;
+    if (MCOp.evaluateAsConstantImm(Imm))
+      return isInt<32>(Imm);
+    return MCOp.isExpr();
+  }];
 }
 
 def pcrel_simm32 : Operand<i64> {
@@ -268,6 +274,19 @@ def pcrel_simm32 : Operand<i64> {
 def PCRelTarget18 : Operand<OtherVT>,
                     ImmLeaf<i64, [{return isShiftedInt<18, 2>(Imm);}]> {
   let EncoderMethod    = "getPCRel18OpValue";
+  let DecoderMethod    = "decodeSImmOperand<20>";
+  let ParserMatchClass = PCRel20AsmOperand;
+  let OperandType      = "OPERAND_PCREL";
+  let MCOperandPredicate = [{ return MCOp.isExpr(); }];
+}
+
+// ISA v3 short call target: as PCRelTarget18, but a target the assembler
+// cannot resolve becomes an R_KLAUSSCPU_CALL18 relocation
+// (FK_KlaussCPU_CALL18) instead of relaxing; lld adds a thunk when the
+// callee is out of range.  Only a symbolic target compresses.
+def CallTarget18 : Operand<i64>,
+                   ImmLeaf<i64, [{return isShiftedInt<18, 2>(Imm);}]> {
+  let EncoderMethod    = "getCall18OpValue";
   let DecoderMethod    = "decodeSImmOperand<20>";
   let ParserMatchClass = PCRel20AsmOperand;
   let OperandType      = "OPERAND_PCREL";
@@ -1686,8 +1705,9 @@ def : MnemonicAlias<"stidx64a", "stidx64">;
 //===----------------------------------------------------------------------===//
 
 // Direct call to a global address or external symbol: CALL_I, or CALLREL
-// under PIC.  The register operands LowerCall attaches (the node is
-// variadic) become the call's implicit uses.
+// under PIC; either is emitted as the short CALL_SH (its CompressPats).  The
+// register operands LowerCall attaches (the node is variadic) become the
+// call's implicit uses.
 // Callee is i64 (global address zero-extended into a GPR; encoder takes [31:0]).
 foreach func = [tglobaladdr, texternalsym] in {
 let Predicates = [NotPIC] in
@@ -1870,17 +1890,18 @@ class ShortStore<KCInst64 long, int shift, string asmstr>
   let Inst{7-4}   = base;
 }
 
-// A1 short PC-relative branch: the absolute 2-word branch's word 0 with
-// LEN=01 and REL=1 [24], keeping COND/INV [22:18]; simm18 word displacement
-// in [17:0].
-class ShortBranch<KCInst64 long, string asmstr>
+// A1 short PC-relative branch or call: the absolute 2-word branch's word 0
+// with LEN=01 and REL=1 [24], keeping LINK [25] and COND/INV [22:18]; simm18
+// word displacement in [17:0].
+class ShortBranch<KCInst64 long, string asmstr, Operand tgt = PCRelTarget18,
+                  Predicate pred = HasShortBranches>
     : KCInst32<{0b01, long.Word0{29-25}, 0b1, long.Word0{23-18},
                 0b000000000000000000},
-               (outs), (ins PCRelTarget18:$target), asmstr> {
+               (outs), (ins tgt:$target), asmstr> {
   bits<20> target;
   let Inst{17-0} = target{19-2};
   let AsmVariantName = "NoMatch";
-  let Predicates = [HasShortBranches];
+  let Predicates = [pred];
 }
 
 let hasSideEffects = 0 in {
@@ -1924,6 +1945,14 @@ foreach c = ["z", "nz", "c", "nc", "o", "no", "s", "ns", "lt", "ge", "le",
 }
 let isBranch = 1, isTerminator = 1, isBarrier = 1 in
 def JMP_SH : ShortBranch<JMP, "jmprel\t$target">;
+// A1 short PC-relative call (0x63000000): pushes PC+4, the address of the
+// next instruction (pipeline_core.sv U_CALL: exo_wdata = ex_pc_next).
+// Produced by its CompressPats for any call to a symbol; relaxed to CALLREL
+// only when the assembler resolves the target and it is out of range.
+let isCall = 1, Uses = [SP],
+    Defs = [R0, R1, R2, R3, R8, R9, R10, R11, R12, R13, R14, FLAGS] in
+def CALL_SH : ShortBranch<CALL_I, "callrel\t$target", CallTarget18,
+                          HasShortCalls>;
 
 let mayStore = 1 in {
 def STIDX8_SH    : ShortStore<STIDX8, 0, "stidx8\t$rs_data, $base, $offset">;
@@ -1995,6 +2024,15 @@ foreach c = ["", "Z", "NZ", "C", "NC", "O", "NO", "S", "NS", "LT", "GE", "LE",
   if hasRel then
   def : CompressPat<(!cast<KCInst64>("JMP" # c # "REL") PCRelTarget18:$target),
                     (short PCRelTarget18:$target)>;
+}
+
+// A call to a symbol, absolute (non-PIC) or PC-relative, is the short call;
+// it expands to CALLREL.
+let Predicates = [HasShortCalls] in {
+let isCompressOnly = true in
+def : CompressPat<(CALL_I CallTarget18:$target), (CALL_SH CallTarget18:$target)>;
+def : CompressPat<(CALLREL CallTarget18:$target),
+                  (CALL_SH CallTarget18:$target)>;
 }
 
 // ISA v3 B: fused compare-and-branch (class 0xD, 1 word, flags untouched).

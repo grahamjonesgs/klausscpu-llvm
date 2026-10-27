@@ -20,7 +20,9 @@
         .text
 # CHECK-DAG: [[#@LINE+1]]:25: error: PC-relative expression in an absolute operand
         setr    r1, ext - .
-# CHECK-DAG: [[#@LINE+1]]:17: error: fixup value out of range for 4-byte field
+## A call to a symbol is a short call: its relocation's 32-bit addend cannot
+## hold HUGE either.
+# CHECK-DAG: [[#@LINE+1]]:17: error: relocation addend out of range
         call    HUGE
 # CHECK-DAG: [[#@LINE+1]]:25: error: symbol difference in a PC-relative operand
         leapc   r1, ext - small

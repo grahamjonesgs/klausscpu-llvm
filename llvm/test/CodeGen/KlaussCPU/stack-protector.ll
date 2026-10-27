@@ -15,7 +15,7 @@ define void @protected() nounwind sspstrong {
 ; CHECK-NEXT:    addi r0, r15, -32
 ; CHECK-NEXT:    ldidx64 r12, r4, 0
 ; CHECK-NEXT:    stidx64 r12, r15, -16
-; CHECK-NEXT:    call use
+; CHECK-NEXT:    callrel use
 ; CHECK-NEXT:    ldidx64 r12, r4, 0
 ; CHECK-NEXT:    ldidx64 r14, r15, -16
 ; CHECK-NEXT:    fbr r12, r14, 8, .LBB0_2
@@ -23,7 +23,7 @@ define void @protected() nounwind sspstrong {
 ; CHECK-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
 ; CHECK-NEXT:    leaveret
 ; CHECK-NEXT:  .LBB0_2:
-; CHECK-NEXT:    call __stack_chk_fail
+; CHECK-NEXT:    callrel __stack_chk_fail
   %buf = alloca [16 x i8]
   call void @use(ptr %buf)
   ret void

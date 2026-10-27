@@ -15,4 +15,6 @@ build-std-features = ["optimize_for_size"]
 json-target-spec = true
 
 [target.klausscpu-unknown-none-elf]
-rustflags = ["-Zunstable-options"]
+# Long calls: the LLEXT loader places the extension beyond the +-512 KiB reach
+# of the short CALL and cannot add thunks (R_KLAUSSCPU_CALL18).
+rustflags = ["-Zunstable-options", "-Cllvm-args=-klausscpu-short-calls=false"]

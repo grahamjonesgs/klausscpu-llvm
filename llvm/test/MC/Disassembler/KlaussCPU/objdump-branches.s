@@ -3,7 +3,8 @@
 
 # Branch targets print as addresses and are symbolized by llvm-objdump
 # (KlaussCPUMCInstrAnalysis::evaluateBranch): short A1 branches, fused
-# compare-and-branch, the 2-word PC-relative form and backward branches.
+# compare-and-branch, the 2-word PC-relative form, backward branches and the
+# short call.
 
 # CHECK-LABEL: <start>:
 # CHECK-NEXT:  0: jmpzrel 0x10 <target>
@@ -13,7 +14,8 @@
 # CHECK-LABEL: <target>:
 # CHECK-NEXT: 10: jmprel 0x0 <start>
 # CHECK-NEXT: 14: jmpo 0x0 <start>
-# CHECK-NEXT: 18: trap
+# CHECK-NEXT: 18: callrel 0x0 <start>
+# CHECK-NEXT: 1c: trap
         .text
 start:
         jmpzrel target
@@ -23,4 +25,5 @@ start:
 target:
         jmprel  start
         jmpo    start
+        callrel start
         trap

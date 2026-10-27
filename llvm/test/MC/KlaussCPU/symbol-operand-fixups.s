@@ -6,8 +6,8 @@
 # Every operand kind whose EncoderMethod emits a fixup for a symbolic value
 # (KlaussCPUInstrInfo.td operand types, KlaussCPUMCCodeEmitter): the field is
 # zero and the fixup has the right kind and byte offset.  ABS32/PCREL32 cover
-# word 1 (offset 4); the short-branch PCREL18 and fused-branch PCREL13 fields
-# are in word 0 (offset 0).  A symbol keeps setr/memreadr/memsetr long.
+# word 1 (offset 4); the short-branch PCREL18, short-call CALL18 and
+# fused-branch PCREL13 fields are in word 0 (offset 0).  A symbol keeps setr/memreadr/memsetr long.
 
 ## simm32_abs (SETR), uimm32_abs (MEMREADR, MEMSETR) -> FK_KlaussCPU_ABS32 at 4
 # CHECK:      setr r1, sym # encoding: [0x00,0x01,0xd0,0x8b,A,A,A,A]
@@ -20,18 +20,27 @@
 # CHECK-NEXT: fixup A - offset: 4, value: sym+8, kind: FK_KlaussCPU_ABS32
         memsetr  r3, sym+8
 
-## CallTarget32 -> FK_KlaussCPU_ABS32 at 4 (calls are never shortened)
-# CHECK:      call sym # encoding: [0x00,0x00,0x00,0xa2,A,A,A,A]
-# CHECK-NEXT: fixup A - offset: 4, value: sym, kind: FK_KlaussCPU_ABS32
+## A call to a symbol starts as the short call (CallTarget18,
+## FK_KlaussCPU_CALL18 at 0); without short forms it keeps CallTarget32
+## (ABS32) or PCRelCallTarget32 (PCREL32) in word 1.  A conditional call
+## has no short form.
+# SHORT:      callrel sym # encoding: [A,A,0b000000AA,0x63]
+# SHORT-NEXT: fixup A - offset: 0, value: sym, kind: FK_KlaussCPU_CALL18
+# LONG:       call sym # encoding: [0x00,0x00,0x00,0xa2,A,A,A,A]
+# LONG-NEXT:  fixup A - offset: 4, value: sym, kind: FK_KlaussCPU_ABS32
         call     sym
 # CHECK:      callne sym # encoding: [0x00,0x00,0x4c,0xa2,A,A,A,A]
 # CHECK-NEXT: fixup A - offset: 4, value: sym, kind: FK_KlaussCPU_ABS32
         callne   sym
+# SHORT:      callrel sym+4 # encoding: [A,A,0b000000AA,0x63]
+# SHORT-NEXT: fixup A - offset: 0, value: sym+4, kind: FK_KlaussCPU_CALL18
+# LONG:       callrel sym+4 # encoding: [0x00,0x00,0x00,0xa3,A,A,A,A]
+# LONG-NEXT:  fixup A - offset: 4, value: sym+4, kind: FK_KlaussCPU_PCREL32
+        callrel  sym+4
 
 ## PCRelCallTarget32 / pcrel_simm32 -> FK_KlaussCPU_PCREL32 at 4
-# CHECK:      callrel sym # encoding: [0x00,0x00,0x00,0xa3,A,A,A,A]
-# CHECK-NEXT: fixup A - offset: 4, value: sym, kind: FK_KlaussCPU_PCREL32
-        callrel  sym
+# CHECK:      callrel 16 # encoding: [0x00,0x00,0x00,0xa3,0x10,0x00,0x00,0x00]
+        callrel  16
 # CHECK:      leapc r4, sym # encoding: [0x00,0x04,0x80,0x8b,A,A,A,A]
 # CHECK-NEXT: fixup A - offset: 4, value: sym, kind: FK_KlaussCPU_PCREL32
         leapc    r4, sym

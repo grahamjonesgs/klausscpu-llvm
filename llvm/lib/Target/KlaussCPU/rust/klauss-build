@@ -74,9 +74,11 @@ build_llext() {
     [ -f "$MERGE_LD" ] || die "merge script not found: $MERGE_LD"
     echo "==> llext: $pkg"
     # No compiler-builtins-mem: mem* resolve against the kernel exports.
+    # Long calls: the loader places the extension beyond the +-512 KiB reach
+    # of the short CALL and cannot add thunks (R_KLAUSSCPU_CALL18).
     ( cd "$WS"
       RUSTC="$KLAUSSCPU_RUSTC" \
-      RUSTFLAGS="-Zunstable-options" \
+      RUSTFLAGS="-Zunstable-options -Cllvm-args=-klausscpu-short-calls=false" \
         "$CARGO" +nightly build -p "$pkg" --release \
           -Z build-std-features=optimize_for_size )
 

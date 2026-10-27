@@ -11,7 +11,7 @@
 declare void @g(i64, i64, i64, i64, i64, i64)
 
 ; CHECK-LABEL: f:
-; CHECK:         call g
+; CHECK:         callrel g
 define void @f(i64 %a, i64 %b, i64 %c, i64 %d) nounwind {
   %c1 = icmp slt i64 %a, %b
   %s1 = select i1 %c1, i64 %c, i64 %d

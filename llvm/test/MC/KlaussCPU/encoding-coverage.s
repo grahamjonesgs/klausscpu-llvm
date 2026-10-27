@@ -549,6 +549,14 @@
 # CHECK-NEXT: fixup A - offset: 0, value: lab, kind: FK_KlaussCPU_PCREL18
         jmpne	lab
 
+## Class 8 short PC-relative call (LINK=1; a call to a symbol starts short)
+# CHECK: callrel lab # encoding: [A,A,0b000000AA,0x63]
+# CHECK-NEXT: fixup A - offset: 0, value: lab, kind: FK_KlaussCPU_CALL18
+        call	lab
+# CHECK: callrel lab # encoding: [A,A,0b000000AA,0x63]
+# CHECK-NEXT: fixup A - offset: 0, value: lab, kind: FK_KlaussCPU_CALL18
+        callrel	lab
+
 ## Class 9 stack
 # CHECK: push r2 # encoding: [0x20,0x00,0x00,0x64]
         push	r2

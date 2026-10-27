@@ -112,7 +112,8 @@ let SchedModel = KlaussCPUSchedModel in {
 }
 
 def : ProcessorModel<"generic", KlaussCPUSchedModel,
-                     [FeatureShortForms, FeatureShortBranches]>;
+                     [FeatureShortForms, FeatureShortBranches,
+                      FeatureShortCalls]>;
 
 // A/B baseline (spec §7.1): `-mcpu=no-sched` selects NoSchedModel — no per-op
 // latencies, PostRAScheduler off — so the whole M8 transform can be turned off with
@@ -123,4 +124,5 @@ def : ProcessorModel<"generic", KlaussCPUSchedModel,
 // (KlaussCPUTTIImpl::getUnrollingPreferences checks getSchedModel().hasInstrSchedModel()),
 // so -mcpu=no-sched reverts both halves of M8 together.
 def : ProcessorModel<"no-sched", NoSchedModel,
-                     [FeatureShortForms, FeatureShortBranches]>;
+                     [FeatureShortForms, FeatureShortBranches,
+                      FeatureShortCalls]>;

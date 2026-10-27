@@ -1,4 +1,5 @@
-# RUN: llvm-mc -triple=klausscpu -filetype=obj %s -o %t.o
+# RUN: llvm-mc -triple=klausscpu -filetype=obj -klausscpu-short-calls=false \
+# RUN:   %s -o %t.o
 # RUN: llvm-objdump -dr --no-show-raw-insn %t.o | FileCheck %s
 # RUN: llvm-objdump -d %t.o | FileCheck %s --check-prefix=BYTES
 
@@ -8,7 +9,8 @@
 # to get no relocation, so the instruction branched to (or LEAPC returned)
 # its own address.  A .set before the use must not turn the operand into a
 # displacement either.  A resolved in-section target needs no relocation and
-# its field is target - instruction address.
+# its field is target - instruction address.  (Calls stay long here; the
+# short call's R_KLAUSSCPU_CALL18 is tested in short-call.s.)
 
         .set BEFORE, 0x1000
 
