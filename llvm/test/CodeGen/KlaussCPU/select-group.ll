@@ -378,3 +378,96 @@ define i64 @swap32_ext_used(i64 %a, i64 %b, i64 %c, i64 %d) nounwind {
   %r = add i64 %s, %e
   ret i64 %r
 }
+
+; An ALU op (which clobbers FLAGS, dead) between two selects on the same
+; condition: it stays ahead of the one compare, and both selects share the
+; branch.
+define i64 @add_between(i64 %a, i64 %b, i64 %c, i64 %d, i64 %x) nounwind {
+; CHECK-LABEL: add_between:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    ldidx64 r12, r15, 40
+; CHECK-NEXT:    fbr r0, r1, 9, .LBB8_2
+; CHECK-NEXT:  # %bb.1:
+; CHECK-NEXT:    addr r12, r2, r12
+; CHECK-NEXT:    mulr r12, r2, r12
+; CHECK-NEXT:    leaveret
+; CHECK-NEXT:  .LBB8_2:
+; CHECK-NEXT:    mulr r12, r3, r12
+; CHECK-NEXT:    leaveret
+;
+; NOGROUP-LABEL: add_between:
+; NOGROUP:       # %bb.0:
+; NOGROUP-NEXT:    enter 0
+; NOGROUP-NEXT:    cmprr r0, r1
+; NOGROUP-NEXT:    copy r12, r2
+; NOGROUP-NEXT:    jmpltrel .LBB8_2
+; NOGROUP-NEXT:  # %bb.1:
+; NOGROUP-NEXT:    copy r12, r3
+; NOGROUP-NEXT:  .LBB8_2:
+; NOGROUP-NEXT:    ldidx64 r14, r15, 40
+; NOGROUP-NEXT:    fbr r0, r1, 9, .LBB8_4
+; NOGROUP-NEXT:  # %bb.3:
+; NOGROUP-NEXT:    addr r14, r2, r14
+; NOGROUP-NEXT:  .LBB8_4:
+; NOGROUP-NEXT:    mulr r12, r12, r14
+; NOGROUP-NEXT:    leaveret
+  %cc = icmp slt i64 %a, %b
+  %s1 = select i1 %cc, i64 %c, i64 %d
+  %t = add i64 %c, %x
+  %s2 = select i1 %cc, i64 %t, i64 %x
+  %r = mul i64 %s1, %s2
+  ret i64 %r
+}
+
+; A W boolean compare (no flags, no side effects) between two selects on the
+; same 32-bit condition does not split the run.
+define i64 @wbool_between(i32 %a, i32 %b, i32 %c, i32 %d, i64 %x, i64 %y) nounwind {
+; CHECK-LABEL: wbool_between:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    ldidx64 r13, r15, 48
+; CHECK-NEXT:    ldidx64 r12, r15, 40
+; CHECK-NEXT:    cmprrw r0, r1
+; CHECK-NEXT:    cmpultrw r14, r2, r3
+; CHECK-NEXT:    jmpgerel .LBB9_2
+; CHECK-NEXT:  # %bb.1:
+; CHECK-NEXT:    copy r11, r12
+; CHECK-NEXT:    copy r12, r13
+; CHECK-NEXT:    jmprel .LBB9_3
+; CHECK-NEXT:  .LBB9_2:
+; CHECK-NEXT:    copy r11, r13
+; CHECK-NEXT:  .LBB9_3:
+; CHECK-NEXT:    addr r14, r11, r14
+; CHECK-NEXT:    mulr r12, r14, r12
+; CHECK-NEXT:    leaveret
+;
+; NOGROUP-LABEL: wbool_between:
+; NOGROUP:       # %bb.0:
+; NOGROUP-NEXT:    enter 0
+; NOGROUP-NEXT:    ldidx64 r14, r15, 40
+; NOGROUP-NEXT:    ldidx64 r12, r15, 48
+; NOGROUP-NEXT:    cmprrw r0, r1
+; NOGROUP-NEXT:    copy r13, r14
+; NOGROUP-NEXT:    jmpltrel .LBB9_2
+; NOGROUP-NEXT:  # %bb.1:
+; NOGROUP-NEXT:    copy r13, r12
+; NOGROUP-NEXT:  .LBB9_2:
+; NOGROUP-NEXT:    cmprrw r0, r1
+; NOGROUP-NEXT:    cmpultrw r11, r2, r3
+; NOGROUP-NEXT:    jmpltrel .LBB9_4
+; NOGROUP-NEXT:  # %bb.3:
+; NOGROUP-NEXT:    copy r12, r14
+; NOGROUP-NEXT:  .LBB9_4:
+; NOGROUP-NEXT:    addr r14, r13, r11
+; NOGROUP-NEXT:    mulr r12, r14, r12
+; NOGROUP-NEXT:    leaveret
+  %cc = icmp slt i32 %a, %b
+  %s1 = select i1 %cc, i64 %x, i64 %y
+  %c2 = icmp ult i32 %c, %d
+  %z2 = zext i1 %c2 to i64
+  %s2 = select i1 %cc, i64 %y, i64 %x
+  %r1 = add i64 %s1, %z2
+  %r = mul i64 %r1, %s2
+  ret i64 %r
+}

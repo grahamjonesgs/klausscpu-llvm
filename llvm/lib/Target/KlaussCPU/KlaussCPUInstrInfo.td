@@ -1234,10 +1234,13 @@ def : Pat<(mul GPR:$rs, simm32_imm:$i), (MULV GPR:$rs, simm32_imm:$i)>;
 // f_cmp_op(PRED, INV), no fmask), id_b_imm / id_b_sext (imm32, extended per
 // SGN), id_w + f_wsh (W: both operands shifted left 32 before the EX
 // compare).  The W forms are chosen in C++ (KlaussCPUDAGToDAGISel, as for
-// CMPRRW/CMPRVW); the immediate form by the patterns here.
+// CMPRRW/CMPRVW); the immediate form by the patterns here.  The W forms have
+// no pattern, so the properties are stated explicitly: otherwise TableGen
+// guesses hasSideEffects = 1 and MachineCSE/LICM/sinking and select grouping
+// would all have to step around them.
 multiclass BoolCompare<bits<32> rr, string mn, CondCode cc> {
   defvar imm = !or(!and(rr, 0x3FFFFFFF), 0x80100000);
-  let Defs = []<Register> in {
+  let Defs = []<Register>, hasSideEffects = 0, mayLoad = 0, mayStore = 0 in {
     def V  : RV_imm<imm, mn # "v">;
     def RW : RRR<!or(rr, 0x00080000), (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                  mn # "rw\t$rd, $rs1, $rs2">;

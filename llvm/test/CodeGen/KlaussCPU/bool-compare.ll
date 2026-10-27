@@ -179,3 +179,63 @@ define i64 @w_ext_used(i64 %a, i64 %b) nounwind {
   %t = add i64 %s, %b
   ret i64 %t
 }
+
+; The W forms are side-effect free: MachineCSE merges two identical ones ...
+define i64 @w_cse(i32 %a, i32 %b, i1 %p) nounwind {
+; CHECK-LABEL: w_cse:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    andv r12, r2, 1
+; CHECK-NEXT:    cmprv r12, 0
+; CHECK-NEXT:    cmpltrw r12, r0, r1
+; CHECK-NEXT:    jmperel .LBB14_2
+; CHECK-NEXT:  # %bb.1: # %t
+; CHECK-NEXT:    addr r12, r12, r12
+; CHECK-NEXT:  .LBB14_2: # %f
+; CHECK-NEXT:    leaveret
+entry:
+  %c1 = icmp slt i32 %a, %b
+  %z1 = zext i1 %c1 to i64
+  br i1 %p, label %t, label %f
+t:
+  %c2 = icmp slt i32 %a, %b
+  %z2 = zext i1 %c2 to i64
+  %q = add i64 %z1, %z2
+  ret i64 %q
+f:
+  ret i64 %z1
+}
+
+; ... and MachineLICM hoists a loop-invariant one out of the loop.
+define i64 @w_licm(i32 %a, i32 %b, ptr %p, i64 %n) nounwind {
+; CHECK-LABEL: w_licm:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    setr r12, 0
+; CHECK-NEXT:    cmpltrw r14, r0, r1
+; CHECK-NEXT:    .p2align 4
+; CHECK-NEXT:  .LBB15_1: # %loop
+; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
+; CHECK-NEXT:    ldidx64 r13, r2, 0
+; CHECK-NEXT:    decr r3, r3
+; CHECK-NEXT:    addr r13, r13, r14
+; CHECK-NEXT:    addr r12, r12, r13
+; CHECK-NEXT:    fbri r3, 0, 8, .LBB15_1
+; CHECK-NEXT:  # %bb.2: # %exit
+; CHECK-NEXT:    leaveret
+entry:
+  br label %loop
+loop:
+  %i = phi i64 [0, %entry], [%i2, %loop]
+  %acc = phi i64 [0, %entry], [%acc2, %loop]
+  %c = icmp slt i32 %a, %b
+  %z = zext i1 %c to i64
+  %ld = load i64, ptr %p
+  %t = add i64 %ld, %z
+  %acc2 = add i64 %acc, %t
+  %i2 = add i64 %i, 1
+  %e = icmp eq i64 %i2, %n
+  br i1 %e, label %exit, label %loop
+exit:
+  ret i64 %acc2
+}

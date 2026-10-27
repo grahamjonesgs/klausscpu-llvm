@@ -90,7 +90,10 @@ ordinary instruction:
    `EncoderMethod` in `KlaussCPUMCCodeEmitter.cpp` plus the fixup kind in
    `KlaussCPUFixupKinds.h` / `KlaussCPUAsmBackend.cpp`).
 3. Set `Defs = [FLAGS]` / `Uses = [FLAGS]`, `mayLoad`, `mayStore`,
-   `hasSideEffects` and `SchedRW` to what the RTL does.
+   `hasSideEffects` and `SchedRW` to what the RTL does.  An instruction with
+   no isel pattern (one selected in C++, e.g. the W compares) must state
+   `hasSideEffects = 0` explicitly: otherwise TableGen guesses 1, which
+   blocks MachineCSE/LICM/sinking and splits select groups.
 4. For codegen, add an isel `Pat<>`; for a v3 short twin, a `ShortForm`
    instance and its `CompressPat`.
 5. Pin the encoding in `llvm/test/MC/KlaussCPU/encoding-coverage.s` (checked
