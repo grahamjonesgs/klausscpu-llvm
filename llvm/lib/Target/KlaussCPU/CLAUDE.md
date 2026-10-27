@@ -158,7 +158,13 @@ liveness:
   that constant in the loop reuse it.  That loop-constant setup runs as a
   second instance of the pass before the post-RA scheduler (`addPreSched2`,
   the compare becomes `CMPRR` with the constant register), so the
-  scheduler's register renaming cannot take the free register.
+  scheduler's register renaming cannot take the free register.  A branch
+  whose next instruction in layout is a divide (`DIVR`/`DIVUR`/`MODR`/
+  `MODUR`/`DIVV`/`MODV`, or a non-empty inline asm) never fuses: a taken FBR
+  redirects from MEM and squashes that instruction in EX, but the RTL
+  divider has already started on it and is not reset by the squash, so the
+  next real divide would complete with the wrong-path result (a board-only
+  bug: the emulator has no pipeline; `fuse-cmp-br-div-shadow.ll`/`.mir`).
 - Both rewrite only when FLAGS is dead after the branch
   (`KlaussCPUInstrInfo::flagsDeadAfter`): no later reader in the block and
   no successor with FLAGS live-in (MachineCSE can leave a successor reading
