@@ -28,7 +28,9 @@
 //
 // Loop strength reduction counts instructions first (isLSRCostLess) against
 // the real register file (getNumberOfRegisters) and the addressing modes in
-// KlaussCPUTargetLowering::isLegalAddressingMode.
+// KlaussCPUTargetLowering::isLegalAddressingMode, and drops a solution that
+// costs more than the loop it started from.  -klausscpu-lsr-insns-first=false
+// restores the generic register-first order without dropping, for A/B.
 //
 //===----------------------------------------------------------------------===//
 
@@ -69,14 +71,7 @@ public:
   getRegisterBitWidth(TargetTransformInfo::RegisterKind K) const override;
   bool isLSRCostLess(const TargetTransformInfo::LSRCost &C1,
                      const TargetTransformInfo::LSRCost &C2) const override;
-  // LSR's search is heuristic: under the instruction-first order it can
-  // settle on a solution worse than the loop it started from
-  // (perf_baseline's k_alu: a second IV only for a value used after the
-  // loop, +1 instruction per iteration).  Keep the loop as it was then.
-  // LSR's estimate of that loop can be optimistic: a strlen-style loop
-  // whose exit value is the pre-increment index keeps a COPY it would have
-  // removed (+1 per iteration); the corpus still favours dropping.
-  bool shouldDropLSRSolutionIfLessProfitable() const override { return true; }
+  bool shouldDropLSRSolutionIfLessProfitable() const override;
 };
 
 } // namespace llvm

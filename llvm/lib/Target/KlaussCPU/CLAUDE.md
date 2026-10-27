@@ -256,11 +256,14 @@ when clobbered.
   unrolling.  Loop strength reduction ranks solutions by instruction count first
   (`isLSRCostLess`, as RISC-V), sees 15 GPRs and no vector registers, and
   drops a solution that costs more than the loop it started from
-  (`shouldDropLSRSolutionIfLessProfitable`).  `isLegalAddressingMode` (in
-  `KlaussCPUISelLowering.cpp`) is exactly what isel selects: r + simm32,
+  (`shouldDropLSRSolutionIfLessProfitable`); `-klausscpu-lsr-insns-first=false`
+  turns both off (generic register-first order) for A/B.
+  `isLegalAddressingMode` (in `KlaussCPUISelLowering.cpp`) is exactly what
+  isel selects: r + simm32,
   r + r (no displacement, accesses up to 8 bytes), no scaled index, no
   absolute address; `isLegalAddImmediate` / `isLegalICmpImmediate` are the
-  imm32 forms (ADDI/ADDV/MINUSV, CMPRV/CMPRVU).  So array loops share one
+  imm32 forms (ADDI/ADDV/MINUSV, branch compares CMPRV/CMPRVU; a value setcc
+  above INT32_MAX still needs SETRU + CMPxxR).  So array loops share one
   byte-offset IV across their r + r accesses.
 
 ### Hidden options (`-mllvm`)

@@ -19,6 +19,13 @@ static cl::opt<bool> EnableBranchDensityGate(
     cl::desc("Scale the M8 unroll budget down for branch-dense loop bodies "
              "(M8 spec §7.4).  =false restores the flat M8 budget for A/B."));
 
+static cl::opt<bool> EnableLSRInsnsFirst(
+    "klausscpu-lsr-insns-first", cl::Hidden, cl::init(true),
+    cl::desc("Rank loop strength reduction solutions by instruction count "
+             "first and drop one that costs more than the original loop.  "
+             "=false restores the generic register-first order (and no "
+             "dropping) for A/B."));
+
 /// Count the control-flow splits in \p L's body that survive unrolling and land
 /// in the final instruction stream.
 ///
@@ -176,6 +183,8 @@ TypeSize KlaussCPUTTIImpl::getRegisterBitWidth(
 bool KlaussCPUTTIImpl::isLSRCostLess(
     const TargetTransformInfo::LSRCost &C1,
     const TargetTransformInfo::LSRCost &C2) const {
+  if (!EnableLSRInsnsFirst)
+    return BaseT::isLSRCostLess(C1, C2);
   // Adds inside the loop to sum base registers need a temporary.
   unsigned C1NumRegs = C1.NumRegs + (C1.NumBaseAdds != 0);
   unsigned C2NumRegs = C2.NumRegs + (C2.NumBaseAdds != 0);
@@ -183,4 +192,19 @@ bool KlaussCPUTTIImpl::isLSRCostLess(
                   C1.NumBaseAdds, C1.ScaleCost, C1.ImmCost, C1.SetupCost) <
          std::tie(C2.Insns, C2NumRegs, C2.AddRecCost, C2.NumIVMuls,
                   C2.NumBaseAdds, C2.ScaleCost, C2.ImmCost, C2.SetupCost);
+}
+
+// LSR's search is heuristic: under the instruction-first order it can settle
+// on a solution worse than the loop it started from (perf_baseline's k_alu: a
+// second IV only for a value used after the loop, +1 instruction per
+// iteration).  Keep the loop as it was then.  LSR's estimate of that loop can
+// be optimistic: it does not count the COPY that keeps a pre-increment value
+// live out of the loop, so a strlen-style loop returning the index it stopped
+// at keeps that COPY (+1 per iteration) where the dropped solution would have
+// rewritten the exit value as index - 1.  The corpus still favours dropping.
+// Dropping only pays together with the instruction-first order (with the
+// register-first order it made perf_baseline -O2 1% worse), so the A/B switch
+// turns both off.
+bool KlaussCPUTTIImpl::shouldDropLSRSolutionIfLessProfitable() const {
+  return EnableLSRInsnsFirst;
 }

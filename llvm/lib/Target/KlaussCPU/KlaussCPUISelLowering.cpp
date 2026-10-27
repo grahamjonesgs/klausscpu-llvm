@@ -369,7 +369,11 @@ bool KlaussCPUTargetLowering::isLegalAddImmediate(int64_t Imm) const {
          isUInt<32>(-static_cast<uint64_t>(Imm));
 }
 
-// CMPRV compares with a simm32, CMPRVU with a zero-extended imm32.
+// A compare that feeds a branch is CMPRV (simm32) or CMPRVU (zero-extended
+// imm32).  A setcc that produces a value is CMPxxV, which only has the simm32
+// form: an imm32 above INT32_MAX goes in a register (SETRU + CMPxxR).  LSR
+// asks this for its ICmpZero uses, the loop-exit compare and branch, so this
+// describes the branch forms.
 bool KlaussCPUTargetLowering::isLegalICmpImmediate(int64_t Imm) const {
   return isInt<32>(Imm) || isUInt<32>(Imm);
 }
