@@ -43,17 +43,24 @@
 //  * the flags are dead after the branch (no later reader in the block, not
 //    live into any successor) — the fused form does not write them;
 //  * the instruction that follows the branch in the final layout (its
-//    "EX shadow") is not a divide: DIVR/DIVUR/MODR/MODUR/DIVV/MODV, or a
-//    non-empty inline asm, which may start with one. A taken FBR redirects
-//    from MEM and squashes the instruction in EX, but the RTL divider has
-//    already latched that instruction's operands and keeps running: the
-//    MD_IDLE start (pipeline_core.sv:1581) has no squash gate, and the FBR
-//    squash (:2040-2048) clears ex_valid but not div_ph (only reset does,
-//    :1408). The next divide to reach EX while that one runs latches
-//    nothing and completes (md_done, :918) with the wrong-path quotient or
-//    remainder. Such a branch stays CMP + JMPcc (resolved in EX, which
-//    squashes only ID, where no divide has started). The emulator has no
-//    pipeline, so only the board shows this;
+//    "EX shadow") does not act in EX before the squash takes effect: a
+//    divide (DIVR/DIVUR/MODR/MODUR/DIVV/MODV), an LCD write (LCDCMDV/
+//    LCDDATAV/LCDDATAR), or a non-empty inline asm, which may start with
+//    either. A taken FBR redirects from MEM and squashes the instruction in
+//    EX, but two EX side effects are not gated by the squash:
+//    - the RTL divider latches the divide's operands and keeps running: the
+//      MD_IDLE start (pipeline_core.sv:1581) has no squash gate, and the FBR
+//      squash (:2040-2048) clears ex_valid but not div_ph (only reset does,
+//      :1408). The next divide to reach EX while that one runs latches
+//      nothing and completes (md_done, :918) with the wrong-path quotient
+//      or remainder;
+//    - the LCD data strobe is combinational from EX (lcd_dv = ex_is_lcd &&
+//      lcd_ready, :1392, ex_is_lcd :922; U_LCD decode :702-709), so the
+//      wrong-path byte reaches the LCD in the cycle the FBR redirects.
+//      LCDRST (`lcd`, U_LCDRST) is gated by !fbr_taken (:1633) and is safe.
+//    Such a branch stays CMP + JMPcc (resolved in EX, which squashes only
+//    ID, where neither has started). The emulator has no pipeline, so only
+//    the board shows this;
 //  * the target is in simm13 word range (+-16 KB) at worst case: every
 //    instruction at its long (.td) size, every aligned block after its
 //    maximum padding. Compression and fusion only shrink code, so the PCREL13
@@ -239,9 +246,10 @@ MachineInstr *findFusableCompare(MachineInstr &Br,
   return Cmp;
 }
 
-// True for an instruction that starts the RTL divider in EX (pipeline_core.sv
-// class A decode, :663-668: U_DIV / U_MOD).
-bool isDivide(const MachineInstr &MI) {
+// True for an instruction whose effect a squash in EX does not undo (see the
+// header): one that starts the RTL divider (pipeline_core.sv class A decode,
+// :663-668: U_DIV / U_MOD) or strobes the LCD (:702-709: U_LCD).
+bool actsInShadow(const MachineInstr &MI) {
   switch (MI.getOpcode()) {
   case KlaussCPU::DIVR:
   case KlaussCPU::DIVUR:
@@ -249,6 +257,9 @@ bool isDivide(const MachineInstr &MI) {
   case KlaussCPU::MODUR:
   case KlaussCPU::DIVV:
   case KlaussCPU::MODV:
+  case KlaussCPU::LCDCMDV:
+  case KlaussCPU::LCDDATAV:
+  case KlaussCPU::LCDDATAR:
     return true;
   default:
     return false;
@@ -256,13 +267,14 @@ bool isDivide(const MachineInstr &MI) {
 }
 
 // True if the instruction emitted right after Br, which a taken fused branch
-// squashes in EX, cannot be a divide (see the header). That is the next
-// instruction in Br's block, or, when Br ends it, the first one emitted in
-// the blocks that follow in layout. Instructions that emit nothing are
-// skipped (alignment padding is not a divide); past the function's end the
-// next instruction is unknown. Fusing never makes a divide the next
-// instruction: it only erases compares, and every instruction between an
-// erased compare and its branch keeps FLAGS, which a divide writes.
+// squashes in EX, cannot act there (actsInShadow, see the header). That is
+// the next instruction in Br's block, or, when Br ends it, the first one
+// emitted in the blocks that follow in layout. Instructions that emit nothing
+// are skipped (alignment padding is neither); past the function's end the
+// next instruction is unknown. Fusing never puts such an instruction next:
+// it only erases compares, and nothing between an erased compare and its
+// branch writes FLAGS, as a divide does, or has side effects, as an LCD
+// write does (findFusableCompare).
 bool shadowIsSafe(const MachineInstr &Br, const TargetInstrInfo &TII) {
   const MachineBasicBlock *MBB = Br.getParent();
   MachineBasicBlock::const_iterator I = std::next(Br.getIterator());
@@ -275,7 +287,7 @@ bool shadowIsSafe(const MachineInstr &Br, const TargetInstrInfo &TII) {
           continue;
         return false;
       }
-      return !isDivide(*I);
+      return !actsInShadow(*I);
     }
     MBB = MBB->getNextNode();
     if (!MBB)

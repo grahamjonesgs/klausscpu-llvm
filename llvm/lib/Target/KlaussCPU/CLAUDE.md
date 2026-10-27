@@ -160,11 +160,14 @@ liveness:
   the compare becomes `CMPRR` with the constant register), so the
   scheduler's register renaming cannot take the free register.  A branch
   whose next instruction in layout is a divide (`DIVR`/`DIVUR`/`MODR`/
-  `MODUR`/`DIVV`/`MODV`, or a non-empty inline asm) never fuses: a taken FBR
-  redirects from MEM and squashes that instruction in EX, but the RTL
-  divider has already started on it and is not reset by the squash, so the
-  next real divide would complete with the wrong-path result (a board-only
-  bug: the emulator has no pipeline; `fuse-cmp-br-div-shadow.ll`/`.mir`).
+  `MODUR`/`DIVV`/`MODV`), an LCD write (`LCDCMDV`/`LCDDATAV`/`LCDDATAR`) or
+  a non-empty inline asm never fuses: a taken FBR redirects from MEM and
+  squashes that instruction in EX, but the squash does not undo either
+  effect.  The RTL divider has already started on the divide and is not
+  reset, so the next real divide would complete with the wrong-path result;
+  the LCD strobe fires from EX in that same cycle, so the wrong-path byte
+  reaches the LCD (board-only bugs: the emulator has no pipeline;
+  `fuse-cmp-br-div-shadow.ll`/`.mir`).
 - Both rewrite only when FLAGS is dead after the branch
   (`KlaussCPUInstrInfo::flagsDeadAfter`): no later reader in the block and
   no successor with FLAGS live-in (MachineCSE can leave a successor reading

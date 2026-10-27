@@ -1,7 +1,8 @@
 # KlaussCPUFuseCmpBr does not fuse a branch whose next instruction in layout
-# (the one a taken FBR squashes in EX) is a divide. The RTL divider latches
-# that wrong-path divide's operands and keeps running after the squash, and
-# the next real divide then completes with its result. The next instruction
+# (the one a taken FBR squashes in EX) is a divide or an LCD write. The RTL
+# divider latches that wrong-path divide's operands and keeps running after
+# the squash, and the next real divide then completes with its result; the
+# LCD strobe fires from EX before the squash. The next instruction
 # is the one after the branch in its block, else the first instruction
 # emitted in the following blocks: instructions that emit nothing are
 # skipped, an empty block is passed over, and a non-empty inline asm counts
@@ -16,6 +17,7 @@
   define void @meta_and_empty_block() { ret void }
   define void @inline_asm() { ret void }
   define void @not_in_shadow() { ret void }
+  define void @lcd_writes() { ret void }
 ...
 ---
 # Every divide form: DIVR, DIVUR, MODR, MODUR, DIVV, MODV.
@@ -225,5 +227,60 @@ body:             |
   bb.3:
     liveins: $r0, $r1
     $r12 = MODUR $r0, $r1, implicit-def dead $flags
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit killed $r12
+...
+---
+# The LCD writes LCDCMDV, LCDDATAV and LCDDATAR strobe the LCD from EX
+# (U_LCD), so they block the fusion; LCDRST (`lcd`, U_LCDRST) is gated by
+# the squash and does not.
+# CHECK-LABEL: name: lcd_writes
+# CHECK:       CMPRV_I $r1, 0, implicit-def $flags
+# CHECK-NEXT:  JMPE %bb.5
+# CHECK:       LCDCMDV 1
+# CHECK:       CMPRV_I $r1, 1, implicit-def $flags
+# CHECK-NEXT:  JMPE %bb.5
+# CHECK:       LCDDATAV 2
+# CHECK:       CMPRV_I $r1, 2, implicit-def $flags
+# CHECK-NEXT:  JMPE %bb.5
+# CHECK:       LCDDATAR $r0
+# CHECK:       FBR_RI $r1, 3, 0, %bb.5
+# CHECK:       LCD 1
+name:            lcd_writes
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.5
+    liveins: $r0, $r1
+    CMPRV_I $r1, 0, implicit-def $flags
+    JMPE %bb.5, implicit killed $flags
+
+  bb.1:
+    successors: %bb.2, %bb.5
+    liveins: $r0, $r1
+    LCDCMDV 1
+    CMPRV_I $r1, 1, implicit-def $flags
+    JMPE %bb.5, implicit killed $flags
+
+  bb.2:
+    successors: %bb.3, %bb.5
+    liveins: $r0, $r1
+    LCDDATAV 2
+    CMPRV_I $r1, 2, implicit-def $flags
+    JMPE %bb.5, implicit killed $flags
+
+  bb.3:
+    successors: %bb.4, %bb.5
+    liveins: $r0, $r1
+    LCDDATAR $r0
+    CMPRV_I $r1, 3, implicit-def $flags
+    JMPE %bb.5, implicit killed $flags
+
+  bb.4:
+    LCD 1
+    $r12 = SETR 1
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit killed $r12
+
+  bb.5:
+    $r12 = SETR 0
     LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit killed $r12
 ...
