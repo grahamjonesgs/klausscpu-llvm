@@ -53,14 +53,14 @@ public:
   bool isCheapToSpeculateCttz(Type *Ty) const override { return true; }
 
   // Never narrow a wide load into a smaller one.  KlaussCPU has a single
-  // 64-bit register class, so narrowing saves no register, and the combine
-  // turns LowerVAARG's deliberate full-8-byte-slot load + truncate
-  // ((trunc (ldidx64 slot)) for an i32 va_arg) into a register-addressed
-  // 32-bit MEMGET32 load.  MEMGET32 read the wrong slot for va_arg's
-  // computed pointers (hardware-confirmed in 2026-06: mixed-width printf
-  // "%u" garbled while "%lu" via ldidx64 was correct), so always keep the
-  // wide load.  (Clang now emits a 32-bit load of the slot itself for an
-  // int va_arg, MEMGET32 / LDIDX32, which passes on the current board.)
+  // 64-bit register class, so narrowing saves no register and no
+  // instruction.  History: this was added when the combine turned
+  // LowerVAARG's full-slot load + truncate into a register-addressed
+  // MEMGET32 that read the wrong va_arg slot (mixed-width printf "%u"
+  // garbled, 2026-06).  That was a fault of the pre-pipeline core; on the
+  // pipeline core MEMGET32 is correct at any address (unaligned 32-bit loads
+  // rely on it) and clang's va_arg loads the slot at the argument's width.
+  // Whether narrowing would now pay off has not been measured.
   bool shouldReduceLoadWidth(SDNode *Load, ISD::LoadExtType ExtTy, EVT NewVT,
                              std::optional<unsigned> ByteOffset) const override {
     return false;
