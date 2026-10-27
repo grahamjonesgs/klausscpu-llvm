@@ -1,24 +1,36 @@
 //===-- KlaussCPUFuseCmpBr.cpp - ISA v3 B fused compare-and-branch --------===//
 //
-// ISA v3 B (ISA_V3_PROPOSAL.md §5): rewrite an adjacent
+// ISA v3 B (ISA_V3_PROPOSAL.md §5): rewrite
 //
-//     CMPRR  a, b            |   CMPRV a, #imm   (imm in -8..7)
+//     CMPRR  a, b            |   CMPRV a, #imm   (imm in -8..7;
+//     ...                    |   ...              CMPRVU: 0..7)
 //     JMPcc  target          |   JMPcc target
 //
-// into one 1-word fused branch (class 0xD, FBR_RR / FBR_RI) that compares
-// and branches without writing the flags. The RTL evaluates the compare in
-// EX on the boolean-compare path and redirects from MEM.
+// into one 1-word fused branch (class 0xD, FBR_RR / FBR_RI) at the branch's
+// position that compares and branches without writing the flags. The RTL
+// evaluates the compare in EX on the boolean-compare path and redirects from
+// MEM. FBR has no width bit: it always compares 64 bits, so the W compares
+// (CMPRRW/CMPRVW) never fuse.
 //
 // Conditions, all checked here on the final (post-RA, pre-emit) stream:
-//  * the compare and the branch are adjacent (debug instructions in between
-//    are ignored, so -g does not change codegen; they stay where they are);
+//  * the compare is the nearest FLAGS writer before the branch in its block,
+//    and every instruction between them (the PHI copies, constant and address
+//    materialisations and spills that PHI elimination and the schedulers put
+//    there) reads no FLAGS, redefines no compare operand, and is not a call,
+//    inline asm or other unmodelled side effect. The compare then computes
+//    the same thing at the branch, and the instructions in between never
+//    observed its flags. Debug instructions are ignored (-g does not change
+//    codegen) and stay where they are;
 //  * the condition maps onto a class-3 predicate: EQ/NE (incl. Z/NZ),
 //    signed LT/GE/LE/GT, unsigned LT/GE/LE/GT (incl. C/NC);
 //  * the flags are dead after the branch (no later reader in the block, not
 //    live into any successor) — the fused form does not write them;
-//  * the whole function is under 16 KB at worst-case (2/3-word) sizes, so
-//    every intra-function displacement fits the simm13 word field and the
-//    PCREL13 fixup always resolves at assembly time (no relaxation needed).
+//  * the target is in simm13 word range (+-16 KB) at worst case: every
+//    instruction at its long (.td) size, every aligned block after its
+//    maximum padding. Compression and fusion only shrink code, so the PCREL13
+//    fixup always resolves at assembly time (no relaxation needed). An inline
+//    asm statement has no bounded size (directives, macros) unless it is
+//    empty, so no branch whose range spans a non-empty one fuses.
 //
 // -mllvm -klausscpu-fuse-cmp-br=false disables it.
 //
@@ -49,6 +61,13 @@ static cl::opt<bool> EnableFuseCmpBr(
     cl::desc("KlaussCPU ISA v3 B: fuse compare + conditional branch"));
 
 namespace {
+
+// simm13 words: the fused branch reaches PC-16384 .. PC+16380. The worst-case
+// layout below is an upper bound already; the margin is for anything added
+// after this pass.
+constexpr int64_t MaxFusedDisp = 16000;
+// Size of an instruction whose length is unknown: no branch across it fuses.
+constexpr uint64_t UnboundedSize = uint64_t(1) << 20;
 
 // Class-3 predicate + INV for a conditional jump that follows CMP a, b.
 // Returns false for conditions with no predicate (S/NS/O/NO).
@@ -87,6 +106,73 @@ public:
   }
 };
 
+// Worst-case size in bytes of MI. An inline asm statement can be a directive
+// (.space, .rept) or a macro of any length, so only an empty one is bounded.
+uint64_t worstCaseSize(const MachineInstr &MI, const TargetInstrInfo &TII) {
+  if (MI.isInlineAsm()) {
+    StringRef Asm = MI.getOperand(0).getSymbolName();
+    return Asm.trim().empty() ? 0 : UnboundedSize;
+  }
+  return TII.get(MI.getOpcode()).getSize();
+}
+
+// The CMPRR / CMPRV whose flags the conditional branch Br reads, if Br can
+// take over its compare: it is the nearest FLAGS writer before Br, and
+// nothing between them reads FLAGS, redefines a compare operand, or has an
+// effect on FLAGS that is not modelled (calls, inline asm, side effects).
+MachineInstr *findFusableCompare(MachineInstr &Br,
+                                 const TargetRegisterInfo *TRI) {
+  MachineBasicBlock &MBB = *Br.getParent();
+  MachineInstr *Cmp = nullptr;
+  for (MachineInstr &MI :
+       make_range(std::next(MachineBasicBlock::reverse_iterator(Br)),
+                  MBB.rend())) {
+    if (MI.isDebugInstr())
+      continue;
+    if (MI.isCall() || MI.isInlineAsm() || MI.hasUnmodeledSideEffects() ||
+        MI.readsRegister(KlaussCPU::FLAGS, TRI))
+      return nullptr;
+    if (MI.modifiesRegister(KlaussCPU::FLAGS, TRI)) {
+      Cmp = &MI;
+      break;
+    }
+  }
+  if (!Cmp)
+    return nullptr;
+
+  switch (Cmp->getOpcode()) {
+  case KlaussCPU::CMPRR_I:
+    if (!Cmp->getOperand(1).isReg())
+      return nullptr;
+    break;
+  case KlaussCPU::CMPRV_I:
+  case KlaussCPU::CMPRVU_I: {
+    // CMPRVU zero-extends its immediate: the same value as simm4 for 0..7.
+    if (!Cmp->getOperand(1).isImm())
+      return nullptr;
+    int64_t Imm = Cmp->getOperand(1).getImm();
+    int64_t Lo = Cmp->getOpcode() == KlaussCPU::CMPRVU_I ? 0 : -8;
+    if (Imm < Lo || Imm > 7)
+      return nullptr;
+    break;
+  }
+  default:
+    return nullptr;
+  }
+  if (!Cmp->getOperand(0).isReg())
+    return nullptr;
+
+  // Br will read the compare operands where it stands.
+  for (MachineInstr &MI :
+       make_range(std::next(Cmp->getIterator()), Br.getIterator()))
+    for (unsigned I = 0; I < 2; ++I) {
+      const MachineOperand &MO = Cmp->getOperand(I);
+      if (MO.isReg() && MI.modifiesRegister(MO.getReg(), TRI))
+        return nullptr;
+    }
+  return Cmp;
+}
+
 } // namespace
 
 char KlaussCPUFuseCmpBr::ID = 0;
@@ -96,59 +182,83 @@ INITIALIZE_PASS(KlaussCPUFuseCmpBr, DEBUG_TYPE, PASS_NAME, false, false)
 bool KlaussCPUFuseCmpBr::runOnMachineFunction(MachineFunction &MF) {
   if (!EnableFuseCmpBr)
     return false;
-  const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
-
-  // Worst-case function size (every instruction at its long encoding).
-  uint64_t Size = 0;
-  for (MachineBasicBlock &MBB : MF)
-    for (MachineInstr &MI : MBB) {
-      if (MI.isInlineAsm())
-        return false; // unknown length: don't risk an out-of-range fixup
-      Size += TII->get(MI.getOpcode()).getSize();
-    }
-  if (Size >= 16000) // simm13 words = +-16 KB
+  // A branch into another section is resolved by the linker, and PCREL13 has
+  // no relocation.
+  if (MF.hasBBSections())
     return false;
+  const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
+  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+
+  // Worst-case offset of every block: instructions at their long encodings,
+  // each aligned block after its largest padding (code is word aligned, so
+  // at most Align - 4 bytes). The real distance between two points is never
+  // larger than the distance between their offsets here.
+  SmallVector<uint64_t, 16> BlockOffset(MF.getNumBlockIDs());
+  uint64_t Offset = 0;
+  for (MachineBasicBlock &MBB : MF) {
+    uint64_t A = MBB.getAlignment().value();
+    if (A > 4)
+      Offset += A - 4;
+    BlockOffset[MBB.getNumber()] = Offset;
+    for (MachineInstr &MI : MBB)
+      Offset += worstCaseSize(MI, *TII);
+  }
 
   bool Changed = false;
   for (MachineBasicBlock &MBB : MF) {
     SmallVector<MachineInstr *, 4> Dead;
-    for (MachineInstr &Cmp : MBB) {
-      unsigned CO = Cmp.getOpcode();
-      if (CO != KlaussCPU::CMPRR_I && CO != KlaussCPU::CMPRV_I)
-        continue;
-      // A debug instruction never reads FLAGS or changes a register, so it
-      // does not separate the pair.
-      auto BrIt = next_nodbg(MachineBasicBlock::iterator(Cmp), MBB.end());
-      if (BrIt == MBB.end())
-        continue;
-      MachineInstr *Br = &*BrIt;
-      if (!Br->isConditionalBranch() || Br->getNumOperands() < 1 ||
-          !Br->getOperand(0).isMBB())
+    uint64_t BrOffset = BlockOffset[MBB.getNumber()];
+    for (MachineInstr &Br : MBB) {
+      uint64_t ThisOffset = BrOffset;
+      BrOffset += worstCaseSize(Br, *TII);
+      if (!Br.isConditionalBranch() || Br.getNumOperands() < 1 ||
+          !Br.getOperand(0).isMBB())
         continue;
       unsigned Pred;
       bool Inv;
-      if (!branchPred(Br->getOpcode(), Pred, Inv))
+      if (!branchPred(Br.getOpcode(), Pred, Inv))
         continue;
-      if (CO == KlaussCPU::CMPRV_I &&
-          (!Cmp.getOperand(1).isImm() || Cmp.getOperand(1).getImm() < -8 ||
-           Cmp.getOperand(1).getImm() > 7))
+      MachineBasicBlock *Target = Br.getOperand(0).getMBB();
+      int64_t Disp = int64_t(BlockOffset[Target->getNumber()]) -
+                     int64_t(ThisOffset);
+      if (Disp < -MaxFusedDisp || Disp > MaxFusedDisp)
         continue;
-      if (!KlaussCPUInstrInfo::flagsDeadAfter(*Br))
+      if (!KlaussCPUInstrInfo::flagsDeadAfter(Br))
+        continue;
+      MachineInstr *Cmp = findFusableCompare(Br, TRI);
+      if (!Cmp)
         continue;
 
+      // The compare operands are now read at Br: move their kill flags (from
+      // the compare, or from a last use in between) onto the fused branch.
+      RegState RegFlags[2] = {};
+      for (unsigned I = 0; I < 2; ++I) {
+        const MachineOperand &MO = Cmp->getOperand(I);
+        if (!MO.isReg())
+          continue;
+        bool Kill = MO.isKill();
+        for (MachineInstr &MI :
+             make_range(std::next(Cmp->getIterator()), Br.getIterator()))
+          if (MI.killsRegister(MO.getReg(), TRI)) {
+            MI.clearRegisterKills(MO.getReg(), TRI);
+            Kill = true;
+          }
+        RegFlags[I] = getKillRegState(Kill) | getUndefRegState(MO.isUndef());
+      }
+
       int64_t CC = Pred | (Inv ? 8 : 0);
+      bool RR = Cmp->getOpcode() == KlaussCPU::CMPRR_I;
       MachineInstrBuilder MIB =
-          BuildMI(MBB, Br->getIterator(), Br->getDebugLoc(),
-                  TII->get(CO == KlaussCPU::CMPRR_I ? KlaussCPU::FBR_RR
-                                                    : KlaussCPU::FBR_RI))
-              .addReg(Cmp.getOperand(0).getReg());
-      if (CO == KlaussCPU::CMPRR_I)
-        MIB.addReg(Cmp.getOperand(1).getReg());
+          BuildMI(MBB, Br.getIterator(), Br.getDebugLoc(),
+                  TII->get(RR ? KlaussCPU::FBR_RR : KlaussCPU::FBR_RI))
+              .addReg(Cmp->getOperand(0).getReg(), RegFlags[0]);
+      if (RR)
+        MIB.addReg(Cmp->getOperand(1).getReg(), RegFlags[1]);
       else
-        MIB.addImm(Cmp.getOperand(1).getImm());
-      MIB.addImm(CC).addMBB(Br->getOperand(0).getMBB());
-      Dead.push_back(&Cmp);
-      Dead.push_back(Br);
+        MIB.addImm(Cmp->getOperand(1).getImm());
+      MIB.addImm(CC).addMBB(Target);
+      Dead.push_back(Cmp);
+      Dead.push_back(&Br);
       Changed = true;
     }
     for (MachineInstr *MI : Dead)

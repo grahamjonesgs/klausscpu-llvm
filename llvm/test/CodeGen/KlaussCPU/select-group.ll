@@ -31,9 +31,8 @@ define void @swap(i64 %a, i64 %b, ptr %p, ptr %q, i64 %c, i64 %d) nounwind {
 ; NOGROUP-NEXT:    enter 0
 ; NOGROUP-NEXT:    ldidx64 r14, r15, 40
 ; NOGROUP-NEXT:    ldidx64 r12, r15, 48
-; NOGROUP-NEXT:    cmprr r0, r1
 ; NOGROUP-NEXT:    copy r13, r14
-; NOGROUP-NEXT:    jmpugtrel .LBB0_2
+; NOGROUP-NEXT:    fbr r0, r1, 12, .LBB0_2
 ; NOGROUP-NEXT:  # %bb.1:
 ; NOGROUP-NEXT:    copy r13, r12
 ; NOGROUP-NEXT:  .LBB0_2:
@@ -68,9 +67,8 @@ define i64 @minmax(i64 %a, i64 %b, i64 %c, i64 %d) nounwind {
 ; NOGROUP-LABEL: minmax:
 ; NOGROUP:       # %bb.0:
 ; NOGROUP-NEXT:    enter 0
-; NOGROUP-NEXT:    cmprr r0, r1
 ; NOGROUP-NEXT:    copy r12, r2
-; NOGROUP-NEXT:    jmpgerel .LBB1_1
+; NOGROUP-NEXT:    fbr r0, r1, 9, .LBB1_1
 ; NOGROUP-NEXT:  # %bb.2:
 ; NOGROUP-NEXT:    fbr r0, r1, 9, .LBB1_3
 ; NOGROUP-NEXT:  .LBB1_4:
@@ -112,9 +110,8 @@ define i64 @three(i32 signext %a, i32 signext %b, i64 %c, i64 %d, ptr %p) nounwi
 ; NOGROUP-LABEL: three:
 ; NOGROUP:       # %bb.0:
 ; NOGROUP-NEXT:    enter 0
-; NOGROUP-NEXT:    cmprr r0, r1
 ; NOGROUP-NEXT:    copy r12, r2
-; NOGROUP-NEXT:    jmpultrel .LBB2_2
+; NOGROUP-NEXT:    fbr r0, r1, 3, .LBB2_2
 ; NOGROUP-NEXT:  # %bb.1:
 ; NOGROUP-NEXT:    copy r12, r3
 ; NOGROUP-NEXT:  .LBB2_2:
@@ -233,9 +230,8 @@ define i64 @different(i64 %a, i64 %b, i64 %c, i64 %d) nounwind {
 ; CHECK-LABEL: different:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    cmprr r0, r1
 ; CHECK-NEXT:    copy r12, r2
-; CHECK-NEXT:    jmpgerel .LBB5_1
+; CHECK-NEXT:    fbr r0, r1, 9, .LBB5_1
 ; CHECK-NEXT:  # %bb.2:
 ; CHECK-NEXT:    fbr r0, r1, 11, .LBB5_3
 ; CHECK-NEXT:  .LBB5_4:
@@ -252,9 +248,8 @@ define i64 @different(i64 %a, i64 %b, i64 %c, i64 %d) nounwind {
 ; NOGROUP-LABEL: different:
 ; NOGROUP:       # %bb.0:
 ; NOGROUP-NEXT:    enter 0
-; NOGROUP-NEXT:    cmprr r0, r1
 ; NOGROUP-NEXT:    copy r12, r2
-; NOGROUP-NEXT:    jmpgerel .LBB5_1
+; NOGROUP-NEXT:    fbr r0, r1, 9, .LBB5_1
 ; NOGROUP-NEXT:  # %bb.2:
 ; NOGROUP-NEXT:    fbr r0, r1, 11, .LBB5_3
 ; NOGROUP-NEXT:  .LBB5_4:
@@ -397,9 +392,8 @@ define i64 @add_between(i64 %a, i64 %b, i64 %c, i64 %d, i64 %x) nounwind {
 ; NOGROUP-LABEL: add_between:
 ; NOGROUP:       # %bb.0:
 ; NOGROUP-NEXT:    enter 0
-; NOGROUP-NEXT:    cmprr r0, r1
 ; NOGROUP-NEXT:    copy r12, r2
-; NOGROUP-NEXT:    jmpltrel .LBB8_2
+; NOGROUP-NEXT:    fbr r0, r1, 1, .LBB8_2
 ; NOGROUP-NEXT:  # %bb.1:
 ; NOGROUP-NEXT:    copy r12, r3
 ; NOGROUP-NEXT:  .LBB8_2:

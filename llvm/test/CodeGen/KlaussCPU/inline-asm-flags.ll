@@ -5,9 +5,14 @@
 ; post-RA scheduler all put the compare before an asm that writes the flags,
 ; and the branch then tested the asm's flags.
 ;
-; RUN: llc -march=klausscpu -verify-machineinstrs -O0 < %s | FileCheck %s
-; RUN: llc -march=klausscpu -verify-machineinstrs -O1 < %s | FileCheck %s
-; RUN: llc -march=klausscpu -verify-machineinstrs -O2 < %s | FileCheck %s
+; The compare is checked with compare/branch fusion off (it would otherwise
+; become part of the fused branch); FUSE checks that the asm in the function
+; does not stop fusion of a branch whose range it is not in.
+;
+; RUN: llc -march=klausscpu -verify-machineinstrs -O0 -klausscpu-fuse-cmp-br=false < %s | FileCheck %s
+; RUN: llc -march=klausscpu -verify-machineinstrs -O1 -klausscpu-fuse-cmp-br=false < %s | FileCheck %s
+; RUN: llc -march=klausscpu -verify-machineinstrs -O2 -klausscpu-fuse-cmp-br=false < %s | FileCheck %s
+; RUN: llc -march=klausscpu -verify-machineinstrs -O1 < %s | FileCheck %s --check-prefix=FUSE
 ; RUN: llc -march=klausscpu -O1 -stop-after=finalize-isel < %s \
 ; RUN:   | FileCheck %s --check-prefix=MIR
 
@@ -20,6 +25,9 @@ define i64 @flags_before_cmp(i64 %x, i64 %y, i64 %a, i64 %b) nounwind {
 ; CHECK-NOT:     #APP
 ; CHECK:         cmprr r0, r1
 ; CHECK-NEXT:    jmp
+; FUSE-LABEL: flags_before_cmp:
+; FUSE:         #NO_APP
+; FUSE-NEXT:    fbr r0, r1, 9, .LBB0_2
 ; MIR-LABEL:   name: flags_before_cmp
 ; MIR:         INLINEASM &"addr $0, $1, $2"
 ; MIR-SAME:      implicit-def early-clobber $flags
@@ -44,6 +52,9 @@ define i64 @cc_after_cmp(ptr %p, i64 %x, i64 %y, i64 %a) nounwind {
 ; CHECK-NOT:     #APP
 ; CHECK:         cmprr r1, r2
 ; CHECK-NEXT:    jmp
+; FUSE-LABEL: cc_after_cmp:
+; FUSE:         #NO_APP
+; FUSE-NEXT:    fbr r1, r2, 9, .LBB1_2
 ; MIR-LABEL:   name: cc_after_cmp
 ; MIR:         INLINEASM &"subr $0, $1, $1"
 ; MIR-SAME:      implicit-def early-clobber $flags

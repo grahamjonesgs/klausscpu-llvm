@@ -117,7 +117,13 @@ pre-emit passes rely on this liveness:
 - `KlaussCPUFlagReuse` (pre-emit, default on): drops a `CMPRV Rd, 0` before
   `JMPE`/`JMPNE` when the arithmetic op that wrote Rd already set Z.
 - `KlaussCPUFuseCmpBr` (pre-emit, default on): fuses a compare and its
-  conditional branch into the 1-word ISA v3 `FBR_RR`/`FBR_RI`.
+  conditional branch into the 1-word ISA v3 `FBR_RR`/`FBR_RI` (64-bit only:
+  FBR has no width bit, so `CMPRRW`/`CMPRVW` never fuse).  It scans back
+  from the branch to the nearest FLAGS writer, so PHI copies, constants and
+  spills between the pair do not stop it; it gives up at a FLAGS reader, a
+  redefined compare operand, a call or inline asm.  Range is checked per
+  branch at worst-case sizes plus alignment padding; a non-empty inline asm
+  (unbounded size) blocks only the branches that span it.
 - Both rewrite only when FLAGS is dead after the branch
   (`KlaussCPUInstrInfo::flagsDeadAfter`): no later reader in the block and
   no successor with FLAGS live-in (MachineCSE can leave a successor reading

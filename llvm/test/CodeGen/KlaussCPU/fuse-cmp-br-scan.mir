@@ -1,0 +1,331 @@
+# KlaussCPUFuseCmpBr scans back from each conditional branch to the nearest
+# FLAGS writer. PHI elimination and the schedulers put copies, constants and
+# spills between a compare and its branch; the pair still fuses when that
+# writer is a CMPRR / CMPRV (simm4) / CMPRVU (0..7) and nothing in between
+# reads FLAGS, redefines a compare operand, or is a call or inline asm. The
+# FBR goes where the branch was and the instructions in between stay.
+#
+# Range: the displacement is bounded per branch at worst-case sizes, with the
+# largest padding of every aligned block, and a non-empty inline asm (no
+# bounded size) blocks only the branches whose range it is in.
+#
+# RUN: llc -march=klausscpu -run-pass=klausscpu-cmp-br-fuse -verify-machineinstrs \
+# RUN:   %s -o - | FileCheck %s
+
+--- |
+  declare void @g()
+  define void @separated() { ret void }
+  define void @kill_moves() { ret void }
+  define void @operand_redefined() { ret void }
+  define void @flags_read_between() { ret void }
+  define void @other_writer() { ret void }
+  define void @barriers() { ret void }
+  define void @immediates() { ret void }
+  define void @range() { ret void }
+...
+---
+# A copy, a constant and a store between the compare and the branch.
+# CHECK-LABEL: name: separated
+# CHECK:       $r12 = COPY_R $r2
+# CHECK-NEXT:  $r13 = SETR 5
+# CHECK-NEXT:  STIDX64 killed $r13, $r3, 0
+# CHECK-NEXT:  FBR_RR $r0, $r1, 1, %bb.2
+# CHECK-NOT:   CMPRR_I
+# CHECK-NOT:   JMPLT
+name:            separated
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $r0, $r1, $r2, $r3
+
+    CMPRR_I $r0, $r1, implicit-def $flags
+    $r12 = COPY_R $r2
+    $r13 = SETR 5
+    STIDX64 killed $r13, $r3, 0 :: (store (s64))
+    JMPLT %bb.2, implicit killed $flags
+
+  bb.1:
+    liveins: $r0
+    $r12 = COPY_R killed $r0
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit killed $r12
+
+  bb.2:
+    liveins: $r12
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit killed $r12
+...
+---
+# The last use of a compare operand in between gives its kill to the FBR,
+# which now reads the register after it.
+# CHECK-LABEL: name: kill_moves
+# CHECK:       $r12 = COPY_R $r1
+# CHECK-NEXT:  FBR_RI killed $r1, -8, 12, %bb.2
+name:            kill_moves
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $r1
+
+    CMPRV_I $r1, -8, implicit-def $flags
+    $r12 = COPY_R killed $r1
+    JMPUGT %bb.2, implicit killed $flags
+
+  bb.1:
+    $r12 = SETR 1
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit killed $r12
+
+  bb.2:
+    liveins: $r12
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit killed $r12
+...
+---
+# A compare operand redefined in between: the branch would see the new value.
+# CHECK-LABEL: name: operand_redefined
+# CHECK:       CMPRR_I $r0, $r1, implicit-def $flags
+# CHECK-NEXT:  $r1 = SETR 3
+# CHECK-NEXT:  JMPLT %bb.2
+# CHECK-NOT:   FBR
+name:            operand_redefined
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $r0, $r1
+
+    CMPRR_I $r0, $r1, implicit-def $flags
+    $r1 = SETR 3
+    JMPLT %bb.2, implicit killed $flags
+
+  bb.1:
+    liveins: $r1
+    $r12 = COPY_R killed $r1
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit killed $r12
+
+  bb.2:
+    liveins: $r0
+    $r12 = COPY_R killed $r0
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit killed $r12
+...
+---
+# An instruction in between reads the compare's flags (ADDC's carry-in).
+# CHECK-LABEL: name: flags_read_between
+# CHECK:       CMPRR_I $r0, $r1, implicit-def $flags
+# CHECK-NEXT:  $r12 = ADDC
+# CHECK-NEXT:  JMPLT %bb.2
+# CHECK-NOT:   FBR
+name:            flags_read_between
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $r0, $r1, $r2
+
+    CMPRR_I $r0, $r1, implicit-def $flags
+    $r12 = ADDC $r2, $r2, implicit-def $flags, implicit $flags
+    JMPLT %bb.2, implicit killed $flags
+
+  bb.1:
+    liveins: $r12
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit killed $r12
+
+  bb.2:
+    liveins: $r0
+    $r12 = COPY_R killed $r0
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit killed $r12
+...
+---
+# The nearest FLAGS writer is not a compare (the branch reads ADDR's flags).
+# CHECK-LABEL: name: other_writer
+# CHECK:       CMPRR_I $r0, $r1, implicit-def dead $flags
+# CHECK-NEXT:  $r12 = ADDR
+# CHECK-NEXT:  JMPLT %bb.2
+# CHECK-NOT:   FBR
+name:            other_writer
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $r0, $r1, $r2
+
+    CMPRR_I $r0, $r1, implicit-def dead $flags
+    $r12 = ADDR $r2, $r2, implicit-def $flags
+    JMPLT %bb.2, implicit killed $flags
+
+  bb.1:
+    liveins: $r12
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit killed $r12
+
+  bb.2:
+    liveins: $r0
+    $r12 = COPY_R killed $r0
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit killed $r12
+...
+---
+# A call or an inline asm in between stops the scan even where it declares
+# no FLAGS clobber: what it does to the flags is not modelled.
+# CHECK-LABEL: name: barriers
+# CHECK:       CMPRR_I $r0, $r1, implicit-def $flags
+# CHECK-NEXT:  CALL_I @g
+# CHECK-NEXT:  JMPLT %bb.3
+# CHECK:       CMPRR_I $r0, $r1, implicit-def $flags
+# CHECK-NEXT:  INLINEASM
+# CHECK-NEXT:  JMPGE %bb.3
+# CHECK-NOT:   FBR
+name:            barriers
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.3
+    liveins: $r0, $r1
+
+    CMPRR_I $r0, $r1, implicit-def $flags
+    CALL_I @g, implicit $sp
+    JMPLT %bb.3, implicit killed $flags
+
+  bb.1:
+    successors: %bb.2, %bb.3
+    liveins: $r0, $r1
+
+    CMPRR_I $r0, $r1, implicit-def $flags
+    INLINEASM &"", 1 /* sideeffect attdialect */
+    JMPGE %bb.3, implicit killed $flags
+
+  bb.2:
+    liveins: $r0
+    $r12 = COPY_R killed $r0
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit killed $r12
+
+  bb.3:
+    $r12 = SETR 0
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit killed $r12
+...
+---
+# Immediates: CMPRV takes -8..7, CMPRVU (zero-extended) 0..7, and the 32-bit
+# CMPRVW never fuses (FBR always compares 64 bits).
+# CHECK-LABEL: name: immediates
+# CHECK:       CMPRV_I $r0, 8, implicit-def $flags
+# CHECK-NEXT:  $r12 = SETR 0
+# CHECK-NEXT:  JMPE %bb.5
+# CHECK:       $r12 = SETR 1
+# CHECK-NEXT:  FBR_RI $r0, 7, 0, %bb.5
+# CHECK:       CMPRVW_I $r0, 1, implicit-def $flags
+# CHECK-NEXT:  $r12 = SETR 2
+# CHECK-NEXT:  JMPE %bb.5
+# CHECK:       $r12 = SETR 3
+# CHECK-NEXT:  FBR_RI killed $r0, -1, 8, %bb.5
+name:            immediates
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.5
+    liveins: $r0
+
+    CMPRV_I $r0, 8, implicit-def $flags
+    $r12 = SETR 0
+    JMPE %bb.5, implicit killed $flags
+
+  bb.1:
+    successors: %bb.2, %bb.5
+    liveins: $r0
+
+    CMPRVU_I $r0, 7, implicit-def $flags
+    $r12 = SETR 1
+    JMPE %bb.5, implicit killed $flags
+
+  bb.2:
+    successors: %bb.3, %bb.5
+    liveins: $r0
+
+    CMPRVW_I $r0, 1, implicit-def $flags
+    $r12 = SETR 2
+    JMPE %bb.5, implicit killed $flags
+
+  bb.3:
+    successors: %bb.4, %bb.5
+    liveins: $r0
+
+    CMPRV_I killed $r0, -1, implicit-def $flags
+    $r12 = SETR 3
+    JMPNE %bb.5, implicit killed $flags
+
+  bb.4:
+    $r12 = SETR 4
+
+  bb.5:
+    liveins: $r12
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit killed $r12
+...
+---
+# Range. The branch over a 16 KB-aligned block (up to 16380 bytes of padding)
+# and the one over a non-empty inline asm stay; the short branches in the
+# same function, and the one over an empty asm, fuse.
+# CHECK-LABEL: name: range
+# CHECK:       bb.0:
+# CHECK:       FBR_RR $r0, $r1, 0, %bb.2
+# CHECK:       bb.1:
+# CHECK:       CMPRR_I $r0, $r1, implicit-def $flags
+# CHECK-NEXT:  JMPE %bb.4
+# CHECK:       bb.4:
+# CHECK:       FBR_RR $r0, $r1, 3, %bb.6
+# CHECK:       bb.5:
+# CHECK:       CMPRR_I $r0, $r1, implicit-def $flags
+# CHECK-NEXT:  JMPE %bb.7
+# CHECK:       bb.6:
+# CHECK:       INLINEASM &nop
+# CHECK-NEXT:  FBR_RR killed $r0, killed $r1, 1, %bb.8
+name:            range
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $r0, $r1
+
+    CMPRR_I $r0, $r1, implicit-def $flags
+    JMPE %bb.2, implicit killed $flags
+
+  bb.1:
+    successors: %bb.2, %bb.4
+    liveins: $r0, $r1
+
+    CMPRR_I $r0, $r1, implicit-def $flags
+    JMPE %bb.4, implicit killed $flags
+
+  bb.2:
+    successors: %bb.3
+    liveins: $r0, $r1
+
+    $r12 = SETR 0
+
+  bb.3 (align 16384):
+    successors: %bb.4
+    liveins: $r0, $r1
+
+  bb.4:
+    successors: %bb.5, %bb.6
+    liveins: $r0, $r1
+
+    CMPRR_I $r0, $r1, implicit-def $flags
+    JMPULT %bb.6, implicit killed $flags
+
+  bb.5:
+    successors: %bb.6, %bb.7
+    liveins: $r0, $r1
+
+    CMPRR_I $r0, $r1, implicit-def $flags
+    JMPE %bb.7, implicit killed $flags
+
+  bb.6:
+    successors: %bb.7, %bb.8
+    liveins: $r0, $r1
+
+    INLINEASM &"nop", 1 /* sideeffect attdialect */
+    CMPRR_I killed $r0, killed $r1, implicit-def $flags
+    JMPLT %bb.8, implicit killed $flags
+
+  bb.7:
+    INLINEASM &"  ", 1 /* sideeffect attdialect */
+
+  bb.8:
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15
+...

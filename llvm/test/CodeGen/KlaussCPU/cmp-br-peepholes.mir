@@ -267,7 +267,7 @@ body:             |
 #
 # FUSE-LABEL: name: fuse_dbg_between
 # FUSE:       DBG_VALUE $r0, $noreg,
-# FUSE-NEXT:  FBR_RR $r0, $r1, 9, %bb.2
+# FUSE-NEXT:  FBR_RR $r0, killed $r1, 9, %bb.2
 # FUSE-NOT:   CMPRR_I
 # FUSE-NOT:   JMPGE
 name:            fuse_dbg_between

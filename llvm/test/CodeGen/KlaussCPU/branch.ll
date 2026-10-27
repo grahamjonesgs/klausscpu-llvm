@@ -52,9 +52,8 @@ define i64 @eq_zero(i64 %a) {
 ; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    .cfi_def_cfa r15, 16
 ; CHECK-NEXT:    .cfi_offset r15, -16
-; CHECK-NEXT:    cmprv r0, 0
 ; CHECK-NEXT:    setr r12, 10
-; CHECK-NEXT:    jmperel .LBB3_2
+; CHECK-NEXT:    fbri r0, 0, 0, .LBB3_2
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    setr r12, 20
 ; CHECK-NEXT:  .LBB3_2:
