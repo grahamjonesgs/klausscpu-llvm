@@ -1166,15 +1166,22 @@ def : Pat<(i64 (add GPR:$rs, uimm32_nonsimm32_imm:$imm)),
 def : Pat<(i64 (add GPR:$rs, neg_uimm32_nonsimm32_imm:$imm)),
           (MINUSV GPR:$rs, (NegImm imm:$imm))>;
 
-// A frame index as a value: ADDI rd, FI, 0 (AddrFI gives the
-// TargetFrameIndex, which eliminateFrameIndex rewrites to the frame register,
-// adding the slot offset to the immediate).  A load or store straight off a
-// frame index uses it as the base with offset 0, selected in
-// KlaussCPUDAGToDAGISel::Select.  A frame index plus a constant is not
-// folded: the address is the ADDI's result.
-def AddrFI : ComplexPattern<iPTR, 1, "SelectAddrFI", [frameindex]>;
+// A frame index, or a frame index plus a constant (KlaussCPUDAGToDAGISel::
+// selectFrameAddr, which decides when folding the constant pays), as
+// (TargetFrameIndex, offset): eliminateFrameIndex rewrites the pair to
+// (frame register, slot offset + offset).  As a value (AddrFI) it is one
+// ADDI rd, FI, offset; loads and stores take it as their base and offset
+// (AddrFIMem, below, which sees the access size).  AddedComplexity puts both
+// ahead of the GPR-address patterns, which compute the frame address with a
+// separate ADDI.
+def AddrFI : ComplexPattern<iPTR, 2, "SelectAddrFI", [frameindex, add, or]>;
+def AddrFIMem : ComplexPattern<iPTR, 2, "SelectAddrFIMem"> {
+  let WantsParent = true;
+}
 
-def : Pat<(i64 AddrFI:$fi), (ADDI AddrFI:$fi, 0)>;
+let AddedComplexity = 10 in
+def : Pat<(AddrFI (i64 GPR:$base), simm32_imm:$off),
+          (ADDI GPR:$base, simm32_imm:$off)>;
 
 //===----------------------------------------------------------------------===//
 // Immediate-form ALU patterns
@@ -1264,7 +1271,6 @@ def : Pat<(store (i64 GPR:$val), (add (i64 GPR:$base), simm32_imm:$off)),
           (STIDX64 GPR:$val, GPR:$base, simm32_imm:$off)>;
 
 // Sub-word zero-extending loads from a plain GPR address (no offset).
-// A frame-index address takes LDIDX8/16/32 instead (see AddrFI).
 def : Pat<(i64 (zextloadi8  (i64 GPR:$addr))), (MEMGET8  GPR:$addr)>;
 def : Pat<(i64 (zextloadi16 (i64 GPR:$addr))), (MEMGET16 GPR:$addr)>;
 def : Pat<(i64 (zextloadi32 (i64 GPR:$addr))), (MEMGET32 GPR:$addr)>;
@@ -1301,6 +1307,33 @@ def : Pat<(truncstorei16 (i64 GPR:$val), (add (i64 GPR:$base), simm32_imm:$off))
           (STIDX16 GPR:$val, GPR:$base, simm32_imm:$off)>;
 def : Pat<(truncstorei32 (i64 GPR:$val), (add (i64 GPR:$base), simm32_imm:$off)),
           (STIDX32 GPR:$val, GPR:$base, simm32_imm:$off)>;
+
+// Loads and stores off a frame index plus a constant (AddrFIMem), for every
+// width and extension: base+offset with the frame register as the base.
+multiclass FrameLoadPat<PatFrag ld, Instruction Inst> {
+  def : Pat<(i64 (ld (AddrFIMem (i64 GPR:$base), simm32_imm:$off))),
+            (Inst GPR:$base, simm32_imm:$off)>;
+}
+multiclass FrameStorePat<PatFrag st, Instruction Inst> {
+  def : Pat<(st (i64 GPR:$val), (AddrFIMem (i64 GPR:$base), simm32_imm:$off)),
+            (Inst GPR:$val, GPR:$base, simm32_imm:$off)>;
+}
+let AddedComplexity = 10 in {
+defm : FrameLoadPat<load,        LDIDX64>;
+defm : FrameLoadPat<zextloadi32, LDIDX32>;
+defm : FrameLoadPat<extloadi32,  LDIDX32>;
+defm : FrameLoadPat<sextloadi32, LDIDX32_S>;
+defm : FrameLoadPat<zextloadi16, LDIDX16>;
+defm : FrameLoadPat<extloadi16,  LDIDX16>;
+defm : FrameLoadPat<sextloadi16, LDIDX16_S>;
+defm : FrameLoadPat<zextloadi8,  LDIDX8>;
+defm : FrameLoadPat<extloadi8,   LDIDX8>;
+defm : FrameLoadPat<sextloadi8,  LDIDX8_S>;
+defm : FrameStorePat<store,         STIDX64>;
+defm : FrameStorePat<truncstorei32, STIDX32>;
+defm : FrameStorePat<truncstorei16, STIDX16>;
+defm : FrameStorePat<truncstorei8,  STIDX8>;
+}
 
 //===----------------------------------------------------------------------===//
 // Control flow: branches and calls

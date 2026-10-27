@@ -55,14 +55,12 @@ define i64 @i128_local() nounwind {
 ; O1-NEXT:    stidx64 r7, r15, -8 # 8-byte Folded Spill
 ; O1-NEXT:    andi r7, r15, -16
 ; O1-NEXT:    call mk
-; O1-NEXT:    addi r14, r7, -32
-; O1-NEXT:    bset r14, r14, 3
-; O1-NEXT:    stidx64 r11, r14, 0
 ; O1-NEXT:    stidx64 r12, r7, -32
-; O1-NEXT:    ldidx64 r12, r14, 0
-; O1-NEXT:    ldidx64 r14, r7, -32
+; O1-NEXT:    stidx64 r11, r7, -24
+; O1-NEXT:    ldidx64 r12, r7, -32
+; O1-NEXT:    ldidx64 r14, r7, -24
 ; O1-NEXT:    ldidx64 r7, r15, -8 # 8-byte Folded Reload
-; O1-NEXT:    xorr r12, r12, r14
+; O1-NEXT:    xorr r12, r14, r12
 ; O1-NEXT:    leaveret
 ;
 ; O0-LABEL: i128_local:
@@ -71,13 +69,10 @@ define i64 @i128_local() nounwind {
 ; O0-NEXT:    stidx64 r7, r15, -8 # 8-byte Folded Spill
 ; O0-NEXT:    andi r7, r15, -16
 ; O0-NEXT:    call mk
-; O0-NEXT:    copy r14, r12
-; O0-NEXT:    addi r12, r7, -32
-; O0-NEXT:    bset r12, r12, 3
-; O0-NEXT:    stidx64 r11, r12, 0
-; O0-NEXT:    stidx64 r14, r7, -32
-; O0-NEXT:    ldidx64 r12, r12, 0
+; O0-NEXT:    stidx64 r12, r7, -32
+; O0-NEXT:    stidx64 r11, r7, -24
 ; O0-NEXT:    ldidx64 r14, r7, -32
+; O0-NEXT:    ldidx64 r12, r7, -24
 ; O0-NEXT:    xorr r12, r12, r14
 ; O0-NEXT:    ldidx64 r7, r15, -8 # 8-byte Folded Reload
 ; O0-NEXT:    leaveret
@@ -90,14 +85,12 @@ define i64 @i128_local() nounwind {
 ; PUSH-NEXT:    stidx64 r7, r15, -8 # 8-byte Folded Spill
 ; PUSH-NEXT:    andi r7, r15, -16
 ; PUSH-NEXT:    call mk
-; PUSH-NEXT:    addi r14, r7, -32
-; PUSH-NEXT:    bset r14, r14, 3
-; PUSH-NEXT:    stidx64 r11, r14, 0
 ; PUSH-NEXT:    stidx64 r12, r7, -32
-; PUSH-NEXT:    ldidx64 r12, r14, 0
-; PUSH-NEXT:    ldidx64 r14, r7, -32
+; PUSH-NEXT:    stidx64 r11, r7, -24
+; PUSH-NEXT:    ldidx64 r12, r7, -32
+; PUSH-NEXT:    ldidx64 r14, r7, -24
 ; PUSH-NEXT:    ldidx64 r7, r15, -8 # 8-byte Folded Reload
-; PUSH-NEXT:    xorr r12, r12, r14
+; PUSH-NEXT:    xorr r12, r14, r12
 ; PUSH-NEXT:    setsp r15
 ; PUSH-NEXT:    pop r15
 ; PUSH-NEXT:    ret

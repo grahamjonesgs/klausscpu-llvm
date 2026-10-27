@@ -84,11 +84,10 @@ define i64 @pick_u32(i64 %n, ...) {
 ; CHECK-NEXT:    enter 1
 ; CHECK-NEXT:    .cfi_def_cfa r15, 16
 ; CHECK-NEXT:    .cfi_offset r15, -16
-; CHECK-NEXT:    addi r12, r15, 16
+; CHECK-NEXT:    addi r12, r15, 31
 ; CHECK-NEXT:    stidx64 r3, r15, 32
 ; CHECK-NEXT:    stidx64 r2, r15, 24
 ; CHECK-NEXT:    stidx64 r1, r15, 16
-; CHECK-NEXT:    addi r12, r12, 15
 ; CHECK-NEXT:    andi r12, r12, -8
 ; CHECK-NEXT:    addi r14, r12, 15
 ; CHECK-NEXT:    addi r13, r12, 8

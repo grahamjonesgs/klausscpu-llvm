@@ -205,9 +205,18 @@ when clobbered.
 
 - Instruction selection is the generated `SelectCode` from the `.td`
   patterns; `KlaussCPUISelDAGToDAG.cpp` keeps only BR_CC / `SELECT_CC`
-  (glued compare, 32-bit W-compare choice) and loads/stores straight off a
-  frame index.  Frame indexes as values select through the `AddrFI`
-  ComplexPattern (`ADDI rd, FI, 0`).
+  (glued compare, 32-bit W-compare choice).  A frame index, or a frame index
+  plus a constant below 2^29 (`add` or disjoint `or`), is the `AddrFI` /
+  `AddrFIMem` ComplexPattern `(TargetFrameIndex, offset)`: one
+  `ADDI rd, FI, offset` as a value, or the base and offset of an
+  `LDIDXn`/`STIDXn` frame access.  The constant is folded when the access is
+  likely to stay in 1-word short-form reach of R15 (estimated from the locals
+  laid out before the slot) or the slot has at most two accesses in the
+  block; otherwise the slot address is computed once and the accesses use
+  small offsets from it (`selectFrameAddr`).  `eliminateFrameIndex` adds the
+  slot offset to the folded offset; a frame index anywhere else (or a sum
+  that overflows simm32) gets the slot address in a scavenged register
+  (`ADDI`, which clobbers FLAGS).
 - Scheduling: the M8 model (`KlaussCPUSchedule.td`, CPU `generic`, the
   default) drives the machine scheduler and the post-RA scheduler, which runs
   from **-O1** up (`getOptLevelToEnablePostRAScheduler`).  `-mcpu=no-sched`
@@ -227,6 +236,7 @@ when clobbered.
 | `-klausscpu-fuse-cmp-br` | on | FBR fused compare-and-branch |
 | `-klausscpu-arith-flag-reuse` | on | FlagReuse peephole |
 | `-klausscpu-w32-alu` / `-klausscpu-w32-compare` | on | 32-bit W ops / W compares |
+| `-klausscpu-fold-fi-offset` | on | fold frame index + constant into the access / ADDI offset |
 | `-klausscpu-min-jump-table-entries` | 0 (off) | jump tables from N cases |
 | `-klausscpu-pref-loop-align` | 16 | loop-header alignment in bytes |
 | `-klausscpu-unroll-branch-density-gate` | on | scale the unroll budget for branchy loops |
@@ -329,7 +339,7 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPURegisterInfo.h/.cpp reserved regs, stack realignment, eliminateFrameIndex
 ├── KlaussCPUFrameLowering.h/.cpp prologue/epilogue, CFI, base pointer, getFrameIndexReference
 ├── KlaussCPUISelLowering.h/.cpp  calls/args/returns, varargs, SELECT_CC, BR_JT, DAG combines
-├── KlaussCPUISelDAGToDAG.cpp   SelectCode() + C++ for BR_CC, SELECT_CC, frame-index loads/stores; AddrFI; inline-asm 'm'
+├── KlaussCPUISelDAGToDAG.cpp   SelectCode() + C++ for BR_CC, SELECT_CC; AddrFI; inline-asm 'm'
 ├── KlaussCPUMachineFunctionInfo.h  per-function state (vararg frame index)
 ├── KlaussCPUAsmPrinter.cpp     MachineInstr → MCInst (+ CompressPat), inline-asm operand printing
 ├── KlaussCPUFlagReuse.cpp      pre-emit: CMPRV Rd,0 + JMPE/NE → JMPZ/NZ (default on)

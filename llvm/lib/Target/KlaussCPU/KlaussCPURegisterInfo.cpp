@@ -108,6 +108,37 @@ bool KlaussCPURegisterInfo::isInlineAsmReadOnlyReg(const MachineFunction &MF,
           MF.getSubtarget<KlaussCPUSubtarget>().getFrameLowering()->hasBP(MF));
 }
 
+// Is operand FIOp of MI a base whose next operand is an offset added to it:
+// the ADDI frame address (AddrFI), a base+offset load or store, or an inline
+// asm memory operand (SelectInlineAsmMemoryOperand)?  Anything else with a
+// frame index -- MEMGETn/MEMSETn, the reg+reg LDIDXnR/STIDXnR, an operand
+// whose next immediate is not an offset -- gets the frame address in a
+// register instead.
+static bool isBaseOffsetOperand(const MachineInstr &MI, unsigned FIOp) {
+  if (MI.isInlineAsm())
+    return FIOp + 1 < MI.getNumOperands() && MI.getOperand(FIOp + 1).isImm();
+  switch (MI.getOpcode()) {
+  case KlaussCPU::ADDI:
+  case KlaussCPU::LDIDX64:
+  case KlaussCPU::LDIDX64U:
+  case KlaussCPU::LDIDX32:
+  case KlaussCPU::LDIDX32_S:
+  case KlaussCPU::LDIDX16:
+  case KlaussCPU::LDIDX16_S:
+  case KlaussCPU::LDIDX8:
+  case KlaussCPU::LDIDX8_S:
+  case KlaussCPU::STIDX64:
+  case KlaussCPU::STIDX64U:
+  case KlaussCPU::STIDX32:
+  case KlaussCPU::STIDX16:
+  case KlaussCPU::STIDX8:
+    // (rd, base, offset) / (data, base, offset).
+    return FIOp == 1;
+  default:
+    return false;
+  }
+}
+
 bool KlaussCPURegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
                                                  int SPAdj,
                                                  unsigned FIOperandNum,
@@ -128,11 +159,10 @@ bool KlaussCPURegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
           ->getFrameIndexReference(MF, FrameIndex, FrameReg)
           .getFixed();
 
-  // Standard case: load/store instructions have (base, imm_offset) at
-  // [FIOperandNum, FIOperandNum+1].  Replace FI with FrameReg (R15, or the
-  // base pointer R7) and fold in the frame-slot offset.
-  if (FIOperandNum + 1 < MI.getNumOperands() &&
-      MI.getOperand(FIOperandNum + 1).isImm()) {
+  // Standard case: (base, imm_offset) at [FIOperandNum, FIOperandNum+1].
+  // Replace FI with FrameReg (R15, or the base pointer R7) and add the
+  // frame-slot offset to the offset isel folded in (AddrFI).
+  if (isBaseOffsetOperand(MI, FIOperandNum)) {
     int64_t Offset = BaseOffset + MI.getOperand(FIOperandNum + 1).getImm();
     if (isInt<32>(Offset)) {
       MI.getOperand(FIOperandNum).ChangeToRegister(FrameReg, false);
@@ -140,14 +170,14 @@ bool KlaussCPURegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
       return false;
     }
     // The sum overflows simm32.  Isel folds at most a 512 MiB offset onto a
-    // frame index (SelectInlineAsmMemoryOperand), so this needs a frame over
-    // 1.5 GiB.  Keep the instruction's offset and put the slot address in a
-    // scratch register, as below.
+    // frame index (isFrameIndexOffset in KlaussCPUISelDAGToDAG.cpp), so this
+    // needs a frame over 1.5 GiB.  Keep the instruction's offset and put the
+    // slot address in a scratch register, as below.
   }
 
-  // Non-standard case: FrameIndex used as a plain register operand (e.g. ADDR
-  // for variable-indexed stack access).  Materialise (FrameReg + BaseOffset)
-  // into a scratch register with a single ADDI, then replace the FI operand.
+  // Non-standard case: a frame index as a plain register operand.
+  // Materialise (FrameReg + BaseOffset) into a scratch register with a
+  // single ADDI, then replace the FI operand.
   assert(RS && "Register scavenger required for variable-indexed stack access");
   assert(isInt<32>(BaseOffset) && "Frame offset out of ADDI simm32 range");
 

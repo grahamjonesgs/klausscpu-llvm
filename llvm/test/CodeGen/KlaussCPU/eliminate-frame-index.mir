@@ -1,0 +1,60 @@
+# eliminateFrameIndex: a frame index as the base of a base+offset access (or
+# the ADDI frame address) becomes the frame register with the slot offset
+# added to the instruction's offset.  Anywhere else -- the reg+reg
+# LDIDXnR/STIDXnR, the register-addressed MEMGETn/MEMSETn, store data, a
+# compare -- and when slot offset + offset overflows simm32, the slot address
+# is put in a scavenged register with an ADDI.  Isel only folds a frame index
+# into the base+offset forms and ADDI (AddrFI), and an offset below 2^29, so
+# the other cases are reached only from MIR or a frame over 1.5 GiB.
+#
+# RUN: llc -march=klausscpu -run-pass=prologepilog -verify-machineinstrs \
+# RUN:   %s -o - | FileCheck %s
+
+--- |
+  target triple = "klausscpu-unknown-elf"
+
+  define void @fi_operands() { ret void }
+...
+---
+name:            fi_operands
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 32, alignment: 8 }
+body:             |
+  bb.0:
+    liveins: $r0, $r1
+
+    ; CHECK-LABEL: name: fi_operands
+    ; CHECK:      $r12 = LDIDX64 $r15, -24
+    ; CHECK-NEXT: $r12 = LDIDX8_S $r15, -31
+    ; CHECK-NEXT: STIDX32 $r0, $r15, -28
+    ; CHECK-NEXT: $r12 = ADDI $r15, -16
+    ; CHECK-NEXT: [[S:\$r[0-9]+]] = ADDI $r15, -32
+    ; CHECK-NEXT: $r12 = LDIDX64R killed [[S]], $r1
+    ; CHECK-NEXT: [[S:\$r[0-9]+]] = ADDI $r15, -32
+    ; CHECK-NEXT: STIDX16R $r0, killed [[S]], $r1
+    ; CHECK-NEXT: [[S:\$r[0-9]+]] = ADDI $r15, -32
+    ; CHECK-NEXT: $r12 = MEMGET8 killed [[S]]
+    ; CHECK-NEXT: [[S:\$r[0-9]+]] = ADDI $r15, -32
+    ; CHECK-NEXT: MEMSET64 killed [[S]], $r0
+    ; CHECK-NEXT: [[S:\$r[0-9]+]] = ADDI $r15, -32
+    ; CHECK-NEXT: STIDX64 killed [[S]], $r0, 8
+    ; CHECK-NEXT: [[S:\$r[0-9]+]] = ADDI $r15, -32
+    ; CHECK-NEXT: CMPRV_I killed [[S]], 8
+    ; CHECK-NEXT: $r12 = LDIDX64 $r15, 2147483615
+    ; CHECK-NEXT: [[S:\$r[0-9]+]] = ADDI $r15, -32
+    ; CHECK-NEXT: $r12 = LDIDX64 killed [[S]], -2147483648
+    $r12 = LDIDX64 %stack.0, 8
+    $r12 = LDIDX8_S %stack.0, 1
+    STIDX32 $r0, %stack.0, 4
+    $r12 = ADDI %stack.0, 16, implicit-def dead $flags
+    $r12 = LDIDX64R %stack.0, $r1
+    STIDX16R $r0, %stack.0, $r1
+    $r12 = MEMGET8 %stack.0
+    MEMSET64 %stack.0, $r0
+    STIDX64 %stack.0, $r0, 8
+    CMPRV_I %stack.0, 8, implicit-def $flags
+    $r12 = LDIDX64 %stack.0, 2147483647
+    $r12 = LDIDX64 %stack.0, -2147483648
+    RET_I implicit $r12
+...

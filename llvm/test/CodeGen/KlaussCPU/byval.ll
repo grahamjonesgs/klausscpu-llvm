@@ -29,9 +29,9 @@ define void @pass_const() {
 ; CHECK-DAG:     setru {{r([1-9]|1[0-5])}}, cs+8
 ; CHECK-DAG:     setru {{r([1-9]|1[0-5])}}, cs{{$}}
 ; CHECK-DAG:     addi r0, r15, -32
-; CHECK-DAG:     stidx64 r12, r0, 24
-; CHECK-DAG:     stidx64 r12, r0, 16
-; CHECK-DAG:     stidx64 r12, r0, 8
+; CHECK-DAG:     stidx64 r12, r15, -8
+; CHECK-DAG:     stidx64 r12, r15, -16
+; CHECK-DAG:     stidx64 r12, r15, -24
 ; CHECK-DAG:     stidx64 r12, r15, -32
 ; CHECK-NOT:     {{(setr|copy) r0,}}
 ; CHECK:         call take
@@ -45,7 +45,7 @@ define void @pass_stack_slot(ptr %p) {
 ; CHECK:         enter 8
 ; CHECK:         ldidx64 r12, r0, 24
 ; CHECK-NEXT:    addi [[COPY:r[0-9]+]], r15, -32
-; CHECK:         stidx64 r12, [[COPY]], 24
+; CHECK:         stidx64 r12, r15, -8
 ; CHECK:         ldidx64 r12, r0, 0
 ; CHECK:         stidx64 r12, r15, -32
 ; CHECK-NEXT:    getsp [[SP:r[0-9]+]]
@@ -75,12 +75,12 @@ define void @pass_vla(i64 %n, ptr %p) {
 ; CHECK:         call use
 ; CHECK-NEXT:    addsp 24
 ; CHECK-NEXT:    ldidx64 r12, [[P:r[0-9]+]], 24
-; CHECK-NEXT:    addi [[COPY:r[0-9]+]], r15, -40
-; CHECK-NEXT:    stidx64 r12, [[COPY]], 24
+; CHECK-NEXT:    stidx64 r12, r15, -16
 ; CHECK:         ldidx64 r12, [[P]], 0
 ; CHECK-NEXT:    stidx64 r12, r15, -40
 ; CHECK-NEXT:    addsp -32
 ; CHECK-NEXT:    getsp [[SP:r[0-9]+]]
+; CHECK-NEXT:    addi [[COPY:r[0-9]+]], r15, -40
 ; CHECK:         stidx64 [[COPY]], [[SP]], 24
 ; CHECK-NEXT:    call take5
 ; CHECK-NEXT:    addsp 32
@@ -91,25 +91,25 @@ define void @pass_vla(i64 %n, ptr %p) {
 }
 
 ; Odd-size, align-1 byval: inlined as byte loads from the original and
-; stores into the copy, and R0 gets the copy's frame address.  The final
-; byte (offset 12 or 2) goes through R0 and the first word is stored through
-; R15 at the same offset as the addi, so both prove the copy is what is passed.
+; stores into the copy, and R0 gets the copy's frame address.  The copy's
+; stores are R15-relative; their offsets, relative to the addi's, prove the
+; copy is what is passed.
 declare void @take13(ptr byval([13 x i8]) align 1)
 declare void @take3(ptr byval({ i8, i8, i8 }) align 1)
 
 define void @pass_odd(ptr %p, ptr %q) {
 ; CHECK-LABEL: pass_odd:
-; CHECK:         addi r0, r15, [[C13:-[0-9]+]]
+; CHECK:         stidx8 {{r[0-9]+}}, r15, [[#%d,E13:]]
+; CHECK:         stidx32 {{r[0-9]+}}, r15, [[#%d,E13-4]]
+; CHECK:         addi r0, r15, [[#%d,E13-12]]
 ; CHECK-NOT:     {{(copy|addi|setr) r0,}}
-; CHECK:         stidx8 {{r[0-9]+}}, r0, 12
-; CHECK:         stidx32 {{r[0-9]+}}, r0, 8
-; CHECK-NOT:     {{(copy|addi|setr) r0,}}
-; CHECK:         stidx64 {{r[0-9]+}}, r15, [[C13]]
+; CHECK:         stidx64 {{r[0-9]+}}, r15, [[#%d,E13-12]]
 ; CHECK-NEXT:    call take13
-; CHECK:         addi r0, r15, [[C3:-[0-9]+]]
-; CHECK-NEXT:    stidx8 {{r[0-9]+}}, r0, 2
+; CHECK:         addi r0, r15, [[#%d,C3:]]
 ; CHECK-NOT:     {{(copy|addi|setr) r0,}}
-; CHECK:         stidx16 {{r[0-9]+}}, r15, [[C3]]
+; CHECK:         stidx8 {{r[0-9]+}}, r15, [[#%d,C3+2]]
+; CHECK-NOT:     {{(copy|addi|setr) r0,}}
+; CHECK:         stidx16 {{r[0-9]+}}, r15, [[#%d,C3]]
 ; CHECK-NEXT:    call take3
   call void @take13(ptr byval([13 x i8]) align 1 %p)
   call void @take3(ptr byval({ i8, i8, i8 }) align 1 %q)

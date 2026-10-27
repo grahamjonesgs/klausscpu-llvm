@@ -6,18 +6,18 @@
 // KlaussCPUGenDAGISel.inc), driven by the isel patterns in
 // KlaussCPUInstrInfo.td.  This file holds the pass scaffolding, the
 // ComplexPattern hook (SelectAddrFI), the inline-asm memory operand hook and
-// the nodes Select() handles itself:
+// the two nodes Select() handles itself:
 //   BR_CC, KlaussCPUISD::SELECT_CC: they pick the 32-bit W compare by looking
 //     at how each operand was extended and whether stripping the extension
 //     removes an instruction.  BR_CC also glues the compare (which defines
 //     only FLAGS) to its conditional jump; as a pattern that would need a
 //     FLAGS-producing compare node, and the W-compare choice would still be
 //     C++, so both nodes stay here.
-//   LOAD / STORE straight off a frame index (selectFrameIndexMemOp).
 //
 //===----------------------------------------------------------------------===//
 
 #include "KlaussCPUTargetMachine.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/Support/Debug.h"
@@ -46,6 +46,10 @@ static cl::opt<bool> EnableW32Alu(
     "klausscpu-w32-alu", cl::init(true), cl::Hidden,
     cl::desc("ISA v3 D3: select ADDW/SUBW/ADDIW/MULW for sign-extended 32-bit "
              "add/sub/mul"));
+static cl::opt<bool> FoldFrameIndexOffset(
+    "klausscpu-fold-fi-offset", cl::init(true), cl::Hidden,
+    cl::desc("Fold a frame index plus a constant into the offset of a "
+             "load, store or frame-address ADDI"));
 static cl::opt<bool> EnableW32Compare(
     "klausscpu-w32-compare", cl::init(true), cl::Hidden,
     cl::desc("ISA v3 D2: select 32-bit CMPRRW/CMPRVW for compares of "
@@ -159,8 +163,17 @@ public:
 
   void Select(SDNode *N) override;
 
-  bool SelectAddrFI(SDValue Addr, SDValue &Base);
-  bool selectFrameIndexMemOp(LSBaseSDNode *N);
+  bool SelectAddrFI(SDValue Addr, SDValue &Base, SDValue &Offset) {
+    return selectFrameAddr(Addr, /*Scale=*/1, Base, Offset);
+  }
+  bool SelectAddrFIMem(SDNode *Parent, SDValue Addr, SDValue &Base,
+                       SDValue &Offset) {
+    unsigned Scale = cast<MemSDNode>(Parent)->getMemoryVT().getStoreSize();
+    return selectFrameAddr(Addr, Scale, Base, Offset);
+  }
+  bool selectFrameAddr(SDValue Addr, unsigned Scale, SDValue &Base,
+                       SDValue &Offset);
+  bool frameOffsetFitsShortForm(int FI, int64_t C, unsigned Scale) const;
 
   bool SelectInlineAsmMemoryOperand(const SDValue &Op,
                                     InlineAsm::ConstraintCode ConstraintID,
@@ -191,10 +204,6 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
     LLVM_DEBUG(dbgs() << "== "; N->dump(CurDAG); dbgs() << "\n");
     return;
   }
-
-  if ((N->getOpcode() == ISD::LOAD || N->getOpcode() == ISD::STORE) &&
-      selectFrameIndexMemOp(cast<LSBaseSDNode>(N)))
-    return;
 
   // ---- ISD::BR_CC → CMPRR_I/CMPRV_I + conditional JMP -------------------
   // ISD::BR_CC: (chain, condcode, lhs, rhs, dest_bb)
@@ -312,67 +321,78 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
   SelectCode(N);
 }
 
-// AddrFI: a frame index used as an address, or as a value (ADDI rd, FI, 0).
-bool KlaussCPUDAGToDAGISel::SelectAddrFI(SDValue Addr, SDValue &Base) {
+// A constant is folded onto a frame index only while slot offset + constant
+// is sure to fit in simm32: |constant| < 512 MiB, four times the address
+// space, so only a frame over 1.5 GiB could overflow (eliminateFrameIndex
+// copes with that too, except at an inline asm).
+static bool isFrameIndexOffset(int64_t C) { return isInt<30>(C); }
+
+// Would frame object FI + C be in reach of the 1-word short form (a signed
+// 8-bit offset scaled by the access size, unscaled for ADDI) once the frame
+// is laid out?  An incoming-argument slot's offset is already known.  A
+// local's is not, but PEI places the callee-saved slots (at most R4-R7)
+// nearest the frame register, then the locals in index order and the spill
+// slots, which are created later, below them: the local is no further away
+// than the callee-saved area plus the size of every local up to and
+// including it.  This is only a size estimate; any offset is correct.
+bool KlaussCPUDAGToDAGISel::frameOffsetFitsShortForm(int FI, int64_t C,
+                                                     unsigned Scale) const {
+  const MachineFrameInfo &MFI = MF->getFrameInfo();
+  int64_t Lo = -128 * int64_t(Scale), Hi = 127 * int64_t(Scale);
+  if (MFI.isFixedObjectIndex(FI)) {
+    // getFrameIndexReference: fixed objects are R15 + 8 + their offset.
+    int64_t Off = MFI.getObjectOffset(FI) + 8 + C;
+    return Off >= Lo && Off <= Hi;
+  }
+  int64_t Dist = 4 * 8;
+  for (int I = 0; I <= FI; ++I)
+    if (!MFI.isDeadObjectIndex(I) && !MFI.isVariableSizedObjectIndex(I))
+      Dist += MFI.getObjectSize(I) + MFI.getObjectAlign(I).value() - 1;
+  // The slot starts somewhere in [R15 - Dist, R15 - 1].
+  return C - Dist >= Lo && C - 1 <= Hi;
+}
+
+// AddrFI / AddrFIMem: a frame index, or a frame index plus a constant (add,
+// or a disjoint or), as (TargetFrameIndex, offset).  eliminateFrameIndex
+// rewrites the pair to (frame register, slot offset + offset).  As a value it
+// is one ADDI rd, FI, offset (AddrFI); a load or store of Scale bytes takes
+// it as its base and offset (AddrFIMem).
+//
+// Folding the constant saves the ADDI that computes the slot address, but an
+// access whose R15-relative offset is out of short-form reach takes 2 words,
+// where through the slot address in a register its small offset takes 1.
+// So the constant is folded when the offset is likely to be in reach, or
+// when the frame index has at most two accesses in this block (two 2-word
+// accesses are no larger than ADDI + two 1-word ones).  Otherwise the
+// GPR-address patterns compute the slot address once.
+bool KlaussCPUDAGToDAGISel::selectFrameAddr(SDValue Addr, unsigned Scale,
+                                            SDValue &Base, SDValue &Offset) {
+  int64_t C = 0;
+  if (CurDAG->isBaseWithConstantOffset(Addr)) {
+    auto *FIN = dyn_cast<FrameIndexSDNode>(Addr.getOperand(0));
+    C = cast<ConstantSDNode>(Addr.getOperand(1))->getSExtValue();
+    if (!FIN || !FoldFrameIndexOffset || !isFrameIndexOffset(C))
+      return false;
+    if (!frameOffsetFitsShortForm(FIN->getIndex(), C, Scale)) {
+      // Count the users of FI and of each FI + constant.
+      unsigned Accesses = 0;
+      for (SDNode *U : FIN->users()) {
+        SDValue UV(U, 0);
+        bool FIPlusConst = U->getNumOperands() == 2 &&
+                           U->getOperand(0).getNode() == FIN &&
+                           CurDAG->isBaseWithConstantOffset(UV);
+        Accesses += FIPlusConst ? U->use_size() : 1;
+      }
+      if (Accesses > 2)
+        return false;
+    }
+    Addr = Addr.getOperand(0);
+  }
   auto *FIN = dyn_cast<FrameIndexSDNode>(Addr);
   if (!FIN)
     return false;
   Base = CurDAG->getTargetFrameIndex(FIN->getIndex(), MVT::i64);
-  return true;
-}
-
-// The base+offset load/store for an access of N's width and extension.
-static unsigned getIndexedMemOpcode(const LSBaseSDNode *N) {
-  if (!N->getMemoryVT().isScalarInteger())
-    return 0;
-  unsigned Bits = N->getMemoryVT().getSizeInBits();
-  if (auto *SN = dyn_cast<StoreSDNode>(N)) {
-    if (SN->isTruncatingStore() != (Bits != 64))
-      return 0;
-    switch (Bits) {
-    case 64: return KlaussCPU::STIDX64;
-    case 32: return KlaussCPU::STIDX32;
-    case 16: return KlaussCPU::STIDX16;
-    case 8:  return KlaussCPU::STIDX8;
-    }
-    return 0;
-  }
-  ISD::LoadExtType Ext = cast<LoadSDNode>(N)->getExtensionType();
-  if ((Ext == ISD::NON_EXTLOAD) != (Bits == 64))
-    return 0;
-  bool S = Ext == ISD::SEXTLOAD;
-  switch (Bits) {
-  case 64: return KlaussCPU::LDIDX64;
-  case 32: return S ? KlaussCPU::LDIDX32_S : KlaussCPU::LDIDX32;
-  case 16: return S ? KlaussCPU::LDIDX16_S : KlaussCPU::LDIDX16;
-  case 8:  return S ? KlaussCPU::LDIDX8_S : KlaussCPU::LDIDX8;
-  }
-  return 0;
-}
-
-// A load or store straight off a frame index: the TargetFrameIndex as the
-// base with offset 0, which eliminateFrameIndex rewrites to (frame register,
-// slot offset).  This is the AddrFI pattern for loads and stores, but done
-// here because the node it builds carries no memory operands, as it always
-// has: a pattern would attach them, and the scheduling freedom they give
-// changes the generated code.  Making that switch is a separate change.
-bool KlaussCPUDAGToDAGISel::selectFrameIndexMemOp(LSBaseSDNode *N) {
-  SDValue Base;
-  unsigned Opc = getIndexedMemOpcode(N);
-  if (!Opc || !SelectAddrFI(N->getBasePtr(), Base))
-    return false;
-  SDLoc DL(N);
-  SDValue Off = CurDAG->getTargetConstant(0, DL, MVT::i64);
-  if (auto *SN = dyn_cast<StoreSDNode>(N)) {
-    SDValue Ops[] = {SN->getValue(), Base, Off, SN->getChain()};
-    ReplaceNode(N, CurDAG->getMachineNode(Opc, DL, MVT::Other, Ops));
-    return true;
-  }
-  SDValue Ops[] = {Base, Off, N->getChain()};
-  SDNode *Res = CurDAG->getMachineNode(
-      Opc, DL, CurDAG->getVTList(MVT::i64, MVT::Other), Ops);
-  ReplaceUses(N, Res);
-  CurDAG->RemoveDeadNode(N);
+  Offset = CurDAG->getTargetConstant(C, SDLoc(Addr), MVT::i64);
   return true;
 }
 
@@ -380,14 +400,11 @@ bool KlaussCPUDAGToDAGISel::selectFrameIndexMemOp(LSBaseSDNode *N) {
 // printed by KlaussCPUAsmPrinter::PrintAsmMemoryOperand as `base, offset` --
 // the operand syntax of the LDIDX*/STIDX* instructions.  A frame index base
 // stays a TargetFrameIndex followed by its offset, which eliminateFrameIndex
-// rewrites to (FrameReg, slot offset + offset).
-//
-// A constant is folded onto a frame index only while slot offset + constant
-// is sure to fit in simm32: |constant| < 512 MiB, four times the address
-// space, so only a frame over 1.5 GiB could overflow.  Otherwise
-// eliminateFrameIndex would need a scratch register at the asm, where every
-// GPR may be clobbered or used.  A larger constant stays in the address,
-// which the register allocator computes like any other value.
+// rewrites to (FrameReg, slot offset + offset).  The constant is limited as
+// for AddrFI (isFrameIndexOffset): eliminateFrameIndex cannot use a scratch
+// register at the asm, where every GPR may be clobbered or used.  A larger
+// constant stays in the address, which the register allocator computes like
+// any other value.
 bool KlaussCPUDAGToDAGISel::SelectInlineAsmMemoryOperand(
     const SDValue &Op, InlineAsm::ConstraintCode ConstraintID,
     std::vector<SDValue> &OutOps) {
@@ -405,7 +422,7 @@ bool KlaussCPUDAGToDAGISel::SelectInlineAsmMemoryOperand(
   if (CurDAG->isBaseWithConstantOffset(Op)) {
     int64_t C = cast<ConstantSDNode>(Op.getOperand(1))->getSExtValue();
     bool FIBase = isa<FrameIndexSDNode>(Op.getOperand(0));
-    if (FIBase ? isInt<30>(C) : isInt<32>(C)) {
+    if (FIBase ? isFrameIndexOffset(C) : isInt<32>(C)) {
       Base = Op.getOperand(0);
       Offset = C;
     }
