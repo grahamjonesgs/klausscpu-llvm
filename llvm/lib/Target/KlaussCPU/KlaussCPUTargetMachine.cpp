@@ -117,8 +117,9 @@ KlaussCPUTargetMachine::createMachineFunctionInfo(BumpPtrAllocator &Allocator,
 }
 
 void KlaussCPUPassConfig::addIRPasses() {
-  // There are no atomic instructions (MaxAtomicSizeInBitsSupported is 0):
-  // turn atomic loads, stores, RMWs and cmpxchgs into __atomic_* libcalls.
+  // Forced atomics (KlaussCPUTargetLowering constructor): atomics wider than
+  // 64 bits or misaligned become __atomic_* libcalls, the RMWs without a
+  // __sync_* libcall (FP, uinc/udec_wrap, usub_cond/sat) cmpxchg loops.
   addPass(createAtomicExpandLegacyPass());
   TargetPassConfig::addIRPasses();
 }

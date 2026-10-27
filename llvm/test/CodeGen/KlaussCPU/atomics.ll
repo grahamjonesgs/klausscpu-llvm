@@ -2,10 +2,12 @@
 ; RUN: llc -march=klausscpu -verify-machineinstrs -O1 < %s | FileCheck %s
 ; RUN: llc -march=klausscpu -verify-machineinstrs -O0 < %s | FileCheck %s --check-prefix=O0
 
-; There are no atomic instructions (MaxAtomicSizeInBitsSupported is 0).
-; AtomicExpandPass turns atomic loads, stores, RMWs and cmpxchgs into
-; __atomic_* libcalls (the last argument is the C11 memory order), and a
-; fence is only a compiler barrier: the core is in-order and single-issue.
+; There are no atomic instructions: "forced atomics" (as RISC-V
+; +forced-atomics).  An aligned atomic load or store of up to 8 bytes is a
+; plain load or store, an RMW or cmpxchg a __sync_* libcall (the runtime's
+; src/atomic.c, interrupts masked), and a fence only a compiler barrier: the
+; core is in-order and single-issue.  Per-size coverage: atomic-load-store.ll,
+; atomic-rmw.ll, atomic-cmpxchg.ll, atomic-rmw-expand.ll.
 
 @counter = global i32 0
 @wide = global i64 0
@@ -13,18 +15,16 @@
 define i32 @load_relaxed() nounwind {
 ; CHECK-LABEL: load_relaxed:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    setru r0, counter
-; CHECK-NEXT:    setr r1, 0
-; CHECK-NEXT:    call __atomic_load_4
+; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    setru r12, counter
+; CHECK-NEXT:    ldidx32 r12, r12, 0
 ; CHECK-NEXT:    leaveret
 ;
 ; O0-LABEL: load_relaxed:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 3
-; O0-NEXT:    setru r0, counter
-; O0-NEXT:    setr r1, 0
-; O0-NEXT:    call __atomic_load_4
+; O0-NEXT:    enter 0
+; O0-NEXT:    setru r12, counter
+; O0-NEXT:    ldidx32 r12, r12, 0
 ; O0-NEXT:    leaveret
   %v = load atomic i32, ptr @counter monotonic, align 4
   ret i32 %v
@@ -33,21 +33,17 @@ define i32 @load_relaxed() nounwind {
 define void @store_seq_cst(i32 %x) nounwind {
 ; CHECK-LABEL: store_seq_cst:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    copy r1, r0
-; CHECK-NEXT:    setru r0, counter
-; CHECK-NEXT:    setr r2, 5
-; CHECK-NEXT:    call __atomic_store_4
+; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    setru r12, counter
+; CHECK-NEXT:    stidx32 r0, r12, 0
 ; CHECK-NEXT:    leaveret
 ;
 ; O0-LABEL: store_seq_cst:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 3
-; O0-NEXT:    copy r1, r0
-; O0-NEXT:    # kill: def $r0 killed $r1
-; O0-NEXT:    setru r0, counter
-; O0-NEXT:    setr r2, 5
-; O0-NEXT:    call __atomic_store_4
+; O0-NEXT:    enter 0
+; O0-NEXT:    # kill: def $r12 killed $r0
+; O0-NEXT:    setru r12, counter
+; O0-NEXT:    stidx32 r0, r12, 0
 ; O0-NEXT:    leaveret
   store atomic i32 %x, ptr @counter seq_cst, align 4
   ret void
@@ -56,18 +52,16 @@ define void @store_seq_cst(i32 %x) nounwind {
 define i64 @load_acquire_i64() nounwind {
 ; CHECK-LABEL: load_acquire_i64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    setru r0, wide
-; CHECK-NEXT:    setr r1, 2
-; CHECK-NEXT:    call __atomic_load_8
+; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    setru r12, wide
+; CHECK-NEXT:    ldidx64 r12, r12, 0
 ; CHECK-NEXT:    leaveret
 ;
 ; O0-LABEL: load_acquire_i64:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 3
-; O0-NEXT:    setru r0, wide
-; O0-NEXT:    setr r1, 2
-; O0-NEXT:    call __atomic_load_8
+; O0-NEXT:    enter 0
+; O0-NEXT:    setru r12, wide
+; O0-NEXT:    ldidx64 r12, r12, 0
 ; O0-NEXT:    leaveret
   %v = load atomic i64, ptr @wide acquire, align 8
   ret i64 %v
@@ -79,8 +73,7 @@ define i32 @fetch_add(i32 %x) nounwind {
 ; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    copy r1, r0
 ; CHECK-NEXT:    setru r0, counter
-; CHECK-NEXT:    setr r2, 5
-; CHECK-NEXT:    call __atomic_fetch_add_4
+; CHECK-NEXT:    call __sync_fetch_and_add_4
 ; CHECK-NEXT:    leaveret
 ;
 ; O0-LABEL: fetch_add:
@@ -89,8 +82,7 @@ define i32 @fetch_add(i32 %x) nounwind {
 ; O0-NEXT:    copy r1, r0
 ; O0-NEXT:    # kill: def $r0 killed $r1
 ; O0-NEXT:    setru r0, counter
-; O0-NEXT:    setr r2, 5
-; O0-NEXT:    call __atomic_fetch_add_4
+; O0-NEXT:    call __sync_fetch_and_add_4
 ; O0-NEXT:    leaveret
   %v = atomicrmw add ptr @counter, i32 %x seq_cst
   ret i32 %v
@@ -100,16 +92,14 @@ define i8 @xchg_i8(ptr %p, i8 %x) nounwind {
 ; CHECK-LABEL: xchg_i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    setr r2, 4
-; CHECK-NEXT:    call __atomic_exchange_1
+; CHECK-NEXT:    call __sync_lock_test_and_set_1
 ; CHECK-NEXT:    leaveret
 ;
 ; O0-LABEL: xchg_i8:
 ; O0:       # %bb.0:
 ; O0-NEXT:    enter 3
 ; O0-NEXT:    # kill: def $r12 killed $r1
-; O0-NEXT:    setr r2, 4
-; O0-NEXT:    call __atomic_exchange_1
+; O0-NEXT:    call __sync_lock_test_and_set_1
 ; O0-NEXT:    leaveret
   %v = atomicrmw xchg ptr %p, i8 %x acq_rel
   ret i8 %v
@@ -118,33 +108,22 @@ define i8 @xchg_i8(ptr %p, i8 %x) nounwind {
 define i32 @cas(i32 %expected, i32 %desired) nounwind {
 ; CHECK-LABEL: cas:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 5
-; CHECK-NEXT:    stidx32 r0, r15, -4
+; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    copy r2, r1
-; CHECK-NEXT:    getsp r12
-; CHECK-NEXT:    setr r14, 5
+; CHECK-NEXT:    copy r1, r0
 ; CHECK-NEXT:    setru r0, counter
-; CHECK-NEXT:    addi r1, r15, -4
-; CHECK-NEXT:    setr r3, 5
-; CHECK-NEXT:    stidx64 r14, r12, 24
-; CHECK-NEXT:    call __atomic_compare_exchange_4
-; CHECK-NEXT:    ldidx32 r12, r15, -4
+; CHECK-NEXT:    call __sync_val_compare_and_swap_4
 ; CHECK-NEXT:    leaveret
 ;
 ; O0-LABEL: cas:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 5
+; O0-NEXT:    enter 3
 ; O0-NEXT:    copy r2, r1
-; O0-NEXT:    # kill: def $r1 killed $r2
-; O0-NEXT:    # kill: def $r12 killed $r0
-; O0-NEXT:    stidx32 r0, r15, -4
-; O0-NEXT:    getsp r12
-; O0-NEXT:    setr r3, 5
-; O0-NEXT:    stidx64 r3, r12, 24
+; O0-NEXT:    copy r1, r0
+; O0-NEXT:    # kill: def $r12 killed $r2
+; O0-NEXT:    # kill: def $r0 killed $r1
 ; O0-NEXT:    setru r0, counter
-; O0-NEXT:    addi r1, r15, -4
-; O0-NEXT:    call __atomic_compare_exchange_4
-; O0-NEXT:    ldidx32 r12, r15, -4
+; O0-NEXT:    call __sync_val_compare_and_swap_4
 ; O0-NEXT:    leaveret
   %pair = cmpxchg ptr @counter, i32 %expected, i32 %desired seq_cst seq_cst
   %v = extractvalue { i32, i1 } %pair, 0

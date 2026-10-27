@@ -34,6 +34,11 @@ public:
     TLSSupported = false;
     // No hardware FP.
     HasFloat128 = false;
+    // Atomics up to 8 bytes are inline: the backend makes their loads and
+    // stores plain accesses and their RMW / cmpxchg __sync_* libcalls
+    // ("forced atomics", atomic within one core only).  Wider ones are
+    // __atomic_* library calls.
+    MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 64;
   }
 
   void getTargetDefines(const LangOptions &Opts,

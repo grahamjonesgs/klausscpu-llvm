@@ -23,7 +23,7 @@ describe earlier states of the backend and are superseded by this file.
 | C type model | `int`=32; `long`/`long long`/`void*`=64 |
 | Hardware FP | none — soft-float (compiler-rt builtins) |
 | CMOV | none — `select` becomes a `SELECT_CC_RR/RI` pseudo, expanded to compare + branch; a run of selects on the same condition shares one compare/branch (one PHI each) |
-| Atomics | none — `setMaxAtomicSizeInBitsSupported(0)`; AtomicExpand turns every atomic op into an `__atomic_*` libcall, fences are compiler barriers |
+| Atomics | no instructions — "forced atomics" (as RISC-V `+forced-atomics`), **atomic within one core only**: an aligned atomic load/store of 1/2/4/8 bytes is the plain access (patterns), a fence a compiler barrier, every RMW / cmpxchg a `__sync_*_N` libcall (LibCall actions) that the runtime's `src/atomic.c` runs with `INT_MASK` saved/zeroed/restored; FP / `uinc_wrap` / `udec_wrap` / `usub_*` RMWs are cmpxchg loops (`shouldExpandAtomicRMWInIR`); wider or misaligned atomics are `__atomic_*` libcalls (not provided).  Sub-word libcall values go in any-extended and come back zero-extended.  Clang inlines atomics up to 64 bits (`MaxAtomicInlineWidth`).  Nothing makes them atomic against core 2 (AMP), whose DDR view also bypasses core 1's D-cache |
 | Sign-extending loads | i8/i16/i32: hardware (`LDIDX8_S`/`LDIDX16_S`/`LDIDX32_S`) |
 | Load/store addressing | `[r]` (`MEMGETn`/`MEMSETn`), `r + simm32` (`LDIDXn`/`STIDXn`, 1-word short form for a small scaled offset), `r + r` at every width (`LDIDXnR`/`LDIDXn_SR`/`STIDXnR`, MODE=11); 16/32-bit forms other than `MEMGET32` force-align the EA |
 | 32-bit ops | `ADDW`/`SUBW`/`ADDIW`/`MULW`, `CMPRRW`/`CMPRVW`, boolean `CMPxxRW`/`CMPxxVW` (ISA v3 D2/D3) |

@@ -2139,3 +2139,47 @@ def : Pat<(truncstorei16 (i64 GPR:$val), (add (i64 GPR:$base), (i64 GPR:$idx))),
           (STIDX16R GPR:$val, GPR:$base, GPR:$idx)>;
 def : Pat<(truncstorei32 (i64 GPR:$val), (add (i64 GPR:$base), (i64 GPR:$idx))),
           (STIDX32R GPR:$val, GPR:$base, GPR:$idx)>;
+
+//===----------------------------------------------------------------------===//
+// Atomic loads and stores ("forced atomics", KlaussCPUISelLowering.cpp)
+//===----------------------------------------------------------------------===//
+// A naturally aligned atomic load or store of 1/2/4/8 bytes is the plain
+// access, whatever its ordering: the in-order core makes every access visible
+// in program order.  The same addressing modes as the plain accesses: [r]
+// (offset 0), r + simm32, a frame slot (AddrFIMem) and r + r.  A sub-word
+// atomic load is zero-extending by default (getExtendForAtomicOps); the
+// combiner may turn it into a sign-extending one.  Every form is naturally
+// aligned (AtomicExpand makes a misaligned atomic a libcall), so the forced
+// EA alignment of the 16/32-bit forms does not matter.
+multiclass AtomicLoadPat<PatFrags ld, Instruction Inst, Instruction InstRR> {
+  def : Pat<(i64 (ld (i64 GPR:$base))), (Inst GPR:$base, 0)>;
+  def : Pat<(i64 (ld (add (i64 GPR:$base), simm32_imm:$off))),
+            (Inst GPR:$base, simm32_imm:$off)>;
+  let AddedComplexity = 10 in
+  def : Pat<(i64 (ld (AddrFIMem (i64 GPR:$base), simm32_imm:$off))),
+            (Inst GPR:$base, simm32_imm:$off)>;
+  def : Pat<(i64 (ld (add (i64 GPR:$base), (i64 GPR:$idx)))),
+            (InstRR GPR:$base, GPR:$idx)>;
+}
+multiclass AtomicStorePat<PatFrag st, Instruction Inst, Instruction InstRR> {
+  def : Pat<(st (i64 GPR:$val), (i64 GPR:$base)),
+            (Inst GPR:$val, GPR:$base, 0)>;
+  def : Pat<(st (i64 GPR:$val), (add (i64 GPR:$base), simm32_imm:$off)),
+            (Inst GPR:$val, GPR:$base, simm32_imm:$off)>;
+  let AddedComplexity = 10 in
+  def : Pat<(st (i64 GPR:$val), (AddrFIMem (i64 GPR:$base), simm32_imm:$off)),
+            (Inst GPR:$val, GPR:$base, simm32_imm:$off)>;
+  def : Pat<(st (i64 GPR:$val), (add (i64 GPR:$base), (i64 GPR:$idx))),
+            (InstRR GPR:$val, GPR:$base, GPR:$idx)>;
+}
+defm : AtomicLoadPat<atomic_load_nonext_64, LDIDX64,   LDIDX64R>;
+defm : AtomicLoadPat<atomic_load_azext_32,  LDIDX32,   LDIDX32R>;
+defm : AtomicLoadPat<atomic_load_sext_32,   LDIDX32_S, LDIDX32_SR>;
+defm : AtomicLoadPat<atomic_load_azext_16,  LDIDX16,   LDIDX16R>;
+defm : AtomicLoadPat<atomic_load_sext_16,   LDIDX16_S, LDIDX16_SR>;
+defm : AtomicLoadPat<atomic_load_azext_8,   LDIDX8,    LDIDX8R>;
+defm : AtomicLoadPat<atomic_load_sext_8,    LDIDX8_S,  LDIDX8_SR>;
+defm : AtomicStorePat<atomic_store_64, STIDX64, STIDX64R>;
+defm : AtomicStorePat<atomic_store_32, STIDX32, STIDX32R>;
+defm : AtomicStorePat<atomic_store_16, STIDX16, STIDX16R>;
+defm : AtomicStorePat<atomic_store_8,  STIDX8,  STIDX8R>;

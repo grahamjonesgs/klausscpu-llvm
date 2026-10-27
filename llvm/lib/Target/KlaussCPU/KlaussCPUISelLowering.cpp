@@ -5,8 +5,9 @@
 // Key architecture constraints:
 //   - No hardware FP               → soft-float
 //   - No CMOV                      → SELECT must be expanded
-//   - No atomics                   → setMaxAtomicSizeInBitsSupported(0);
-//                                    AtomicExpand makes __atomic_* libcalls
+//   - No atomic instructions       → forced atomics: atomic load/store
+//                                    ≤ 8 bytes are plain loads/stores,
+//                                    RMW/cmpxchg are __sync_* libcalls
 //   - Sign-extending loads         → LDIDX8_S / LDIDX16_S / LDIDX32_S
 //   - Hardware integer ops         → div, mul-high, min/max, setcc are Legal
 //
@@ -32,6 +33,7 @@
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/DiagnosticInfo.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <optional>
@@ -139,12 +141,33 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i16, Legal);
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i32, Legal);
 
-  // ---- No atomics ----
-  // AtomicExpandPass (KlaussCPUPassConfig::addIRPasses) turns every atomic
-  // load/store/RMW/cmpxchg into an __atomic_* libcall.  Fences reach the DAG
-  // and are only compiler barriers (LowerATOMIC_FENCE).
-  setMaxAtomicSizeInBitsSupported(0);
+  // ---- Atomics: "forced atomics", as RISC-V +forced-atomics ----
+  // The ISA has no atomic RMW, CAS or LL/SC.  Up to 64 bits:
+  //  - a naturally aligned atomic load/store is a plain load/store (patterns
+  //    in KlaussCPUInstrInfo.td): the in-order core makes every access
+  //    visible in program order, also to its own interrupt handlers;
+  //  - a fence is only a compiler barrier (LowerATOMIC_FENCE);
+  //  - every RMW and cmpxchg is a __sync_*_N libcall, which the runtime
+  //    implements with interrupts masked (klausscpu-runtime src/atomic.c).
+  //    Atomic within one core only.
+  // AtomicExpandPass turns larger or misaligned atomics into __atomic_*
+  // libcalls and the RMWs without a __sync libcall into cmpxchg loops
+  // (shouldExpandAtomicRMWInIR).  The libcalls pass sub-word values
+  // any-extended and return them zero-extended (the default
+  // getExtendForAtomicOps, which the runtime matches).
+  setMaxAtomicSizeInBitsSupported(64);
   setOperationAction(ISD::ATOMIC_FENCE, MVT::Other, Custom);
+  // The sign- and zero-extending loads are atomic too, so a [sz]ext of an
+  // atomic load folds into it (LDIDXn_S / LDIDXn).
+  setAtomicLoadExtAction({ISD::SEXTLOAD, ISD::ZEXTLOAD}, MVT::i64,
+                         {MVT::i8, MVT::i16, MVT::i32}, Legal);
+  setOperationAction({ISD::ATOMIC_CMP_SWAP, ISD::ATOMIC_SWAP,
+                      ISD::ATOMIC_LOAD_ADD, ISD::ATOMIC_LOAD_SUB,
+                      ISD::ATOMIC_LOAD_AND, ISD::ATOMIC_LOAD_OR,
+                      ISD::ATOMIC_LOAD_XOR, ISD::ATOMIC_LOAD_NAND,
+                      ISD::ATOMIC_LOAD_MIN, ISD::ATOMIC_LOAD_MAX,
+                      ISD::ATOMIC_LOAD_UMIN, ISD::ATOMIC_LOAD_UMAX},
+                     MVT::i64, LibCall);
 
   // ---- Stack operations ----
   setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i64, Custom);
@@ -321,6 +344,20 @@ SDValue KlaussCPUTargetLowering::LowerOperation(SDValue Op,
   default:
     report_fatal_error("KlaussCPU: unimplemented LowerOperation opcode");
   }
+}
+
+// The __sync libcalls cover xchg and the integer RMW ops (LibCall in the
+// constructor); the others become a loop around cmpxchg, as in RISC-V.
+TargetLowering::AtomicExpansionKind
+KlaussCPUTargetLowering::shouldExpandAtomicRMWInIR(
+    const AtomicRMWInst *AI) const {
+  if (AI->isFloatingPointOperation() ||
+      AI->getOperation() == AtomicRMWInst::UIncWrap ||
+      AI->getOperation() == AtomicRMWInst::UDecWrap ||
+      AI->getOperation() == AtomicRMWInst::USubCond ||
+      AI->getOperation() == AtomicRMWInst::USubSat)
+    return AtomicExpansionKind::CmpXChg;
+  return AtomicExpansionKind::None;
 }
 
 bool KlaussCPUTargetLowering::isZExtFree(SDValue Val, EVT VT2) const {
@@ -821,7 +858,8 @@ SDValue KlaussCPUTargetLowering::LowerDYNAMIC_STACKALLOC(SDValue Op,
 
 // The core is in-order and single-issue, so its own loads and stores already
 // take effect in program order (also as seen by its interrupt handlers): a
-// fence only has to stop the compiler moving memory accesses across it.  It
+// fence only has to stop the compiler moving memory accesses across it (the
+// __sync_* libcalls are calls, so nothing moves across them either).  It
 // does NOT make stores visible to the second (AMP) core, whose view of DDR
 // bypasses core 1's write-back D-cache; cross-core hand-offs need an explicit
 // CACHE_CTRL FLUSH (MMIO_MAP.md) before the doorbell/flag write.
