@@ -443,6 +443,19 @@ the `klausscpu-runtime` repo root; see its READMEs for build/run detail:
 
 ## Known issues
 
+- **A misaligned access through a pointer that claims natural alignment reads
+  or writes the aligned-down address.**  Every 16/32-bit load and store except
+  `MEMGET32` (`[r]` 32-bit, `U_LOAD32`) clears the low address bits in hardware
+  (`pipeline_core.sv` U_LOAD issue address / store byte enables).  That is UB in
+  C (`*(uint32_t *)(buf + 1)`), and the backend only splits accesses whose IR
+  alignment is below natural (`allowsMisalignedMemoryAccesses` is false).  Since
+  `r + r` selects `LDIDX32R` instead of `ADDR` + `MEMGET32`, a type-punned
+  `*(uint32_t *)(buf + i)` with odd `i` no longer gets away with it; `buf + 4`
+  (`LDIDX32`) never did.  Use `memcpy` or a packed struct for unaligned data.
+- **The klausscc assembler/disassembler table (`src/isa/table.rs`) only names
+  `LDIDX64R`/`STIDX64R` among the MODE=11 forms.**  The emulator executes the
+  8/16/32-bit `ldidxNr`/`ldidxNsr`/`stidxNr` correctly (generic decode), but
+  klausscc disassembly and crash dumps do not name them; extend the table there.
 - **Zephyr *packaged* logging (`cbprintf_package`) may still mis-render mixed
   32/64-bit conversions.**  The packaged path (`lib/os/cbprintf_packaged.c`,
   used by deferred/immediate `LOG_*`) packs each arg by its C-type size
