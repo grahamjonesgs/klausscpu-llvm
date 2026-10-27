@@ -25,7 +25,7 @@ define i64 @b(i64 %x) nounwind {
 ; STATIC-LABEL: b:
 ; STATIC:       # %bb.0:
 ; STATIC-NEXT:    enter 0
-; STATIC-NEXT:    setr r12, a
+; STATIC-NEXT:    setru r12, a
 ; STATIC-NEXT:    ldidx64 r12, r12, 0
 ; STATIC-NEXT:    addr r12, r12, r0
 ; STATIC-NEXT:    leaveret
@@ -46,8 +46,8 @@ define i64 @sp() nounwind {
 ; STATIC-LABEL: sp:
 ; STATIC:       # %bb.0:
 ; STATIC-NEXT:    enter 0
-; STATIC-NEXT:    setr r12, K
-; STATIC-NEXT:    setr r14, flags
+; STATIC-NEXT:    setru r12, K
+; STATIC-NEXT:    setru r14, flags
 ; STATIC-NEXT:    ldidx64 r12, r12, 16
 ; STATIC-NEXT:    stidx64 r12, r14, 0
 ; STATIC-NEXT:    leaveret
@@ -70,7 +70,7 @@ define void @ra(ptr %f) nounwind {
 ; STATIC-LABEL: ra:
 ; STATIC:       # %bb.0:
 ; STATIC-NEXT:    enter 0
-; STATIC-NEXT:    setr r12, b
+; STATIC-NEXT:    setru r12, b
 ; STATIC-NEXT:    stidx64 r12, r0, 0
 ; STATIC-NEXT:    leaveret
 ;
@@ -93,7 +93,7 @@ define i64 @p() nounwind {
 ; STATIC-NEXT:    call b
 ; STATIC-NEXT:    copy r4, r12
 ; STATIC-NEXT:    call sp
-; STATIC-NEXT:    setr r0, r1
+; STATIC-NEXT:    setru r0, r1
 ; STATIC-NEXT:    addr r4, r4, r12
 ; STATIC-NEXT:    call ra
 ; STATIC-NEXT:    copy r12, r4

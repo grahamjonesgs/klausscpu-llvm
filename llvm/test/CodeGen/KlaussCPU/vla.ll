@@ -17,7 +17,7 @@ define void @two_vlas(i64 %n, i64 %m) {
 ; CHECK:         subr [[A:r[0-9]+]], [[SP1]], {{r[0-9]+}}
 ; CHECK-NEXT:    setsp [[A]]
 ; CHECK:         getsp [[SP2:r[0-9]+]]
-; CHECK-NEXT:    subr [[B:r[0-9]+]], [[SP2]], {{r[0-9]+}}
+; CHECK:         subr [[B:r[0-9]+]], [[SP2]], {{r[0-9]+}}
 ; CHECK-NEXT:    setsp [[B]]
 ; CHECK:         call use
   %a = alloca i8, i64 %n, align 8

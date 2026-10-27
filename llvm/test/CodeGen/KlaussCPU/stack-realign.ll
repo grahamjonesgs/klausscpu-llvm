@@ -23,7 +23,7 @@ define void @align32() nounwind {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 15
 ; CHECK-NEXT:    stidx64 r7, r15, -8 # 8-byte Folded Spill
-; CHECK-NEXT:    andv r7, r15, 4294967264
+; CHECK-NEXT:    andi r7, r15, -32
 ; CHECK-NEXT:    addi r0, r7, -64
 ; CHECK-NEXT:    call use
 ; CHECK-NEXT:    ldidx64 r7, r15, -8 # 8-byte Folded Reload
@@ -35,7 +35,7 @@ define void @align32() nounwind {
 ; PUSH-NEXT:    getsp r15
 ; PUSH-NEXT:    addsp -120
 ; PUSH-NEXT:    stidx64 r7, r15, -8 # 8-byte Folded Spill
-; PUSH-NEXT:    andv r7, r15, 4294967264
+; PUSH-NEXT:    andi r7, r15, -32
 ; PUSH-NEXT:    addi r0, r7, -64
 ; PUSH-NEXT:    call use
 ; PUSH-NEXT:    ldidx64 r7, r15, -8 # 8-byte Folded Reload
@@ -53,7 +53,7 @@ define i64 @i128_local() nounwind {
 ; O1:       # %bb.0:
 ; O1-NEXT:    enter 9
 ; O1-NEXT:    stidx64 r7, r15, -8 # 8-byte Folded Spill
-; O1-NEXT:    andv r7, r15, 4294967280
+; O1-NEXT:    andi r7, r15, -16
 ; O1-NEXT:    call mk
 ; O1-NEXT:    addi r14, r7, -32
 ; O1-NEXT:    bset r14, r14, 3
@@ -69,7 +69,7 @@ define i64 @i128_local() nounwind {
 ; O0:       # %bb.0:
 ; O0-NEXT:    enter 9
 ; O0-NEXT:    stidx64 r7, r15, -8 # 8-byte Folded Spill
-; O0-NEXT:    andv r7, r15, 4294967280
+; O0-NEXT:    andi r7, r15, -16
 ; O0-NEXT:    call mk
 ; O0-NEXT:    copy r14, r12
 ; O0-NEXT:    addi r12, r7, -32
@@ -88,7 +88,7 @@ define i64 @i128_local() nounwind {
 ; PUSH-NEXT:    getsp r15
 ; PUSH-NEXT:    addsp -72
 ; PUSH-NEXT:    stidx64 r7, r15, -8 # 8-byte Folded Spill
-; PUSH-NEXT:    andv r7, r15, 4294967280
+; PUSH-NEXT:    andi r7, r15, -16
 ; PUSH-NEXT:    call mk
 ; PUSH-NEXT:    addi r14, r7, -32
 ; PUSH-NEXT:    bset r14, r14, 3
@@ -118,12 +118,11 @@ define void @align64_vla(i64 %n) nounwind {
 ; O1:       # %bb.0:
 ; O1-NEXT:    enter 15
 ; O1-NEXT:    addi r12, r0, 7
-; O1-NEXT:    setr r14, -8
 ; O1-NEXT:    stidx64 r7, r15, -16 # 8-byte Folded Spill
 ; O1-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; O1-NEXT:    andv r7, r15, 4294967232
-; O1-NEXT:    andr r12, r12, r14
 ; O1-NEXT:    getsp r14
+; O1-NEXT:    andi r7, r15, -64
+; O1-NEXT:    andi r12, r12, -8
 ; O1-NEXT:    subr r4, r14, r12
 ; O1-NEXT:    setsp r4
 ; O1-NEXT:    addsp -24
@@ -142,10 +141,9 @@ define void @align64_vla(i64 %n) nounwind {
 ; O0:       # %bb.0:
 ; O0-NEXT:    enter 23
 ; O0-NEXT:    stidx64 r7, r15, -8 # 8-byte Folded Spill
-; O0-NEXT:    andv r7, r15, 4294967232
+; O0-NEXT:    andi r7, r15, -64
 ; O0-NEXT:    addi r12, r0, 7
-; O0-NEXT:    setr r14, -8
-; O0-NEXT:    andr r14, r12, r14
+; O0-NEXT:    andi r14, r12, -8
 ; O0-NEXT:    getsp r12
 ; O0-NEXT:    subr r12, r12, r14
 ; O0-NEXT:    stidx64 r12, r7, -72 # 8-byte Folded Spill
@@ -167,12 +165,11 @@ define void @align64_vla(i64 %n) nounwind {
 ; PUSH-NEXT:    getsp r15
 ; PUSH-NEXT:    addsp -120
 ; PUSH-NEXT:    addi r12, r0, 7
-; PUSH-NEXT:    setr r14, -8
 ; PUSH-NEXT:    stidx64 r7, r15, -16 # 8-byte Folded Spill
 ; PUSH-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; PUSH-NEXT:    andv r7, r15, 4294967232
-; PUSH-NEXT:    andr r12, r12, r14
 ; PUSH-NEXT:    getsp r14
+; PUSH-NEXT:    andi r7, r15, -64
+; PUSH-NEXT:    andi r12, r12, -8
 ; PUSH-NEXT:    subr r4, r14, r12
 ; PUSH-NEXT:    setsp r4
 ; PUSH-NEXT:    addsp -24
@@ -201,7 +198,7 @@ define i64 @stack_arg(i64 %a, i64 %b, i64 %c, i64 %d, i64 %e) nounwind {
 ; O1:       # %bb.0:
 ; O1-NEXT:    enter 15
 ; O1-NEXT:    stidx64 r7, r15, -16 # 8-byte Folded Spill
-; O1-NEXT:    andv r7, r15, 4294967264
+; O1-NEXT:    andi r7, r15, -32
 ; O1-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; O1-NEXT:    ldidx64 r4, r15, 40
 ; O1-NEXT:    addi r0, r7, -64
@@ -215,7 +212,7 @@ define i64 @stack_arg(i64 %a, i64 %b, i64 %c, i64 %d, i64 %e) nounwind {
 ; O0:       # %bb.0:
 ; O0-NEXT:    enter 15
 ; O0-NEXT:    stidx64 r7, r15, -8 # 8-byte Folded Spill
-; O0-NEXT:    andv r7, r15, 4294967264
+; O0-NEXT:    andi r7, r15, -32
 ; O0-NEXT:    ldidx64 r12, r15, 40
 ; O0-NEXT:    stidx64 r12, r7, -72 # 8-byte Folded Spill
 ; O0-NEXT:    addi r0, r7, -64
@@ -230,7 +227,7 @@ define i64 @stack_arg(i64 %a, i64 %b, i64 %c, i64 %d, i64 %e) nounwind {
 ; PUSH-NEXT:    getsp r15
 ; PUSH-NEXT:    addsp -120
 ; PUSH-NEXT:    stidx64 r7, r15, -16 # 8-byte Folded Spill
-; PUSH-NEXT:    andv r7, r15, 4294967264
+; PUSH-NEXT:    andi r7, r15, -32
 ; PUSH-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; PUSH-NEXT:    ldidx64 r4, r15, 40
 ; PUSH-NEXT:    addi r0, r7, -64
@@ -254,7 +251,7 @@ define void @cfi() uwtable {
 ; CHECK-NEXT:    .cfi_def_cfa r15, 16
 ; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    stidx64 r7, r15, -8 # 8-byte Folded Spill
-; CHECK-NEXT:    andv r7, r15, 4294967280
+; CHECK-NEXT:    andi r7, r15, -16
 ; CHECK-NEXT:    .cfi_offset r7, -24
 ; CHECK-NEXT:    addi r0, r7, -16
 ; CHECK-NEXT:    call use
@@ -270,7 +267,7 @@ define void @cfi() uwtable {
 ; PUSH-NEXT:    .cfi_def_cfa_register r15
 ; PUSH-NEXT:    addsp -56
 ; PUSH-NEXT:    stidx64 r7, r15, -8 # 8-byte Folded Spill
-; PUSH-NEXT:    andv r7, r15, 4294967280
+; PUSH-NEXT:    andi r7, r15, -16
 ; PUSH-NEXT:    .cfi_offset r7, -24
 ; PUSH-NEXT:    addi r0, r7, -16
 ; PUSH-NEXT:    call use
@@ -318,12 +315,10 @@ define void @dyn_align64(i64 %n) nounwind {
 ; O1:       # %bb.0:
 ; O1-NEXT:    enter 0
 ; O1-NEXT:    addi r12, r0, 7
-; O1-NEXT:    setr r14, -8
-; O1-NEXT:    andr r12, r12, r14
 ; O1-NEXT:    getsp r14
+; O1-NEXT:    andi r12, r12, -8
 ; O1-NEXT:    subr r12, r14, r12
-; O1-NEXT:    setr r14, -64
-; O1-NEXT:    andr r0, r12, r14
+; O1-NEXT:    andi r0, r12, -64
 ; O1-NEXT:    setsp r0
 ; O1-NEXT:    addsp -24
 ; O1-NEXT:    call use
@@ -334,12 +329,10 @@ define void @dyn_align64(i64 %n) nounwind {
 ; O0:       # %bb.0:
 ; O0-NEXT:    enter 0
 ; O0-NEXT:    addi r12, r0, 7
-; O0-NEXT:    setr r14, -8
-; O0-NEXT:    andr r14, r12, r14
+; O0-NEXT:    andi r14, r12, -8
 ; O0-NEXT:    getsp r12
 ; O0-NEXT:    subr r12, r12, r14
-; O0-NEXT:    setr r14, -64
-; O0-NEXT:    andr r0, r12, r14
+; O0-NEXT:    andi r0, r12, -64
 ; O0-NEXT:    setsp r0
 ; O0-NEXT:    addsp -24
 ; O0-NEXT:    call use
@@ -350,13 +343,11 @@ define void @dyn_align64(i64 %n) nounwind {
 ; PUSH:       # %bb.0:
 ; PUSH-NEXT:    push r15
 ; PUSH-NEXT:    addi r12, r0, 7
-; PUSH-NEXT:    setr r14, -8
 ; PUSH-NEXT:    getsp r15
-; PUSH-NEXT:    andr r12, r12, r14
 ; PUSH-NEXT:    getsp r14
+; PUSH-NEXT:    andi r12, r12, -8
 ; PUSH-NEXT:    subr r12, r14, r12
-; PUSH-NEXT:    setr r14, -64
-; PUSH-NEXT:    andr r0, r12, r14
+; PUSH-NEXT:    andi r0, r12, -64
 ; PUSH-NEXT:    setsp r0
 ; PUSH-NEXT:    addsp -24
 ; PUSH-NEXT:    call use

@@ -1,7 +1,7 @@
 //===-- KlaussCPUFixupKinds.h - KlaussCPU fixup entry definitions ----------===//
 //
 // FK_KlaussCPU_ABS32   — 32-bit absolute address, word 1 (bytes [4:7]) of an
-//                         8-byte branch/call/SETR instruction. LE byte order.
+//                         8-byte branch/call/SETR(U) instruction. LE order.
 // FK_KlaussCPU_PCREL32 — 32-bit signed PC-relative offset, word 1 of an 8-byte
 //                         JMPREL/JMPxxREL/CALLREL/LEAPC instruction.
 //                         field_value = target - PC_of_instruction.

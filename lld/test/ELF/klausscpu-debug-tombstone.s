@@ -1,15 +1,18 @@
 # REQUIRES: klausscpu
 ## KlaussCPU code starts at 0x20, so references from .debug_* to a section
 ## discarded by --gc-sections resolve to the -1 tombstone (0xffffffff), not
-## 0, which would make dead functions overlap live code.  .debug_ranges /
-## .debug_loc keep the generic tombstone of 1.
+## 0, which would make dead functions overlap live code; an 8-byte reference
+## (R_KLAUSSCPU_ABS64) gets all-ones, although that relocation otherwise
+## zero-extends the 32-bit address.  .debug_ranges / .debug_loc keep the
+## generic tombstone of 1.
 
 # RUN: llvm-mc -triple=klausscpu -filetype=obj %s -o %t.o
 # RUN: ld.lld --gc-sections -e live %t.o -o %t
 # RUN: llvm-objdump -s -j .debug_info -j .debug_ranges %t | FileCheck %s
 
 # CHECK:      Contents of section .debug_info:
-# CHECK-NEXT:  0000 ffffffff [[LIVE:[0-9a-f]{8}]]
+# CHECK-NEXT:  0000 ffffffff [[LIVE:[0-9a-f]{8}]] ffffffff ffffffff
+# CHECK-NEXT:  0010 [[LIVE]] 00000000
 # CHECK:      Contents of section .debug_ranges:
 # CHECK-NEXT:  0000 01000000
 
@@ -25,6 +28,8 @@ live:
         .section .debug_info,"",@progbits
         .long dead
         .long live
+        .quad dead
+        .quad live
 
         .section .debug_ranges,"",@progbits
         .long dead

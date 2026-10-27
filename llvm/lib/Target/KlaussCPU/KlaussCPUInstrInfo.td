@@ -48,7 +48,7 @@ def callseq_end   : SDNode<"ISD::CALLSEQ_END", SDT_KlaussCPUCallSeqEnd,
                            [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]>;
 
 // Address of a global, external symbol, block address or jump table, from
-// LowerGlobalAddress & co: SETR (ABS32 fixup) or, under PIC, LEAPC (PCREL32).
+// LowerGlobalAddress & co: SETRU (ABS32 fixup) or, under PIC, LEAPC (PCREL32).
 // The wrapper keeps the target symbol node, which CSEs, from being the node
 // that selection replaces.
 def KlaussCPUAddr  : SDNode<"KlaussCPUISD::ADDR", SDTIntUnaryOp>;
@@ -554,8 +554,8 @@ class RRRV<bits<32> word0, string mnem, Operand immop>
 }
 
 // Compare register to immediate — flags only, no output (CMPRV)
-class RV_cmp<bits<32> word0, string asmstr>
-    : KCInst64<word0, (outs), (ins GPR:$rs, simm32:$imm), asmstr> {
+class RV_cmp<bits<32> word0, string asmstr, Operand immop = simm32>
+    : KCInst64<word0, (outs), (ins GPR:$rs, immop:$imm), asmstr> {
   bits<4>  rs;
   bits<32> imm;
   let Inst{63-32} = imm;
@@ -945,7 +945,7 @@ def ADJCALLSTACKUP   : Pseudo<(outs), (ins i64imm:$amt1, i64imm:$amt2),
 
 // SELECT without CMOV: KlaussCPUISD::SELECT_CC (lhs, rhs, cc, t, f) selects
 // to one of these; EmitInstrWithCustomInserter (KlaussCPUISelLowering.cpp)
-// expands it to CMPRR/CMPRV + the conditional jump in $jmp + a PHI.
+// expands it to CMPRR/CMPRV/CMPRVU + the conditional jump in $jmp + a PHI.
 // $jmp holds the JMPxx opcode (from KlaussCPUInstrInfo::getCondBranchOpcode).
 // Defs=[FLAGS]: the expansion's compare clobbers the flags.
 let usesCustomInserter = 1, hasSideEffects = 0, Defs = [FLAGS] in {
@@ -1014,6 +1014,18 @@ let hasSideEffects = 0, isReMaterializable = 1 in {
 let isAsCheapAsAMove = 1, isMoveImm = 1 in
 def SETR    : RV_ld<0x8BD00000, "setr\t$rd, $imm", [], simm32_abs>;
 
+// Load 32-bit immediate zero-extended to 64 bits: the class 2 MOV with
+// SGN=0 (pipeline_core.sv f_decode_raw `{4'd15,1'b0}` U_MOV, ex_imm and
+// exo_result; ISA_ENCODING_V2_MAP §5 "zero-extended MOV").  Constants in
+// [2^31, 2^32) and symbol addresses, which are 32-bit and zero-extended
+// like LEAPC's (CPU_ARCHITECTURE.md §11).  Not isAsCheapAsAMove, like the
+// SETR64 it replaces: MachineLICM then hoists such a constant (mostly an MMIO
+// address) out of a loop instead of leaving it in the body to be
+// rematerialized there (with the flag, the emulator corpus executed ~9K/14K
+// more instructions at -O1/-O2 than with SETR64).
+let isMoveImm = 1 in
+def SETRU   : RV_ld<0x8BC00000, "setru\t$rd, $imm", [], uimm32_abs>;
+
 // Load full 64-bit immediate: rd = (hi32 << 32) | lo32
 let isMoveImm = 1 in
 def SETR64  : V64_ld<0xCBC00000, "setr64\t$rd, $lo, $hi">;
@@ -1026,6 +1038,13 @@ def MINUSV  : RV_imm<0x88600000, "minusv", uimm32>;
 def ANDV    : RV_imm<0x89000000, "andv", uimm32>;
 def ORV     : RV_imm<0x89400000, "orv", uimm32>;
 def XORV    : RV_imm<0x89800000, "xorv", uimm32>;
+// The same bitwise ops with a sign-extended imm32 (SGN=1: pipeline_core.sv
+// f_decode_raw class 2 `{4'd4..6,1'b0}`, ex_b): a mask with the high 32 bits
+// set, e.g. the `& -8` of an alignment round-up.  The CPU writes no flags for
+// AND/OR/XOR (no fmask).
+def ANDI    : RV_imm<0x89100000, "andi"> { let Defs = []; }
+def ORI     : RV_imm<0x89500000, "ori">  { let Defs = []; }
+def XORI    : RV_imm<0x89900000, "xori"> { let Defs = []; }
 // Shift by immediate (count = imm[5:0]); v2: single word, count embedded.
 def SHLV    : ShiftImmN<0x50204000, "shlv">;
 def SHRV    : ShiftImmN<0x50604000, "shrv">;
@@ -1043,9 +1062,14 @@ def RORV    : ShiftImmN<0x51204000, "rorv">;
 // Also materialises a frame address in one instruction (see AddrFI).
 def ADDI : RRV_alu<0x88300000, "addi\t$rd, $rs, $imm">;
 
-// Compare register to immediate — flags only (see CMPRR_I on side effects)
-let hasSideEffects = 0 in
-def CMPRV_I : RV_cmp<0x8C100000, "cmprv\t$rs, $imm">;
+// Compare register to immediate — flags only (see CMPRR_I on side effects).
+// CMPRVU_I zero-extends its imm32 (class 3 SGN=0: pipeline_core.sv
+// f_decode_raw class 3, id_b_sext / ex_b): a compare with a constant in
+// [2^31, 2^32).
+let hasSideEffects = 0 in {
+def CMPRV_I  : RV_cmp<0x8C100000, "cmprv\t$rs, $imm">;
+def CMPRVU_I : RV_cmp<0x8C000000, "cmprvu\t$rs, $imm", uimm32>;
+}
 
 //===----------------------------------------------------------------------===//
 // Memory: indexed load / store  (primary frame-slot instructions)
@@ -1099,7 +1123,17 @@ def : MnemonicAlias<"ldidx32_s", "ldidx32s">;
 //===----------------------------------------------------------------------===//
 
 def simm32_imm : ImmLeaf<i64, [{return isInt<32>(Imm);}]>;
-def nonsimm32_imm : ImmLeaf<i64, [{return !isInt<32>(Imm);}]>;
+// A constant in [2^31, 2^32): an unsigned 32-bit value that no sign-extending
+// imm32 reaches (SETRU / ADDV / CMPRVU).
+def uimm32_nonsimm32_imm
+    : ImmLeaf<i64, [{return isUInt<32>(Imm) && !isInt<32>(Imm);}]>;
+// The negation of one, as `add` sees a subtraction of it (MINUSV).
+def neg_uimm32_nonsimm32_imm
+    : ImmLeaf<i64, [{return Imm < 0 && isUInt<32>(-(uint64_t)Imm) &&
+                            !isInt<32>(Imm);}]>;
+// Neither a sign- nor a zero-extended imm32 (SETR64).
+def imm64_imm
+    : ImmLeaf<i64, [{return !isInt<32>(Imm) && !isUInt<32>(Imm);}]>;
 
 // SETR64's halves: rd = (hi32 << 32) | lo32, each printed signed.
 def Lo32XForm : SDNodeXForm<imm, [{
@@ -1110,15 +1144,25 @@ def Hi32XForm : SDNodeXForm<imm, [{
   return CurDAG->getTargetConstant(SignExtend64<32>(N->getZExtValue() >> 32),
                                    SDLoc(N), MVT::i64);
 }]>;
+def NegImm : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(-N->getSExtValue(), SDLoc(N), MVT::i64);
+}]>;
 
-// Materialize a signed 32-bit constant into a GPR using SETR, any other
-// 64-bit constant with one 12-byte SETR64.
+// Materialize a constant into a GPR: a signed 32-bit one with SETR, one in
+// [2^31, 2^32) with the zero-extending SETRU (both 2 words; their CompressPats
+// pick the 1-word form for -128..255), any other with one 12-byte SETR64.
 def : Pat<(i64 simm32_imm:$imm), (SETR simm32_imm:$imm)>;
-def : Pat<(i64 nonsimm32_imm:$imm),
+def : Pat<(i64 uimm32_nonsimm32_imm:$imm), (SETRU uimm32_nonsimm32_imm:$imm)>;
+def : Pat<(i64 imm64_imm:$imm),
           (SETR64 (Lo32XForm imm:$imm), (Hi32XForm imm:$imm))>;
 
-// Register + signed-32-bit constant addition → ADDI (one instruction).
+// Register + 32-bit constant addition in one instruction: ADDI sign-extends
+// its imm32, ADDV zero-extends it, and MINUSV subtracts a zero-extended one.
 def : Pat<(i64 (add GPR:$rs, simm32_imm:$imm)), (ADDI GPR:$rs, simm32_imm:$imm)>;
+def : Pat<(i64 (add GPR:$rs, uimm32_nonsimm32_imm:$imm)),
+          (ADDV GPR:$rs, uimm32_nonsimm32_imm:$imm)>;
+def : Pat<(i64 (add GPR:$rs, neg_uimm32_nonsimm32_imm:$imm)),
+          (MINUSV GPR:$rs, (NegImm imm:$imm))>;
 
 // A frame index as a value: ADDI rd, FI, 0 (AddrFI gives the
 // TargetFrameIndex, which eliminateFrameIndex rewrites to the frame register,
@@ -1143,6 +1187,7 @@ def : Pat<(i64 AddrFI:$fi), (ADDI AddrFI:$fi, 0)>;
 // getting these wrong would silently miscompile:
 //   SHLV/SHRV/SHRAV : shift count is imm[5:0]            → uimm6   (0–63)
 //   ANDV/ORV/XORV   : imm32 is ZERO-extended to 64 bits  → uimm32_imm (hi32==0)
+//   ANDI/ORI/XORI   : imm32 is SIGN-extended to 64 bits   → negsimm32_imm
 //   MULV            : imm32 is SIGN-extended to 64 bits   → simm32_imm
 // Out-of-range constants simply fall through to the register-register form.
 //===----------------------------------------------------------------------===//
@@ -1155,10 +1200,17 @@ def : Pat<(srl GPR:$rs, uimm6:$sh), (SHRV  GPR:$rs, uimm6:$sh)>;
 def : Pat<(sra GPR:$rs, uimm6:$sh), (SHRAV GPR:$rs, uimm6:$sh)>;
 
 // Bitwise op with a mask that fits in unsigned 32 bits (imm is zero-extended).
-// Masks with non-zero high 32 bits fall through to SETR64 + ANDR/ORR/XORR.
+// Masks that are neither a zero- nor a sign-extended imm32 fall through to
+// SETR64 + ANDR/ORR/XORR.
 def : Pat<(and GPR:$rs, uimm32_imm:$i), (ANDV GPR:$rs, uimm32_imm:$i)>;
 def : Pat<(or  GPR:$rs, uimm32_imm:$i), (ORV  GPR:$rs, uimm32_imm:$i)>;
 def : Pat<(xor GPR:$rs, uimm32_imm:$i), (XORV GPR:$rs, uimm32_imm:$i)>;
+// A negative simm32 mask (high 32 bits all ones; -1 itself is NOTR).
+def negsimm32_imm
+    : ImmLeaf<i64, [{ return Imm < 0 && Imm != -1 && isInt<32>(Imm); }]>;
+def : Pat<(and GPR:$rs, negsimm32_imm:$i), (ANDI GPR:$rs, negsimm32_imm:$i)>;
+def : Pat<(or  GPR:$rs, negsimm32_imm:$i), (ORI  GPR:$rs, negsimm32_imm:$i)>;
+def : Pat<(xor GPR:$rs, negsimm32_imm:$i), (XORI GPR:$rs, negsimm32_imm:$i)>;
 
 // Multiply by a signed-32 constant (imm is sign-extended).
 def : Pat<(mul GPR:$rs, simm32_imm:$i), (MULV GPR:$rs, simm32_imm:$i)>;
@@ -1318,8 +1370,10 @@ let hasSideEffects = 0, isReMaterializable = 1 in
 def LEAPC   : RV_ld<0x8B800000, "leapc\t$rd, $imm", [], pcrel_simm32>;
 
 // Symbol addresses (see KlaussCPUAddr).
+// A non-PIC address is zero-extended (SETRU) like a PIC one (LEAPC builds
+// {32'b0, PC + imm32}) and a 32-bit integer pointer constant.
 foreach sym = [tglobaladdr, texternalsym, tblockaddress, tjumptable] in {
-def : Pat<(KlaussCPUAddr sym:$sym), (SETR sym:$sym)>;
+def : Pat<(KlaussCPUAddr sym:$sym), (SETRU sym:$sym)>;
 def : Pat<(KlaussCPULeaPC sym:$sym), (LEAPC sym:$sym)>;
 }
 
@@ -1586,9 +1640,9 @@ class ShortForm<KCInst64 long, dag outs, dag ins, string asmstr>
   let Predicates = [HasShortForms];
 }
 
-// rd = imm8 (SETR)
-class ShortRdImm<KCInst64 long, string asmstr>
-    : ShortForm<long, (outs GPR:$rd), (ins simm8_lsl0:$imm), asmstr> {
+// rd = imm8 (SETR, SETRU)
+class ShortRdImm<KCInst64 long, string asmstr, Operand immop = simm8_lsl0>
+    : ShortForm<long, (outs GPR:$rd), (ins immop:$imm), asmstr> {
   bits<4> rd;
   bits<8> imm;
   let Inst{19-12} = imm;
@@ -1663,6 +1717,10 @@ class ShortBranch<KCInst64 long, string asmstr>
 
 let hasSideEffects = 0 in {
 def SETR_SH    : ShortRdImm<SETR, "setr\t$rd, $imm">;
+def SETRU_SH   : ShortRdImm<SETRU, "setru\t$rd, $imm", uimm8>;
+def ANDI_SH    : ShortRdRsImm<ANDI, "andi\t$rd, $rs, $imm">;
+def ORI_SH     : ShortRdRsImm<ORI, "ori\t$rd, $rs, $imm">;
+def XORI_SH    : ShortRdRsImm<XORI, "xori\t$rd, $rs, $imm">;
 let Defs = [FLAGS] in {
 def ADDV_SH    : ShortRdRsImm<ADDV, "addv\t$rd, $rs, $imm", uimm8>;
 def MINUSV_SH  : ShortRdRsImm<MINUSV, "minusv\t$rd, $rs, $imm", uimm8>;
@@ -1717,8 +1775,15 @@ let isCompressOnly = true in {
 let Predicates = [HasShortForms] in {
 def : CompressPat<(SETR GPR:$rd, simm8_lsl0:$imm),
                   (SETR_SH GPR:$rd, simm8_lsl0:$imm)>;
-def : CompressPat<(ADDI GPR:$rd, GPR:$rs, simm8_lsl0:$imm),
-                  (ADDI_SH GPR:$rd, GPR:$rs, simm8_lsl0:$imm)>;
+// 128..255: the zero-extending short MOV loads the same value.
+def : CompressPat<(SETR GPR:$rd, uimm8:$imm),
+                  (SETRU_SH GPR:$rd, uimm8:$imm)>;
+def : CompressPat<(SETRU GPR:$rd, uimm8:$imm),
+                  (SETRU_SH GPR:$rd, uimm8:$imm)>;
+foreach op = ["ADDI", "ANDI", "ORI", "XORI"] in
+def : CompressPat<(!cast<KCInst64>(op) GPR:$rd, GPR:$rs, simm8_lsl0:$imm),
+                  (!cast<KCInst32>(op # "_SH") GPR:$rd, GPR:$rs,
+                                               simm8_lsl0:$imm)>;
 def : CompressPat<(CMPRV_I GPR:$rs, simm8_lsl0:$imm),
                   (CMPRV_SH GPR:$rs, simm8_lsl0:$imm)>;
 foreach op = ["ADDV", "MINUSV", "ANDV", "ORV", "XORV"] in

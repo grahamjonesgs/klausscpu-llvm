@@ -135,7 +135,7 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::STACKRESTORE,       MVT::Other, Custom);
 
   // ---- Global addresses / symbols ----
-  // Non-PIC: GlobalAddress → ADDR → SETR (absolute 32-bit address).
+  // Non-PIC: GlobalAddress → ADDR → SETRU (absolute 32-bit address).
   // PIC:     GlobalAddress → LEAPC → LEAPC insn (PC-relative, PCREL32 fixup).
   setOperationAction(ISD::GlobalAddress,  MVT::i64, Custom);
   setOperationAction(ISD::ExternalSymbol, MVT::i64, Custom);
@@ -438,7 +438,7 @@ SDValue KlaussCPUTargetLowering::LowerGlobalAddress(SDValue Op,
   SDValue TGA = DAG.getTargetGlobalAddress(N->getGlobal(), SDLoc(N), MVT::i64,
                                             N->getOffset());
   // PIC: wrap in LEAPC → emits LEAPC with PCREL32 fixup.
-  // Non-PIC: wrap in ADDR → emits SETR with ABS32 fixup.
+  // Non-PIC: wrap in ADDR → emits SETRU with ABS32 fixup.
   unsigned WrapOp = getTargetMachine().isPositionIndependent()
                         ? KlaussCPUISD::LEAPC : KlaussCPUISD::ADDR;
   return DAG.getNode(WrapOp, SDLoc(N), MVT::i64, TGA);
@@ -1163,8 +1163,12 @@ MachineBasicBlock *KlaussCPUTargetLowering::EmitInstrWithCustomInserter(
     BuildMI(BB, DL, TII.get(W32 ? KlaussCPU::CMPRRW_I : KlaussCPU::CMPRR_I))
         .addReg(LHSReg)
         .addReg(RHS.getReg());
-  else
+  else if (W32 || isInt<32>(RHS.getImm()))
     BuildMI(BB, DL, TII.get(W32 ? KlaussCPU::CMPRVW_I : KlaussCPU::CMPRV_I))
+        .addReg(LHSReg)
+        .addImm(RHS.getImm());
+  else // [2^31, 2^32): zero-extended imm32
+    BuildMI(BB, DL, TII.get(KlaussCPU::CMPRVU_I))
         .addReg(LHSReg)
         .addImm(RHS.getImm());
   BuildMI(BB, DL, TII.get(JmpOpc)).addMBB(SinkBB);

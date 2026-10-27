@@ -19,7 +19,7 @@
 ;   }
 
 ; ASM-LABEL: realigned:
-; ASM:       andv r7, r15, 4294967264
+; ASM:       andi r7, r15, -32
 ; ASM:       stidx64 r0, r7, -16
 ; ASM:       ldidx64 {{r[0-9]+}}, r15, 40
 ; ASM:       stidx64 {{r[0-9]+}}, r7, -104

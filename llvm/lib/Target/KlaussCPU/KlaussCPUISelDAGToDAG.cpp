@@ -202,9 +202,10 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
   // The compare instruction has no output register (it only sets processor
   // flags): it is chained and glued to the branch (see below).
   //
-  // CMPRV_I accepts a signed-32-bit immediate RHS directly.
-  // CMPRR_I requires both operands to be in registers; a constant outside
-  // simm32 is left in RHS, which the SETR64 pattern materialises.
+  // CMPRV_I accepts a signed-32-bit immediate RHS directly, CMPRVU_I one in
+  // [2^31, 2^32) (zero-extended).  CMPRR_I requires both operands to be in
+  // registers; any other constant is left in RHS, which the SETR64 pattern
+  // materialises.
   if (N->getOpcode() == ISD::BR_CC) {
     ISD::CondCode CC = cast<CondCodeSDNode>(N->getOperand(1))->get();
     SDValue Chain    = N->getOperand(0);
@@ -249,6 +250,11 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
       SDValue Imm  = CurDAG->getTargetConstant(C->getSExtValue(), DL, MVT::i64);
       SDValue Ops[] = {LHS, Imm, Chain};
       CmpNode = CurDAG->getMachineNode(KlaussCPU::CMPRV_I, DL, CmpVTs, Ops);
+    } else if (auto *C = dyn_cast<ConstantSDNode>(RHS);
+               C && isUInt<32>(C->getZExtValue())) {
+      SDValue Imm  = CurDAG->getTargetConstant(C->getZExtValue(), DL, MVT::i64);
+      SDValue Ops[] = {LHS, Imm, Chain};
+      CmpNode = CurDAG->getMachineNode(KlaussCPU::CMPRVU_I, DL, CmpVTs, Ops);
     } else {
       // Register-register compare.
       SDValue Ops[] = {LHS, RHS, Chain};
@@ -285,10 +291,11 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
     bool W = tryW32Compare(CC, LHS, RHS);
     SDValue Jmp = CurDAG->getTargetConstant(
         JmpOpc | (W ? KlaussCPU::SelectCCW32Flag : 0), DL, MVT::i64);
+    // SELECT_CC_RI takes a W compare's 32-bit pattern (printed signed), or a
+    // 64-bit RHS in simm32 (CMPRV) or [2^31, 2^32) (CMPRVU).
     unsigned Opc = KlaussCPU::SELECT_CC_RR;
     if (auto *C = dyn_cast<ConstantSDNode>(RHS);
-        C && (W ? isUInt<32>(C->getZExtValue()) || isInt<32>(C->getSExtValue())
-                : isInt<32>(C->getSExtValue()))) {
+        C && (isUInt<32>(C->getZExtValue()) || isInt<32>(C->getSExtValue()))) {
       Opc = KlaussCPU::SELECT_CC_RI;
       RHS = CurDAG->getTargetConstant(
           W ? static_cast<int64_t>(static_cast<int32_t>(C->getZExtValue()))

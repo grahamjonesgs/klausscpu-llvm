@@ -85,24 +85,23 @@ define i64 @pick_u32(i64 %n, ...) {
 ; CHECK-NEXT:    .cfi_def_cfa r15, 16
 ; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    addi r12, r15, 16
-; CHECK-NEXT:    setr r14, -8
 ; CHECK-NEXT:    stidx64 r3, r15, 32
 ; CHECK-NEXT:    stidx64 r2, r15, 24
 ; CHECK-NEXT:    stidx64 r1, r15, 16
 ; CHECK-NEXT:    addi r12, r12, 15
-; CHECK-NEXT:    andr r12, r12, r14
-; CHECK-NEXT:    addi r13, r12, 15
-; CHECK-NEXT:    andr r14, r13, r14
+; CHECK-NEXT:    andi r12, r12, -8
+; CHECK-NEXT:    addi r14, r12, 15
 ; CHECK-NEXT:    addi r13, r12, 8
+; CHECK-NEXT:    andi r14, r14, -8
 ; CHECK-NEXT:    stidx64 r13, r15, -8
-; CHECK-NEXT:    addi r13, r14, 8
 ; CHECK-NEXT:    ldidx64 r12, r12, 0
+; CHECK-NEXT:    addi r13, r14, 8
 ; CHECK-NEXT:    stidx64 r13, r15, -8
 ; CHECK-NEXT:    zextw r13, r1
-; CHECK-NEXT:    ldidx64 r14, r14, 0
 ; CHECK-NEXT:    zextw r12, r12
-; CHECK-NEXT:    zextw r14, r14
+; CHECK-NEXT:    ldidx64 r14, r14, 0
 ; CHECK-NEXT:    addr r12, r13, r12
+; CHECK-NEXT:    zextw r14, r14
 ; CHECK-NEXT:    addr r12, r12, r14
 ; CHECK-NEXT:    leaveret
   %ap = alloca ptr

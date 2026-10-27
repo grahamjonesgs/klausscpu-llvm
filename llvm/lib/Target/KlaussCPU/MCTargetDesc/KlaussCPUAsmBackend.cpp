@@ -3,7 +3,7 @@
 // Implements MCAsmBackend for KlaussCPU:
 //
 //   FK_KlaussCPU_ABS32   — 32-bit absolute, LE, placed at byte offset 4–7 of
-//     an 8-byte branch/call/SETR instruction (word 1).
+//     an 8-byte branch/call/SETR(U) instruction (word 1).
 //
 //   FK_KlaussCPU_PCREL32 — 32-bit signed PC-relative offset, LE, same word-1
 //     slot.  field_value = target − PC_of_instruction: the hardware adds the
@@ -189,7 +189,7 @@ public:
       NumBytes = 2;
       break;
     // FK_KlaussCPU_ABS32 / FK_Data_4: 32-bit LE address — instruction word-1
-    // slot (CALL/SETR) or 4-byte data reference (EK_Custom32 jump tables).
+    // slot (CALL/SETR(U)) or 4-byte data reference (EK_Custom32 jump tables).
     case FK_Data_4:
     case KlaussCPU::FK_KlaussCPU_ABS32:
       NumBytes = 4;

@@ -27,6 +27,8 @@ describe earlier states of the backend and are superseded by this file.
 | Sign-extending loads | i8/i16/i32: hardware (`LDIDX8_S`/`LDIDX16_S`/`LDIDX32_S`) |
 | Load/store addressing | `[r]` (`MEMGETn`/`MEMSETn`), `r + simm32` (`LDIDXn`/`STIDXn`, 1-word short form for a small scaled offset), `r + r` at every width (`LDIDXnR`/`LDIDXn_SR`/`STIDXnR`, MODE=11); 16/32-bit forms other than `MEMGET32` force-align the EA |
 | 32-bit ops | `ADDW`/`SUBW`/`ADDIW`/`MULW`, `CMPRRW`/`CMPRVW` (ISA v3 D2/D3) |
+| Immediates | each class 2/3 op exists with a sign- and a zero-extended imm32 (SGN bit); isel picks the one that holds the constant: `SETR`/`SETRU` (MOV), `ADDI`/`ADDV`/`MINUSV`, `ANDI`/`ANDV` (and OR/XOR), `CMPRV`/`CMPRVU`; `SETR64` only for a value neither reaches |
+| Addresses | 32-bit, zero-extended in a register: `SETRU sym` (static), `LEAPC` (PIC), `R_KLAUSSCPU_ABS64` data (lld zero-extends) |
 | Indirect branch / call | `JMPR` / `CALLR`; jump tables are off by default (`-klausscpu-min-jump-table-entries=N` enables them) |
 | `llvm.trap` / `llvm.debugtrap` | `HALT` / `TRAP` (the debugger's breakpoint) |
 
@@ -58,7 +60,9 @@ that name in an immediate/target slot (`KlaussCPUAsmParser.cpp` header) — so
 a typo such as `call r1` for `callr r1` is an undefined symbol at link time,
 not an assembler error.  SETR accepts [-2^31, 2^32) and the CPU sign-extends
 the imm32: `setr rX, 0xFFFFFFFF` loads -1 (kept for the runtime's
-`setr r0, 0xF00F0000` MMIO idiom).
+`setr r0, 0xF00F0000` MMIO idiom); `setru` zero-extends.  `setr rX, 128..255`
+compresses to the zero-extending short `setru` (same value), so the asm
+printer and disassembler show `setru` there.
 
 The disassembler is `-gen-disassembler` with one table per width
 (`--specialize-decoders-per-bitwidth`: 32/64/96 bits); `getInstruction` picks
@@ -176,7 +180,7 @@ has a frame (no frame-pointer elimination).
 **Stack realignment:** the ABI stack is only 8-byte aligned.  A function with
 a local aligned to A > 8 (`_Alignas(32)`, an `__int128`) reserves **R7 as a
 base pointer**: the frame grows by A-8, R7 is saved with the other callee-saved
-registers (R15-relative), then `ANDV R7, R15, -A`, and the locals are
+registers (R15-relative), then `ANDI R7, R15, -A`, and the locals are
 addressed R7-relative (`DW_OP_breg7` in the debug info).  Incoming arguments
 and callee-saved slots stay R15-relative; the epilogue and CFA are unchanged.
 Inline asm may not write R7 in such a function.  See
@@ -409,9 +413,9 @@ SelectionDAGTargetInfo    TSI;
 
 ### Global address / large-constant materialization (step 13)
 - `DAG.getTargetGlobalAddress(same_params)` is **CSE-deduplicated** — calling it twice returns the *same* `SDNode*`. If you then call `getMachineNode(SETR, DL, MVT::i64, SDValue(tga_node, 0))` and `ReplaceNode(tga_node, setr_node)`, `ReplaceAllUsesWith` rewrites SETR's own operand from `tga_node` to `setr_node` → self-referential machine instruction `%0 = SETR %0` → RegAllocFast crash `"no reload in start block. Missing vreg def?"`.
-- **Fix — ADDR wrapper node:** `LowerGlobalAddress` / `LowerExternalSymbol` wrap the TargetGlobalAddress in a `KlaussCPUISD::ADDR` node (`LEAPC` under PIC), which the `(KlaussCPUAddr tglobaladdr)` → `SETR` pattern selects: `ADDR` (not TGA) is the node replaced → no circular reference.
+- **Fix — ADDR wrapper node:** `LowerGlobalAddress` / `LowerExternalSymbol` wrap the TargetGlobalAddress in a `KlaussCPUISD::ADDR` node (`LEAPC` under PIC), which the `(KlaussCPUAddr tglobaladdr)` → `SETRU` pattern selects: `ADDR` (not TGA) is the node replaced → no circular reference.
 - Call-site callee addresses **bypass `LowerOperation`** — `LowerCall` calls `DAG.getTargetGlobalAddress()` directly, and the bare TGA is consumed by the `CALL_I` tablegen pattern. Never wrap call-target TGAs in ADDR.
-- `SETR64` is a single 12-byte instruction for 64-bit constants: `rd = (hi32 << 32) | lo32`. Use it for any i64 constant that does not fit in a simm32. Global addresses are always ≤ 32 bits and use SETR, not SETR64.
+- `SETR64` is a single 12-byte instruction for 64-bit constants: `rd = (hi32 << 32) | lo32`. Isel uses it only for an i64 constant that is neither a simm32 (`SETR`) nor a uimm32 (`SETRU`). Global addresses are always ≤ 32 bits and use SETRU (zero-extended, like LEAPC), not SETR64.
 - `SDUse` iterators: `for (auto UI = N->use_begin(); UI != N->use_end(); ++UI)` — `*UI` is an `SDUse&`. Access the user node via `UI->getUser()` (arrow, not dot).
 
 ---
@@ -453,8 +457,9 @@ the `klausscpu-runtime` repo root; see its READMEs for build/run detail:
   `*(uint32_t *)(buf + i)` with odd `i` no longer gets away with it; `buf + 4`
   (`LDIDX32`) never did.  Use `memcpy` or a packed struct for unaligned data.
 - **The klausscc assembler/disassembler table (`src/isa/table.rs`) only names
-  `LDIDX64R`/`STIDX64R` among the MODE=11 forms.**  The emulator executes the
-  8/16/32-bit `ldidxNr`/`ldidxNsr`/`stidxNr` correctly (generic decode), but
+  `LDIDX64R`/`STIDX64R` among the MODE=11 forms, and none of the opposite-SGN
+  immediate forms (`setru`, `cmprvu`, `andi`/`ori`/`xori` and their short
+  forms).**  The emulator executes them correctly (generic decode), but
   klausscc disassembly and crash dumps do not name them; extend the table there.
 - **Zephyr *packaged* logging (`cbprintf_package`) may still mis-render mixed
   32/64-bit conversions.**  The packaged path (`lib/os/cbprintf_packaged.c`,

@@ -76,7 +76,7 @@ define i64 @mem_stack(i64 %v) nounwind {
 ; offset folds into the operand's offset.
 define i64 @load_m_global() nounwind {
 ; CHECK-LABEL: load_m_global:
-; CHECK:         setr [[R:r[0-9]+]], arr{{$}}
+; CHECK:         setru [[R:r[0-9]+]], arr{{$}}
 ; CHECK:         #APP
 ; CHECK-NEXT:    ldidx64 r{{[0-9]+}}, [[R]], 32
 ; CHECK:         #NO_APP

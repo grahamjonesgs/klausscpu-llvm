@@ -36,7 +36,7 @@
 //
 //            ENTER (N + A - 8) / 8           ; frame plus realignment slack
 //            <callee-saved spills>           ; R15-relative, saves the old BP
-//            ANDV  R7, R15, -A               ; BP = R15 rounded down to A
+//            ANDI  R7, R15, -A               ; BP = R15 rounded down to A
 //
 // PEI lays every local out at an offset that is a multiple of its alignment
 // below a MaxAlign-aligned top, so BP+offset is aligned, and BP is at most
@@ -223,13 +223,12 @@ void KlaussCPUFrameLowering::emitPrologue(MachineFunction &MF,
     if (!isUInt<32>(Alignment.value()))
       reportFatalUsageError("KlaussCPU: stack object alignment exceeds the "
                             "32-bit address space");
-    const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
-    // ANDV zero-extends its immediate; addresses are 32-bit.
-    BuildMI(MBB, MBBI, DL, TII.get(KlaussCPU::ANDV), getBPReg())
+    // ANDI sign-extends its immediate (1 word for A <= 128) and leaves the
+    // flags alone.
+    BuildMI(MBB, MBBI, DL, TII.get(KlaussCPU::ANDI), getBPReg())
         .addReg(KlaussCPU::R15)
-        .addImm(Lo_32(-Alignment.value()))
-        .setMIFlag(MachineInstr::FrameSetup)
-        ->addRegisterDead(KlaussCPU::FLAGS, TRI);
+        .addImm(-static_cast<int64_t>(Alignment.value()))
+        .setMIFlag(MachineInstr::FrameSetup);
   }
 
   if (!NeedsCFI)

@@ -8,7 +8,8 @@
 //   R_KLAUSSCPU_ABS32  (1) — 32-bit absolute, LE — instruction word-1 slot
 //                             (branch/call target) or 4-byte data reference.
 //   R_KLAUSSCPU_ABS64  (2) — 64-bit absolute, LE — 8-byte pointer field in
-//                             .rodata/.data (struct members, pointer arrays).
+//                             .rodata/.data (struct members, pointer arrays):
+//                             the 32-bit address, zero-extended.
 //   R_KLAUSSCPU_PCREL32(3) — 32-bit signed PC-relative, LE — word-1 slot of
 //                             JMPREL/JMPxxREL/CALLREL/LEAPC instructions.
 //                             field_value = S + A − instr_addr.
@@ -87,9 +88,17 @@ void KlaussCPU::relocate(uint8_t *loc, const Relocation &rel,
     write32le(loc, static_cast<uint32_t>(val));
     break;
   case R_KLAUSSCPU_ABS64:
-    // 8-byte pointer field in .rodata/.data — all addresses fit in 32 bits,
-    // upper 32 bits are always zero.
-    write64le(loc, val);
+    // 8-byte pointer field in .rodata/.data.  Addresses are 32-bit and
+    // zero-extended, as SETRU, LEAPC and the assembler's own FK_Data_8 build
+    // them, but lld hands an ELFCLASS32 target the value sign-extended from
+    // 32 bits: keep the low half, so an address >= 2 GiB is not
+    // 0xFFFFFFFF_xxxxxxxx.  The exception is the -1 tombstone of a reference
+    // from a .debug_* section (relocateNonAlloc, expr R_NONE) to a discarded
+    // section, which DWARF consumers expect as all-ones.
+    if (rel.expr == R_NONE && val == UINT64_MAX)
+      write64le(loc, val);
+    else
+      write64le(loc, static_cast<uint32_t>(val));
     break;
   case R_KLAUSSCPU_PCREL32:
     // val = S + A − (instr_addr+4) from lld's R_PC computation.

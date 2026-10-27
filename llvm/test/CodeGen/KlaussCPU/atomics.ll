@@ -14,7 +14,7 @@ define i32 @load_relaxed() nounwind {
 ; CHECK-LABEL: load_relaxed:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    setr r0, counter
+; CHECK-NEXT:    setru r0, counter
 ; CHECK-NEXT:    setr r1, 0
 ; CHECK-NEXT:    call __atomic_load_4
 ; CHECK-NEXT:    leaveret
@@ -22,7 +22,7 @@ define i32 @load_relaxed() nounwind {
 ; O0-LABEL: load_relaxed:
 ; O0:       # %bb.0:
 ; O0-NEXT:    enter 3
-; O0-NEXT:    setr r0, counter
+; O0-NEXT:    setru r0, counter
 ; O0-NEXT:    setr r1, 0
 ; O0-NEXT:    call __atomic_load_4
 ; O0-NEXT:    leaveret
@@ -35,7 +35,7 @@ define void @store_seq_cst(i32 %x) nounwind {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    copy r1, r0
-; CHECK-NEXT:    setr r0, counter
+; CHECK-NEXT:    setru r0, counter
 ; CHECK-NEXT:    setr r2, 5
 ; CHECK-NEXT:    call __atomic_store_4
 ; CHECK-NEXT:    leaveret
@@ -45,7 +45,7 @@ define void @store_seq_cst(i32 %x) nounwind {
 ; O0-NEXT:    enter 3
 ; O0-NEXT:    copy r1, r0
 ; O0-NEXT:    # kill: def $r0 killed $r1
-; O0-NEXT:    setr r0, counter
+; O0-NEXT:    setru r0, counter
 ; O0-NEXT:    setr r2, 5
 ; O0-NEXT:    call __atomic_store_4
 ; O0-NEXT:    leaveret
@@ -57,7 +57,7 @@ define i64 @load_acquire_i64() nounwind {
 ; CHECK-LABEL: load_acquire_i64:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
-; CHECK-NEXT:    setr r0, wide
+; CHECK-NEXT:    setru r0, wide
 ; CHECK-NEXT:    setr r1, 2
 ; CHECK-NEXT:    call __atomic_load_8
 ; CHECK-NEXT:    leaveret
@@ -65,7 +65,7 @@ define i64 @load_acquire_i64() nounwind {
 ; O0-LABEL: load_acquire_i64:
 ; O0:       # %bb.0:
 ; O0-NEXT:    enter 3
-; O0-NEXT:    setr r0, wide
+; O0-NEXT:    setru r0, wide
 ; O0-NEXT:    setr r1, 2
 ; O0-NEXT:    call __atomic_load_8
 ; O0-NEXT:    leaveret
@@ -78,7 +78,7 @@ define i32 @fetch_add(i32 %x) nounwind {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    copy r1, r0
-; CHECK-NEXT:    setr r0, counter
+; CHECK-NEXT:    setru r0, counter
 ; CHECK-NEXT:    setr r2, 5
 ; CHECK-NEXT:    call __atomic_fetch_add_4
 ; CHECK-NEXT:    leaveret
@@ -88,7 +88,7 @@ define i32 @fetch_add(i32 %x) nounwind {
 ; O0-NEXT:    enter 3
 ; O0-NEXT:    copy r1, r0
 ; O0-NEXT:    # kill: def $r0 killed $r1
-; O0-NEXT:    setr r0, counter
+; O0-NEXT:    setru r0, counter
 ; O0-NEXT:    setr r2, 5
 ; O0-NEXT:    call __atomic_fetch_add_4
 ; O0-NEXT:    leaveret
@@ -123,8 +123,8 @@ define i32 @cas(i32 %expected, i32 %desired) nounwind {
 ; CHECK-NEXT:    copy r2, r1
 ; CHECK-NEXT:    getsp r12
 ; CHECK-NEXT:    setr r14, 5
+; CHECK-NEXT:    setru r0, counter
 ; CHECK-NEXT:    addi r1, r15, -4
-; CHECK-NEXT:    setr r0, counter
 ; CHECK-NEXT:    setr r3, 5
 ; CHECK-NEXT:    stidx64 r14, r12, 24
 ; CHECK-NEXT:    call __atomic_compare_exchange_4
@@ -141,7 +141,7 @@ define i32 @cas(i32 %expected, i32 %desired) nounwind {
 ; O0-NEXT:    getsp r12
 ; O0-NEXT:    setr r3, 5
 ; O0-NEXT:    stidx64 r3, r12, 24
-; O0-NEXT:    setr r0, counter
+; O0-NEXT:    setru r0, counter
 ; O0-NEXT:    addi r1, r15, -4
 ; O0-NEXT:    call __atomic_compare_exchange_4
 ; O0-NEXT:    ldidx32 r12, r15, -4

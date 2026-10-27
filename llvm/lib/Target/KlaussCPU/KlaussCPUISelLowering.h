@@ -19,11 +19,11 @@ enum NodeType : unsigned {
   FIRST_NUMBER = ISD::BUILTIN_OP_END,
   RET_GLUE, // function return with optional return-value glue
   CALL,     // direct/indirect call
-  ADDR,     // materialise a global address via SETR (non-PIC)
+  ADDR,     // materialise a global address via SETRU (non-PIC)
             //   (i64) = ADDR (TargetGlobalAddress/TargetExternalSymbol/...)
-            // Selected to SETR by a pattern.  The wrapper is necessary because
+            // Selected to SETRU by a pattern.  The wrapper is necessary because
             // TargetGlobalAddress CSEs: selecting it in place would replace it
-            // in the SETR's own operand ("%0 = SETR %0").
+            // in the SETRU's own operand ("%0 = SETRU %0").
   LEAPC,    // materialise a global address via LEAPC (PIC mode)
             //   (i64) = LEAPC (TargetGlobalAddress/TargetExternalSymbol/...)
             // Selected to LEAPC by a pattern.  Same wrapper as ADDR.

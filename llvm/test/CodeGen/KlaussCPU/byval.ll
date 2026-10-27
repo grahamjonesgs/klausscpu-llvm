@@ -24,10 +24,10 @@ define void @pass_const() {
 ; CHECK-LABEL: pass_const:
 ; CHECK:         enter 7
 ; CHECK-NOT:     {{(setr|copy) r0,}}
-; CHECK-DAG:     setr {{r([1-9]|1[0-5])}}, cs+24
-; CHECK-DAG:     setr {{r([1-9]|1[0-5])}}, cs+16
-; CHECK-DAG:     setr {{r([1-9]|1[0-5])}}, cs+8
-; CHECK-DAG:     setr {{r([1-9]|1[0-5])}}, cs{{$}}
+; CHECK-DAG:     setru {{r([1-9]|1[0-5])}}, cs+24
+; CHECK-DAG:     setru {{r([1-9]|1[0-5])}}, cs+16
+; CHECK-DAG:     setru {{r([1-9]|1[0-5])}}, cs+8
+; CHECK-DAG:     setru {{r([1-9]|1[0-5])}}, cs{{$}}
 ; CHECK-DAG:     addi r0, r15, -32
 ; CHECK-DAG:     stidx64 r12, r0, 24
 ; CHECK-DAG:     stidx64 r12, r0, 16
@@ -60,7 +60,7 @@ define void @pass_large() {
 ; CHECK-LABEL: pass_large:
 ; CHECK:         addi [[COPY:r[0-9]+]], r15, -328
 ; CHECK-DAG:     copy r0, [[COPY]]
-; CHECK-DAG:     setr r1, gl
+; CHECK-DAG:     setru r1, gl
 ; CHECK-DAG:     setr r2, 320
 ; CHECK:         call memcpy
 ; CHECK-NEXT:    copy r0, [[COPY]]

@@ -9,7 +9,7 @@
 
 define ptr @addr_of_label() {
 ; CHECK-LABEL: addr_of_label:
-; CHECK:         setr r12, .Ltmp0
+; CHECK:         setru r12, .Ltmp0
 ; PIC-LABEL: addr_of_label:
 ; PIC:           leapc r12, .Ltmp0
 entry:

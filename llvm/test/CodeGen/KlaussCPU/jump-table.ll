@@ -15,7 +15,7 @@
 
 define i64 @sw(i64 %x) {
 ; CHECK-LABEL: sw:
-; CHECK:         setr [[BASE:r[0-9]+]], .LJTI0_0
+; CHECK:         setru [[BASE:r[0-9]+]], .LJTI0_0
 ; CHECK:         ldidx32r [[T:r[0-9]+]], [[BASE]], {{r[0-9]+}}
 ; CHECK-NEXT:    jmpr [[T]]
 ; CHECK:       .p2align 2
