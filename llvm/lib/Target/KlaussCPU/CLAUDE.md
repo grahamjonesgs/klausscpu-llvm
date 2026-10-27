@@ -31,7 +31,7 @@ describe earlier states of the backend and are superseded by this file.
 | Multiply by a constant | `MULV` (simm32; EX-serialised, `WriteMul`); a constant 2^N+1, 2^N-1 or 1-2^N that is not a simm32 becomes `SHLV` + `ADDR`/`SUBR` (`decomposeMulByConstant`); for a simm32 one only with `-klausscpu-mul-imm-shift-add` (one more instruction than `MULV`, fewer cycles) |
 | Addresses | 32-bit, zero-extended in a register: `SETRU sym` (static), `LEAPC` (PIC); `sym+off` is folded only for `off` in [0, 2^31), other offsets are a separate add so a negative S + off stays negative; `R_KLAUSSCPU_ABS64` data is the exact 64-bit S + A (lld) |
 | Indirect branch / call | `JMPR` / `CALLR`; jump tables are off by default (`-klausscpu-min-jump-table-entries=N` enables them) |
-| `llvm.trap` / `llvm.debugtrap` | `HALT` / `TRAP` (the debugger's breakpoint) |
+| `llvm.trap` / `llvm.debugtrap` | both `TRAP`: an abnormal stop (crash dump; `stop = Trap` in the emulator; a debug halt with SIGTRAP under the debugger).  `HALT` is the clean stop the runtime ends a program with (exit status in R12) |
 | Shifts / rotates | 64-bit only; a register amount uses only rs2[5:0], so isel drops masks/extensions of it (`shamt`); an i32 rotate is a 64-bit rotate of the value copied into both halves (`ROLW`/`RORW`) |
 | Bit fields | `BEXTR` for `(x >> s) & (2^l - 1)` with s, l in [1, 31]; other fields and high/low masks beyond an imm32 as a shift pair (a mask stays SETR64 + ANDR in a loop, where MachineLICM hoists the SETR64, unless optsize) |
 

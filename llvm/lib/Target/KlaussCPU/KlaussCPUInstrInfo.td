@@ -1528,9 +1528,11 @@ def NOP_I   : I0<0x6C000000, (outs), (ins), "nop">;
 def HALT_I  : I0<0x6C010000, (outs), (ins), "halt">;
 def IRET_I  : I0<0x65C00000, (outs), (ins), "iret">;
 
-// TRAP — debug breakpoint (v2 class B, OP 4: 0x6C040000).  With a debugger
-// attached the core halts at the TRAP's address; otherwise it raises the
-// ERR_TRAP crash dump.  Used for software breakpoints and __builtin_debugtrap.
+// TRAP — software trap (v2 class B, OP 4: 0x6C040000).  The core parks
+// (park_kind 1) and the SoC produces the ERR_TRAP crash dump; the emulator
+// stops with `stop = Trap`.  With a debugger attached the core halts at the
+// TRAP's address instead (SIGTRAP).  __builtin_trap and __builtin_debugtrap
+// both select it; a program's normal end is HALT (the runtime's crt0/_exit).
 let hasSideEffects = 1 in
 def TRAP_I  : I0<0x6C040000, (outs), (ins), "trap">;
 
@@ -1701,9 +1703,10 @@ let Predicates = [IsPIC] in
 def : Pat<(br bb:$target), (JMPREL bb:$target)>;
 def : Pat<(brind GPR:$reg), (JMPR_R GPR:$reg)>;
 
-// __builtin_trap halts the core; __builtin_debugtrap is the debugger's
-// software breakpoint.
-def : Pat<(trap), (HALT_I)>;
+// __builtin_trap is an abnormal stop and __builtin_debugtrap the debugger's
+// software breakpoint: both are TRAP (crash dump, or a debug halt under the
+// debugger).  HALT is the clean stop a program ends with, not a trap.
+def : Pat<(trap), (TRAP_I)>;
 def : Pat<(debugtrap), (TRAP_I)>;
 
 // ISA v3 D3: (sext_inreg (add|sub|mul a, b), i32) → the W op, which drops
