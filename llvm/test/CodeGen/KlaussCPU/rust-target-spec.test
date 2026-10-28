@@ -19,8 +19,9 @@
 ## without the generic __atomic_* calls, which no runtime provides: a load or
 ## store is a plain access, every read-modify-write and cmpxchg a __sync_*_N
 ## call (klausscpu-runtime src/atomic.c; for Rust bare-metal programs the
-## klauss-rt crate).  clang's MaxAtomicInlineWidth is the same 64.  An RMW
-## twice as wide as max-atomic-width must not be lock-free.
+## klauss-rt crate).  An RMW twice as wide as max-atomic-width must not be
+## lock-free.  clang's MaxAtomicInlineWidth must be the same 64; that is pinned
+## by clang/test/Preprocessor/klausscpu-target-defines.c.
 
 # RUN: %python %S/Inputs/rust-spec-atomics.py \
 # RUN:   %S/../../../lib/Target/KlaussCPU/rust/klausscpu-unknown-none-elf.json \
