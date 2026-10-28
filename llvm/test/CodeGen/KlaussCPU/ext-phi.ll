@@ -19,12 +19,11 @@ define i64 @chase(ptr %b) {
 ; CHECK-NEXT:  .LBB0_1: # %loop
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
 ; CHECK-NEXT:    shlv r13, r13, 3
-; CHECK-NEXT:    decr r14, r14
+; CHECK-NEXT:    addiw r14, r14, -1
 ; CHECK-NEXT:    ldidx64r r13, r0, r13
 ; CHECK-NEXT:    zextw r13, r13
 ; CHECK-NEXT:    addr r12, r12, r13
-; CHECK-NEXT:    cmprvw r14, 0
-; CHECK-NEXT:    jmpnerel .LBB0_1
+; CHECK-NEXT:    fbri r14, 0, 8, .LBB0_1
 ; CHECK-NEXT:  # %bb.2: # %exit
 ; CHECK-NEXT:    ret
 ;
@@ -39,11 +38,11 @@ define i64 @chase(ptr %b) {
 ; NOOPT-NEXT:    zextw r13, r13
 ; NOOPT-NEXT:    decr r14, r14
 ; NOOPT-NEXT:    shlv r13, r13, 3
+; NOOPT-NEXT:    sextw r10, r14
 ; NOOPT-NEXT:    ldidx64r r13, r0, r13
 ; NOOPT-NEXT:    zextw r11, r13
 ; NOOPT-NEXT:    addr r12, r12, r11
-; NOOPT-NEXT:    cmprvw r14, 0
-; NOOPT-NEXT:    jmpnerel .LBB0_1
+; NOOPT-NEXT:    fbri r10, 0, 8, .LBB0_1
 ; NOOPT-NEXT:  # %bb.2: # %exit
 ; NOOPT-NEXT:    ret
 entry:

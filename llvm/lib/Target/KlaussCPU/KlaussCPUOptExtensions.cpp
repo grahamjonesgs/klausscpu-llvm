@@ -32,12 +32,21 @@
 //      read only the low N bits, and each incoming value is extended already
 //      or has the same extension in its predecessor block: that extension
 //      becomes the incoming value, and then rule 1 applies.
+//   4. (SEXTW only) its source is an add, subtract or multiply (ADDR,
+//      SUBR, MULR, ADDI, ADDV, MINUSV, INCR, DECR, with dead FLAGS) whose
+//      every reader reads only its low 32 bits, this SEXTW included: that
+//      op becomes its W form (ADDW, SUBW, MULW, ADDIW), whose result is the
+//      sign extension of the same low 32 bits, and then rule 1 applies.
+//      This is what lets a branch on a 32-bit value compare all 64 bits and
+//      fuse into an FBR (KlaussCPUISelDAGToDAG tryW32Compare): a loop's
+//      `n++ ; n < max` becomes ADDIW + FBR instead of INCR + CMPRRW + JMPcc.
+//      -klausscpu-w32-alu=false turns this rule off with the W-op patterns.
 //
 // The extension's result is then replaced by its source.  Every decision is
 // made on the current code, so removing one extension can only keep another
 // from being removed, never make a removal wrong.
 //
-// Rules 2 and 3 change values above bit N that no instruction reads, but a
+// Rules 2, 3 and 4 change values above bit N that no instruction reads, but a
 // debug value may: the variable can be wider than the bits its code uses.  A
 // debug value of the removed extension's result describes the source with
 // the extension in its DIExpression (rule 2); one of any other register whose
@@ -56,6 +65,7 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/Support/CommandLine.h"
@@ -71,6 +81,7 @@ using namespace llvm;
 STATISTIC(NumExtendedSource, "Extensions of an already extended value removed");
 STATISTIC(NumNarrowUsers, "Extensions read only in their low bits removed");
 STATISTIC(NumPHIInputs, "Extensions of a PHI removed by extending its inputs");
+STATISTIC(NumWOps, "SEXTWs removed by making their source a W op");
 
 namespace llvm {
 void initializeKlaussCPUOptExtensionsPass(PassRegistry &);
@@ -81,6 +92,9 @@ static cl::opt<bool> EnableOptExtensions(
     "klausscpu-opt-extensions", cl::Hidden, cl::init(true),
     cl::desc("Remove sign and zero extensions whose source is already "
              "extended or whose users read only the low bits"));
+
+// -klausscpu-w32-alu (KlaussCPUISelDAGToDAG.cpp): rule 4 makes W ops too.
+extern cl::opt<bool> KlaussCPUEnableW32Alu;
 
 namespace {
 
@@ -522,11 +536,70 @@ static void dropWideDebugValues(ArrayRef<Register> Regs, unsigned Bits,
         DbgMI.setDebugValueUndef();
 }
 
+// Rule 4: Src, which a SEXTW extends, is an add, subtract or multiply whose
+// readers all read only its low 32 bits.  Replace it with its W form, whose
+// low 32 bits are the same and whose result is their sign extension.
+// Changed is set to Src and the registers followed from it, whose values
+// change above bit 32.
+static bool makeWOp(Register Src, MachineRegisterInfo &MRI,
+                    const TargetInstrInfo &TII,
+                    SmallVectorImpl<Register> &Changed) {
+  MachineInstr *MI = MRI.getVRegDef(Src);
+  if (!MI || !flagsDead(*MI))
+    return false;
+  unsigned WOpc;
+  bool HasImm = false;
+  int64_t Imm = 0;
+  switch (MI->getOpcode()) {
+  case KlaussCPU::ADDR: WOpc = KlaussCPU::ADDW; break;
+  case KlaussCPU::SUBR: WOpc = KlaussCPU::SUBW; break;
+  case KlaussCPU::MULR: WOpc = KlaussCPU::MULW; break;
+  // The low 32 bits of x + c depend only on the low 32 bits of c, so every
+  // immediate form becomes ADDIW of that 32-bit pattern.
+  case KlaussCPU::ADDI:
+  case KlaussCPU::ADDV:
+  case KlaussCPU::MINUSV:
+    if (!MI->getOperand(2).isImm())
+      return false;
+    WOpc = KlaussCPU::ADDIW;
+    HasImm = true;
+    Imm = MI->getOperand(2).getImm();
+    if (MI->getOpcode() == KlaussCPU::MINUSV)
+      Imm = -Imm;
+    break;
+  case KlaussCPU::INCR:
+  case KlaussCPU::DECR:
+    WOpc = KlaussCPU::ADDIW;
+    HasImm = true;
+    Imm = MI->getOpcode() == KlaussCPU::INCR ? 1 : -1;
+    break;
+  default:
+    return false;
+  }
+  Changed.clear();
+  if (!onlyLowBitsRead(Src, 32, MRI, &Changed))
+    return false;
+  MachineInstrBuilder MIB =
+      BuildMI(*MI->getParent(), MI, MI->getDebugLoc(), TII.get(WOpc), Src)
+          .add(MI->getOperand(1));
+  if (HasImm)
+    MIB.addImm(static_cast<int32_t>(Imm));
+  else
+    MIB.add(MI->getOperand(2));
+  if (MachineOperand *F =
+          MIB->findRegisterDefOperand(KlaussCPU::FLAGS, /*TRI=*/nullptr))
+    F->setIsDead();
+  LLVM_DEBUG(dbgs() << "W op " << *MIB << "  for " << *MI);
+  MI->eraseFromParent();
+  return true;
+}
+
 bool KlaussCPUOptExtensions::runOnMachineFunction(MachineFunction &MF) {
   if (!EnableOptExtensions || skipFunction(MF.getFunction()))
     return false;
 
   MachineRegisterInfo &MRI = MF.getRegInfo();
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
   bool Changed = false;
   for (MachineBasicBlock &MBB : MF) {
     for (MachineInstr &MI : make_early_inc_range(MBB)) {
@@ -548,6 +621,10 @@ bool KlaussCPUOptExtensions::runOnMachineFunction(MachineFunction &MF) {
         extendDebugValues(Dst, Src, Bits, IsZExt, MRI);
       } else if (extendPHIInputs(MI, Bits, IsZExt, MRI, Altered)) {
         ++NumPHIInputs;
+      } else if (KlaussCPUEnableW32Alu &&
+                 MI.getOpcode() == KlaussCPU::SEXTW &&
+                 makeWOp(Src, MRI, TII, Altered)) {
+        ++NumWOps;
       } else {
         continue;
       }

@@ -126,6 +126,11 @@ public:
   // f16 is still zero-extended: clang has no _Float16 for this target, so
   // compiler-rt's half-precision functions (__extendhfsf2, __truncsfhf2, ...)
   // take and return a uint16_t, which the C ABI zero-extends.
+  // An i32 is promoted by sign extension where either would do (unsigned
+  // compares): C ABI arguments and results arrive sign-extended, and the W
+  // ops produce sign-extended values (as RV64).
+  bool isSExtCheaperThanZExt(EVT SrcVT, EVT DstVT) const override;
+
   bool shouldSignExtendTypeInLibCall(Type *Ty, bool IsSigned) const override {
     return Ty->isIntegerTy(32) || IsSigned;
   }

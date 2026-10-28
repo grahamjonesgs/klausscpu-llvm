@@ -312,42 +312,46 @@ define void @swap32(i64 %a, i64 %b, ptr %p, ptr %q, i64 %c, i64 %d) nounwind {
   ret void
 }
 
-; Both extensions also feed an add, so they stay and the compare stays 64-bit
-; (an FBR).
+; Both zero extensions also feed an add, but the unsigned compare promotes
+; by sign extension (isSExtCheaperThanZExt), so its own extensions die and it
+; takes the W form; the zero extensions stay for the add.
 define i64 @swap32_ext_used(i64 %a, i64 %b, i64 %c, i64 %d) nounwind {
 ; CHECK-LABEL: swap32_ext_used:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    zextw r12, r0
-; CHECK-NEXT:    zextw r14, r1
-; CHECK-NEXT:    fbr r12, r14, 4, .LBB7_2
+; CHECK-NEXT:    cmprrw r0, r1
+; CHECK-NEXT:    jmpulerel .LBB7_2
 ; CHECK-NEXT:  # %bb.1:
-; CHECK-NEXT:    copy r13, r2
+; CHECK-NEXT:    copy r12, r2
 ; CHECK-NEXT:    copy r2, r3
 ; CHECK-NEXT:    jmprel .LBB7_3
 ; CHECK-NEXT:  .LBB7_2:
-; CHECK-NEXT:    copy r13, r3
+; CHECK-NEXT:    copy r12, r3
 ; CHECK-NEXT:  .LBB7_3:
-; CHECK-NEXT:    subr r13, r13, r2
+; CHECK-NEXT:    zextw r14, r0
+; CHECK-NEXT:    zextw r13, r1
+; CHECK-NEXT:    subr r12, r12, r2
+; CHECK-NEXT:    addr r14, r14, r13
 ; CHECK-NEXT:    addr r12, r12, r14
-; CHECK-NEXT:    addr r12, r13, r12
 ; CHECK-NEXT:    ret
 ;
 ; NOGROUP-LABEL: swap32_ext_used:
 ; NOGROUP:       # %bb.0:
-; NOGROUP-NEXT:    zextw r12, r0
-; NOGROUP-NEXT:    zextw r14, r1
-; NOGROUP-NEXT:    copy r13, r2
-; NOGROUP-NEXT:    fbr r12, r14, 12, .LBB7_2
+; NOGROUP-NEXT:    cmprrw r0, r1
+; NOGROUP-NEXT:    copy r12, r2
+; NOGROUP-NEXT:    jmpugtrel .LBB7_2
 ; NOGROUP-NEXT:  # %bb.1:
-; NOGROUP-NEXT:    copy r13, r3
+; NOGROUP-NEXT:    copy r12, r3
 ; NOGROUP-NEXT:  .LBB7_2:
-; NOGROUP-NEXT:    fbr r12, r14, 12, .LBB7_4
+; NOGROUP-NEXT:    cmprrw r0, r1
+; NOGROUP-NEXT:    jmpugtrel .LBB7_4
 ; NOGROUP-NEXT:  # %bb.3:
 ; NOGROUP-NEXT:    copy r3, r2
 ; NOGROUP-NEXT:  .LBB7_4:
-; NOGROUP-NEXT:    subr r13, r13, r3
+; NOGROUP-NEXT:    zextw r14, r0
+; NOGROUP-NEXT:    zextw r13, r1
+; NOGROUP-NEXT:    subr r12, r12, r3
+; NOGROUP-NEXT:    addr r14, r14, r13
 ; NOGROUP-NEXT:    addr r12, r12, r14
-; NOGROUP-NEXT:    addr r12, r13, r12
 ; NOGROUP-NEXT:    ret
   %a1 = trunc i64 %a to i32
   %b1 = trunc i64 %b to i32

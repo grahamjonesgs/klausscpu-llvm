@@ -69,7 +69,7 @@ def KlaussCPURorW : SDNode<"KlaussCPUISD::RORW", SDTIntShiftOp>;
 def IsPIC  : Predicate<"TM.isPositionIndependent()">;
 def NotPIC : Predicate<"!TM.isPositionIndependent()">;
 // -mllvm -klausscpu-w32-alu (KlaussCPUISelDAGToDAG.cpp), on by default.
-def UseW32Alu : Predicate<"EnableW32Alu">;
+def UseW32Alu : Predicate<"KlaussCPUEnableW32Alu">;
 
 
 //===----------------------------------------------------------------------===//

@@ -369,7 +369,14 @@ when clobbered.
   (glued compare) and the 32-bit W-compare choice for those and SETCC:
   `tryW32Compare` takes the W form when an operand's 32-bit extension then
   dies, i.e. it feeds nothing but compares of the same operands and
-  condition.  A frame index, or a frame index plus a constant in
+  condition; not for a branch whose sign extensions are of an add, subtract
+  or multiply, which compares 64 bits so that FuseCmpBr can make it an FBR,
+  while the extension becomes the W op (a W-op pattern, or
+  `KlaussCPUOptExtensions` rule 4): `n++ ; n < max` is `ADDIW` + `FBR`, not
+  `INCR` + `CMPRRW` + `JMPcc` (`w32-compare-branch.ll`).  An i32 is promoted
+  by sign extension wherever either extension would do (unsigned compares;
+  `isSExtCheaperThanZExt`, as RV64), since arguments arrive sign-extended
+  and the W ops produce sign-extended values.  A frame index, or a frame index plus a constant in
   [-2^29, 2^29) (`add` or disjoint `or`), is the `AddrFI` / `AddrFIMem`
   ComplexPattern `(TargetFrameIndex, offset)`: one
   `ADDI rd, FI, offset` as a value, or the base and offset of an
@@ -456,8 +463,11 @@ when clobbered.
   source is already extended (extending loads, W ops, compares, constants,
   through COPY, PHI and bitwise/min/max ops), whose result is read only in
   its low bits, or whose PHI source can take the same extension already
-  made in each predecessor instead (`opt-extensions.mir`, `ext-phi.ll`).
-  The last two change bits no instruction reads but a debug value may: a
+  made in each predecessor instead (`opt-extensions.mir`, `ext-phi.ll`);
+  and a `SEXTW` of an add, subtract or multiply that is read only in its
+  low 32 bits, by making that op its W form (`ADDW`/`SUBW`/`MULW`/`ADDIW`;
+  off with `-klausscpu-w32-alu=false`; `w32-alu.ll`).
+  The last three change bits no instruction reads but a debug value may: a
   debug value of the removed extension describes the source with the
   extension in its DIExpression (`DW_OP_LLVM_convert`), and one of another
   register whose high bits change is set undef unless its variable fits in
@@ -511,6 +521,8 @@ when clobbered.
 | `-klausscpu-fuse-loop-const` | on | FBR for a loop compare with a non-simm4 constant, via a free register set in the preheader |
 | `-klausscpu-arith-flag-reuse` | on | FlagReuse peephole |
 | `-klausscpu-w32-alu` / `-klausscpu-w32-compare` | on | 32-bit W ops / W compares |
+| `-klausscpu-w32-compare-branch` | off | branch on a W compare even when its sign extensions are of an add/sub/mul (=false: compare 64 bits, the extension becomes the W op, FBR fuses) |
+| `-klausscpu-sext-i32` | on | promote an i32 by sign extension where either would do (`isSExtCheaperThanZExt`) |
 | `-klausscpu-group-selects` | on | consecutive selects on one condition share a compare/branch |
 | `-klausscpu-fold-fi-offset` | on | fold frame index + constant into the access / ADDI offset |
 | `-klausscpu-sched-cmp-br-pair` | on | pre-RA scheduler keeps a compare next to its branch (for FuseCmpBr) |

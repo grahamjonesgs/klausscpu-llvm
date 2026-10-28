@@ -36,11 +36,13 @@ exit:
   ret i32 %sel
 }
 
-; A loaded value used for an equality compare needs no ZEXTW either way.
+; A loaded value used for an equality compare needs no separate extension
+; either way: i32 compares promote by sign extension (isSExtCheaperThanZExt),
+; and the load sign-extends.
 define i64 @plain_load_cmp(ptr %p, i32 %c) {
 ; CHECK-LABEL: plain_load_cmp:
-; CHECK:         memget32 [[L:r[0-9]+]], r0
-; CHECK-NOT:     zextw [[L]]
+; CHECK:         ldidx32s [[L:r[0-9]+]], r0, 0
+; CHECK-NOT:     {{[sz]}}extw [[L]]
 ; CHECK:         ret
   %l = load i32, ptr %p, align 4
   %e = icmp eq i32 %l, %c

@@ -30,9 +30,8 @@ define signext i32 @mandel(i64 %cr, i64 %ci, i32 signext %maxit) nounwind {
 ; CHECK-NEXT:    .p2align 4
 ; CHECK-NEXT:  .LBB0_2: # %while.body
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
-; CHECK-NEXT:    incr r12, r12
-; CHECK-NEXT:    cmprrw r12, r2
-; CHECK-NEXT:    jmpugerel .LBB0_4
+; CHECK-NEXT:    addiw r12, r12, 1
+; CHECK-NEXT:    fbr r12, r2, 11, .LBB0_4
 ; CHECK-NEXT:  # %bb.3: # %while.body
 ; CHECK-NEXT:    # in Loop: Header=BB0_2 Depth=1
 ; CHECK-NEXT:    mulr r11, r11, r10
@@ -47,7 +46,6 @@ define signext i32 @mandel(i64 %cr, i64 %ci, i32 signext %maxit) nounwind {
 ; CHECK-NEXT:    addr r9, r14, r13
 ; CHECK-NEXT:    fbr r9, r8, 3, .LBB0_2
 ; CHECK-NEXT:  .LBB0_4: # %while.end
-; CHECK-NEXT:    sextw r12, r12
 ; CHECK-NEXT:    ret
 ;
 ; NOBUSY-LABEL: mandel:
@@ -63,9 +61,8 @@ define signext i32 @mandel(i64 %cr, i64 %ci, i32 signext %maxit) nounwind {
 ; NOBUSY-NEXT:    .p2align 4
 ; NOBUSY-NEXT:  .LBB0_2: # %while.body
 ; NOBUSY-NEXT:    # =>This Inner Loop Header: Depth=1
-; NOBUSY-NEXT:    incr r12, r12
-; NOBUSY-NEXT:    cmprrw r12, r2
-; NOBUSY-NEXT:    jmpugerel .LBB0_4
+; NOBUSY-NEXT:    addiw r12, r12, 1
+; NOBUSY-NEXT:    fbr r12, r2, 11, .LBB0_4
 ; NOBUSY-NEXT:  # %bb.3: # %while.body
 ; NOBUSY-NEXT:    # in Loop: Header=BB0_2 Depth=1
 ; NOBUSY-NEXT:    mulr r11, r11, r10
@@ -80,7 +77,6 @@ define signext i32 @mandel(i64 %cr, i64 %ci, i32 signext %maxit) nounwind {
 ; NOBUSY-NEXT:    addr r9, r14, r13
 ; NOBUSY-NEXT:    fbr r9, r8, 3, .LBB0_2
 ; NOBUSY-NEXT:  .LBB0_4: # %while.end
-; NOBUSY-NEXT:    sextw r12, r12
 ; NOBUSY-NEXT:    ret
 entry:
   %cmp15.not = icmp eq i32 %maxit, 0

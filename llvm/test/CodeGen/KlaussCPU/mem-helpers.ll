@@ -214,14 +214,13 @@ define i64 @va_sum(i32 %n, ptr %ap) nounwind {
 ; CHECK-NEXT:  .LBB9_1: # %loop
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
 ; CHECK-NEXT:    ldidx64 r14, r1, 0
-; CHECK-NEXT:    decr r0, r0
+; CHECK-NEXT:    addiw r0, r0, -1
 ; CHECK-NEXT:    addi r13, r14, 8
 ; CHECK-NEXT:    stidx64 r13, r1, 0
 ; CHECK-NEXT:    ldidx64 r14, r14, 0
 ; CHECK-NEXT:    sextw r14, r14
 ; CHECK-NEXT:    addr r12, r12, r14
-; CHECK-NEXT:    cmprvw r0, 0
-; CHECK-NEXT:    jmpnerel .LBB9_1
+; CHECK-NEXT:    fbri r0, 0, 8, .LBB9_1
 ; CHECK-NEXT:  .LBB9_2: # %done
 ; CHECK-NEXT:    ret
 entry:

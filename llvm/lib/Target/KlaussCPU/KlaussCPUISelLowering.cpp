@@ -415,6 +415,16 @@ KlaussCPUTargetLowering::shouldExpandAtomicRMWInIR(
   return AtomicExpansionKind::None;
 }
 
+static cl::opt<bool> SExtI32Promotion(
+    "klausscpu-sext-i32", cl::Hidden, cl::init(true),
+    cl::desc("Promote an i32 by sign extension where either extension "
+             "would do (isSExtCheaperThanZExt)"));
+
+bool KlaussCPUTargetLowering::isSExtCheaperThanZExt(EVT SrcVT,
+                                                    EVT DstVT) const {
+  return SExtI32Promotion && SrcVT == MVT::i32 && DstVT == MVT::i64;
+}
+
 bool KlaussCPUTargetLowering::isZExtFree(SDValue Val, EVT VT2) const {
   if (auto *LD = dyn_cast<LoadSDNode>(Val)) {
     EVT MemVT = LD->getMemoryVT();
