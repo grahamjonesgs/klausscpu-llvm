@@ -19,7 +19,10 @@
 // Spill slots are R15-relative (getFrameIndexReference) and R15 = CFA-16.
 // The spills are the FrameSetup stores of the prologue block
 // (spillCalleeSavedRegisters): the entry block, or the save point that
-// shrink-wrapping chose.
+// shrink-wrapping chose.  There is exactly one: the prologue's ENTER (PUSH)
+// is isNotDuplicable, so tail duplication never copies that block
+// (KlaussCPUInstrInfo.td, "Stack management"), and CFIFixup relies on the
+// same.
 //
 //===----------------------------------------------------------------------===//
 
@@ -27,6 +30,7 @@
 #include "KlaussCPUInstrInfo.h"
 #include "KlaussCPUSubtarget.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/CodeGen/CFIInstBuilder.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -82,7 +86,8 @@ bool KlaussCPUCalleeSavedCFI::runOnMachineFunction(MachineFunction &MF) {
   }
 
   // PEI has dropped the save point by now; the spills are the only
-  // FrameSetup stores of a callee-saved register.
+  // FrameSetup stores of a callee-saved register, one per register.
+  DenseMap<MCRegister, unsigned> Spills;
   for (MachineBasicBlock &MBB : MF) {
     for (MachineInstr &MI : MBB) {
       if (!MI.getFlag(MachineInstr::FrameSetup) || !MI.mayStore() ||
@@ -94,10 +99,13 @@ bool KlaussCPUCalleeSavedCFI::runOnMachineFunction(MachineFunction &MF) {
       CFIInstBuilder(MBB, std::next(MI.getIterator()),
                      MachineInstr::FrameSetup)
           .buildOffset(It->first, It->second);
-      CFAOffset.erase(It);
+      ++Spills[It->first];
     }
   }
-  assert(CFAOffset.empty() && "Callee-saved register without a spill");
+  assert(all_of(CFAOffset,
+                [&](const auto &P) { return Spills.lookup(P.first) == 1; }) &&
+         "Callee-saved register not spilled exactly once (a duplicated "
+         "prologue?)");
   return true;
 }
 

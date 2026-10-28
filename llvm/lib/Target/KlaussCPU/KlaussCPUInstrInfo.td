@@ -1037,7 +1037,20 @@ def SELECT_CC_RI : Pseudo<(outs GPR:$dst),
 // Stack management (used by frame lowering; no isel patterns)
 //===----------------------------------------------------------------------===//
 
-let Uses = [SP], Defs = [SP], mayStore = 1 in
+// The prologue's first instruction (ENTER, or PUSH R15 for a frame too large
+// for ENTER and under -klausscpu-enter-leave=false; codegen emits PUSH
+// nowhere else) is isNotDuplicable: the post-RA tail duplicator and block
+// placement's tail duplication (both after PEI) must not copy a shrink-wrapped
+// prologue block into its predecessors.  The unwind info assumes one prologue
+// that dominates the framed part of the function: CFIFixup takes the last
+// FrameSetup CFI in layout as the prologue and gives every later block the
+// "after prologue" or the CIE state by reachability from it, and
+// KlaussCPUCalleeSavedCFI gives each callee-saved register one .cfi_offset.
+// With two copies, the frameless code before one ENTER and the framed code
+// after the other got the wrong CFA (-O3, cfi-prologue-no-taildup.ll).
+// TailDuplicator lets CFI instructions themselves be duplicated on DWARF
+// targets, so the prologue's CFI alone would not stop it.
+let Uses = [SP], Defs = [SP], mayStore = 1, isNotDuplicable = 1 in
 def PUSH_R  : R_in<0x64000000, (ins GPR:$reg), "push\t$reg">;
 let Uses = [SP], Defs = [SP], mayLoad = 1 in
 def POP_R   : R_out<0x64800000, (outs GPR:$reg), "pop\t$reg">;
@@ -1052,7 +1065,8 @@ def ADDSP_I : Vsp<0xA5400000, "addsp\t$imm">;
 // KlaussCPUFrameLowering):
 //   ENTER N : push R15; R15 = SP; SP -= 8*N      (N = frame dwords, [21:0])
 //   LEAVE   : SP = R15; pop R15
-let Uses = [SP, R15], Defs = [SP, R15], hasSideEffects = 1, mayStore = 1 in
+let Uses = [SP, R15], Defs = [SP, R15], hasSideEffects = 1, mayStore = 1,
+    isNotDuplicable = 1 in
 def ENTER_I : KCInst32<0x66000000, (outs), (ins uimm22:$n), "enter\t$n"> {
   bits<22> n;
   let Inst{21-0} = n;

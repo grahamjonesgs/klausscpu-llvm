@@ -42,8 +42,9 @@
 // return block: canUseAsEpilogue), whose CFI returns to the CIE's state;
 // KlaussCPULeaveRet later folds such a LEAVE into the return, and the CFIFixup
 // pass gives every block laid out after the prologue the state it is entered
-// with.  Nothing needs a scratch register, so any block can hold the
-// prologue.  Shrink-wrapping is off at -O0 and -Os/-Oz, and under
+// with.  That needs a single prologue, so ENTER and PUSH are isNotDuplicable:
+// tail duplication never copies the prologue block (KlaussCPUInstrInfo.td).
+// Nothing needs a scratch register, so any block can hold the prologue.  Shrink-wrapping is off at -O0 and -Os/-Oz, and under
 // "frame-pointer"="all", which promises a frame for the whole function.
 //
 // Frameless leaves.  A function that makes no call and has no stack object

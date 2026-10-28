@@ -319,7 +319,12 @@ restore block must leave the function or only continue to a block that does
 more instruction and stop them fusing.  Tail duplication then leaves
 `LEAVE ... RET`, which `KlaussCPULeaveRet` (pre-emit) folds into `LEAVERET`,
 moving the LEAVE past instructions that use neither R15 nor SP and removing a
-return block left without predecessors (`leaveret-fold.mir`).  In practice
+return block left without predecessors (`leaveret-fold.mir`).  The prologue
+block itself is never tail-duplicated: `ENTER` and `PUSH` (the prologue's
+first instruction) are `isNotDuplicable`, because the unwind info needs one
+prologue (see CFI).  At -O3 (tail-duplication threshold 4) a small prologue
+block behind a select diamond used to be copied into both arms; keeping it
+costs a `JMPREL` on one arm (`cfi-prologue-no-taildup.ll`).  In practice
 few frames move: the register allocator often puts a value that lives across
 a call in a callee-saved register in the entry block (`fib`'s accumulator).
 
@@ -339,7 +344,18 @@ after a `LEAVE` (a tail call, a shrink-wrapped restore point) the CIE's
 state again.  A frameless function needs nothing beyond the CIE.
 `setCFIFixup(true)` gives every block laid out after the prologue the state
 it is entered with (frameless code after a shrink-wrapped prologue or
-behind a LEAVERET) (`DebugInfo/KlaussCPU/frame-cfi.ll`).  CFI
+behind a LEAVERET) (`DebugInfo/KlaussCPU/frame-cfi.ll`).  CFIFixup assumes
+one prologue that dominates the framed code (it takes the last FrameSetup
+CFI in layout as the prologue and decides each block's state by
+reachability from it), and `KlaussCPUCalleeSavedCFI` asserts that each
+callee-saved register has one spill; so `ENTER`/`PUSH` are
+`isNotDuplicable`.  TailDuplicator lets CFI instructions be duplicated on
+every non-Darwin target, so the prologue's CFI alone does not stop it: a
+-O3 prologue copied into two predecessors left the frameless code before
+one copy described as framed, the framed code after the other as
+frameless, and the second R4 spill without a rule
+(`cfi-prologue-no-taildup.ll`).  The runtime's `validate.sh cfi` checks the
+CFI of every executed PC against an emulator trace (`cfi_check.py`).  CFI
 instructions are scheduling boundaries, so -g must not add one where the
 scheduler could otherwise move code: the ENTER/LEAVE (PUSH/ADDSP, SETSP/POP)
 CFI follows instructions that write SP, which are boundaries anyway, and the
@@ -699,6 +715,11 @@ harness in klausscpu-runtime's
   functions and through interrupt handlers, outer frames' callee-saved
   registers, expressions, the Zephyr and FreeRTOS thread lists.
 - `validate.sh csmith N FIRST`: more Csmith seeds.
+- `validate.sh cfi N FIRST`: the `.debug_frame` of Csmith programs (-O2 -g,
+  -O3 -g) and of the corpus (-O3 -g) replayed against an emulator trace and
+  a shadow call stack: at every executed PC the CFI must recover the
+  caller's CFA, return address, R15 and R4-R7.  Run it when frames, CFI,
+  shrink-wrapping or block placement change.
 - `validate.sh board`: board cycles (Dhrystone, also `-fno-builtin`,
   perf_baseline, perf_haz, CoreMark, Embench) against `baselines/perf.tsv`.
 - `validate.sh csmith-board N`: Csmith with the same ELF on the board and
