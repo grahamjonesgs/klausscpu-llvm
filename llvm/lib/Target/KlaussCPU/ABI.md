@@ -70,7 +70,9 @@ the mask.)
   half undefined; `double` and `long double` (also 64-bit) in a GPR.
 - The backend's own library calls follow the same rules
   (`shouldSignExtendTypeInLibCall`: an i32 is sign-extended; a softened
-  `float` is not extended), and so do the library calls the optimiser
+  `float` is not extended; a softened `__fp16` is zero-extended, because
+  without `_Float16` compiler-rt's half-precision functions take a
+  `uint16_t`), and so do the library calls the optimiser
   creates (`TargetLibraryInfo` marks i32 parameters and results `signext`
   for klausscpu, as for riscv64).
 - The `__sync_*_N` atomics libcalls are the exception: the type legaliser
@@ -136,6 +138,18 @@ Calling a variadic function through a non-variadic prototype (or the
 reverse) is undefined behaviour in C and breaks with this ABI: the call
 would not reserve the home area.
 
+A call through a declaration without a prototype (K&R `long f();`, valid C
+up to C17) is made as a variadic call when all its arguments, counted in
+GPR words with the `sret` pointer, fit in R0–R3
+(`isNoProtoCallVariadic` in clang): it reserves the home area, so a
+variadic callee (undefined behaviour, but it worked with version 0 and
+works on RISC-V and x86-64) stores its register arguments there instead of
+over the caller's frame, and a non-variadic callee, which then reads
+nothing from the stack, is unaffected.  A call with stack arguments stays
+non-variadic: they are where a non-variadic callee, the only kind C allows
+here, expects them, and a variadic callee would read them 32 bytes too
+high.
+
 ## Versioning
 
 - `KlaussCPUABI::ABIVersion` is 2.  The assembler writes it into the low byte
@@ -177,9 +191,15 @@ ABI-specific; the classification is rustc's
 (DefaultABIInfo: aggregates indirect, integers extended by their own
 signedness), and objects rustc emits carry version 2 in `e_flags` anyway
 (the flag comes from LLVM's MC layer), so lld does not catch the mismatch.
-Pure Rust code is consistent with itself, but **calls between Rust and C
-disagree for `u32` arguments/results (zero- vs sign-extended) and for
-aggregates passed or returned by value** until the patch is updated.  What
+**Calls between Rust and C disagree for `u32` arguments/results (zero-
+vs sign-extended) and for aggregates passed or returned by value** until
+the patch is updated.  Rust code is not quite consistent with itself
+either: once rustc is built on this LLVM, the backend's library calls
+assume an i32 result is sign-extended (`shouldSignExtendTypeInLibCall`),
+while Rust's `compiler_builtins`, classified by the version-0 module,
+zero-extends a `u32` result (today no libcall the backend emits returns an
+unsigned 32-bit value that needs it: 32-bit division is in hardware, and
+`fptoui` to i32 goes through the 64-bit `__fixuns*di`).  What
 the callconv module needs, following rustc's RISC-V implementation
 (`callconv/riscv.rs`, integer-only, XLEN = 64, without the FP and vector
 cases); a sketch, not built (there is no rustc checkout here):

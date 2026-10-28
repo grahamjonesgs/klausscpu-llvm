@@ -79,6 +79,48 @@ define double @libcall_i32(double %d, i64 %x) nounwind {
   ret double %r
 }
 
+; A softened f16 argument is zero-extended: compiler-rt's half-precision
+; functions take and return a uint16_t (clang has no _Float16 here).  The
+; caller does not rely on the extension of the result.
+define float @libcall_f16_arg(i64 %x) nounwind {
+; CHECK-LABEL: libcall_f16_arg:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    zexth r0, r0
+; CHECK-NEXT:    callrel __extendhfsf2
+; CHECK-NEXT:    leaveret
+  %t = trunc i64 %x to i16
+  %h = bitcast i16 %t to half
+  %f = fpext half %h to float
+  ret float %f
+}
+
+define i64 @libcall_f16_ret(float %f) nounwind {
+; CHECK-LABEL: libcall_f16_ret:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    callrel __truncsfhf2
+; CHECK-NEXT:    zexth r12, r12
+; CHECK-NEXT:    leaveret
+  %h = fptrunc float %f to half
+  %i = bitcast half %h to i16
+  %z = zext i16 %i to i64
+  ret i64 %z
+}
+
+; A softened f32 is passed in the low half, not extended.
+define double @libcall_f32_arg(i64 %x) nounwind {
+; CHECK-LABEL: libcall_f32_arg:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    callrel __extendsfdf2
+; CHECK-NEXT:    leaveret
+  %t = trunc i64 %x to i32
+  %f = bitcast i32 %t to float
+  %d = fpext float %f to double
+  ret double %d
+}
+
 ; A 9-16 byte aggregate in two registers, and split between R3 and the
 ; first stack slot when only R3 is left.
 define void @pass_pair(i64 %a, i64 %b) nounwind {

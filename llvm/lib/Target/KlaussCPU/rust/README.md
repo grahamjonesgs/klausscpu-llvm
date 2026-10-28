@@ -27,9 +27,12 @@ Pinned versions (re-verify on any change — see "Rebasing" below):
 > **C ABI version 2 (`../ABI.md`).**  The callconv module in
 > `rustc-patches/0001-*.patch` (`callconv/klausscpu.rs`) still classifies
 > arguments the version-0 way: aggregates always indirect, `u32` zero-extended.
-> Rust code is consistent with itself, but calls between Rust and C now
-> disagree on `u32` arguments/results and on structs passed or returned by
-> value, and lld cannot tell (rustc's objects carry version 2 in `e_flags`).
+> Calls between Rust and C now disagree on `u32` arguments/results and on
+> structs passed or returned by value, and lld cannot tell (rustc's objects
+> carry version 2 in `e_flags`).  Within Rust, the backend's library calls
+> assume a sign-extended i32 result that `compiler_builtins` would return
+> zero-extended for a `u32` (no libcall the backend emits today depends on
+> it).
 > `../ABI.md` ("Rust") gives the classification the module needs; rebuild
 > rustc with it before mixing Rust and C across such signatures.
 

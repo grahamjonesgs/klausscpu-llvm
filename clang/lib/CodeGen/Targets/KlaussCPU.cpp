@@ -140,6 +140,33 @@ class KlaussCPUTargetCodeGenInfo : public TargetCodeGenInfo {
 public:
   KlaussCPUTargetCodeGenInfo(CodeGenTypes &CGT)
       : TargetCodeGenInfo(std::make_unique<KlaussCPUABIInfo>(CGT)) {}
+
+  // A call through a declaration without a prototype (K&R `long f();`) is
+  // made as a variadic call, which reserves the R0-R3 home area, when all its
+  // arguments are in registers: then a variadic callee (undefined behaviour
+  // in C, but it worked with ABI version 0 and works on RISC-V and x86-64)
+  // stores them in the home area instead of over the caller's frame, and a
+  // non-variadic callee, which reads nothing from the stack, is unaffected.
+  // With stack arguments the call stays non-variadic, so they are where a
+  // non-variadic callee, the only kind C allows here, expects them.
+  bool isNoProtoCallVariadic(const CallArgList &Args,
+                             const FunctionNoProtoType *FnType) const override {
+    const auto &ABI = getABIInfo<KlaussCPUABIInfo>();
+    ASTContext &Ctx = ABI.getContext();
+    // The hidden sret pointer takes R0.
+    unsigned Words =
+        ABI.classifyReturnType(FnType->getReturnType()).isIndirect() ? 1 : 0;
+    for (const CallArg &Arg : Args) {
+      ABIArgInfo AI = ABI.classifyArgumentType(Arg.Ty);
+      if (AI.isIgnore())
+        continue;
+      Words += AI.isIndirect()
+                   ? 1
+                   : llvm::divideCeil(Ctx.getTypeSize(Arg.Ty),
+                                      llvm::KlaussCPUABI::SlotSize * 8);
+    }
+    return Words <= llvm::KlaussCPUABI::NumArgGPRs;
+  }
 };
 
 } // namespace

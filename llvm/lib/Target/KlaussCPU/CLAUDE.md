@@ -194,8 +194,10 @@ ABI version 2 (`KlaussCPUABI::ABIVersion`; RISC-V LP64, integer only):
   marks every i32 `signext`, also `unsigned int` (as RV64), narrower
   integers by their signedness: the producer extends, the consumer relies on
   it (`AssertSext`/`AssertZext`).  The backend's libcalls do the same
-  (`shouldSignExtendTypeInLibCall`), and `TargetLibraryInfo` marks the i32s
-  of the library calls the optimiser creates `signext`.
+  (`shouldSignExtendTypeInLibCall`; a softened f32 is not extended, a
+  softened f16 is zero-extended as compiler-rt's `uint16_t`), and
+  `TargetLibraryInfo` marks the i32s of the library calls the optimiser
+  creates `signext`.
 - **Aggregates** (clang): up to 16 bytes direct, coerced to iN / i128 /
   `[2 x i64]` (one or two GPRs; two parts may straddle R3 and the stack);
   larger ones by reference to a copy the caller makes.  **byval** (other
@@ -210,7 +212,9 @@ ABI version 2 (`KlaussCPUABI::ABIVersion`; RISC-V LP64, integer only):
   frame at all without stack args).  Clang emits the walk as IR (a slot of
   an aggregate over 16 bytes holds its address), so the pointer can stay in
   a register; the IR `va_arg` of other frontends is `LowerVAARG` (full slot
-  + truncate).  C23 `f(...)` works (R0 has a home slot).
+  + truncate).  C23 `f(...)` works (R0 has a home slot).  A call without a
+  prototype (K&R `f();`) is variadic when its arguments fit in R0–R3 (clang
+  `isNoProtoCallVariadic`), so a variadic callee finds the home area.
 - **Call clobbers**: the call instructions `Def` only FLAGS; the registers a
   call clobbers come from its register-mask operand, `CSR_KlaussCPU_Call`
   (R4–R7, R15 and SP preserved).

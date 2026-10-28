@@ -111,12 +111,15 @@ public:
 
   // Library calls follow the C ABI (ABI.md): an i32 argument or result is
   // sign-extended to 64 bits whether it is signed or not, as on RV64, and a
-  // soft-float f32 is passed in the low half with no extension.
+  // soft-float f32 is passed in the low half with no extension.  A softened
+  // f16 is still zero-extended: clang has no _Float16 for this target, so
+  // compiler-rt's half-precision functions (__extendhfsf2, __truncsfhf2, ...)
+  // take and return a uint16_t, which the C ABI zero-extends.
   bool shouldSignExtendTypeInLibCall(Type *Ty, bool IsSigned) const override {
     return Ty->isIntegerTy(32) || IsSigned;
   }
   bool shouldExtendTypeInLibCall(EVT Type) const override {
-    return !Type.isFloatingPoint() || Type.getSizeInBits() >= 64;
+    return Type != MVT::f32;
   }
 
   // Forced atomics: which atomicrmw ops AtomicExpand turns into cmpxchg loops.
