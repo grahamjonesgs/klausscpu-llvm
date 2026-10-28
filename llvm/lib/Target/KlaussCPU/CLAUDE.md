@@ -785,14 +785,17 @@ llvm/lib/Target/KlaussCPU/
 
 Outside this directory: `clang/lib/Basic/Targets/KlaussCPU.*` and
 `clang/lib/Driver/ToolChains/KlaussCPU.*` (clang target + driver, which
-compiles hosted and links with `ld.lld -m elf32klausscpu`; the
-`"frame-pointer"="non-leaf"` default is in `CommonArgs.cpp`),
+compiles hosted and links with `ld.lld -m elf32klausscpu`, passing `-flto`'s
+`-plugin-opt`s; the `"frame-pointer"="non-leaf"` default is in
+`CommonArgs.cpp`),
 `clang/lib/CodeGen/Targets/KlaussCPU.cpp` (the C ABI's argument
 classification, `ABI.md`; `va_arg`), `llvm/lib/Analysis/TargetLibraryInfo.cpp`
 (no synthesised stdio calls; `signext` i32 in
 `llvm/include/llvm/Analysis/TargetLibraryInfo.h`),
 `lld/ELF/Arch/KlaussCPU.cpp` (relocations; `R_KLAUSSCPU_CALL18` range and
-thunk decision; the ABI version check of `e_flags`) with the `jmprel` call thunk in `lld/ELF/Thunks.cpp`,
+thunk decision; the ABI version check of `e_flags`) with the `jmprel` call thunk in `lld/ELF/Thunks.cpp`
+and, for LTO, KlaussCPU bitcode read as an ELFCLASS32 `EM_KLAUSSCPU` file in `lld/ELF/InputFiles.cpp`
+(`lld/test/ELF/klausscpu-lto.ll`; the runtime's `make LTO=1`),
 `llvm/include/llvm/BinaryFormat/ELFRelocs/KlaussCPU.def`,
 `llvm/lib/TargetParser/TargetDataLayout.cpp` (the DataLayout),
 `llvm/include/llvm/TargetParser/KlaussCPUABI.h` (shared constants) with its

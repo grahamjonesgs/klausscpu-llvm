@@ -76,6 +76,13 @@ void klausscpu::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   // -L search paths.
   Args.AddAllArgs(CmdArgs, options::OPT_L);
 
+  // -flto: lld optimises the bitcode at the link (-plugin-opt=O<n> from the
+  // -O level, as BareMetal; -Os/-Oz are function attributes in the bitcode).
+  const Driver &D = TC.getDriver();
+  if (D.isUsingLTO())
+    addLTOOptions(TC, Args, CmdArgs, Output, Inputs,
+                  D.getLTOMode() == LTOK_Thin);
+
   // Input object files and libraries (including any positional -Wl,-T script).
   AddLinkerInputs(TC, Inputs, Args, CmdArgs, JA);
 

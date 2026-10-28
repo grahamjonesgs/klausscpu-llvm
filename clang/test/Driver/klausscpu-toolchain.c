@@ -16,6 +16,15 @@
 // RUN:   | FileCheck %s --check-prefix=LINK
 // LINK: ld.lld{{(.exe)?}}" "-m" "elf32klausscpu" "-o" "{{.*}}.elf"
 
+// -flto: the compile writes bitcode, and the link passes lld the LTO options
+// (the optimisation level, -moutline as a plugin option).
+// RUN: %clang -### --target=klausscpu-unknown-elf -flto -Os -moutline %s -o %t.elf 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=LTO
+// LTO: "-cc1" {{.*}}"-flto=full"
+// LTO-NOT: "-plugin" "{{.*}}LLVMgold
+// LTO: ld.lld{{(.exe)?}}" "-m" "elf32klausscpu" "-o" "{{.*}}.elf" "-plugin-opt=O2"
+// LTO-SAME: "-plugin-opt=-enable-machine-outliner"
+
 // Frame pointers: every function that calls one has a frame (R15 chain);
 // a leaf without stack objects has none unless asked for.  R15 stays
 // reserved either way.

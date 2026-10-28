@@ -1737,6 +1737,10 @@ template <class ELFT> void SharedFile::parse() {
 }
 
 static ELFKind getBitcodeELFKind(const Triple &t) {
+  // KlaussCPU has 64-bit registers and a 32-bit address space; its objects
+  // are ELFCLASS32.
+  if (t.getArch() == Triple::klausscpu)
+    return ELF32LEKind;
   if (t.isLittleEndian())
     return t.isArch64Bit() ? ELF64LEKind : ELF32LEKind;
   return t.isArch64Bit() ? ELF64BEKind : ELF32BEKind;
@@ -1760,6 +1764,8 @@ static uint16_t getBitcodeMachineKind(Ctx &ctx, StringRef path,
     return EM_AVR;
   case Triple::hexagon:
     return EM_HEXAGON;
+  case Triple::klausscpu:
+    return EM_KLAUSSCPU;
   case Triple::loongarch32:
   case Triple::loongarch64:
     return EM_LOONGARCH;

@@ -36,6 +36,8 @@ public:
   bool isPIEDefault(const llvm::opt::ArgList &) const override {
     return false;
   }
+  // The linker is always lld (klausscpu::Linker), so -flto needs no plugin.
+  const char *getDefaultLinker() const override { return "ld.lld"; }
 
   RuntimeLibType GetDefaultRuntimeLibType() const override {
     return RuntimeLibType::RLT_CompilerRT;
