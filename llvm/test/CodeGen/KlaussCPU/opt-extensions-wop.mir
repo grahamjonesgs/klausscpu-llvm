@@ -10,13 +10,16 @@
 # goes.  Every immediate form becomes ADDIW of the immediate's low 32 bits
 # (INCR 1, DECR -1, MINUSV the negation, ADDV a constant above INT32_MAX).
 # Not when another reader takes the whole register (a physical register),
-# when the op's FLAGS are live, or with -klausscpu-w32-alu=false.
+# when the op's FLAGS are live, for an ADDI of a frame index (ADDIW of one
+# would cost eliminateFrameIndex a scratch ADDI), or with
+# -klausscpu-w32-alu=false.
 
 --- |
   define void @wops() { ret void }
   define void @counter() { ret void }
   define void @wide_reader() { ret void }
   define void @flags_live() { ret void }
+  define void @frame_index() { ret void }
 ...
 ---
 name:            wops
@@ -266,5 +269,36 @@ body:             |
 
   bb.2:
     $r12 = COPY %0
+    RET_I implicit $r12
+...
+---
+name:            frame_index
+tracksRegLiveness: true
+stack:
+  - { id: 0, size: 16, alignment: 8 }
+body:             |
+  bb.0:
+    liveins: $r0
+    ; CHECK-LABEL: name: frame_index
+    ; CHECK: liveins: $r0
+    ; CHECK-NEXT: {{  $}}
+    ; CHECK-NEXT: [[COPY:%[0-9]+]]:gpr = COPY $r0
+    ; CHECK-NEXT: [[ADDI:%[0-9]+]]:gpr = ADDI %stack.0, 4, implicit-def dead $flags
+    ; CHECK-NEXT: [[SEXTW:%[0-9]+]]:gpr = SEXTW [[ADDI]]
+    ; CHECK-NEXT: $r12 = COPY [[SEXTW]]
+    ; CHECK-NEXT: RET_I implicit $r12
+    ;
+    ; OFF-LABEL: name: frame_index
+    ; OFF: liveins: $r0
+    ; OFF-NEXT: {{  $}}
+    ; OFF-NEXT: [[COPY:%[0-9]+]]:gpr = COPY $r0
+    ; OFF-NEXT: [[ADDI:%[0-9]+]]:gpr = ADDI %stack.0, 4, implicit-def dead $flags
+    ; OFF-NEXT: [[SEXTW:%[0-9]+]]:gpr = SEXTW [[ADDI]]
+    ; OFF-NEXT: $r12 = COPY [[SEXTW]]
+    ; OFF-NEXT: RET_I implicit $r12
+    %0:gpr = COPY $r0
+    %1:gpr = ADDI %stack.0, 4, implicit-def dead $flags
+    %2:gpr = SEXTW %1
+    $r12 = COPY %2
     RET_I implicit $r12
 ...

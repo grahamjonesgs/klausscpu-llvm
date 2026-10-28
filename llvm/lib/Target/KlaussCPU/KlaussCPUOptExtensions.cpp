@@ -33,7 +33,8 @@
 //      or has the same extension in its predecessor block: that extension
 //      becomes the incoming value, and then rule 1 applies.
 //   4. (SEXTW only) its source is an add, subtract or multiply (ADDR,
-//      SUBR, MULR, ADDI, ADDV, MINUSV, INCR, DECR, with dead FLAGS) whose
+//      SUBR, MULR, ADDI, ADDV, MINUSV, INCR, DECR, with dead FLAGS; not an
+//      ADDI of a frame index, which eliminateFrameIndex folds) whose
 //      every reader reads only its low 32 bits, this SEXTW included: that
 //      op becomes its W form (ADDW, SUBW, MULW, ADDIW), whose result is the
 //      sign extension of the same low 32 bits, and then rule 1 applies.
@@ -539,13 +540,18 @@ static void dropWideDebugValues(ArrayRef<Register> Regs, unsigned Bits,
 // Rule 4: Src, which a SEXTW extends, is an add, subtract or multiply whose
 // readers all read only its low 32 bits.  Replace it with its W form, whose
 // low 32 bits are the same and whose result is their sign extension.
-// Changed is set to Src and the registers followed from it, whose values
-// change above bit 32.
+// Not for an ADDI of a frame index.  Changed is set to Src and the registers
+// followed from it, whose values change above bit 32.
 static bool makeWOp(Register Src, MachineRegisterInfo &MRI,
                     const TargetInstrInfo &TII,
                     SmallVectorImpl<Register> &Changed) {
   MachineInstr *MI = MRI.getVRegDef(Src);
   if (!MI || !flagsDead(*MI))
+    return false;
+  // An ADDI of a frame index stays: eliminateFrameIndex folds the slot offset
+  // into an ADDI but would compute an ADDIW's base in a scratch register
+  // first, which costs more than the SEXTW.
+  if (!MI->getOperand(1).isReg())
     return false;
   unsigned WOpc;
   bool HasImm = false;
