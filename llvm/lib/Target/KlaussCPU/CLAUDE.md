@@ -600,12 +600,15 @@ harness in klausscpu-runtime's
 
 - `validate.sh quick`: the bare-metal corpus at -O1 and -O2 on the klausscc
   emulator against committed UART baselines (each program must also end the
-  same way: a program that used to halt and now hangs or traps fails), with
+  same way: a program that used to halt and now hangs or traps fails; one
+  the instruction cap stops, such as test_rtos, is checked on its first 12
+  lines and on its PASS/FAIL verdicts wherever they come), with
   instruction counts and `.text` sizes, a few ABI-conformance and Csmith
   seeds.
 - `validate.sh full`: adds 300 Csmith + 150 `--float` seeds, 30 ABI seeds,
-  these lit suites and an output-byte oracle (`ORACLE_BASE=<previous
-  snapshot>` diffs it; a refactor must leave it identical).
+  these lit suites (plus any KlaussCPU lldb tests) and an output-byte
+  oracle (`ORACLE_BASE=<previous snapshot>` diffs it; a refactor must leave
+  it identical).
 - `validate.sh csmith N FIRST`: more Csmith seeds.
 - `validate.sh board`: board cycles (Dhrystone, also `-fno-builtin`,
   perf_baseline, perf_haz, CoreMark, Embench) against `baselines/perf.tsv`.
