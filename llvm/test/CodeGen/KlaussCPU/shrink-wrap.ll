@@ -193,3 +193,129 @@ define i64 @stack_arg_late(i64 %a, i64 %b, i64 %c, i64 %d, i64 %x) nounwind {
   %r = add i64 %s1, %s2
   ret i64 %r
 }
+
+; "frame-pointer"="all" asks for a frame in the whole function, so the frame
+; stays in the entry block: no frameless early exit.
+define i64 @early_exit_fp_all(ptr %p) nounwind "frame-pointer"="all" {
+; CHECK-LABEL: early_exit_fp_all:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    fbri r0, 0, 0, .LBB3_1
+; CHECK-NEXT:  # %bb.2: # %work
+; CHECK-NEXT:    ldidx64 r0, r0, 0
+; CHECK-NEXT:    callrel g
+; CHECK-NEXT:    incr r12, r12
+; CHECK-NEXT:    leaveret
+; CHECK-NEXT:  .LBB3_1:
+; CHECK-NEXT:    setr r12, 0
+; CHECK-NEXT:    leaveret
+;
+; NOSW-LABEL: early_exit_fp_all:
+; NOSW:       # %bb.0: # %entry
+; NOSW-NEXT:    enter 0
+; NOSW-NEXT:    fbri r0, 0, 0, .LBB3_1
+; NOSW-NEXT:  # %bb.2: # %work
+; NOSW-NEXT:    ldidx64 r0, r0, 0
+; NOSW-NEXT:    callrel g
+; NOSW-NEXT:    incr r12, r12
+; NOSW-NEXT:    leaveret
+; NOSW-NEXT:  .LBB3_1:
+; NOSW-NEXT:    setr r12, 0
+; NOSW-NEXT:    leaveret
+entry:
+  %c = icmp eq ptr %p, null
+  br i1 %c, label %ret, label %work
+
+work:
+  %v = load i64, ptr %p
+  %r = call i64 @g(i64 %v)
+  %r1 = add i64 %r, 1
+  br label %ret
+
+ret:
+  %x = phi i64 [ %r1, %work ], [ 0, %entry ]
+  ret i64 %x
+}
+
+; At -Os/-Oz the second return costs more than the early exit saves.
+define i64 @early_exit_optsize(ptr %p) nounwind optsize {
+; CHECK-LABEL: early_exit_optsize:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    fbri r0, 0, 0, .LBB4_1
+; CHECK-NEXT:  # %bb.2: # %work
+; CHECK-NEXT:    ldidx64 r0, r0, 0
+; CHECK-NEXT:    callrel g
+; CHECK-NEXT:    incr r12, r12
+; CHECK-NEXT:    leaveret
+; CHECK-NEXT:  .LBB4_1:
+; CHECK-NEXT:    setr r12, 0
+; CHECK-NEXT:    leaveret
+;
+; NOSW-LABEL: early_exit_optsize:
+; NOSW:       # %bb.0: # %entry
+; NOSW-NEXT:    enter 0
+; NOSW-NEXT:    fbri r0, 0, 0, .LBB4_1
+; NOSW-NEXT:  # %bb.2: # %work
+; NOSW-NEXT:    ldidx64 r0, r0, 0
+; NOSW-NEXT:    callrel g
+; NOSW-NEXT:    incr r12, r12
+; NOSW-NEXT:    leaveret
+; NOSW-NEXT:  .LBB4_1:
+; NOSW-NEXT:    setr r12, 0
+; NOSW-NEXT:    leaveret
+entry:
+  %c = icmp eq ptr %p, null
+  br i1 %c, label %ret, label %work
+
+work:
+  %v = load i64, ptr %p
+  %r = call i64 @g(i64 %v)
+  %r1 = add i64 %r, 1
+  br label %ret
+
+ret:
+  %x = phi i64 [ %r1, %work ], [ 0, %entry ]
+  ret i64 %x
+}
+
+define i64 @early_exit_minsize(ptr %p) nounwind minsize {
+; CHECK-LABEL: early_exit_minsize:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    enter 0
+; CHECK-NEXT:    fbri r0, 0, 0, .LBB5_1
+; CHECK-NEXT:  # %bb.2: # %work
+; CHECK-NEXT:    ldidx64 r0, r0, 0
+; CHECK-NEXT:    callrel g
+; CHECK-NEXT:    incr r12, r12
+; CHECK-NEXT:    leaveret
+; CHECK-NEXT:  .LBB5_1:
+; CHECK-NEXT:    setr r12, 0
+; CHECK-NEXT:    leaveret
+;
+; NOSW-LABEL: early_exit_minsize:
+; NOSW:       # %bb.0: # %entry
+; NOSW-NEXT:    enter 0
+; NOSW-NEXT:    fbri r0, 0, 0, .LBB5_1
+; NOSW-NEXT:  # %bb.2: # %work
+; NOSW-NEXT:    ldidx64 r0, r0, 0
+; NOSW-NEXT:    callrel g
+; NOSW-NEXT:    incr r12, r12
+; NOSW-NEXT:    leaveret
+; NOSW-NEXT:  .LBB5_1:
+; NOSW-NEXT:    setr r12, 0
+; NOSW-NEXT:    leaveret
+entry:
+  %c = icmp eq ptr %p, null
+  br i1 %c, label %ret, label %work
+
+work:
+  %v = load i64, ptr %p
+  %r = call i64 @g(i64 %v)
+  %r1 = add i64 %r, 1
+  br label %ret
+
+ret:
+  %x = phi i64 [ %r1, %work ], [ 0, %entry ]
+  ret i64 %x
+}

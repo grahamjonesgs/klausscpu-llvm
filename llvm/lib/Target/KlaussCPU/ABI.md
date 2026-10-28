@@ -131,10 +131,12 @@ compiler builds frames, which the unwinders depend on.
 - A leaf without stack objects has no frame: R15 still holds its caller's
   frame and `[SP]` the return address throughout.  clang's default is
   `-fno-omit-frame-pointer -momit-leaf-frame-pointer`
-  (`"frame-pointer"="non-leaf"`); `-mno-omit-leaf-frame-pointer` gives every
-  function a frame.  R15 is never allocated.
-- Shrink-wrapping can set the frame up after the entry and tear it down
-  before the return, so code on a path that needs no frame runs frameless.
+  (`"frame-pointer"="non-leaf"`); `-mno-omit-leaf-frame-pointer`
+  (`"frame-pointer"="all"`) gives every function a frame from its entry to
+  its return (it also turns shrink-wrapping off).  R15 is never allocated.
+- Shrink-wrapping (-O1 and up, but not at -Os/-Oz) can set the frame up
+  after the entry and tear it down before the return, so code on a path
+  that needs no frame runs frameless.
 - A sibling call whose arguments are all in registers (to a function that
   is not variadic, without byval or sret arguments) can be a tail call: the
   caller tears its frame down (`LEAVE`) and jumps; the callee is entered
@@ -381,7 +383,9 @@ its base case still has a frame); `perf_baseline` +0.03%, all of it
 `ptr_chase` reading a malloc'd buffer that starts 56 bytes lower (with
 `_end` padded back, +0.001%).  A board microbenchmark of the patterns
 (20,000 calls each): a frameless leaf reached by a tail call −37% cycles, an
-early exit −6%, soft-float `float` −11%, `double` −3%.
+early exit −6%, soft-float `float` −11%, `double` −3%.  At -Os/-Oz
+shrink-wrapping is off: there it only grew `.text` (the runtime's 44
+objects, +44 bytes at -Os, +40 at -Oz).
 
 ## Validation
 

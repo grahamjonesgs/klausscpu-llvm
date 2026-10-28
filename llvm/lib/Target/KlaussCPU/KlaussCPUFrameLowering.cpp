@@ -43,7 +43,8 @@
 // KlaussCPULeaveRet later folds such a LEAVE into the return, and the CFIFixup
 // pass gives every block laid out after the prologue the state it is entered
 // with.  Nothing needs a scratch register, so any block can hold the
-// prologue.
+// prologue.  Shrink-wrapping is off at -O0 and -Os/-Oz, and under
+// "frame-pointer"="all", which promises a frame for the whole function.
 //
 // Frameless leaves.  A function that makes no call and has no stack object
 // (no local, spill, callee-saved register, stack argument or vararg slot)
@@ -196,8 +197,15 @@ void KlaussCPUFrameLowering::determineCalleeSaves(MachineFunction &MF,
 
 bool KlaussCPUFrameLowering::enableShrinkWrapping(
     const MachineFunction &MF) const {
-  // Keep the conventional code flow when not optimizing.
-  return EnableShrinkWrap && !MF.getFunction().hasOptNone();
+  const Function &F = MF.getFunction();
+  // Keep the conventional code flow when not optimizing.  "frame-pointer"="all"
+  // (-fno-omit-frame-pointer -mno-omit-leaf-frame-pointer) asks for a frame
+  // in every function for its whole body, which a frameless stretch before
+  // the prologue or after the epilogue would break for an unwinder that walks
+  // the R15 chain.  At -Os/-Oz the second return a shrink-wrapped function
+  // usually ends up with costs more than the frameless early exit saves.
+  return EnableShrinkWrap && !F.hasOptNone() && !F.hasOptSize() &&
+         F.getFnAttribute("frame-pointer").getValueAsString() != "all";
 }
 
 // LEAVERET tears the frame down and returns in one instruction; a LEAVE

@@ -290,12 +290,19 @@ a plain `RET`.  CALL leaves the return address at `[SP]` and R15 untouched
 function that calls has one: the R15 chain from any call site is complete.
 The `"frame-pointer"` attribute can ask for a frame: clang's default for
 KlaussCPU is `non-leaf` (`clang/lib/Driver/ToolChains/CommonArgs.cpp`;
-`-mno-omit-leaf-frame-pointer` gives every function one).  Every stack access
+`-mno-omit-leaf-frame-pointer`, i.e. `all`, gives every function one, for
+its whole body: it also turns shrink-wrapping off).  Every stack access
 goes through R15 (SP is not a GPR), so a frame is never omitted from a
 function that calls or uses the stack.  The frame register of the debug info
-is SP in a frameless function (`getFrameRegister`).
+is SP in a frameless function (`getFrameRegister`).  A shrink-wrapped
+function's `DW_AT_frame_base` is R15 throughout, so a stack variable's
+location is wrong in the frameless stretch before its ENTER or after its
+LEAVE (R15 is the caller's frame there); generated code is unaffected, and
+x86 and RISC-V have the same limitation.
 
-**Shrink-wrapping** (`enableShrinkWrapping`, -O1 and up): ShrinkWrap may put
+**Shrink-wrapping** (`enableShrinkWrapping`, -O1 and up; off at -Os/-Oz,
+where the second return costs more than the early exit saves, and under
+`"frame-pointer"="all"`): ShrinkWrap may put
 the prologue in the block that dominates every use of the frame (a frame
 index, a call frame, a callee-saved register, SP, or R15:
 `isNonallocatableRegisterCalleeSave`) and the epilogue in one that
@@ -486,7 +493,7 @@ when clobbered.
 | `-klausscpu-opt-extensions` | on | KlaussCPUOptExtensions |
 | `-klausscpu-enter-leave` / `-klausscpu-leaveret` | on | ENTER/LEAVE frames, LEAVE+RET → LEAVERET |
 | `-klausscpu-frameless-leaf` | on | a leaf without stack objects has no frame |
-| `-klausscpu-shrink-wrap` | on | shrink-wrapping (also LLVM's `-enable-shrink-wrap`) |
+| `-klausscpu-shrink-wrap` | on (not -Os/-Oz) | shrink-wrapping (also LLVM's `-enable-shrink-wrap`) |
 | `-klausscpu-tail-calls` | on | sibling calls with register arguments become tail calls |
 | `-klausscpu-tail-call-dup-ret` | off | CodeGenPrepare duplicates a shared return so calls before it become tail calls |
 | `-klausscpu-fuse-cmp-br` | on | FBR fused compare-and-branch |
