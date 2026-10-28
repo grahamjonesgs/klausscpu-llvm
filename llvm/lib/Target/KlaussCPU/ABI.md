@@ -127,7 +127,15 @@ compiler builds frames, which the unwinders depend on.
 - Every function that calls another has a frame: `ENTER`, so `[R15]` is the
   caller's R15 and `[R15 + 8]` the return address.  The R15 chain seen from
   any call site is therefore complete (`__builtin_frame_address(N)` walks
-  it).
+  it).  The exception is the MachineOutliner (-Oz, or `-moutline`): its
+  `OUTLINED_FUNCTION_<n>` have no frame and use no stack (CFA = SP+8, the
+  return address at `[SP]`), and a frameless function may call one; seen
+  from inside such a function the R15 chain skips the frameless caller.  An
+  outlined epilogue (it ends in `LEAVERET`) is jumped to, and runs in the
+  frame of the function it came from (its CFI says so): it returns to that
+  function's caller, as a tail call does.  None of this is visible to code
+  outside the module: outlined functions are internal and follow no
+  calling convention.
 - A leaf without stack objects has no frame: R15 still holds its caller's
   frame and `[SP]` the return address throughout.  clang's default is
   `-fno-omit-frame-pointer -momit-leaf-frame-pointer`
@@ -156,8 +164,11 @@ compiler builds frames, which the unwinders depend on.
   `ENTER`), the return address is `S0` unless the leaf pushed something
   (it does not: it has no stack objects), and R15 is its caller's frame
   record; otherwise the return address is `[R15 + 8]`.  The chain from
-  R15 on is complete either way.  klausscc prints dumps raw and has no
-  unwinder to update.
+  R15 on is complete either way.  A PC in an `OUTLINED_FUNCTION_<n>`
+  (-Oz) is a frameless function in this sense, unless that function ends in
+  `LEAVERET` (an outlined epilogue): then it is in the frame of the function
+  that jumped to it, and the return address is `[R15 + 8]`.  klausscc prints
+  dumps raw and has no unwinder to update.
 
 ## Variadic functions
 

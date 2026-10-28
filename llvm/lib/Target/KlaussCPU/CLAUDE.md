@@ -291,7 +291,9 @@ stack objects (no local, spill, callee-saved register, stack argument or
 vararg slot; no `frameaddress`/`returnaddress`) has no frame: no prologue,
 a plain `RET`.  CALL leaves the return address at `[SP]` and R15 untouched
 (`pipeline_core.sv` U_CALL/U_RET), so R15 keeps the caller's frame and every
-function that calls has one: the R15 chain from any call site is complete.
+function that calls has one: the R15 chain from any call site is complete
+(except for the MachineOutliner's calls, see below, which a frameless
+function may make).
 The `"frame-pointer"` attribute can ask for a frame: clang's default for
 KlaussCPU is `non-leaf` (`clang/lib/Driver/ToolChains/CommonArgs.cpp`;
 `-mno-omit-leaf-frame-pointer`, i.e. `all`, gives every function one, for
@@ -485,6 +487,42 @@ when clobbered.
 - Before the post-RA scheduler: FuseCmpBr's loop constants; pre-emit passes:
   LeaveRet (see Frame layout, -O1 and up), FlagReuse, then FuseCmpBr (see
   Flags), then CalleeSavedCFI (see CFI).
+- After the pre-emit passes, the generic MachineOutliner (a module pass)
+  moves instruction sequences repeated across the module into
+  `OUTLINED_FUNCTION_<n>`: by default in `minsize` functions (-Oz,
+  `shouldOutlineFromFunctionByDefault`), everywhere with
+  `-mllvm -enable-machine-outliner` (clang `-moutline`), nowhere with
+  `-mno-outline`.  The hooks are in `KlaussCPUInstrInfo.cpp` ("Outlining").
+  CALL pushes the return address, so, as on x86, an outlined function needs
+  no link register: `callrel OUT` + `ret` (Default), `tail OUT` for a
+  sequence that ends in a return (TailCall: a RET, a frameless tail call or
+  an epilogue's LEAVERET), or `callrel OUT` for a sequence that ends in a
+  call, which becomes `tail f` in OUT (Thunk: f is entered with the same SP
+  and `[SP]`, so stack arguments and a variadic home area stay where it
+  looks).  Inside a called OUT SP is 8 lower, so nothing that uses SP is
+  outlined except as the last instruction of a TailCall/Thunk (GETSP,
+  PUSH/POP, ADDSP, ENTER/LEAVE, a call in the middle); R15 is unchanged, so
+  frame accesses are.  CALL and RET write no flag, so FLAGS may be live into
+  or out of a sequence (the call carries the uses/defs; its own FLAGS clobber
+  is dropped).  Not outlined: CFI instructions and the prologue's FrameSetup
+  spills that -g follows with CFI (so -g and -g0 outline alike,
+  `DebugInfo/KlaussCPU/outliner-cfi.ll`), inline asm, IRET, jump-table and
+  block operands; nothing from naked functions, functions that call
+  `returns_twice` ones, or ones with an explicit section.  CFI: a called or
+  Thunk OUT runs with the CIE's CFA = SP + 8; an outlined epilogue runs in
+  the frame of the function it came from, so it gets `CFA = R15 + 16`, R15
+  at CFA-16 and the slots of the callee-saved registers it restores, and
+  only candidates that restore the same registers from the same slots share
+  one (`machine-outliner.ll`, `.mir`).  A backtrace from an outlined epilogue
+  skips the function it came from, as after a tail call.  The cost model is
+  `getInstSizeInBytes` (the emitted size, short forms included).  Measured
+  ('size-opts' step): -Oz bare-metal corpus `.text` -2.7% (picolibc and the
+  builtins are not rebuilt), Embench size -7.0%; board CoreMark -16%, Embench
+  speed -4%.  At -Os it would save 3.5% / 7.6% for -11% CoreMark and -3.6%
+  Embench speed, so it stays a -Oz (minsize) feature.  Since the outliner is
+  a module pass, every function now runs the codegen pipeline up to it
+  before any is emitted (diagnostics from the AsmPrinter, such as the
+  inline-asm reserved-register warning, come after all isel errors).
 - TTI (`KlaussCPUTargetTransformInfo.cpp`): moderate partial/runtime
   unrolling (MaxCount 4) with the budget scaled down for branch-dense loop
   bodies, no peeling; `-mcpu=no-sched` reverts to no body-duplicating
@@ -551,6 +589,7 @@ when clobbered.
 | `-klausscpu-split-load64-at-legalize` | on | testing only: =false leaves an under-aligned non-volatile i64 load to the `PreprocessISelDAG` backstop |
 | `-klausscpu-mul-imm-shift-add` | off | multiply by a simm32 2^N±1 / 1-2^N as shift + add/sub when the schedule model rates MULV slower |
 | `-klausscpu-unroll-branch-density-gate` | on | scale the unroll budget for branchy loops |
+| `-enable-machine-outliner` (generic; clang `-moutline` / `-mno-outline`) | minsize functions | the MachineOutliner everywhere (`=always`, also the bare flag) or nowhere (`=never`) |
 
 ---
 
@@ -708,7 +747,7 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPUCallingConv.td     CC_KlaussCPU, RetCC_KlaussCPU, CSR_KlaussCPU, the call mask CSR_KlaussCPU_Call
 ├── KlaussCPUSchedule.td        scheduling model (RTL interlock latencies); processors `generic` and `no-sched`
 ├── KlaussCPUInstrInfo.td       encodings, operand types, isel patterns, short forms + CompressPats, aliases
-├── KlaussCPUInstrInfo.h/.cpp   branch analysis, copies, spills, flagsDeadAfter, post-RA hazard recognizer (single issue)
+├── KlaussCPUInstrInfo.h/.cpp   branch analysis, copies, spills, flagsDeadAfter, post-RA hazard recognizer (single issue), instruction sizes, MachineOutliner hooks
 ├── KlaussCPURegisterInfo.h/.cpp reserved regs, stack realignment, eliminateFrameIndex
 ├── KlaussCPUFrameLowering.h/.cpp prologue/epilogue, frameless leaves, shrink-wrapping, CFI, base pointer, getFrameIndexReference
 ├── KlaussCPUISelLowering.h/.cpp  calls/args/returns, tail calls, varargs, SELECT_CC, BR_JT, i32 rotates, i128 shifts, DAG combines

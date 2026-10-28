@@ -102,6 +102,11 @@ KlaussCPUTargetMachine::KlaussCPUTargetMachine(
   // Epilogues that end in a plain LEAVE tear the frame down before the block's
   // terminator; CFIFixup re-establishes the frame CFI for later blocks.
   setCFIFixup(true);
+  // The MachineOutliner (KlaussCPUInstrInfo.cpp, "Outlining"): by default in
+  // functions built for minimum size (-Oz); -mllvm -enable-machine-outliner
+  // (clang -moutline) everywhere.
+  setMachineOutliner(true);
+  setSupportsDefaultOutlining(true);
 }
 
 // The pre-RA scheduler keeps a compare next to the conditional branch that

@@ -1,0 +1,297 @@
+# RUN: llc -mtriple=klausscpu -run-pass=machine-outliner -verify-machineinstrs \
+# RUN:   %s -o - | FileCheck %s
+#
+# What KlaussCPU's MachineOutliner hooks allow (KlaussCPUInstrInfo.cpp,
+# "Outlining").  CALL and RET write no flag, so a sequence may leave FLAGS
+# for a branch after it (flags_out) or read FLAGS set before it (flags_in);
+# the call carries the uses and defs.  An instruction that uses SP (GETSP),
+# a CFI instruction and the prologue's FrameSetup stores (which -g follows
+# with CFI) are never outlined: each splits the repeated sequence.
+#
+# CHECK-LABEL: name: flags_out1
+# CHECK:       CALL_I @[[OUT:OUTLINED_FUNCTION_[0-9]+]], implicit $sp, implicit-def $flags,
+# CHECK-NEXT:  JMPZ %bb.2, implicit $flags
+#
+# CHECK-LABEL: name: flags_in1
+# CHECK:       renamable $r14 = ADDR {{.*}}implicit-def $flags
+# CHECK-NEXT:  CALL_I @[[IN:OUTLINED_FUNCTION_[0-9]+]], {{.*}}implicit $flags
+# CHECK-NEXT:  $r12 = ADDV killed $r12, 21
+#
+# CHECK-LABEL: name: sp1
+# CHECK:       CALL_I @OUTLINED_FUNCTION
+# CHECK-NEXT:  renamable $r13 = GETSP_R implicit $sp
+# CHECK-NEXT:  CALL_I @OUTLINED_FUNCTION
+#
+# CHECK-LABEL: name: cfi1
+# CHECK:       CALL_I @OUTLINED_FUNCTION
+# CHECK-NEXT:  CFI_INSTRUCTION def_cfa_offset 8
+# CHECK-NEXT:  CALL_I @[[AFTERCFI:OUTLINED_FUNCTION_[0-9]+]],
+#
+# CHECK-LABEL: name: frame_setup1
+# CHECK:       CALL_I @OUTLINED_FUNCTION
+# CHECK-NEXT:  frame-setup STIDX64 killed $r4, $r15, -8
+# CHECK-NEXT:  STIDX64 renamable $r2, renamable $r0, 8
+# CHECK-NEXT:  CALL_I @[[AFTERCFI]],
+#
+# CHECK:       name: [[IN]]{{$}}
+# CHECK:       renamable $r14 = SETFR killed renamable $r14, implicit $flags
+# CHECK-NEXT:  renamable $r12 = XORV renamable $r14, 222
+# CHECK-COUNT-3: STIDX64
+# CHECK-NEXT:  RET_I
+#
+# CHECK:       name: [[OUT]]{{$}}
+# CHECK:       renamable $r14 = ADDR killed renamable $r1, killed renamable $r2, implicit-def $flags
+# CHECK-NEXT:  renamable $r12 = XORV renamable $r14, 111
+# CHECK-COUNT-3: STIDX64
+# CHECK-NEXT:  RET_I
+#
+# CHECK:       name: [[AFTERCFI]]{{$}}
+# CHECK:       STIDX64 renamable $r12, renamable $r0, 16
+# CHECK-NEXT:  STIDX64 renamable $r1, renamable $r0, 24
+# CHECK-NEXT:  RET_I
+
+--- |
+  define void @flags_out1() minsize nounwind { ret void }
+  define void @flags_out2() minsize nounwind { ret void }
+  define void @flags_out3() minsize nounwind { ret void }
+  define void @flags_in1() minsize nounwind { ret void }
+  define void @flags_in2() minsize nounwind { ret void }
+  define void @flags_in3() minsize nounwind { ret void }
+  define void @sp1() minsize nounwind { ret void }
+  define void @sp2() minsize nounwind { ret void }
+  define void @sp3() minsize nounwind { ret void }
+  define void @cfi1() minsize nounwind { ret void }
+  define void @cfi2() minsize nounwind { ret void }
+  define void @cfi3() minsize nounwind { ret void }
+  define void @frame_setup1() minsize nounwind { ret void }
+  define void @frame_setup2() minsize nounwind { ret void }
+  define void @frame_setup3() minsize nounwind { ret void }
+...
+---
+name: flags_out1
+tracksRegLiveness: true
+body: |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $r0, $r1, $r2
+    renamable $r14 = ADDR killed renamable $r1, killed renamable $r2, implicit-def $flags
+    renamable $r12 = XORV renamable $r14, 111
+    STIDX64 renamable $r12, renamable $r0, 0
+    STIDX64 renamable $r14, killed renamable $r0, 8
+    STIDX64 renamable $r12, renamable $r14, 16
+    JMPZ %bb.1, implicit $flags
+  bb.2:
+    liveins: $r12
+    RET_I implicit killed $r12
+  bb.1:
+    $r12 = SETR 1
+    RET_I implicit killed $r12
+---
+name: flags_out2
+tracksRegLiveness: true
+body: |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $r0, $r1, $r2
+    renamable $r14 = ADDR killed renamable $r1, killed renamable $r2, implicit-def $flags
+    renamable $r12 = XORV renamable $r14, 111
+    STIDX64 renamable $r12, renamable $r0, 0
+    STIDX64 renamable $r14, killed renamable $r0, 8
+    STIDX64 renamable $r12, renamable $r14, 16
+    JMPZ %bb.1, implicit $flags
+  bb.2:
+    liveins: $r12
+    RET_I implicit killed $r12
+  bb.1:
+    $r12 = SETR 2
+    RET_I implicit killed $r12
+---
+name: flags_out3
+tracksRegLiveness: true
+body: |
+  bb.0:
+    successors: %bb.1, %bb.2
+    liveins: $r0, $r1, $r2
+    renamable $r14 = ADDR killed renamable $r1, killed renamable $r2, implicit-def $flags
+    renamable $r12 = XORV renamable $r14, 111
+    STIDX64 renamable $r12, renamable $r0, 0
+    STIDX64 renamable $r14, killed renamable $r0, 8
+    STIDX64 renamable $r12, renamable $r14, 16
+    JMPZ %bb.1, implicit $flags
+  bb.2:
+    liveins: $r12
+    RET_I implicit killed $r12
+  bb.1:
+    $r12 = SETR 3
+    RET_I implicit killed $r12
+---
+name: flags_in1
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r0, $r1, $r2
+    renamable $r14 = ADDR killed renamable $r1, killed renamable $r2, implicit-def $flags
+    renamable $r14 = SETFR killed renamable $r14, implicit $flags
+    renamable $r12 = XORV renamable $r14, 222
+    STIDX64 renamable $r12, renamable $r0, 40
+    STIDX64 renamable $r14, killed renamable $r0, 48
+    STIDX64 renamable $r12, renamable $r14, 56
+    $r12 = ADDV killed $r12, 21, implicit-def dead $flags
+    RET_I implicit killed $r12
+---
+name: flags_in2
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r0, $r1, $r2
+    renamable $r14 = SUBR killed renamable $r1, killed renamable $r2, implicit-def $flags
+    renamable $r14 = SETFR killed renamable $r14, implicit $flags
+    renamable $r12 = XORV renamable $r14, 222
+    STIDX64 renamable $r12, renamable $r0, 40
+    STIDX64 renamable $r14, killed renamable $r0, 48
+    STIDX64 renamable $r12, renamable $r14, 56
+    $r12 = ADDV killed $r12, 22, implicit-def dead $flags
+    RET_I implicit killed $r12
+---
+name: flags_in3
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r0, $r1, $r2
+    renamable $r14 = ADDR killed renamable $r2, killed renamable $r1, implicit-def $flags
+    renamable $r14 = SETFR killed renamable $r14, implicit $flags
+    renamable $r12 = XORV renamable $r14, 222
+    STIDX64 renamable $r12, renamable $r0, 40
+    STIDX64 renamable $r14, killed renamable $r0, 48
+    STIDX64 renamable $r12, renamable $r14, 56
+    $r12 = ADDV killed $r12, 23, implicit-def dead $flags
+    RET_I implicit killed $r12
+---
+name: sp1
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r0, $r1, $r2
+    renamable $r12 = XORV renamable $r1, 333
+    STIDX64 renamable $r12, renamable $r0, 0
+    renamable $r13 = GETSP_R implicit $sp
+    STIDX64 renamable $r12, renamable $r13, 0
+    STIDX64 renamable $r2, renamable $r0, 8
+    STIDX64 renamable $r12, renamable $r0, 16
+    $r12 = ADDV killed $r12, 31, implicit-def dead $flags
+    RET_I implicit killed $r12
+---
+name: sp2
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r0, $r1, $r2
+    renamable $r12 = XORV renamable $r1, 333
+    STIDX64 renamable $r12, renamable $r0, 0
+    renamable $r13 = GETSP_R implicit $sp
+    STIDX64 renamable $r12, renamable $r13, 0
+    STIDX64 renamable $r2, renamable $r0, 8
+    STIDX64 renamable $r12, renamable $r0, 16
+    $r12 = ADDV killed $r12, 32, implicit-def dead $flags
+    RET_I implicit killed $r12
+---
+name: sp3
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r0, $r1, $r2
+    renamable $r12 = XORV renamable $r1, 333
+    STIDX64 renamable $r12, renamable $r0, 0
+    renamable $r13 = GETSP_R implicit $sp
+    STIDX64 renamable $r12, renamable $r13, 0
+    STIDX64 renamable $r2, renamable $r0, 8
+    STIDX64 renamable $r12, renamable $r0, 16
+    $r12 = ADDV killed $r12, 33, implicit-def dead $flags
+    RET_I implicit killed $r12
+---
+name: cfi1
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r0, $r1, $r2
+    renamable $r12 = XORV renamable $r1, 444
+    STIDX64 renamable $r12, renamable $r0, 0
+    STIDX64 renamable $r2, renamable $r0, 8
+    CFI_INSTRUCTION def_cfa_offset 8
+    STIDX64 renamable $r12, renamable $r0, 16
+    STIDX64 renamable $r1, renamable $r0, 24
+    STIDX64 renamable $r2, renamable $r0, 32
+    $r12 = ADDV killed $r12, 41, implicit-def dead $flags
+    RET_I implicit killed $r12
+---
+name: cfi2
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r0, $r1, $r2
+    renamable $r12 = XORV renamable $r1, 444
+    STIDX64 renamable $r12, renamable $r0, 0
+    STIDX64 renamable $r2, renamable $r0, 8
+    CFI_INSTRUCTION def_cfa_offset 8
+    STIDX64 renamable $r12, renamable $r0, 16
+    STIDX64 renamable $r1, renamable $r0, 24
+    STIDX64 renamable $r2, renamable $r0, 32
+    $r12 = ADDV killed $r12, 42, implicit-def dead $flags
+    RET_I implicit killed $r12
+---
+name: cfi3
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r0, $r1, $r2
+    renamable $r12 = XORV renamable $r1, 444
+    STIDX64 renamable $r12, renamable $r0, 0
+    STIDX64 renamable $r2, renamable $r0, 8
+    CFI_INSTRUCTION def_cfa_offset 8
+    STIDX64 renamable $r12, renamable $r0, 16
+    STIDX64 renamable $r1, renamable $r0, 24
+    STIDX64 renamable $r2, renamable $r0, 32
+    $r12 = ADDV killed $r12, 43, implicit-def dead $flags
+    RET_I implicit killed $r12
+---
+name: frame_setup1
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r0, $r1, $r2, $r4
+    renamable $r12 = XORV renamable $r1, 555
+    STIDX64 renamable $r12, renamable $r0, 0
+    frame-setup STIDX64 killed $r4, $r15, -8
+    STIDX64 renamable $r2, renamable $r0, 8
+    STIDX64 renamable $r12, renamable $r0, 16
+    STIDX64 renamable $r1, renamable $r0, 24
+    $r12 = ADDV killed $r12, 51, implicit-def dead $flags
+    RET_I implicit killed $r12
+---
+name: frame_setup2
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r0, $r1, $r2, $r4
+    renamable $r12 = XORV renamable $r1, 555
+    STIDX64 renamable $r12, renamable $r0, 0
+    frame-setup STIDX64 killed $r4, $r15, -8
+    STIDX64 renamable $r2, renamable $r0, 8
+    STIDX64 renamable $r12, renamable $r0, 16
+    STIDX64 renamable $r1, renamable $r0, 24
+    $r12 = ADDV killed $r12, 52, implicit-def dead $flags
+    RET_I implicit killed $r12
+---
+name: frame_setup3
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r0, $r1, $r2, $r4
+    renamable $r12 = XORV renamable $r1, 555
+    STIDX64 renamable $r12, renamable $r0, 0
+    frame-setup STIDX64 killed $r4, $r15, -8
+    STIDX64 renamable $r2, renamable $r0, 8
+    STIDX64 renamable $r12, renamable $r0, 16
+    STIDX64 renamable $r1, renamable $r0, 24
+    $r12 = ADDV killed $r12, 53, implicit-def dead $flags
+    RET_I implicit killed $r12

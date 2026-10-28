@@ -108,6 +108,33 @@ public:
 
   ArrayRef<std::pair<MachineMemOperand::Flags, const char *>>
   getSerializableMachineMemOperandTargetFlags() const override;
+
+  // Size in bytes as emitted: the 1-word short form where the AsmPrinter
+  // will compress the instruction (a call or tail call to a symbol, a
+  // literal immediate in short reach).  An estimate for the MachineOutliner;
+  // nothing that must be exact (FuseCmpBr's range check) relies on it.
+  unsigned getInstSizeInBytes(const MachineInstr &MI) const override;
+
+  // MachineOutliner (KlaussCPUInstrInfo.cpp, "Outlining").  CALL pushes the
+  // return address, so an outlined function needs no link register: it is
+  // called like x86's, and nothing in it may use SP.
+  bool isFunctionSafeToOutlineFrom(MachineFunction &MF,
+                                   bool OutlineFromLinkOnceODRs) const override;
+  bool shouldOutlineFromFunctionByDefault(MachineFunction &MF) const override;
+  std::optional<std::unique_ptr<outliner::OutlinedFunction>>
+  getOutliningCandidateInfo(
+      const MachineModuleInfo &MMI,
+      std::vector<outliner::Candidate> &RepeatedSequenceLocs,
+      unsigned MinRepeats) const override;
+  outliner::InstrType getOutliningTypeImpl(const MachineModuleInfo &MMI,
+                                           MachineBasicBlock::iterator &MIT,
+                                           unsigned Flags) const override;
+  void buildOutlinedFrame(MachineBasicBlock &MBB, MachineFunction &MF,
+                          const outliner::OutlinedFunction &OF) const override;
+  MachineBasicBlock::iterator
+  insertOutlinedCall(Module &M, MachineBasicBlock &MBB,
+                     MachineBasicBlock::iterator &It, MachineFunction &MF,
+                     outliner::Candidate &C) const override;
 };
 
 } // namespace llvm

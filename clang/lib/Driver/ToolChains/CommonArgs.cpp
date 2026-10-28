@@ -2981,11 +2981,12 @@ void tools::addMachineOutlinerArgs(const Driver &D,
   if (Arg *A = Args.getLastArg(options::OPT_moutline,
                                options::OPT_mno_outline)) {
     if (A->getOption().matches(options::OPT_moutline)) {
-      // We only support -moutline in AArch64, ARM, RISC-V and X86 targets right
-      // now. If we're compiling for these, add the proper mllvm flags.
-      // Otherwise, emit a warning and ignore the flag.
+      // We only support -moutline in AArch64, ARM, RISC-V, X86 and KlaussCPU
+      // targets right now. If we're compiling for these, add the proper mllvm
+      // flags. Otherwise, emit a warning and ignore the flag.
       if (Triple.isARM() || Triple.isThumb() || Triple.isAArch64() ||
-          Triple.isRISCV() || Triple.isX86()) {
+          Triple.isRISCV() || Triple.isX86() ||
+          Triple.getArch() == llvm::Triple::klausscpu) {
         addArg(Twine("-enable-machine-outliner"));
       } else {
         D.Diag(diag::warn_drv_moutline_unsupported_opt) << Triple.getArchName();

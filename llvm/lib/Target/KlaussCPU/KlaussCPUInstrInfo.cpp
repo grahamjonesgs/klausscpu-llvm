@@ -7,18 +7,28 @@
 #include "KlaussCPUInstrInfo.h"
 #include "KlaussCPURegisterInfo.h"
 #include "KlaussCPUSubtarget.h"
+#include "MCTargetDesc/KlaussCPUMCTargetDesc.h"
+#include "llvm/CodeGen/CFIInstBuilder.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/ScheduleDAGInstrs.h"
 #include "llvm/CodeGen/ScheduleHazardRecognizer.h"
+#include "llvm/CodeGen/TargetFrameLowering.h"
+#include "llvm/IR/Module.h"
+#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/TargetParser/KlaussCPUABI.h"
 
 #define GET_INSTRINFO_CTOR_DTOR
 #include "KlaussCPUGenInstrInfo.inc"
 
 using namespace llvm;
+
+#define GEN_CHECK_COMPRESS_INSTR
+#include "KlaussCPUGenCompressInstEmitter.inc"
 
 static cl::opt<bool> PostRASingleIssue(
     "klausscpu-postra-single-issue", cl::Hidden, cl::init(true),
@@ -399,4 +409,355 @@ KlaussCPUInstrInfo::getSerializableMachineMemOperandTargetFlags() const {
   static const std::pair<MachineMemOperand::Flags, const char *> TargetFlags[] =
       {{KlaussCPU::MOSplitHalf, "klausscpu-split-half"}};
   return ArrayRef(TargetFlags);
+}
+
+unsigned KlaussCPUInstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
+  if (MI.isMetaInstruction())
+    return 0;
+  const auto &FB = STI.getFeatureBits();
+  switch (MI.getOpcode()) {
+  case TargetOpcode::INLINEASM:
+  case TargetOpcode::INLINEASM_BR: {
+    const MachineFunction &MF = *MI.getMF();
+    return getInlineAsmLength(MI.getOperand(0).getSymbolName(),
+                              *MF.getTarget().getMCAsmInfo());
+  }
+  // TAILREL / JMPR (KlaussCPUAsmPrinter::emitInstruction).
+  case KlaussCPU::PseudoTAIL:
+    return FB[KlaussCPU::FeatureShortCalls] ? 4 : 8;
+  case KlaussCPU::PseudoTAILIndirect:
+    return 4;
+  // A call to a symbol is the short CALL (CALL_SH), relaxed or thunked by
+  // the assembler / lld when out of reach.  isCompressibleInst only knows
+  // a literal target.
+  case KlaussCPU::CALL_I:
+  case KlaussCPU::CALLREL:
+    if (!MI.getOperand(0).isImm() && FB[KlaussCPU::FeatureShortCalls])
+      return 4;
+    break;
+  default:
+    // A branch to a block is the short form unless the assembler relaxes it.
+    if (MI.isBranch() && !MI.isIndirectBranch() && MI.getNumOperands() &&
+        MI.getOperand(0).isMBB() && FB[KlaussCPU::FeatureShortBranches] &&
+        get(MI.getOpcode()).getSize() == 8)
+      return 4;
+    break;
+  }
+  if (isCompressibleInst(MI, STI))
+    return 4;
+  return get(MI.getOpcode()).getSize();
+}
+
+//===----------------------------------------------------------------------===//
+// Outlining (MachineOutliner)
+//===----------------------------------------------------------------------===//
+//
+// CALL pushes the return address and RET pops it, so an outlined function
+// needs no link register and no frame: it is entered, like any frameless
+// function, with CFA = SP + 8 and the return address at [SP], which is the
+// CIE's state, so it needs no CFI of its own.  The price is that SP inside
+// it is 8 bytes below SP at the call site, so nothing that reads or writes
+// SP may be outlined into a called function (GETSP, PUSH/POP, ADDSP,
+// ENTER/LEAVE, a call: its callee would find its stack arguments and home
+// area 8 bytes off).  R15 is untouched by CALL, so frame accesses
+// (R15-relative) are outlined freely, also from a frameless function, which
+// keeps its caller's R15 (the R15 chain then skips that function, as in any
+// frameless code; the CFI describes it).  The three kinds of call:
+//
+//   Default:  I1 I2 I3      ->  call OUTLINED       OUTLINED: I1 I2 I3 ret
+//   TailCall: I1 I2 ret     ->  tail OUTLINED       OUTLINED: I1 I2 ret
+//   Thunk:    I1 I2 call f  ->  call OUTLINED       OUTLINED: I1 I2 tail f
+//
+// TailCall jumps, so SP is unchanged.  It ends in a plain RET or a tail
+// call that is not behind a LEAVE (any LEAVE in the sequence is illegal), so
+// the code runs frameless with the CIE's CFA, or in a LEAVERET: an
+// epilogue, which runs in the frame of the function it was outlined from.
+// Its CFI then describes that frame (CFA = R15 + 16, the caller's R15 at
+// CFA - 16) and the callee-saved registers the sequence restores, at their
+// slots; every candidate must restore the same registers from the same
+// slots (the others are already restored).  Such a function returns to the
+// caller of the one it came from, which leaves the backtrace as a tail
+// call does.  In a Thunk, OUTLINED's CALL pushed the same return address that the call it
+// replaces would have, so f is entered with SP and [SP] as before: its
+// stack arguments (stored before the sequence through a GETSP outside it)
+// and a variadic call's home area are where it looks.
+//
+// FLAGS: CALL and RET write no flag (pipeline_core.sv: no fmask for U_CALL /
+// U_RET; nor does the emulator), so a sequence may read flags set before it
+// or leave flags read after it (a flag-setting op that FlagReuse made the
+// branch's compare).  The outliner adds the uses and defs to the call.
+//
+// CFI instructions are never outlined, nor are the prologue's FrameSetup
+// instructions they follow, so -g changes nothing that is outlined.
+
+enum MachineOutlinerConstructionID {
+  MachineOutlinerDefault,
+  MachineOutlinerTailCall,
+  MachineOutlinerThunk
+};
+
+static bool usesSP(const MachineInstr &MI, const TargetRegisterInfo *TRI) {
+  switch (MI.getOpcode()) {
+  // Not described by their operands (the return address is popped from
+  // [SP]; IRET pops the interrupt frame).
+  case KlaussCPU::RET_I:
+  case KlaussCPU::IRET_I:
+  case KlaussCPU::LEAVERET_I:
+  case KlaussCPU::PUSHV:
+  case KlaussCPU::PUSHV64:
+    return true;
+  default:
+    break;
+  }
+  return MI.readsRegister(KlaussCPU::SP, TRI) ||
+         MI.modifiesRegister(KlaussCPU::SP, TRI) ||
+         MI.getDesc().hasImplicitUseOfPhysReg(KlaussCPU::SP) ||
+         MI.getDesc().hasImplicitDefOfPhysReg(KlaussCPU::SP);
+}
+
+// The callee-saved registers an epilogue candidate (one that ends in
+// LEAVERET) restores, with their slots as CFA offsets: the FrameDestroy
+// loads in it of a callee-saved register of its function.
+using CSRRestores = SmallVector<std::pair<MCRegister, int64_t>, 4>;
+static CSRRestores getCSRRestores(outliner::Candidate &C) {
+  const MachineFunction &MF = *C.getMF();
+  const TargetFrameLowering &TFI = *MF.getSubtarget().getFrameLowering();
+  CSRRestores R;
+  for (const MachineInstr &MI : C) {
+    if (!MI.getFlag(MachineInstr::FrameDestroy) || !MI.mayLoad() ||
+        !MI.getOperand(0).isReg() || !MI.getOperand(0).isDef())
+      continue;
+    MCRegister Reg = MI.getOperand(0).getReg().asMCReg();
+    for (const CalleeSavedInfo &CS :
+         MF.getFrameInfo().getCalleeSavedInfo()) {
+      if (CS.getReg() != Reg)
+        continue;
+      Register FrameReg;
+      StackOffset Off =
+          TFI.getFrameIndexReference(MF, CS.getFrameIdx(), FrameReg);
+      R.push_back({Reg, Off.getFixed() -
+                            static_cast<int64_t>(KlaussCPUABI::FPToCFAOffset)});
+    }
+  }
+  llvm::sort(R);
+  return R;
+}
+
+// A call that can end a Thunk candidate: a direct call to a symbol, or an
+// indirect one through a register PseudoTAILIndirect accepts.
+static bool isThunkableCall(const MachineInstr &MI) {
+  switch (MI.getOpcode()) {
+  case KlaussCPU::CALL_I:
+  case KlaussCPU::CALLREL:
+    return MI.getOperand(0).isGlobal() || MI.getOperand(0).isSymbol();
+  case KlaussCPU::CALLR_R:
+    return KlaussCPU::GPRTCRegClass.contains(MI.getOperand(0).getReg());
+  default:
+    return false;
+  }
+}
+
+bool KlaussCPUInstrInfo::isFunctionSafeToOutlineFrom(
+    MachineFunction &MF, bool OutlineFromLinkOnceODRs) const {
+  const Function &F = MF.getFunction();
+
+  // Can F be deduplicated by the linker? If it can, don't outline from it.
+  if (!OutlineFromLinkOnceODRs && F.hasLinkOnceODRLinkage())
+    return false;
+
+  // Don't outline from functions with section markings; the program could
+  // expect that all the code is in the named section.
+  if (F.hasSection())
+    return false;
+
+  // No outlined calls in a function without a prologue, or in one that
+  // calls setjmp (a thunk would be equivalent, but keep it simple).
+  if (F.hasFnAttribute(Attribute::Naked) || MF.exposesReturnsTwice())
+    return false;
+
+  return true;
+}
+
+bool KlaussCPUInstrInfo::shouldOutlineFromFunctionByDefault(
+    MachineFunction &MF) const {
+  return MF.getFunction().hasMinSize();
+}
+
+std::optional<std::unique_ptr<outliner::OutlinedFunction>>
+KlaussCPUInstrInfo::getOutliningCandidateInfo(
+    const MachineModuleInfo &MMI,
+    std::vector<outliner::Candidate> &RepeatedSequenceLocs,
+    unsigned MinRepeats) const {
+  if (RepeatedSequenceLocs.size() < MinRepeats)
+    return std::nullopt;
+
+  // An epilogue's CFI describes the frame it runs in: keep the candidates
+  // whose functions saved the registers it restores in the same slots.
+  if (RepeatedSequenceLocs[0].back().getOpcode() == KlaussCPU::LEAVERET_I) {
+    CSRRestores First = getCSRRestores(RepeatedSequenceLocs[0]);
+    llvm::erase_if(RepeatedSequenceLocs, [&](outliner::Candidate &C) {
+      return getCSRRestores(C) != First;
+    });
+    if (RepeatedSequenceLocs.size() < MinRepeats)
+      return std::nullopt;
+  }
+
+  // Each candidate is the same sequence.
+  outliner::Candidate &Candidate = RepeatedSequenceLocs[0];
+  const MachineInstr &Last = Candidate.back();
+
+  unsigned SequenceSize = 0;
+  for (const MachineInstr &MI : Candidate)
+    SequenceSize += getInstSizeInBytes(MI);
+
+  // A call or a tail jump to the outlined function is one word (the short
+  // CALL / TAIL; lld adds a thunk for an out-of-reach one).
+  const unsigned CallSize = STI.getFeatureBits()[KlaussCPU::FeatureShortCalls]
+                                ? 4
+                                : 8;
+  MachineOutlinerConstructionID MOCI;
+  unsigned FrameOverhead;
+  if (Last.isReturn()) {
+    // The return (or tail jump) moves into the outlined function.
+    MOCI = MachineOutlinerTailCall;
+    FrameOverhead = 0;
+  } else if (Last.isCall()) {
+    // The call becomes the outlined function's tail jump, of the same size.
+    MOCI = MachineOutlinerThunk;
+    FrameOverhead = 0;
+  } else {
+    // A RET is added.
+    MOCI = MachineOutlinerDefault;
+    FrameOverhead = 4;
+  }
+
+  for (outliner::Candidate &C : RepeatedSequenceLocs)
+    C.setCallInfo(MOCI, CallSize);
+
+  return std::make_unique<outliner::OutlinedFunction>(
+      RepeatedSequenceLocs, SequenceSize, FrameOverhead, MOCI);
+}
+
+outliner::InstrType
+KlaussCPUInstrInfo::getOutliningTypeImpl(const MachineModuleInfo &MMI,
+                                         MachineBasicBlock::iterator &MIT,
+                                         unsigned Flags) const {
+  MachineInstr &MI = *MIT;
+  const TargetRegisterInfo *TRI = &getRegisterInfo();
+
+  // The outlined function has no CFI of its own (see above).
+  if (MI.isCFIInstruction())
+    return outliner::InstrType::Illegal;
+
+  // The prologue's stores are followed by CFI with -g; outlining them only
+  // without -g would make -g change the code.
+  if (MI.getFlag(MachineInstr::FrameSetup))
+    return outliner::InstrType::Illegal;
+
+  // A return or a tail call ends a TailCall candidate: RET, LEAVERET, or a
+  // tail call not behind a LEAVE (any LEAVE in the sequence is illegal
+  // below).
+  if (MI.isReturn()) {
+    switch (MI.getOpcode()) {
+    case KlaussCPU::RET_I:
+    case KlaussCPU::LEAVERET_I:
+      return outliner::InstrType::Legal;
+    case KlaussCPU::PseudoTAIL:
+      return MI.getOperand(0).isGlobal() || MI.getOperand(0).isSymbol()
+                 ? outliner::InstrType::Legal
+                 : outliner::InstrType::Illegal;
+    case KlaussCPU::PseudoTAILIndirect:
+      return outliner::InstrType::Legal;
+    default:
+      return outliner::InstrType::Illegal; // IRET
+    }
+  }
+
+  // A call can only end a candidate (a Thunk).
+  if (MI.isCall())
+    return isThunkableCall(MI) ? outliner::InstrType::LegalTerminator
+                               : outliner::InstrType::Illegal;
+
+  if (usesSP(MI, TRI))
+    return outliner::InstrType::Illegal;
+
+  return outliner::InstrType::Legal;
+}
+
+void KlaussCPUInstrInfo::buildOutlinedFrame(
+    MachineBasicBlock &MBB, MachineFunction &MF,
+    const outliner::OutlinedFunction &OF) const {
+  switch (OF.FrameConstructionID) {
+  case MachineOutlinerTailCall: {
+    // The sequence ends in its return.  An epilogue (LEAVERET) runs in the
+    // frame of the function it came from.
+    if (MBB.back().getOpcode() != KlaussCPU::LEAVERET_I || !MF.needsFrameMoves())
+      return;
+    CFIInstBuilder CFIBuilder(MBB, MBB.begin(), MachineInstr::NoFlags);
+    CFIBuilder.buildDefCFA(KlaussCPU::R15, KlaussCPUABI::FPToCFAOffset);
+    CFIBuilder.buildOffset(KlaussCPU::R15,
+                           -static_cast<int64_t>(KlaussCPUABI::FPToCFAOffset));
+    outliner::Candidate C = OF.Candidates.front();
+    for (auto [Reg, Off] : getCSRRestores(C))
+      CFIBuilder.buildOffset(Reg, Off);
+    return;
+  }
+  case MachineOutlinerThunk: {
+    // The final call becomes a tail jump to the same callee.
+    MachineInstr &Call = MBB.back();
+    assert(Call.isCall() && "a thunk ends in a call");
+    MachineOperand Target = Call.getOperand(0);
+    unsigned Opc = Call.getOpcode() == KlaussCPU::CALLR_R
+                       ? KlaussCPU::PseudoTAILIndirect
+                       : KlaussCPU::PseudoTAIL;
+    MachineInstrBuilder MIB =
+        BuildMI(MBB, MBB.end(), Call.getDebugLoc(), get(Opc));
+    if (Target.isReg())
+      MIB.addReg(Target.getReg());
+    else
+      MIB.add(Target);
+    Call.eraseFromParent();
+    return;
+  }
+  default:
+    MBB.insert(MBB.end(), BuildMI(MF, DebugLoc(), get(KlaussCPU::RET_I)));
+    return;
+  }
+}
+
+MachineBasicBlock::iterator KlaussCPUInstrInfo::insertOutlinedCall(
+    Module &M, MachineBasicBlock &MBB, MachineBasicBlock::iterator &It,
+    MachineFunction &MF, outliner::Candidate &C) const {
+  const GlobalValue *Callee = M.getNamedValue(MF.getName());
+  // The call takes a source location from the code it replaces (a Thunk's
+  // that of its call), so that a debugger stepping out of a callee stops at
+  // a line instead of at line 0, which lldb steps out of again.
+  DebugLoc DL;
+  if (C.CallConstructionID == MachineOutlinerThunk)
+    DL = C.back().getDebugLoc();
+  for (const MachineInstr &MI : C) {
+    if (DL)
+      break;
+    if (!MI.isDebugInstr())
+      DL = MI.getDebugLoc();
+  }
+  if (C.CallConstructionID == MachineOutlinerTailCall) {
+    It = MBB.insert(It, BuildMI(MF, DL, get(KlaussCPU::PseudoTAIL))
+                            .addGlobalAddress(Callee));
+    return It;
+  }
+  // As LowerCall: CALLREL under PIC, CALL_I otherwise; both are emitted as
+  // the short CALL.  The call instructions' FLAGS def is the ABI's clobber;
+  // CALL and RET themselves write no flag, so drop it: the outliner adds a
+  // def if the sequence writes FLAGS and a use if it reads flags set before
+  // it.
+  unsigned Opc =
+      STI.isPositionIndependent() ? KlaussCPU::CALLREL : KlaussCPU::CALL_I;
+  MachineInstr *Call = BuildMI(MF, DL, get(Opc)).addGlobalAddress(Callee);
+  int FlagsIdx = Call->findRegisterDefOperandIdx(KlaussCPU::FLAGS,
+                                                 /*TRI=*/nullptr);
+  if (FlagsIdx >= 0)
+    Call->removeOperand(FlagsIdx);
+  It = MBB.insert(It, Call);
+  return It;
 }
