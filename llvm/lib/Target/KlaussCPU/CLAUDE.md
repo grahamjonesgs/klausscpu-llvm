@@ -599,8 +599,10 @@ harness in klausscpu-runtime's
 (`KLAUSSCPU_LLVM_BIN` set to this `build/bin`):
 
 - `validate.sh quick`: the bare-metal corpus at -O1 and -O2 on the klausscc
-  emulator against committed UART baselines, with instruction counts and
-  `.text` sizes, a few ABI-conformance and Csmith seeds.
+  emulator against committed UART baselines (each program must also end the
+  same way: a program that used to halt and now hangs or traps fails), with
+  instruction counts and `.text` sizes, a few ABI-conformance and Csmith
+  seeds.
 - `validate.sh full`: adds 300 Csmith + 150 `--float` seeds, 30 ABI seeds,
   these lit suites and an output-byte oracle (`ORACLE_BASE=<previous
   snapshot>` diffs it; a refactor must leave it identical).
@@ -611,9 +613,13 @@ harness in klausscpu-runtime's
   the emulator.
 - `validate.sh zephyr`: the Zephyr apps.
 
-Board modes take `BOARD_LOCK`.  After an intended change of output or
+Board modes take `BOARD_LOCK`: every session sharing the board must export
+the same lock file (the default, `${XDG_RUNTIME_DIR:-/tmp}/klausscpu-board.lock`,
+is only safe when nobody uses another), and a board run prints the lock it
+uses in its first lines.  After an intended change of output or
 performance, `validate.sh baseline <run dirs>` rewrites the baselines; commit
-them with the change.
+them with the change.  After changing the harness itself, run
+`validate.sh selftest`.
 
 Every CodeGen test that compiles to output runs with `-verify-machineinstrs`
 (the `not llc` diagnostic tests and the post-`patchable-function` MIR test
