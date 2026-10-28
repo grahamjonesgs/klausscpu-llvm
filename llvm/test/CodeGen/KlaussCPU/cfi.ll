@@ -45,7 +45,9 @@ define i64 @leaf(i64 %x) uwtable {
 
 ; Callee-saved registers: each .cfi_offset rule directly follows its spill
 ; (KlaussCPUCalleeSavedCFI), at R15-relative slot offset - 16; the frame
-; teardown drops them again.
+; teardown drops them again.  Without LEAVE, SETSP R15 already leaves the
+; slots below SP (an interrupt there would overwrite them), so their rules go
+; at the SETSP, before the POP; only R15's waits for the POP.
 define i64 @csrs(i64 %a, i64 %b) uwtable {
 ; CHECK-LABEL: csrs:
 ; CHECK:         stidx64 r4, r15, -8
@@ -60,10 +62,14 @@ define i64 @csrs(i64 %a, i64 %b) uwtable {
 ; LEAVE-NEXT:    .cfi_same_value r15
 ; LEAVE-NEXT:    .cfi_same_value r4
 ; LEAVE-NEXT:    .cfi_same_value r5
-; PUSH:          .cfi_def_cfa_offset 8
-; PUSH-NEXT:     .cfi_same_value r15
+; PUSH:          setsp r15
+; PUSH-NEXT:     .cfi_def_cfa_register sp
 ; PUSH-NEXT:     .cfi_same_value r4
 ; PUSH-NEXT:     .cfi_same_value r5
+; PUSH-NEXT:     pop r15
+; PUSH-NEXT:     .cfi_def_cfa_offset 8
+; PUSH-NEXT:     .cfi_same_value r15
+; PUSH-NEXT:     ret
   %x = call i64 @ext(i64 %a)
   %y = call i64 @ext(i64 %b)
   %z = call i64 @ext(i64 %x)

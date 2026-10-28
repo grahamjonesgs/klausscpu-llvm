@@ -44,8 +44,9 @@
 // pass gives every block laid out after the prologue the state it is entered
 // with.  That needs a single prologue, so ENTER and PUSH are isNotDuplicable:
 // tail duplication never copies the prologue block (KlaussCPUInstrInfo.td).
-// Nothing needs a scratch register, so any block can hold the prologue.  Shrink-wrapping is off at -O0 and -Os/-Oz, and under
-// "frame-pointer"="all", which promises a frame for the whole function.
+// Nothing needs a scratch register, so any block can hold the prologue.
+// Shrink-wrapping is off at -O0 and -Os/-Oz, and under "frame-pointer"="all",
+// which promises a frame for the whole function.
 //
 // Frameless leaves.  A function that makes no call and has no stack object
 // (no local, spill, callee-saved register, stack argument or vararg slot)
@@ -92,8 +93,11 @@
 // same instruction, so it needs no CFI; a plain LEAVE (a tail call, a
 // shrink-wrapped restore point) switches the CFA back to SP+8 and drops the
 // save rules, and the CFIFixup pass gives every block laid out after the
-// prologue the state it is entered with.  A frameless function has the CIE's
-// state throughout.
+// prologue the state it is entered with.  Without ENTER/LEAVE the rules go
+// in two steps: SETSP R15 leaves the callee-saved slots below SP, where an
+// interrupt may overwrite them, so their rules go there (the registers were
+// reloaded before it); R15's goes after POP R15.  A frameless function has
+// the CIE's state throughout.
 //
 //===----------------------------------------------------------------------===//
 
@@ -335,14 +339,20 @@ void KlaussCPUFrameLowering::emitPrologue(MachineFunction &MF,
   // spills after the post-RA scheduler (KlaussCPUCalleeSavedCFI.cpp).
 }
 
-// Once the frame is gone, R15 and the callee-saved registers hold the
-// caller's values again, and their spill slots are below SP (an interrupt
-// may overwrite them), so drop the save rules.
+// The callee-saved registers were reloaded in front of the epilogue, so they
+// hold the caller's values again; once SP is back above their spill slots
+// (an interrupt may overwrite them), drop the save rules.
+static void buildCSRsRestoredCFI(const MachineFunction &MF,
+                                 const CFIInstBuilder &CFIBuilder) {
+  for (const CalleeSavedInfo &CS : MF.getFrameInfo().getCalleeSavedInfo())
+    CFIBuilder.buildSameValue(CS.getReg());
+}
+
+// Once the frame is gone, R15 holds the caller's value too.
 static void buildFrameTornDownCFI(const MachineFunction &MF,
                                   const CFIInstBuilder &CFIBuilder) {
   CFIBuilder.buildSameValue(KlaussCPU::R15);
-  for (const CalleeSavedInfo &CS : MF.getFrameInfo().getCalleeSavedInfo())
-    CFIBuilder.buildSameValue(CS.getReg());
+  buildCSRsRestoredCFI(MF, CFIBuilder);
 }
 
 void KlaussCPUFrameLowering::emitEpilogue(MachineFunction &MF,
@@ -385,19 +395,23 @@ void KlaussCPUFrameLowering::emitEpilogue(MachineFunction &MF,
     return;
   }
 
-  // Restore SP from frame pointer (discards locals).
+  // Restore SP from frame pointer (discards locals).  SP now points at the
+  // saved caller R15, so the callee-saved slots below it are dead: drop their
+  // rules here, not after the POP.
   BuildMI(MBB, MBBI, DL, TII.get(KlaussCPU::SETSP_R))
       .addReg(KlaussCPU::R15)
       .setMIFlag(MachineInstr::FrameDestroy);
-  if (NeedsCFI)
+  if (NeedsCFI) {
     CFIBuilder.buildDefCFARegister(KlaussCPU::SP);
+    buildCSRsRestoredCFI(MF, CFIBuilder);
+  }
 
   // Restore caller's frame pointer.
   BuildMI(MBB, MBBI, DL, TII.get(KlaussCPU::POP_R), KlaussCPU::R15)
       .setMIFlag(MachineInstr::FrameDestroy);
   if (NeedsCFI) {
     CFIBuilder.buildDefCFAOffset(KlaussCPUABI::RetAddrSize);
-    buildFrameTornDownCFI(MF, CFIBuilder);
+    CFIBuilder.buildSameValue(KlaussCPU::R15);
   }
 }
 

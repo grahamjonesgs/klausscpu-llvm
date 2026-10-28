@@ -341,7 +341,11 @@ Inline asm may not write R7 in such a function.  See
 `CFA = SP+8, RA (DWARF 17) = [CFA-8]`; after ENTER `CFA = R15+16`, caller R15
 at `CFA-16`; each callee-saved spill is followed by its `.cfi_offset` rule;
 after a `LEAVE` (a tail call, a shrink-wrapped restore point) the CIE's
-state again.  A frameless function needs nothing beyond the CIE.
+state again.  Without ENTER/LEAVE that takes two steps: `SETSP R15` drops
+the callee-saved rules (the registers were reloaded before it, and their
+slots are now below SP, where an interrupt may overwrite them) and
+`POP R15` the R15 rule (`cfi.ll`, `stack-realign.ll`).  A frameless
+function needs nothing beyond the CIE.
 `setCFIFixup(true)` gives every block laid out after the prologue the state
 it is entered with (frameless code after a shrink-wrapped prologue or
 behind a LEAVERET) (`DebugInfo/KlaussCPU/frame-cfi.ll`).  CFIFixup assumes

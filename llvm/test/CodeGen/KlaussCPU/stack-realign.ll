@@ -255,10 +255,10 @@ define void @cfi() uwtable {
 ; PUSH-NEXT:    ldidx64 r7, r15, -8 # 8-byte Folded Reload
 ; PUSH-NEXT:    setsp r15
 ; PUSH-NEXT:    .cfi_def_cfa_register sp
+; PUSH-NEXT:    .cfi_same_value r7
 ; PUSH-NEXT:    pop r15
 ; PUSH-NEXT:    .cfi_def_cfa_offset 8
 ; PUSH-NEXT:    .cfi_same_value r15
-; PUSH-NEXT:    .cfi_same_value r7
 ; PUSH-NEXT:    ret
   %b = alloca [8 x i8], align 16
   call void @use(ptr %b)
