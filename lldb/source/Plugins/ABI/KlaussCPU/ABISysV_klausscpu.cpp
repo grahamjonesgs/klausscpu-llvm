@@ -105,8 +105,12 @@ UnwindPlanSP ABISysV_klausscpu::CreateFunctionEntryUnwindPlan() {
 }
 
 UnwindPlanSP ABISysV_klausscpu::CreateDefaultUnwindPlan() {
-  // Every function keeps a frame pointer: after the prologue r15 points at
-  // the saved caller r15, with the return address above it.
+  // Every function that calls keeps a frame pointer: after the prologue r15
+  // points at the saved caller r15, with the return address above it, so a
+  // frame above frame 0 is always such a frame.  Frame 0 may have none (a
+  // leaf without stack objects, the path a shrink-wrapped prologue does not
+  // cover, a function left by a tail call's LEAVE): the CFI describes it as
+  // the CIE's CFA = SP+8, but without debug info this plan skips its caller.
   UnwindPlan::Row row;
   row.GetCFAValue().SetIsRegisterPlusOffset(dwarf_fp, FPToCFAOffset);
   row.SetRegisterLocationToAtCFAPlusOffset(dwarf_pc, -RetAddrSize, true);

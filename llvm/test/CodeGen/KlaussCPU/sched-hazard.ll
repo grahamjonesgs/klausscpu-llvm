@@ -27,7 +27,6 @@
 define void @chain(ptr %sink) nounwind {
 ; CHECK-LABEL: chain:
 ; CHECK:       # %bb.0: # %entry
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr64 r14, -1985229329, 19088743
 ; CHECK-NEXT:    setr64 r13, 1985229328, -19088744
 ; CHECK-NEXT:    setr r12, -1
@@ -49,7 +48,7 @@ define void @chain(ptr %sink) nounwind {
 ; CHECK-NEXT:  # %bb.2: # %exit
 ; CHECK-NEXT:    addr r12, r13, r14
 ; CHECK-NEXT:    stidx64 r12, r0, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 entry:
   br label %for.body
 
@@ -79,7 +78,6 @@ exit:
 define void @fill(ptr %p, i64 %a, i64 %b, i64 %c) nounwind {
 ; CHECK-LABEL: fill:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    addr r12, r1, r2
 ; CHECK-NEXT:    orr r14, r3, r1
 ; CHECK-NEXT:    shlv r12, r12, 7
@@ -91,7 +89,7 @@ define void @fill(ptr %p, i64 %a, i64 %b, i64 %c) nounwind {
 ; CHECK-NEXT:    stidx64 r13, r0, 0
 ; CHECK-NEXT:    stidx64 r11, r0, 0
 ; CHECK-NEXT:    stidx64 r12, r0, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a1 = add i64 %a, %b
   %a2 = shl i64 %a1, 7
   %a3 = xor i64 %a2, %b
@@ -109,7 +107,6 @@ define void @fill(ptr %p, i64 %a, i64 %b, i64 %c) nounwind {
 define void @struct_copy(ptr %d, ptr %s) nounwind {
 ; CHECK-LABEL: struct_copy:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    ldidx64 r12, r1, 0
 ; CHECK-NEXT:    ldidx64 r14, r1, 24
 ; CHECK-NEXT:    ldidx64 r13, r1, 16
@@ -122,7 +119,7 @@ define void @struct_copy(ptr %d, ptr %s) nounwind {
 ; CHECK-NEXT:    ldidx64 r14, r1, 32
 ; CHECK-NEXT:    stidx64 r12, r0, 40
 ; CHECK-NEXT:    stidx64 r14, r0, 32
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   call void @llvm.memcpy.p0.p0.i64(ptr align 8 %d, ptr align 8 %s, i64 48, i1 false)
   ret void
 }

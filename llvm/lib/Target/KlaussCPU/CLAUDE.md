@@ -18,7 +18,7 @@ the consumers and the measurements behind the design.
 
 | Property | Value |
 |---|---|
-| GPRs | R0–R15, 64-bit; R15 = frame pointer (P) |
+| GPRs | R0–R15, 64-bit; R15 = frame pointer (P), reserved everywhere |
 | PC / SP | 32-bit (128 MiB RAM addressable) |
 | Memory bus / register file | little-endian |
 | DataLayout | `e-m:e-p:64:64-i64:64-i128:128-n32:64` (only in `TargetDataLayout.cpp`; `rust-target-spec.test` checks the Rust spec's copy) |
@@ -33,7 +33,7 @@ the consumers and the measurements behind the design.
 | Immediates | each class 2/3 op exists with a sign- and a zero-extended imm32 (SGN bit); isel picks the one that holds the constant: `SETR`/`SETRU` (MOV), `ADDI`/`ADDV`/`MINUSV`, `ANDI`/`ANDV` (and OR/XOR), `CMPRV`/`CMPRVU`; boolean compares (`setcc` as a value) `CMPxxV` with a simm32; `SETR64` only for a value neither reaches.  An add of -255..-129 (a frame address too) is `MINUSV` of the negation, whose short form reaches it |
 | Multiply by a constant | `MULV` (simm32; EX-serialised, `WriteMul`); a constant 2^N+1, 2^N-1 or 1-2^N that is not a simm32 becomes `SHLV` + `ADDR`/`SUBR` (`decomposeMulByConstant`); for a simm32 one only with `-klausscpu-mul-imm-shift-add` (one more instruction than `MULV`, fewer cycles) |
 | Addresses | 32-bit, zero-extended in a register: `SETRU sym` (static), `LEAPC` (PIC); `sym+off` is folded only for `off` in [0, 2^31), other offsets are a separate add so a negative S + off stays negative; `R_KLAUSSCPU_ABS64` data is the exact 64-bit S + A (lld) |
-| Direct call | the 1-word short `CALL` (ISA v3 A1, LINK=1: PC + 4·simm18, ±512 KiB, pushes PC+4; written `callrel`) for every call to a symbol: resolved by the assembler for a local (static) callee in its own section (relaxed to the 2-word `CALLREL` if out of reach), else (a global or weak callee too, which the link may override) an `R_KLAUSSCPU_CALL18` relocation, for which lld calls an out-of-reach callee through a `jmprel` thunk.  Code a loader without thunks relocates (Zephyr LLEXT) is built with `-mllvm -klausscpu-short-calls=false` (2-word `CALL` / `CALLREL`) |
+| Direct call | the 1-word short `CALL` (ISA v3 A1, LINK=1: PC + 4·simm18, ±512 KiB, pushes PC+4; written `callrel`; a tail call's jump likewise, `tail`) for every call to a symbol: resolved by the assembler for a local (static) callee in its own section (relaxed to the 2-word `CALLREL` if out of reach), else (a global or weak callee too, which the link may override) an `R_KLAUSSCPU_CALL18` relocation, for which lld calls an out-of-reach callee through a `jmprel` thunk.  Code a loader without thunks relocates (Zephyr LLEXT) is built with `-mllvm -klausscpu-short-calls=false` (2-word `CALL` / `CALLREL`) |
 | Indirect branch / call | `JMPR` / `CALLR` |
 | Switches | a compare tree, or a jump table from 12 cases (clusters) at 40% density (the board break-even): a 4-byte-aligned table of absolute 32-bit block addresses (`EK_Custom32`, `R_KLAUSSCPU_ABS32`, also under PIC: only the base is PC-relative, `LEAPC`), dispatched by `LDIDX32R` + `JMPR` (`LowerBR_JT`) |
 | `llvm.trap` / `llvm.debugtrap` | both `TRAP`: an abnormal stop (crash dump; `stop = Trap` in the emulator; a debug halt with SIGTRAP under the debugger).  `HALT` is the clean stop the runtime ends a program with (exit status in R12) |
@@ -186,7 +186,7 @@ ABI version 2 (`KlaussCPUABI::ABIVersion`; RISC-V LP64, integer only):
 | Arg 0–3 | R0–R3 (A–D), caller-saved, named or unnamed |
 | Args 4+ | stack, 8-byte slots: `[CallerSP + n×8]` = `[incoming_SP + 8 + n×8]` = `[R15 + 16 + n×8]`; a variadic call puts them 32 bytes higher (home area) |
 | Return | R12 (M); R12+R11 (M+L) for an i128 or a 9–16 byte aggregate, caller-saved; larger returns go through a hidden sret pointer (clang; `CanLowerReturn` for other IR) |
-| Callee-saved | R4–R7 (E–H) + R15 (P, frame pointer, saved by the prologue) |
+| Callee-saved | R4–R7 (E–H) + R15 (P, frame pointer, saved by the prologue; a frameless function leaves it alone) |
 | Temporaries | R8–R11, R13–R14 (I–L, N–O) caller-saved |
 
 - **Extension**: i8/i16/i32 are promoted to i64 as the IR's `signext`/
@@ -221,7 +221,26 @@ ABI version 2 (`KlaussCPUABI::ABIVersion`; RISC-V LP64, integer only):
 - **Version**: every object carries the ABI version in `e_flags` (an MC
   target streamer), lld refuses to link code of different versions, and
   clang predefines `__klausscpu_abi__`.
-- No tail calls.
+- **Tail calls** (`isEligibleForTailCallOptimization`, as RISC-V): a sibling
+  call in tail position (IR `tail`) whose arguments are all
+  in registers is the epilogue (`LEAVE`, nothing in a frameless function)
+  then `PseudoTAIL` or `PseudoTAILIndirect` (`JMPR`, the address in a
+  `GPRTC` register: not R4–R7, which the epilogue reloads).  `PseudoTAIL` is
+  `tail sym`: `TAILREL` (JMPREL's encoding), compressed like a call to
+  `TAIL_SH`, the 1-word short jump with the short call's fixup
+  (`FK_KlaussCPU_CALL18` / `R_KLAUSSCPU_CALL18`, lld's jmprel thunk when out
+  of reach), so a tail call costs no more words than CALL + LEAVERET; both
+  are `isAsmParserOnly` (the disassembler shows `jmprel`).  The callee finds the caller's return
+  address at `[SP]` and returns to the caller's caller.  Not for a variadic
+  callee (its home area belongs to a variadic call), stack, byval or sret
+  arguments, or `"disable-tail-calls"`; a `musttail` call that cannot be one
+  is a fatal error.  Any calling convention qualifies (all are lowered as
+  `CC_KlaussCPU`, so the preserved-register masks match; GlobalOpt makes
+  internal functions `fastcc`).  CodeGenPrepare does not duplicate a shared
+  return block to put calls in tail position (`mayBeEmittedAsTailCall`,
+  `-klausscpu-tail-call-dup-ret`): every copy needs its own epilogue, which
+  cost 0.15% of `.text` for no measurable board cycles.  Debug info marks
+  tail calls `DW_AT_call_tail_call`.
 
 ### Frame layout
 
@@ -260,9 +279,36 @@ them R15-relative (and the debug info uses the same function, so
 callee-saved spills.  A frame too large for ENTER's 22-bit field uses
 `PUSH R15 ; GETSP R15 ; ADDSP -size`.
 **Epilogue:** the reloads, then `LEAVERET` (`LEAVE` in front of any other
-terminator, e.g. IRET).  `-klausscpu-enter-leave=false` restores the old
-`PUSH/GETSP/ADDSP` / `SETSP R15 ; POP R15 ; RET` sequences.  Every function
-has a frame (no frame-pointer elimination).
+terminator: a tail call, IRET).  `-klausscpu-enter-leave=false` restores the old
+`PUSH/GETSP/ADDSP` / `SETSP R15 ; POP R15 ; RET` sequences.
+
+**Frameless leaves** (`hasFPImpl`): a function without calls and without
+stack objects (no local, spill, callee-saved register, stack argument or
+vararg slot; no `frameaddress`/`returnaddress`) has no frame: no prologue,
+a plain `RET`.  CALL leaves the return address at `[SP]` and R15 untouched
+(`pipeline_core.sv` U_CALL/U_RET), so R15 keeps the caller's frame and every
+function that calls has one: the R15 chain from any call site is complete.
+The `"frame-pointer"` attribute can ask for a frame: clang's default for
+KlaussCPU is `non-leaf` (`clang/lib/Driver/ToolChains/CommonArgs.cpp`;
+`-mno-omit-leaf-frame-pointer` gives every function one).  Every stack access
+goes through R15 (SP is not a GPR), so a frame is never omitted from a
+function that calls or uses the stack.  The frame register of the debug info
+is SP in a frameless function (`getFrameRegister`).
+
+**Shrink-wrapping** (`enableShrinkWrapping`, -O1 and up): ShrinkWrap may put
+the prologue in the block that dominates every use of the frame (a frame
+index, a call frame, a callee-saved register, SP, or R15:
+`isNonallocatableRegisterCalleeSave`) and the epilogue in one that
+post-dominates them, outside loops; the rest of the function runs frameless.
+The epilogue goes in front of the restore block's first terminator.  A
+restore block must leave the function or only continue to a block that does
+(`canUseAsEpilogue`): a `LEAVE` in front of a compare and branch would be one
+more instruction and stop them fusing.  Tail duplication then leaves
+`LEAVE ... RET`, which `KlaussCPULeaveRet` (pre-emit) folds into `LEAVERET`,
+moving the LEAVE past instructions that use neither R15 nor SP and removing a
+return block left without predecessors (`leaveret-fold.mir`).  In practice
+few frames move: the register allocator often puts a value that lives across
+a call in a callee-saved register in the entry block (`fib`'s accumulator).
 
 **Stack realignment:** the ABI stack is only 8-byte aligned.  A function with
 a local aligned to A > 8 (`_Alignas(32)`, an `__int128`) reserves **R7 as a
@@ -275,8 +321,12 @@ Inline asm may not write R7 in such a function.  See
 
 **CFI** (with `-g`, unwind tables or IR without `nounwind`): CIE
 `CFA = SP+8, RA (DWARF 17) = [CFA-8]`; after ENTER `CFA = R15+16`, caller R15
-at `CFA-16`; each callee-saved spill is followed by its `.cfi_offset` rule.
-`setCFIFixup(true)` repairs blocks laid out after a `LEAVE`.  CFI
+at `CFA-16`; each callee-saved spill is followed by its `.cfi_offset` rule;
+after a `LEAVE` (a tail call, a shrink-wrapped restore point) the CIE's
+state again.  A frameless function needs nothing beyond the CIE.
+`setCFIFixup(true)` gives every block laid out after the prologue the state
+it is entered with (frameless code after a shrink-wrapped prologue or
+behind a LEAVERET) (`DebugInfo/KlaussCPU/frame-cfi.ll`).  CFI
 instructions are scheduling boundaries, so -g must not add one where the
 scheduler could otherwise move code: the ENTER/LEAVE (PUSH/ADDSP, SETSP/POP)
 CFI follows instructions that write SP, which are boundaries anyway, and the
@@ -395,7 +445,8 @@ when clobbered.
   register whose high bits change is set undef unless its variable fits in
   the low bits (`DebugInfo/KlaussCPU/opt-extensions-dbg.ll`).
 - Before the post-RA scheduler: FuseCmpBr's loop constants; pre-emit passes:
-  FlagReuse, then FuseCmpBr (see Flags), then CalleeSavedCFI (see CFI).
+  LeaveRet (see Frame layout, -O1 and up), FlagReuse, then FuseCmpBr (see
+  Flags), then CalleeSavedCFI (see CFI).
 - TTI (`KlaussCPUTargetTransformInfo.cpp`): moderate partial/runtime
   unrolling (MaxCount 4) with the budget scaled down for branch-dense loop
   bodies, no peeling; `-mcpu=no-sched` reverts to no body-duplicating
@@ -434,6 +485,10 @@ when clobbered.
 | `-klausscpu-enable-global-merge` | on at -O1+ | GlobalMerge of internal globals |
 | `-klausscpu-opt-extensions` | on | KlaussCPUOptExtensions |
 | `-klausscpu-enter-leave` / `-klausscpu-leaveret` | on | ENTER/LEAVE frames, LEAVE+RET → LEAVERET |
+| `-klausscpu-frameless-leaf` | on | a leaf without stack objects has no frame |
+| `-klausscpu-shrink-wrap` | on | shrink-wrapping (also LLVM's `-enable-shrink-wrap`) |
+| `-klausscpu-tail-calls` | on | sibling calls with register arguments become tail calls |
+| `-klausscpu-tail-call-dup-ret` | off | CodeGenPrepare duplicates a shared return so calls before it become tail calls |
 | `-klausscpu-fuse-cmp-br` | on | FBR fused compare-and-branch |
 | `-klausscpu-fuse-loop-const` | on | FBR for a loop compare with a non-simm4 constant, via a free register set in the preheader |
 | `-klausscpu-arith-flag-reuse` | on | FlagReuse peephole |
@@ -509,16 +564,14 @@ printf 'define i64 @add(i64 %%a, i64 %%b) {\n  %%r = add i64 %%a, %%b\n  ret i64
   | build/bin/llc -march=klausscpu -O0 -x ir -
 ```
 
-Expected output (the `.cfi_*` lines appear because the IR function is not
-`nounwind`):
+Expected output (a leaf without stack objects has no frame; the CFI
+directives appear because the IR function is not `nounwind`, and the CIE
+describes it):
 ```
 add:
 	.cfi_startproc
-	enter	0
-	.cfi_def_cfa r15, 16
-	.cfi_offset r15, -16
 	addr	r12, r0, r1
-	leaveret
+	ret
 	.cfi_endproc
 ```
 
@@ -577,14 +630,15 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPUInstrInfo.td       encodings, operand types, isel patterns, short forms + CompressPats, aliases
 ├── KlaussCPUInstrInfo.h/.cpp   branch analysis, copies, spills, flagsDeadAfter, post-RA hazard recognizer (single issue)
 ├── KlaussCPURegisterInfo.h/.cpp reserved regs, stack realignment, eliminateFrameIndex
-├── KlaussCPUFrameLowering.h/.cpp prologue/epilogue, CFI, base pointer, getFrameIndexReference
-├── KlaussCPUISelLowering.h/.cpp  calls/args/returns, varargs, SELECT_CC, BR_JT, i32 rotates, i128 shifts, DAG combines
+├── KlaussCPUFrameLowering.h/.cpp prologue/epilogue, frameless leaves, shrink-wrapping, CFI, base pointer, getFrameIndexReference
+├── KlaussCPUISelLowering.h/.cpp  calls/args/returns, tail calls, varargs, SELECT_CC, BR_JT, i32 rotates, i128 shifts, DAG combines
 ├── KlaussCPUISelDAGToDAG.cpp   SelectCode() + C++ for BR_CC, SELECT_CC, W SETCC; AddrFI, shift/bit-field ComplexPatterns; inline-asm 'm'
 ├── KlaussCPUMachineFunctionInfo.h  per-function state (vararg frame index)
 ├── KlaussCPUAsmPrinter.cpp     MachineInstr → MCInst (+ CompressPat), inline-asm operand printing
 ├── KlaussCPUEarlyIVInc.cpp     IR, after LSR: loop counter counts from Init - C so its increment can issue early
 ├── KlaussCPUFlagReuse.cpp      pre-emit: CMPRV Rd,0 + JMPE/NE → JMPZ/NZ (default on)
 ├── KlaussCPUJumpTableHoist.cpp pre-RA: jump-table base and entry offset into the range-check block
+├── KlaussCPULeaveRet.cpp       pre-emit: a shrink-wrapped epilogue's LEAVE ... RET → LEAVERET
 ├── KlaussCPUConstAddrBase.cpp  pre-RA (SSA, before MachineLICM): one base register for nearby constant-address accesses
 ├── KlaussCPUOptExtensions.cpp  pre-RA (SSA): redundant sign/zero extensions
 ├── KlaussCPUFuseCmpBr.cpp      pre-emit: compare + branch → ISA v3 FBR (default on); pre-sched2 instance: loop constants
@@ -601,7 +655,7 @@ llvm/lib/Target/KlaussCPU/
 │   ├── KlaussCPUMCAsmInfo.h/.cpp  MCAsmInfoELF subclass
 │   ├── KlaussCPUInstPrinter.h/.cpp printInst / printOperand; uses GenAsmWriter.inc
 │   ├── KlaussCPUMCCodeEmitter.cpp  generated getBinaryCodeForInstr (encodings = .td Inst fields) + fixup operand hooks
-│   ├── KlaussCPUFixupKinds.h   ABS32, PCREL32, PCREL18 (short branch), PCREL13 (FBR), CALL18 (short call)
+│   ├── KlaussCPUFixupKinds.h   ABS32, PCREL32, PCREL18 (short branch), PCREL13 (FBR), CALL18 (short call, tail jump)
 │   ├── KlaussCPUAsmBackend.cpp fixups, ELF relocations, short-branch / short-call relaxation, NOP fill
 │   └── KlaussCPUMCTargetDesc.h/.cpp  LLVMInitializeKlaussCPUTargetMC; MCInstrAnalysis; generated CompressPat compress/uncompress; ELF target streamer (ABI version in e_flags)
 ├── TargetInfo/
@@ -612,7 +666,8 @@ llvm/lib/Target/KlaussCPU/
 
 Outside this directory: `clang/lib/Basic/Targets/KlaussCPU.*` and
 `clang/lib/Driver/ToolChains/KlaussCPU.*` (clang target + driver, which
-compiles hosted and links with `ld.lld -m elf32klausscpu`),
+compiles hosted and links with `ld.lld -m elf32klausscpu`; the
+`"frame-pointer"="non-leaf"` default is in `CommonArgs.cpp`),
 `clang/lib/CodeGen/Targets/KlaussCPU.cpp` (the C ABI's argument
 classification, `ABI.md`; `va_arg`), `llvm/lib/Analysis/TargetLibraryInfo.cpp`
 (no synthesised stdio calls; `signext` i32 in

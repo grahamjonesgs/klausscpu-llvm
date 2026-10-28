@@ -103,7 +103,8 @@ inline constexpr unsigned MaxDirectAggregateSize = 16;
 /// Callee-saved registers the register allocator may use (CSR_KlaussCPU).
 /// The frame pointer is callee-saved too, by the prologue itself.
 inline constexpr unsigned CalleeSavedGPRs[] = {4, 5, 6, 7};
-/// The frame pointer, set up in every function.
+/// The frame pointer, set up by every function that calls another (a leaf
+/// without stack objects has no frame and leaves the caller's value in it).
 inline constexpr unsigned FPReg = 15;
 /// The base pointer of a function that realigns its stack.
 inline constexpr unsigned BPReg = 7;

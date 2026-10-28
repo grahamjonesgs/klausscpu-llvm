@@ -39,7 +39,7 @@ wolfSSL/wolfSSH, Zephyr, the programs) with the new toolchain.
 | R4–R7 (E–H) | callee-saved; R7 is also the base pointer of a function that realigns its stack |
 | R8–R11, R13, R14 | temporaries, caller-saved; R11 is the second return register |
 | R12 (M) | return value (bits 63:0) |
-| R15 (P) | frame pointer, saved by every prologue (`ENTER`) |
+| R15 (P) | frame pointer, saved by the prologue (`ENTER`) of every function that has a frame; a function without one leaves it alone |
 | SP | stack pointer (32-bit, separate register), 8-byte aligned at calls |
 | FLAGS | clobbered by calls |
 
@@ -119,6 +119,44 @@ The prologue (`ENTER`) pushes R15 below the return address and points R15 at
 it, so the incoming stack arguments are at `R15 + 16 + n×8` (variadic:
 `R15 + 48 + n×8`).
 
+### Frames, frameless functions and tail calls
+
+None of this changes what a caller or callee may assume; it is how this
+compiler builds frames, which the unwinders depend on.
+
+- Every function that calls another has a frame: `ENTER`, so `[R15]` is the
+  caller's R15 and `[R15 + 8]` the return address.  The R15 chain seen from
+  any call site is therefore complete (`__builtin_frame_address(N)` walks
+  it).
+- A leaf without stack objects has no frame: R15 still holds its caller's
+  frame and `[SP]` the return address throughout.  clang's default is
+  `-fno-omit-frame-pointer -momit-leaf-frame-pointer`
+  (`"frame-pointer"="non-leaf"`); `-mno-omit-leaf-frame-pointer` gives every
+  function a frame.  R15 is never allocated.
+- Shrink-wrapping can set the frame up after the entry and tear it down
+  before the return, so code on a path that needs no frame runs frameless.
+- A sibling call whose arguments are all in registers (to a function that
+  is not variadic, without byval or sret arguments) can be a tail call: the
+  caller tears its frame down (`LEAVE`) and jumps; the callee is entered
+  with the caller's return address at `[SP]` and returns to the caller's
+  caller.  So a callee must not assume that `[SP]` at entry points into its
+  own caller's code: it points where the callee will return.
+- Unwinding: the CFI (`.debug_frame` with `-g`) describes every instruction
+  (CFA = SP+8 in a frameless stretch, R15+16 in a frame), and lldb uses it.
+  Without CFI, lldb's fallback plan (the ABI plugin) follows the R15 chain,
+  which is right for every frame above frame 0; a frame 0 without a frame is
+  then shown as its caller's frame (the caller itself is skipped).  A
+  function left by a tail call is not on the stack (with `-g`, the
+  `DW_AT_call_tail_call` call sites let lldb show it as an artificial frame).
+- Crash dumps (hardware `CRASH_DUMP.md`: the registers and `S0`–`S3`, the
+  doublewords at SP): if the faulting function has no frame (PC in a leaf
+  whose disassembly starts without `ENTER`, or before a shrink-wrapped
+  `ENTER`), the return address is `S0` unless the leaf pushed something
+  (it does not: it has no stack objects), and R15 is its caller's frame
+  record; otherwise the return address is `[R15 + 8]`.  The chain from
+  R15 on is complete either way.  klausscc prints dumps raw and has no
+  unwinder to update.
+
 ## Variadic functions
 
 The unnamed arguments are assigned exactly like named ones (R0–R3, then the
@@ -175,10 +213,10 @@ high.
 | clang | `KlaussCPUABIInfo` (classification, `va_arg`), `__klausscpu_abi__` | updated; tests `klausscpu-abi.c`, `klausscpu-varargs.c`, `Preprocessor/klausscpu-target-defines.c` |
 | `TargetLibraryInfo` | `signext` on i32 parameters/results of library functions it creates | klausscpu added to the riscv64 rule |
 | MC / lld | `e_flags` version, link check | `MC/KlaussCPU/elf-abi-version.s`, `lld/test/ELF/klausscpu-abi-version.s` |
-| lldb ABI plugin | argument/return/callee-saved registers (from `KlaussCPUABI.h`), return values | aggregates of up to 16 bytes read from R12/R11; a written return value is extended like the ABI (`unsigned int` sign-extended) |
+| lldb ABI plugin | argument/return/callee-saved registers (from `KlaussCPUABI.h`), return values; fallback unwind plans (CIE state at entry, R15 chain) | aggregates of up to 16 bytes read from R12/R11; a written return value is extended like the ABI (`unsigned int` sign-extended); frameless functions: see "Frames" |
 | klausscpu-runtime assembly | `setjmp.S` (R4–R7, R15, SP, PC), `context_switch.S`, FreeRTOS `port.S`, Zephyr `swap.S` (save all 16 GPRs; R4 holds the saved SP across C calls), ISR wrappers that save the caller-saved set, `crt0.c` (`main`'s result in R12) | unchanged: the register roles did not change, and none of them passes stack or variadic arguments or relies on the old home area |
 | klausscpu-runtime libraries | picolibc, compiler-rt builtins, wolfSSL/wolfSSH archives | rebuilt (`build-picolibc.sh`, `build-builtins.sh`, `freertos/wolfssl/build-*.sh`) |
-| klausscc | gdbserver target XML (r0–r3 = arguments, r15 = fp) | unchanged; it has no other ABI knowledge |
+| klausscc | gdbserver target XML (r0–r3 = arguments, r15 = fp) | unchanged; it has no other ABI knowledge (no unwinder: crash dumps are printed raw) |
 | Rust | rustc does its own argument classification | **not updated** — see below |
 | CPU_ARCHITECTURE.md §2 (hardware repo) | "R4–R7 and R15 are callee-saved" | still true |
 
@@ -288,8 +326,10 @@ shrink-wrapping every entry saves them, also on early-exit paths —
 `perf_baseline`'s recursive `fib` at -O2 saves two more registers per call
 and runs 6.8% more instructions — and at -O1 the dynamic gain elsewhere is
 nil.  The board showed no difference between 4, 6 and 8.  Four stays, which
-also leaves every hand-written register-save sequence valid.  Worth
-re-measuring once shrink-wrapping exists.
+also leaves every hand-written register-save sequence valid.  (Shrink-
+wrapping, added in the 'frame' step, moves few frames: `fib`'s accumulator
+lives in a callee-saved register from the entry block on, so its base case
+still saves them.)
 
 **Argument registers.**  Of the 1,701 call sites in the corpus' 1,337
 distinct functions, 93 (5.5%) pass a stack argument (a GETSP in front of the
@@ -319,6 +359,29 @@ waits from the smaller frames).
 emulator instructions −0.10% at -O1, −0.51% at -O2; `.text` −0.78% at both;
 board: dhrystone 299,983,362 cycles (±0), perf_baseline +0.18% (calls_fib
 +0.40%, ptr_chase +0.16%, the rest within ±0.02%).
+
+**Frames** (the 'frame' step, after version 2; same corpus, picolibc and
+the builtins rebuilt; against version 2 as above):
+
+| -O1 | instructions | .text |
+|---|---|---|
+| frameless leaves | −0.002% | −0.29% |
+| + shrink-wrapping | −0.002% | −0.18% |
+| + tail calls (final) | −0.002% | −0.21% (-O2: −0.16%) |
+
+Every program runs the same or fewer instructions (the dynamic gain is
+small: -O1 inlines most small leaves, and a tail call executes as many
+instructions as the call and LEAVERET it replaces).  Shrink-wrapping costs
+0.11% of `.text` (a second return per function; up to two return-block
+instructions copied in front of a LEAVERET).  Letting CodeGenPrepare
+duplicate returns for more tail calls cost another 0.15% for no measurable
+cycles, so it is off.  Board: dhrystone and `calls_fib` unchanged (`fib`
+keeps its accumulator in callee-saved registers from the entry block, so
+its base case still has a frame); `perf_baseline` +0.03%, all of it
+`ptr_chase` reading a malloc'd buffer that starts 56 bytes lower (with
+`_end` padded back, +0.001%).  A board microbenchmark of the patterns
+(20,000 calls each): a frameless leaf reached by a tail call −37% cycles, an
+early exit −6%, soft-float `float` −11%, `double` −3%.
 
 ## Validation
 

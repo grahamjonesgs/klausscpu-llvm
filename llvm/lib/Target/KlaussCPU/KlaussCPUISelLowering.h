@@ -19,6 +19,7 @@ enum NodeType : unsigned {
   FIRST_NUMBER = ISD::BUILTIN_OP_END,
   RET_GLUE, // function return with optional return-value glue
   CALL,     // direct/indirect call
+  TAIL,     // tail call: a jump to the callee after the epilogue
   ADDR,     // materialise a global address via SETRU (non-PIC)
             //   (i64) = ADDR (TargetGlobalAddress/TargetExternalSymbol/...)
             // Selected to SETRU by a pattern.  The wrapper is necessary because
@@ -148,8 +149,16 @@ public:
   SDValue LowerCall(TargetLowering::CallLoweringInfo &CLI,
                      SmallVectorImpl<SDValue> &InVals) const override;
 
+  // Whether CodeGenPrepare may duplicate a return into its predecessors so
+  // that a call there becomes a tail call (-klausscpu-tail-call-dup-ret).
+  bool mayBeEmittedAsTailCall(const CallInst *CI) const override;
+
 private:
   const KlaussCPUSubtarget &Subtarget;
+
+  bool isEligibleForTailCallOptimization(
+      const CCState &CCInfo, const TargetLowering::CallLoweringInfo &CLI,
+      const MachineFunction &MF) const;
 
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerExternalSymbol(SDValue Op, SelectionDAG &DAG) const;

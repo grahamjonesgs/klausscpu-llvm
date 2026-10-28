@@ -24,11 +24,37 @@
 //            <callee-saved spills, R15-relative>
 // Epilogue:  <callee-saved reloads>
 //            LEAVERET      ; SP = R15; pop R15; RET   (LEAVE in front of any
-//                          ; other terminator, e.g. IRET)
+//                          ; other terminator: a tail call's jump, IRET)
 // A frame too large for ENTER's 22-bit field is set up with PUSH R15;
 // GETSP R15; ADDSP -size (LEAVE still tears it down).  With
 // -klausscpu-enter-leave=false every frame uses that prologue and the
 // epilogue SETSP R15; POP R15.
+//
+// Shrink-wrapping (enableShrinkWrapping).  The ShrinkWrap pass may move the
+// prologue (ENTER and the callee-saved spills) from the entry block into the
+// block that dominates every use of the frame -- a frame index, a call (its
+// call-frame pseudos), a callee-saved register, SP, or R15
+// (isNonallocatableRegisterCalleeSave) -- and the epilogue into one block that
+// post-dominates them, outside any loop.  Code outside that region runs
+// frameless, as in a frameless leaf.  The epilogue goes in front of the
+// restore block's terminators: LEAVERET where that is a plain RET, else LEAVE
+// (in front of a tail call, or of the jump to or fall-through into the
+// return block: canUseAsEpilogue), whose CFI returns to the CIE's state;
+// KlaussCPULeaveRet later folds such a LEAVE into the return, and the CFIFixup
+// pass gives every block laid out after the prologue the state it is entered
+// with.  Nothing needs a scratch register, so any block can hold the
+// prologue.
+//
+// Frameless leaves.  A function that makes no call and has no stack object
+// (no local, spill, callee-saved register, stack argument or vararg slot)
+// has no frame at all (hasFPImpl): no prologue, and its return stays RET.
+// CALL leaves the return address at [SP] and R15 alone, and RET pops it
+// (pipeline_core.sv U_CALL / U_RET), so R15 keeps the caller's frame and the
+// R15 chain stays intact for everything the function calls (nothing).  Its
+// unwind state is the CIE's throughout (CFA = SP+8, RA at CFA-8).  The
+// "frame-pointer" function attribute can still ask for a frame: clang's
+// default for KlaussCPU is "non-leaf" (-mno-omit-leaf-frame-pointer gives
+// every function one).
 //
 // Stack realignment.  The ABI keeps SP 8-byte aligned, so R15 is only 8-byte
 // aligned.  A function with a local aligned to A > 8 (_Alignas(32), an
@@ -61,9 +87,11 @@
 // which are boundaries anyway).
 // SP moves after the prologue (VLAs, call frames) need no CFI because the CFA
 // is R15-based.  An epilogue folded into LEAVERET leaves the function in the
-// same instruction, so it needs no CFI; a plain LEAVE switches the CFA back to
-// SP+8 and the CFIFixup pass restores the frame state for any blocks laid out
-// after that epilogue.
+// same instruction, so it needs no CFI; a plain LEAVE (a tail call, a
+// shrink-wrapped restore point) switches the CFA back to SP+8 and drops the
+// save rules, and the CFIFixup pass gives every block laid out after the
+// prologue the state it is entered with.  A frameless function has the CIE's
+// state throughout.
 //
 //===----------------------------------------------------------------------===//
 
@@ -88,6 +116,18 @@ static cl::opt<bool> EnableLeaveRet(
 static cl::opt<bool> EnableEnterLeave(
     "klausscpu-enter-leave", cl::init(true), cl::Hidden,
     cl::desc("Use the ISA v3 ENTER/LEAVE frame instructions"));
+
+static cl::opt<bool> EnableShrinkWrap(
+    "klausscpu-shrink-wrap", cl::init(true), cl::Hidden,
+    cl::desc("Shrink-wrap the frame (ENTER/LEAVE and the callee-saved "
+             "registers) into the blocks that need it"));
+static cl::opt<bool> EnableFramelessLeaf(
+    "klausscpu-frameless-leaf", cl::init(true), cl::Hidden,
+    cl::desc("Give a leaf function without stack objects no frame"));
+
+bool KlaussCPUFrameLowering::useLeaveRet() {
+  return EnableEnterLeave && EnableLeaveRet;
+}
 
 // ENTER encodes the frame size in 8-byte units in a 22-bit field.
 static bool fitsEnter(uint64_t FrameSize) {
@@ -118,6 +158,23 @@ KlaussCPUFrameLowering::getFrameIndexReference(const MachineFunction &MF,
   return StackOffset::getFixed(Offset);
 }
 
+bool KlaussCPUFrameLowering::hasFPImpl(const MachineFunction &MF) const {
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  if (!EnableFramelessLeaf ||
+      MF.getTarget().Options.DisableFramePointerElim(MF) || MFI.hasCalls() ||
+      MFI.adjustsStack() || MFI.isFrameAddressTaken() ||
+      MFI.isReturnAddressTaken())
+    return true;
+  // Every stack access goes through R15 (or the base pointer set from it):
+  // SP is not a GPR, so there is no SP-relative addressing.  The callee-saved
+  // spill slots exist once PEI has assigned them, before it asks this.
+  for (int FI = MFI.getObjectIndexBegin(), E = MFI.getObjectIndexEnd();
+       FI != E; ++FI)
+    if (!MFI.isDeadObjectIndex(FI))
+      return true;
+  return false;
+}
+
 Register KlaussCPUFrameLowering::getBPReg() { return KlaussCPU::R7; }
 
 bool KlaussCPUFrameLowering::hasBP(const MachineFunction &MF) const {
@@ -135,6 +192,26 @@ void KlaussCPUFrameLowering::determineCalleeSaves(MachineFunction &MF,
   // prologue overwrites it.  A naked function has no prologue.
   if (hasBP(MF) && !MF.getFunction().hasFnAttribute(Attribute::Naked))
     SavedRegs.set(getBPReg());
+}
+
+bool KlaussCPUFrameLowering::enableShrinkWrapping(
+    const MachineFunction &MF) const {
+  // Keep the conventional code flow when not optimizing.
+  return EnableShrinkWrap && !MF.getFunction().hasOptNone();
+}
+
+// LEAVERET tears the frame down and returns in one instruction; a LEAVE
+// elsewhere is one more instruction, and in front of a conditional branch it
+// keeps FuseCmpBr from fusing the branch with its compare (LEAVE has side
+// effects).  So the restore point is a block that leaves the function, or
+// one that only continues to such a block, whose return KlaussCPULeaveRet
+// then folds the LEAVE into.  ShrinkWrap moves a restore point that is not
+// to its post-dominator, the return block in the end.
+bool KlaussCPUFrameLowering::canUseAsEpilogue(
+    const MachineBasicBlock &MBB) const {
+  if (MBB.succ_empty())
+    return true;
+  return MBB.succ_size() == 1 && (*MBB.succ_begin())->succ_empty();
 }
 
 bool KlaussCPUFrameLowering::hasReservedCallFrame(
@@ -175,6 +252,10 @@ void KlaussCPUFrameLowering::emitPrologue(MachineFunction &MF,
   MachineBasicBlock::iterator MBBI = MBB.begin();
   MachineFrameInfo &MFI = MF.getFrameInfo();
   DebugLoc DL;
+
+  // A frameless leaf: the CIE's unwind state holds throughout.
+  if (!hasFP(MF))
+    return;
 
   bool NeedsCFI = MF.needsFrameMoves();
   CFIInstBuilder CFIBuilder(MBB, MBBI, MachineInstr::FrameSetup);
@@ -259,10 +340,14 @@ void KlaussCPUFrameLowering::emitEpilogue(MachineFunction &MF,
                                            MachineBasicBlock &MBB) const {
   const KlaussCPUInstrInfo &TII =
       *MF.getSubtarget<KlaussCPUSubtarget>().getInstrInfo();
+  if (!hasFP(MF))
+    return;
 
-  // Insert epilogue before the return instruction.
-  MachineBasicBlock::iterator MBBI = MBB.getLastNonDebugInstr();
-  DebugLoc DL = MBBI->getDebugLoc();
+  // Insert the epilogue in front of the terminators: the return, a tail call,
+  // or, at a shrink-wrapped restore point, the branches (or the end of a
+  // block that falls through).
+  MachineBasicBlock::iterator MBBI = MBB.getFirstTerminator();
+  DebugLoc DL = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
 
   // LEAVE = SETSP R15; POP R15 (valid whatever the prologue was: both leave
   // R15 pointing at the saved caller R15).
@@ -272,7 +357,8 @@ void KlaussCPUFrameLowering::emitEpilogue(MachineFunction &MF,
   if (EnableEnterLeave) {
     // A plain return folds into LEAVERET (IRET / other terminators keep
     // LEAVE in front of them).
-    if (EnableLeaveRet && MBBI->getOpcode() == KlaussCPU::RET_I) {
+    if (EnableLeaveRet && MBBI != MBB.end() &&
+        MBBI->getOpcode() == KlaussCPU::RET_I) {
       // Keep RET's implicit uses (the return-value registers) so post-RA
       // passes still see them live out of this block.
       BuildMI(MBB, MBBI, DL, TII.get(KlaussCPU::LEAVERET_I))

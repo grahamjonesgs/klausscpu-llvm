@@ -135,7 +135,6 @@ define void @copy_src1(ptr %p) nounwind {
 define void @copy_unaligned8(ptr %d, ptr %s) nounwind {
 ; CHECK-LABEL: copy_unaligned8:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    memget8 r12, r1
 ; CHECK-NEXT:    ldidx8 r14, r1, 3
 ; CHECK-NEXT:    ldidx8 r13, r1, 2
@@ -152,7 +151,7 @@ define void @copy_unaligned8(ptr %d, ptr %s) nounwind {
 ; CHECK-NEXT:    stidx8 r13, r0, 6
 ; CHECK-NEXT:    stidx8 r11, r0, 5
 ; CHECK-NEXT:    stidx8 r12, r0, 4
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   call void @llvm.memcpy.p0.p0.i64(ptr align 1 %d, ptr align 1 %s, i64 8, i1 false)
   ret void
 }
@@ -160,13 +159,12 @@ define void @copy_unaligned8(ptr %d, ptr %s) nounwind {
 define void @zero32(ptr align 8 %d) nounwind {
 ; CHECK-LABEL: zero32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r12, 0
 ; CHECK-NEXT:    stidx64 r12, r0, 24
 ; CHECK-NEXT:    stidx64 r12, r0, 16
 ; CHECK-NEXT:    stidx64 r12, r0, 8
 ; CHECK-NEXT:    stidx64 r12, r0, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   call void @llvm.memset.p0.i64(ptr align 8 %d, i8 0, i64 32, i1 false)
   ret void
 }
@@ -174,14 +172,13 @@ define void @zero32(ptr align 8 %d) nounwind {
 define void @move24(ptr align 8 %d, ptr align 8 %s) nounwind {
 ; CHECK-LABEL: move24:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    ldidx64 r12, r1, 16
 ; CHECK-NEXT:    ldidx64 r14, r1, 8
 ; CHECK-NEXT:    ldidx64 r13, r1, 0
 ; CHECK-NEXT:    stidx64 r12, r0, 16
 ; CHECK-NEXT:    stidx64 r14, r0, 8
 ; CHECK-NEXT:    stidx64 r13, r0, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   call void @llvm.memmove.p0.p0.i64(ptr align 8 %d, ptr align 8 %s, i64 24, i1 false)
   ret void
 }
@@ -204,7 +201,6 @@ define void @copy_large(ptr align 8 %d, ptr align 8 %s) nounwind {
 define i64 @va_sum(i32 %n, ptr %ap) nounwind {
 ; CHECK-LABEL: va_sum:
 ; CHECK:       # %bb.0: # %entry
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r12, 0
 ; CHECK-NEXT:    cmprvw r0, 1
 ; CHECK-NEXT:    jmpltrel .LBB9_2
@@ -221,7 +217,7 @@ define i64 @va_sum(i32 %n, ptr %ap) nounwind {
 ; CHECK-NEXT:    cmprvw r0, 0
 ; CHECK-NEXT:    jmpnerel .LBB9_1
 ; CHECK-NEXT:  .LBB9_2: # %done
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 entry:
   %cmp = icmp sgt i32 %n, 0
   br i1 %cmp, label %loop, label %done
@@ -245,13 +241,12 @@ done:
 define i64 @load64_unaligned(ptr %p) nounwind {
 ; CHECK-LABEL: load64_unaligned:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    addi r12, r0, 4
 ; CHECK-NEXT:    memget32 r14, r0
 ; CHECK-NEXT:    memget32 r12, r12
 ; CHECK-NEXT:    shlv r12, r12, 32
 ; CHECK-NEXT:    orr r12, r12, r14
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %v = load i64, ptr %p, align 1
   ret i64 %v
 }
@@ -259,10 +254,9 @@ define i64 @load64_unaligned(ptr %p) nounwind {
 define i64 @load32_unaligned_off(ptr %p) nounwind {
 ; CHECK-LABEL: load32_unaligned_off:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    addi r12, r0, 5
 ; CHECK-NEXT:    memget32 r12, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a = getelementptr i8, ptr %p, i64 5
   %v = load i32, ptr %a, align 1
   %r = zext i32 %v to i64
@@ -272,11 +266,10 @@ define i64 @load32_unaligned_off(ptr %p) nounwind {
 define i64 @load32_unaligned_sext(ptr %p, i64 %i) nounwind {
 ; CHECK-LABEL: load32_unaligned_sext:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    addr r12, r0, r1
 ; CHECK-NEXT:    memget32 r12, r12
 ; CHECK-NEXT:    sextw r12, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a = getelementptr i8, ptr %p, i64 %i
   %v = load i32, ptr %a, align 2
   %r = sext i32 %v to i64
@@ -287,9 +280,8 @@ define i64 @load32_unaligned_sext(ptr %p, i64 %i) nounwind {
 define i32 @le32(ptr %p) nounwind {
 ; CHECK-LABEL: le32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    memget32 r12, r0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %b0 = load i8, ptr %p, align 1
   %p1 = getelementptr i8, ptr %p, i64 1
   %b1 = load i8, ptr %p1, align 1
@@ -331,7 +323,6 @@ define i64 @load32_unaligned_frame() nounwind {
 define i64 @load32_unaligned_volatile(ptr %p) nounwind {
 ; CHECK-LABEL: load32_unaligned_volatile:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    memget8 r12, r0
 ; CHECK-NEXT:    ldidx8 r14, r0, 1
 ; CHECK-NEXT:    ldidx8 r13, r0, 2
@@ -342,7 +333,7 @@ define i64 @load32_unaligned_volatile(ptr %p) nounwind {
 ; CHECK-NEXT:    orr r12, r14, r12
 ; CHECK-NEXT:    orr r13, r11, r13
 ; CHECK-NEXT:    orr r12, r13, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %v = load volatile i32, ptr %p, align 1
   %r = zext i32 %v to i64
   ret i64 %r
@@ -351,7 +342,6 @@ define i64 @load32_unaligned_volatile(ptr %p) nounwind {
 define void @store32_unaligned(ptr %p, i32 %v) nounwind {
 ; CHECK-LABEL: store32_unaligned:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    shrv r12, r1, 24
 ; CHECK-NEXT:    shrv r13, r1, 16
 ; CHECK-NEXT:    shrv r14, r1, 8
@@ -359,7 +349,7 @@ define void @store32_unaligned(ptr %p, i32 %v) nounwind {
 ; CHECK-NEXT:    stidx8 r12, r0, 3
 ; CHECK-NEXT:    stidx8 r13, r0, 2
 ; CHECK-NEXT:    stidx8 r14, r0, 1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   store i32 %v, ptr %p, align 1
   ret void
 }

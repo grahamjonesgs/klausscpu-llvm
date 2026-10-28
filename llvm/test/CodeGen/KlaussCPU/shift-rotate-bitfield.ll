@@ -11,9 +11,8 @@
 define i64 @shl_and63(i64 %a, i64 %b) nounwind {
 ; CHECK-LABEL: shl_and63:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    shlr r12, r0, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %m = and i64 %b, 63
   %r = shl i64 %a, %m
   ret i64 %r
@@ -22,9 +21,8 @@ define i64 @shl_and63(i64 %a, i64 %b) nounwind {
 define i64 @lshr_and127(i64 %a, i64 %b) nounwind {
 ; CHECK-LABEL: lshr_and127:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    shrr r12, r0, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %m = and i64 %b, 127
   %r = lshr i64 %a, %m
   ret i64 %r
@@ -33,9 +31,8 @@ define i64 @lshr_and127(i64 %a, i64 %b) nounwind {
 define i64 @ashr_and63(i64 %a, i64 %b) nounwind {
 ; CHECK-LABEL: ashr_and63:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    sarr r12, r0, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %m = and i64 %b, 63
   %r = ashr i64 %a, %m
   ret i64 %r
@@ -45,10 +42,9 @@ define i64 @ashr_and63(i64 %a, i64 %b) nounwind {
 define i64 @shl_and31(i64 %a, i64 %b) nounwind {
 ; CHECK-LABEL: shl_and31:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    andv r12, r1, 31
 ; CHECK-NEXT:    shlr r12, r0, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %m = and i64 %b, 31
   %r = shl i64 %a, %m
   ret i64 %r
@@ -58,9 +54,8 @@ define i64 @shl_and31(i64 %a, i64 %b) nounwind {
 define i32 @shl_i32(i32 %a, i32 %b) nounwind {
 ; CHECK-LABEL: shl_i32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    shlr r12, r0, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %r = shl i32 %a, %b
   ret i32 %r
 }
@@ -68,10 +63,9 @@ define i32 @shl_i32(i32 %a, i32 %b) nounwind {
 define i32 @ashr_i32(i32 %a, i32 %b) nounwind {
 ; CHECK-LABEL: ashr_i32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    sextw r12, r0
 ; CHECK-NEXT:    sarr r12, r12, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %r = ashr i32 %a, %b
   ret i32 %r
 }
@@ -79,9 +73,8 @@ define i32 @ashr_i32(i32 %a, i32 %b) nounwind {
 define i64 @shl_i32_amount(i64 %a, i32 %b) nounwind {
 ; CHECK-LABEL: shl_i32_amount:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    shlr r12, r0, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %z = zext i32 %b to i64
   %r = shl i64 %a, %z
   ret i64 %r
@@ -90,10 +83,9 @@ define i64 @shl_i32_amount(i64 %a, i32 %b) nounwind {
 define i64 @lshr_64_minus(i64 %a, i64 %b) nounwind {
 ; CHECK-LABEL: lshr_64_minus:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    negr r12, r1
 ; CHECK-NEXT:    shrr r12, r0, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %s = sub i64 64, %b
   %m = and i64 %s, 63
   %r = lshr i64 %a, %m
@@ -103,10 +95,9 @@ define i64 @lshr_64_minus(i64 %a, i64 %b) nounwind {
 define i64 @shl_63_minus(i64 %a, i64 %b) nounwind {
 ; CHECK-LABEL: shl_63_minus:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    notr r12, r1
 ; CHECK-NEXT:    shlr r12, r0, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %s = sub i64 63, %b
   %r = shl i64 %a, %s
   ret i64 %r
@@ -115,10 +106,9 @@ define i64 @shl_63_minus(i64 %a, i64 %b) nounwind {
 define i64 @shl_xor63(i64 %a, i64 %b) nounwind {
 ; CHECK-LABEL: shl_xor63:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    notr r12, r1
 ; CHECK-NEXT:    shlr r12, r0, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %m = and i64 %b, 63
   %s = xor i64 %m, 63
   %r = shl i64 %a, %s
@@ -128,9 +118,8 @@ define i64 @shl_xor63(i64 %a, i64 %b) nounwind {
 define i64 @lshr_plus64(i64 %a, i64 %b) nounwind {
 ; CHECK-LABEL: lshr_plus64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    shrr r12, r0, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %s = add i64 %b, 64
   %m = and i64 %s, 63
   %r = lshr i64 %a, %m
@@ -140,13 +129,12 @@ define i64 @lshr_plus64(i64 %a, i64 %b) nounwind {
 define i64 @fshl64(i64 %a, i64 %b, i64 %c) nounwind {
 ; CHECK-LABEL: fshl64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    notr r12, r2
 ; CHECK-NEXT:    shrv r14, r1, 1
 ; CHECK-NEXT:    shlr r13, r0, r2
 ; CHECK-NEXT:    shrr r12, r14, r12
 ; CHECK-NEXT:    orr r12, r13, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %r = call i64 @llvm.fshl.i64(i64 %a, i64 %b, i64 %c)
   ret i64 %r
 }
@@ -156,12 +144,11 @@ define i64 @fshl64(i64 %a, i64 %b, i64 %c) nounwind {
 define i32 @rotl32_const(i32 %a) nounwind {
 ; CHECK-LABEL: rotl32_const:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    zextw r12, r0
 ; CHECK-NEXT:    shlv r14, r0, 32
 ; CHECK-NEXT:    orr r12, r14, r12
 ; CHECK-NEXT:    rolv r12, r12, 7
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %r = call i32 @llvm.fshl.i32(i32 %a, i32 %a, i32 7)
   ret i32 %r
 }
@@ -169,12 +156,11 @@ define i32 @rotl32_const(i32 %a) nounwind {
 define i32 @rotr32_const(i32 %a) nounwind {
 ; CHECK-LABEL: rotr32_const:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    zextw r12, r0
 ; CHECK-NEXT:    shlv r14, r0, 32
 ; CHECK-NEXT:    orr r12, r14, r12
 ; CHECK-NEXT:    rorv r12, r12, 7
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %r = call i32 @llvm.fshr.i32(i32 %a, i32 %a, i32 7)
   ret i32 %r
 }
@@ -182,12 +168,11 @@ define i32 @rotr32_const(i32 %a) nounwind {
 define i32 @rotl32_var(i32 %a, i32 %n) nounwind {
 ; CHECK-LABEL: rotl32_var:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    zextw r12, r0
 ; CHECK-NEXT:    shlv r14, r0, 32
 ; CHECK-NEXT:    orr r12, r14, r12
 ; CHECK-NEXT:    rolr r12, r12, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %r = call i32 @llvm.fshl.i32(i32 %a, i32 %a, i32 %n)
   ret i32 %r
 }
@@ -195,12 +180,11 @@ define i32 @rotl32_var(i32 %a, i32 %n) nounwind {
 define i32 @rotr32_var(i32 %a, i32 %n) nounwind {
 ; CHECK-LABEL: rotr32_var:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    zextw r12, r0
 ; CHECK-NEXT:    shlv r14, r0, 32
 ; CHECK-NEXT:    orr r12, r14, r12
 ; CHECK-NEXT:    rorr r12, r12, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %r = call i32 @llvm.fshr.i32(i32 %a, i32 %a, i32 %n)
   ret i32 %r
 }
@@ -209,7 +193,6 @@ define i32 @rotr32_var(i32 %a, i32 %n) nounwind {
 define i32 @sigma0(i32 %x) nounwind {
 ; CHECK-LABEL: sigma0:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    zextw r12, r0
 ; CHECK-NEXT:    shlv r14, r0, 32
 ; CHECK-NEXT:    orr r12, r14, r12
@@ -218,7 +201,7 @@ define i32 @sigma0(i32 %x) nounwind {
 ; CHECK-NEXT:    rorv r12, r12, 22
 ; CHECK-NEXT:    xorr r14, r14, r13
 ; CHECK-NEXT:    xorr r12, r14, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %r1 = call i32 @llvm.fshr.i32(i32 %x, i32 %x, i32 2)
   %r2 = call i32 @llvm.fshr.i32(i32 %x, i32 %x, i32 13)
   %r3 = call i32 @llvm.fshr.i32(i32 %x, i32 %x, i32 22)
@@ -231,12 +214,11 @@ define i32 @sigma0(i32 %x) nounwind {
 define i32 @rotl32_load(ptr %p) nounwind {
 ; CHECK-LABEL: rotl32_load:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    memget32 r12, r0
 ; CHECK-NEXT:    shlv r14, r12, 32
 ; CHECK-NEXT:    orr r12, r14, r12
 ; CHECK-NEXT:    rolv r12, r12, 9
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a = load i32, ptr %p
   %r = call i32 @llvm.fshl.i32(i32 %a, i32 %a, i32 9)
   ret i32 %r
@@ -247,9 +229,8 @@ define i32 @rotl32_load(ptr %p) nounwind {
 define i64 @bextr_5_5(i64 %x) nounwind {
 ; CHECK-LABEL: bextr_5_5:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    bextr r12, r0, 1285
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %s = lshr i64 %x, 5
   %r = and i64 %s, 31
   ret i64 %r
@@ -258,9 +239,8 @@ define i64 @bextr_5_5(i64 %x) nounwind {
 define i64 @bextr_byte(i64 %x) nounwind {
 ; CHECK-LABEL: bextr_byte:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    bextr r12, r0, 2056
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %s = lshr i64 %x, 8
   %r = and i64 %s, 255
   ret i64 %r
@@ -270,9 +250,8 @@ define i64 @bextr_byte(i64 %x) nounwind {
 define i64 @bextr_high(i64 %x) nounwind {
 ; CHECK-LABEL: bextr_high:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    bextr r12, r0, 7956
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %s = lshr i64 %x, 20
   %r = and i64 %s, 2147483647
   ret i64 %r
@@ -282,9 +261,8 @@ define i64 @bextr_high(i64 %x) nounwind {
 define i32 @bextr_lshr_i32(i32 %x) nounwind {
 ; CHECK-LABEL: bextr_lshr_i32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    bextr r12, r0, 7427
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %r = lshr i32 %x, 3
   ret i32 %r
 }
@@ -292,9 +270,8 @@ define i32 @bextr_lshr_i32(i32 %x) nounwind {
 define i64 @bextr_lshr_i32_zext(i32 %x) nounwind {
 ; CHECK-LABEL: bextr_lshr_i32_zext:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    bextr r12, r0, 3857
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %s = lshr i32 %x, 17
   %r = zext i32 %s to i64
   ret i64 %r
@@ -304,11 +281,10 @@ define i64 @bextr_lshr_i32_zext(i32 %x) nounwind {
 define i64 @bextr_shared_shift(i64 %x) nounwind {
 ; CHECK-LABEL: bextr_shared_shift:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    shrv r12, r0, 3
 ; CHECK-NEXT:    andv r14, r12, 127
 ; CHECK-NEXT:    addr r12, r14, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %s = lshr i64 %x, 3
   %f = and i64 %s, 127
   %r = add i64 %f, %s
@@ -320,10 +296,9 @@ define i64 @bextr_shared_shift(i64 %x) nounwind {
 define i64 @field_exponent(i64 %x) nounwind {
 ; CHECK-LABEL: field_exponent:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    shlv r12, r0, 1
 ; CHECK-NEXT:    shrv r12, r12, 53
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %s = lshr i64 %x, 52
   %r = and i64 %s, 2047
   ret i64 %r
@@ -332,10 +307,9 @@ define i64 @field_exponent(i64 %x) nounwind {
 define i64 @field_wide(i64 %x) nounwind {
 ; CHECK-LABEL: field_wide:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    shlv r12, r0, 24
 ; CHECK-NEXT:    shrv r12, r12, 28
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %s = lshr i64 %x, 4
   %r = and i64 %s, 68719476735
   ret i64 %r
@@ -346,10 +320,9 @@ define i64 @field_wide(i64 %x) nounwind {
 define i64 @mask_high16(i64 %x) nounwind {
 ; CHECK-LABEL: mask_high16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    shrv r12, r0, 48
 ; CHECK-NEXT:    shlv r12, r12, 48
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %r = and i64 %x, -281474976710656
   ret i64 %r
 }
@@ -357,10 +330,9 @@ define i64 @mask_high16(i64 %x) nounwind {
 define i64 @mask_low48(i64 %x) nounwind {
 ; CHECK-LABEL: mask_low48:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    shlv r12, r0, 16
 ; CHECK-NEXT:    shrv r12, r12, 16
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %r = and i64 %x, 281474976710655
   ret i64 %r
 }
@@ -369,10 +341,9 @@ define i64 @mask_low48(i64 %x) nounwind {
 define i64 @mask_middle(i64 %x) nounwind {
 ; CHECK-LABEL: mask_middle:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr64 r12, -16, 4095
 ; CHECK-NEXT:    andr r12, r0, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %r = and i64 %x, 17592186044400
   ret i64 %r
 }
@@ -380,12 +351,11 @@ define i64 @mask_middle(i64 %x) nounwind {
 define i64 @mask_shared(i64 %x, i64 %y) nounwind {
 ; CHECK-LABEL: mask_shared:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr64 r12, -1, 65535
 ; CHECK-NEXT:    andr r14, r0, r12
 ; CHECK-NEXT:    andr r12, r1, r12
 ; CHECK-NEXT:    addr r12, r14, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a = and i64 %x, 281474976710655
   %b = and i64 %y, 281474976710655
   %r = add i64 %a, %b
@@ -397,7 +367,6 @@ define i64 @mask_shared(i64 %x, i64 %y) nounwind {
 define void @mask_high24_loop(ptr %p, i64 %n) nounwind {
 ; CHECK-LABEL: mask_high24_loop:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r12, 0
 ; CHECK-NEXT:    setr64 r14, 0, -256
 ; CHECK-NEXT:    .p2align 4
@@ -410,7 +379,7 @@ define void @mask_high24_loop(ptr %p, i64 %n) nounwind {
 ; CHECK-NEXT:    addi r0, r0, 8
 ; CHECK-NEXT:    fbr r12, r1, 3, .LBB30_1
 ; CHECK-NEXT:  # %bb.2: # %exit
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   br label %loop
 loop:
   %i = phi i64 [ 0, %0 ], [ %i1, %loop ]
@@ -428,7 +397,6 @@ exit:
 define void @mask_low40_loop(ptr %p, i64 %n) nounwind {
 ; CHECK-LABEL: mask_low40_loop:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r12, 0
 ; CHECK-NEXT:    setr64 r14, -1, 255
 ; CHECK-NEXT:    .p2align 4
@@ -441,7 +409,7 @@ define void @mask_low40_loop(ptr %p, i64 %n) nounwind {
 ; CHECK-NEXT:    addi r0, r0, 8
 ; CHECK-NEXT:    fbr r12, r1, 3, .LBB31_1
 ; CHECK-NEXT:  # %bb.2: # %exit
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   br label %loop
 loop:
   %i = phi i64 [ 0, %0 ], [ %i1, %loop ]
@@ -459,7 +427,6 @@ exit:
 define void @mask_high24_loop_optsize(ptr %p, i64 %n) nounwind optsize {
 ; CHECK-LABEL: mask_high24_loop_optsize:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r12, 0
 ; CHECK-NEXT:  .LBB32_1: # %loop
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
@@ -471,7 +438,7 @@ define void @mask_high24_loop_optsize(ptr %p, i64 %n) nounwind optsize {
 ; CHECK-NEXT:    addi r0, r0, 8
 ; CHECK-NEXT:    fbr r12, r1, 3, .LBB32_1
 ; CHECK-NEXT:  # %bb.2: # %exit
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   br label %loop
 loop:
   %i = phi i64 [ 0, %0 ], [ %i1, %loop ]
@@ -491,7 +458,6 @@ exit:
 define i128 @shl128(i128 %a, i128 %b) nounwind {
 ; CHECK-LABEL: shl128:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    andv r14, r2, 64
 ; CHECK-NEXT:    shlr r12, r0, r2
 ; CHECK-NEXT:    fbri r14, 0, 8, .LBB33_2
@@ -501,11 +467,11 @@ define i128 @shl128(i128 %a, i128 %b) nounwind {
 ; CHECK-NEXT:    shlr r11, r1, r2
 ; CHECK-NEXT:    shrr r14, r13, r14
 ; CHECK-NEXT:    orr r11, r11, r14
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB33_2:
 ; CHECK-NEXT:    copy r11, r12
 ; CHECK-NEXT:    setr r12, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %r = shl i128 %a, %b
   ret i128 %r
 }
@@ -513,7 +479,6 @@ define i128 @shl128(i128 %a, i128 %b) nounwind {
 define i128 @lshr128(i128 %a, i128 %b) nounwind {
 ; CHECK-LABEL: lshr128:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    andv r12, r2, 64
 ; CHECK-NEXT:    shrr r11, r1, r2
 ; CHECK-NEXT:    fbri r12, 0, 8, .LBB34_2
@@ -523,11 +488,11 @@ define i128 @lshr128(i128 %a, i128 %b) nounwind {
 ; CHECK-NEXT:    shrr r13, r0, r2
 ; CHECK-NEXT:    shlr r12, r14, r12
 ; CHECK-NEXT:    orr r12, r13, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB34_2:
 ; CHECK-NEXT:    copy r12, r11
 ; CHECK-NEXT:    setr r11, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %r = lshr i128 %a, %b
   ret i128 %r
 }
@@ -535,7 +500,6 @@ define i128 @lshr128(i128 %a, i128 %b) nounwind {
 define i128 @ashr128(i128 %a, i128 %b) nounwind {
 ; CHECK-LABEL: ashr128:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    andv r12, r2, 64
 ; CHECK-NEXT:    sarr r11, r1, r2
 ; CHECK-NEXT:    fbri r12, 0, 8, .LBB35_2
@@ -545,12 +509,12 @@ define i128 @ashr128(i128 %a, i128 %b) nounwind {
 ; CHECK-NEXT:    shrr r13, r0, r2
 ; CHECK-NEXT:    shlr r12, r14, r12
 ; CHECK-NEXT:    orr r12, r13, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB35_2:
 ; CHECK-NEXT:    shrav r14, r1, 63
 ; CHECK-NEXT:    copy r12, r11
 ; CHECK-NEXT:    copy r11, r14
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %r = ashr i128 %a, %b
   ret i128 %r
 }

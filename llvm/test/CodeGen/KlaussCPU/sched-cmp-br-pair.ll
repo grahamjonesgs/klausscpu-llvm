@@ -12,18 +12,16 @@
 define i64 @value_below_compare(i32 %a, i32 %b, i1 %p) nounwind {
 ; CHECK-LABEL: value_below_compare:
 ; CHECK:       # %bb.0: # %entry
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    andv r14, r2, 1
 ; CHECK-NEXT:    cmpltrw r12, r0, r1
 ; CHECK-NEXT:    fbri r14, 0, 0, .LBB0_2
 ; CHECK-NEXT:  # %bb.1: # %t
 ; CHECK-NEXT:    addr r12, r12, r12
 ; CHECK-NEXT:  .LBB0_2: # %f
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; NOPAIR-LABEL: value_below_compare:
 ; NOPAIR:       # %bb.0: # %entry
-; NOPAIR-NEXT:    enter 0
 ; NOPAIR-NEXT:    andv r12, r2, 1
 ; NOPAIR-NEXT:    cmprv r12, 0
 ; NOPAIR-NEXT:    cmpltrw r12, r0, r1
@@ -31,7 +29,7 @@ define i64 @value_below_compare(i32 %a, i32 %b, i1 %p) nounwind {
 ; NOPAIR-NEXT:  # %bb.1: # %t
 ; NOPAIR-NEXT:    addr r12, r12, r12
 ; NOPAIR-NEXT:  .LBB0_2: # %f
-; NOPAIR-NEXT:    leaveret
+; NOPAIR-NEXT:    ret
 entry:
   %c = icmp slt i32 %a, %b
   %z = zext i1 %c to i64

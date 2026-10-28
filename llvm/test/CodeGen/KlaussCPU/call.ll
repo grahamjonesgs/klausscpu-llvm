@@ -61,11 +61,8 @@ define i64 @callee_saved_live_across_call(i64 %x) {
 define i64 @leaf(i64 %a, i64 %b) {
 ; CHECK-LABEL: leaf:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    .cfi_def_cfa r15, 16
-; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    addr r12, r0, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %r = add i64 %a, %b
   ret i64 %r
 }
@@ -74,11 +71,8 @@ define i64 @leaf(i64 %a, i64 %b) {
 define i64 @return_const() {
 ; CHECK-LABEL: return_const:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    .cfi_def_cfa r15, 16
-; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    setr r12, 99
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   ret i64 99
 }
 

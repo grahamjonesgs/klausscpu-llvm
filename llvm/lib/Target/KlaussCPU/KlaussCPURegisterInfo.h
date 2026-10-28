@@ -48,6 +48,13 @@ public:
                            RegScavenger *RS = nullptr) const override;
 
   Register getFrameRegister(const MachineFunction &MF) const override;
+
+  // R15, the frame pointer, is not in CSR_KlaussCPU (the prologue saves it),
+  // but an instruction that reads or writes it must stay inside a
+  // shrink-wrapped frame.
+  bool isNonallocatableRegisterCalleeSave(MCRegister Reg) const override {
+    return Reg == KlaussCPU::R15;
+  }
 };
 
 } // namespace llvm

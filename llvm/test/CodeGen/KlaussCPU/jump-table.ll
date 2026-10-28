@@ -25,7 +25,6 @@
 define i64 @dense12(i64 %x, i64 %a) nounwind {
 ; STATIC-LABEL: dense12:
 ; STATIC:       # %bb.0: # %entry
-; STATIC-NEXT:    enter 0
 ; STATIC-NEXT:    shlv r12, r0, 2
 ; STATIC-NEXT:    setru r14, .LJTI0_0
 ; STATIC-NEXT:    cmprv r0, 11
@@ -35,47 +34,46 @@ define i64 @dense12(i64 %x, i64 %a) nounwind {
 ; STATIC-NEXT:    jmpr r12
 ; STATIC-NEXT:  .LBB0_2: # %c0
 ; STATIC-NEXT:    addi r12, r1, 3
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB0_13: # %c11
 ; STATIC-NEXT:    mulv r12, r1, 80
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB0_6: # %c4
 ; STATIC-NEXT:    orv r12, r1, 31
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB0_11: # %c9
 ; STATIC-NEXT:    addi r12, r1, -66
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB0_4: # %c2
 ; STATIC-NEXT:    xorv r12, r1, 17
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB0_5: # %c3
 ; STATIC-NEXT:    mulv r12, r1, 24
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB0_9: # %c7
 ; STATIC-NEXT:    shrv r12, r1, 7
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB0_3: # %c1
 ; STATIC-NEXT:    addi r12, r1, -10
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB0_7: # %c5
 ; STATIC-NEXT:    andv r12, r1, 38
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB0_8: # %c6
 ; STATIC-NEXT:    shlv r12, r1, 5
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB0_12: # %c10
 ; STATIC-NEXT:    xorv r12, r1, 73
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB0_10: # %c8
 ; STATIC-NEXT:    addi r12, r1, 59
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB0_14: # %def
 ; STATIC-NEXT:    copy r12, r1
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ;
 ; PIC-LABEL: dense12:
 ; PIC:       # %bb.0: # %entry
-; PIC-NEXT:    enter 0
 ; PIC-NEXT:    shlv r12, r0, 2
 ; PIC-NEXT:    leapc r14, .LJTI0_0
 ; PIC-NEXT:    cmprv r0, 11
@@ -85,43 +83,43 @@ define i64 @dense12(i64 %x, i64 %a) nounwind {
 ; PIC-NEXT:    jmpr r12
 ; PIC-NEXT:  .LBB0_2: # %c0
 ; PIC-NEXT:    addi r12, r1, 3
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB0_13: # %c11
 ; PIC-NEXT:    mulv r12, r1, 80
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB0_6: # %c4
 ; PIC-NEXT:    orv r12, r1, 31
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB0_11: # %c9
 ; PIC-NEXT:    addi r12, r1, -66
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB0_4: # %c2
 ; PIC-NEXT:    xorv r12, r1, 17
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB0_5: # %c3
 ; PIC-NEXT:    mulv r12, r1, 24
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB0_9: # %c7
 ; PIC-NEXT:    shrv r12, r1, 7
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB0_3: # %c1
 ; PIC-NEXT:    addi r12, r1, -10
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB0_7: # %c5
 ; PIC-NEXT:    andv r12, r1, 38
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB0_8: # %c6
 ; PIC-NEXT:    shlv r12, r1, 5
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB0_12: # %c10
 ; PIC-NEXT:    xorv r12, r1, 73
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB0_10: # %c8
 ; PIC-NEXT:    addi r12, r1, 59
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB0_14: # %def
 ; PIC-NEXT:    copy r12, r1
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 entry:
   switch i64 %x, label %def [
     i64 0, label %c0
@@ -181,7 +179,6 @@ def:
 define i64 @dense11(i64 %x, i64 %a) nounwind {
 ; STATIC-LABEL: dense11:
 ; STATIC:       # %bb.0: # %entry
-; STATIC-NEXT:    enter 0
 ; STATIC-NEXT:    fbri r0, 4, 2, .LBB1_1
 ; STATIC-NEXT:  # %bb.9: # %entry
 ; STATIC-NEXT:    fbri r0, 7, 10, .LBB1_14
@@ -193,7 +190,7 @@ define i64 @dense11(i64 %x, i64 %a) nounwind {
 ; STATIC-NEXT:    fbri r0, 7, 8, .LBB1_25
 ; STATIC-NEXT:  # %bb.13: # %c7
 ; STATIC-NEXT:    shrv r12, r1, 7
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB1_1: # %entry
 ; STATIC-NEXT:    fbri r0, 1, 2, .LBB1_2
 ; STATIC-NEXT:  # %bb.5: # %entry
@@ -204,7 +201,7 @@ define i64 @dense11(i64 %x, i64 %a) nounwind {
 ; STATIC-NEXT:    fbri r0, 4, 8, .LBB1_25
 ; STATIC-NEXT:  # %bb.8: # %c4
 ; STATIC-NEXT:    orv r12, r1, 31
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB1_14: # %entry
 ; STATIC-NEXT:    cmprv r0, 8
 ; STATIC-NEXT:    jmperel .LBB1_23
@@ -216,42 +213,41 @@ define i64 @dense11(i64 %x, i64 %a) nounwind {
 ; STATIC-NEXT:    jmpnerel .LBB1_25
 ; STATIC-NEXT:  # %bb.17: # %c10
 ; STATIC-NEXT:    xorv r12, r1, 73
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB1_2: # %entry
 ; STATIC-NEXT:    fbri r0, 0, 0, .LBB1_18
 ; STATIC-NEXT:  # %bb.3: # %entry
 ; STATIC-NEXT:    fbri r0, 1, 8, .LBB1_25
 ; STATIC-NEXT:  # %bb.4: # %c1
 ; STATIC-NEXT:    addi r12, r1, -10
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB1_18: # %c0
 ; STATIC-NEXT:    addi r12, r1, 3
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB1_20: # %c3
 ; STATIC-NEXT:    mulv r12, r1, 24
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB1_22: # %c6
 ; STATIC-NEXT:    shlv r12, r1, 5
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB1_24: # %c9
 ; STATIC-NEXT:    addi r12, r1, -66
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB1_19: # %c2
 ; STATIC-NEXT:    xorv r12, r1, 17
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB1_21: # %c5
 ; STATIC-NEXT:    andv r12, r1, 38
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB1_23: # %c8
 ; STATIC-NEXT:    addi r12, r1, 59
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB1_25: # %def
 ; STATIC-NEXT:    copy r12, r1
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ;
 ; PIC-LABEL: dense11:
 ; PIC:       # %bb.0: # %entry
-; PIC-NEXT:    enter 0
 ; PIC-NEXT:    fbri r0, 4, 2, .LBB1_1
 ; PIC-NEXT:  # %bb.9: # %entry
 ; PIC-NEXT:    fbri r0, 7, 10, .LBB1_14
@@ -263,7 +259,7 @@ define i64 @dense11(i64 %x, i64 %a) nounwind {
 ; PIC-NEXT:    fbri r0, 7, 8, .LBB1_25
 ; PIC-NEXT:  # %bb.13: # %c7
 ; PIC-NEXT:    shrv r12, r1, 7
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB1_1: # %entry
 ; PIC-NEXT:    fbri r0, 1, 2, .LBB1_2
 ; PIC-NEXT:  # %bb.5: # %entry
@@ -274,7 +270,7 @@ define i64 @dense11(i64 %x, i64 %a) nounwind {
 ; PIC-NEXT:    fbri r0, 4, 8, .LBB1_25
 ; PIC-NEXT:  # %bb.8: # %c4
 ; PIC-NEXT:    orv r12, r1, 31
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB1_14: # %entry
 ; PIC-NEXT:    cmprv r0, 8
 ; PIC-NEXT:    jmperel .LBB1_23
@@ -286,38 +282,38 @@ define i64 @dense11(i64 %x, i64 %a) nounwind {
 ; PIC-NEXT:    jmpnerel .LBB1_25
 ; PIC-NEXT:  # %bb.17: # %c10
 ; PIC-NEXT:    xorv r12, r1, 73
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB1_2: # %entry
 ; PIC-NEXT:    fbri r0, 0, 0, .LBB1_18
 ; PIC-NEXT:  # %bb.3: # %entry
 ; PIC-NEXT:    fbri r0, 1, 8, .LBB1_25
 ; PIC-NEXT:  # %bb.4: # %c1
 ; PIC-NEXT:    addi r12, r1, -10
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB1_18: # %c0
 ; PIC-NEXT:    addi r12, r1, 3
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB1_20: # %c3
 ; PIC-NEXT:    mulv r12, r1, 24
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB1_22: # %c6
 ; PIC-NEXT:    shlv r12, r1, 5
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB1_24: # %c9
 ; PIC-NEXT:    addi r12, r1, -66
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB1_19: # %c2
 ; PIC-NEXT:    xorv r12, r1, 17
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB1_21: # %c5
 ; PIC-NEXT:    andv r12, r1, 38
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB1_23: # %c8
 ; PIC-NEXT:    addi r12, r1, 59
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB1_25: # %def
 ; PIC-NEXT:    copy r12, r1
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 entry:
   switch i64 %x, label %def [
     i64 0, label %c0
@@ -373,7 +369,6 @@ def:
 define i64 @sparse_half(i64 %x, i64 %a) nounwind {
 ; STATIC-LABEL: sparse_half:
 ; STATIC:       # %bb.0: # %entry
-; STATIC-NEXT:    enter 0
 ; STATIC-NEXT:    addi r13, r0, -5
 ; STATIC-NEXT:    setru r14, .LJTI2_0
 ; STATIC-NEXT:    shlv r12, r13, 2
@@ -384,47 +379,46 @@ define i64 @sparse_half(i64 %x, i64 %a) nounwind {
 ; STATIC-NEXT:    jmpr r12
 ; STATIC-NEXT:  .LBB2_2: # %c0
 ; STATIC-NEXT:    addi r12, r1, 3
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB2_12: # %c10
 ; STATIC-NEXT:    xorv r12, r1, 73
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB2_4: # %c2
 ; STATIC-NEXT:    xorv r12, r1, 17
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB2_7: # %c5
 ; STATIC-NEXT:    andv r12, r1, 38
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB2_13: # %c11
 ; STATIC-NEXT:    mulv r12, r1, 80
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB2_3: # %c1
 ; STATIC-NEXT:    addi r12, r1, -10
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB2_8: # %c6
 ; STATIC-NEXT:    shlv r12, r1, 5
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB2_9: # %c7
 ; STATIC-NEXT:    shrv r12, r1, 7
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB2_5: # %c3
 ; STATIC-NEXT:    mulv r12, r1, 24
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB2_6: # %c4
 ; STATIC-NEXT:    orv r12, r1, 31
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB2_11: # %c9
 ; STATIC-NEXT:    addi r12, r1, -66
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB2_10: # %c8
 ; STATIC-NEXT:    addi r12, r1, 59
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB2_14: # %def
 ; STATIC-NEXT:    copy r12, r1
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ;
 ; PIC-LABEL: sparse_half:
 ; PIC:       # %bb.0: # %entry
-; PIC-NEXT:    enter 0
 ; PIC-NEXT:    addi r13, r0, -5
 ; PIC-NEXT:    leapc r14, .LJTI2_0
 ; PIC-NEXT:    shlv r12, r13, 2
@@ -435,43 +429,43 @@ define i64 @sparse_half(i64 %x, i64 %a) nounwind {
 ; PIC-NEXT:    jmpr r12
 ; PIC-NEXT:  .LBB2_2: # %c0
 ; PIC-NEXT:    addi r12, r1, 3
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB2_12: # %c10
 ; PIC-NEXT:    xorv r12, r1, 73
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB2_4: # %c2
 ; PIC-NEXT:    xorv r12, r1, 17
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB2_7: # %c5
 ; PIC-NEXT:    andv r12, r1, 38
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB2_13: # %c11
 ; PIC-NEXT:    mulv r12, r1, 80
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB2_3: # %c1
 ; PIC-NEXT:    addi r12, r1, -10
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB2_8: # %c6
 ; PIC-NEXT:    shlv r12, r1, 5
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB2_9: # %c7
 ; PIC-NEXT:    shrv r12, r1, 7
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB2_5: # %c3
 ; PIC-NEXT:    mulv r12, r1, 24
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB2_6: # %c4
 ; PIC-NEXT:    orv r12, r1, 31
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB2_11: # %c9
 ; PIC-NEXT:    addi r12, r1, -66
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB2_10: # %c8
 ; PIC-NEXT:    addi r12, r1, 59
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB2_14: # %def
 ; PIC-NEXT:    copy r12, r1
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 entry:
   switch i64 %x, label %def [
     i64 5, label %c0
@@ -531,7 +525,6 @@ def:
 define i64 @sparse_third(i64 %x, i64 %a) nounwind {
 ; STATIC-LABEL: sparse_third:
 ; STATIC:       # %bb.0: # %entry
-; STATIC-NEXT:    enter 0
 ; STATIC-NEXT:    cmprv r0, 22
 ; STATIC-NEXT:    jmpgtrel .LBB3_10
 ; STATIC-NEXT:  # %bb.1: # %entry
@@ -547,7 +540,7 @@ define i64 @sparse_third(i64 %x, i64 %a) nounwind {
 ; STATIC-NEXT:    jmpnerel .LBB3_27
 ; STATIC-NEXT:  # %bb.5: # %c2
 ; STATIC-NEXT:    xorv r12, r1, 17
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB3_10: # %entry
 ; STATIC-NEXT:    cmprv r0, 31
 ; STATIC-NEXT:    jmpgtrel .LBB3_15
@@ -562,7 +555,7 @@ define i64 @sparse_third(i64 %x, i64 %a) nounwind {
 ; STATIC-NEXT:    jmpnerel .LBB3_27
 ; STATIC-NEXT:  # %bb.14: # %c8
 ; STATIC-NEXT:    addi r12, r1, 59
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB3_6: # %entry
 ; STATIC-NEXT:    cmprv r0, 14
 ; STATIC-NEXT:    jmperel .LBB3_21
@@ -574,7 +567,7 @@ define i64 @sparse_third(i64 %x, i64 %a) nounwind {
 ; STATIC-NEXT:    jmpnerel .LBB3_27
 ; STATIC-NEXT:  # %bb.9: # %c5
 ; STATIC-NEXT:    andv r12, r1, 38
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB3_15: # %entry
 ; STATIC-NEXT:    cmprv r0, 32
 ; STATIC-NEXT:    jmperel .LBB3_25
@@ -586,38 +579,37 @@ define i64 @sparse_third(i64 %x, i64 %a) nounwind {
 ; STATIC-NEXT:    jmpnerel .LBB3_27
 ; STATIC-NEXT:  # %bb.18: # %c11
 ; STATIC-NEXT:    mulv r12, r1, 80
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB3_19: # %c0
 ; STATIC-NEXT:    addi r12, r1, 3
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB3_23: # %c6
 ; STATIC-NEXT:    shlv r12, r1, 5
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB3_21: # %c3
 ; STATIC-NEXT:    mulv r12, r1, 24
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB3_25: # %c9
 ; STATIC-NEXT:    addi r12, r1, -66
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB3_20: # %c1
 ; STATIC-NEXT:    addi r12, r1, -10
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB3_24: # %c7
 ; STATIC-NEXT:    shrv r12, r1, 7
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB3_22: # %c4
 ; STATIC-NEXT:    orv r12, r1, 31
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB3_26: # %c10
 ; STATIC-NEXT:    xorv r12, r1, 73
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ; STATIC-NEXT:  .LBB3_27: # %def
 ; STATIC-NEXT:    copy r12, r1
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ;
 ; PIC-LABEL: sparse_third:
 ; PIC:       # %bb.0: # %entry
-; PIC-NEXT:    enter 0
 ; PIC-NEXT:    cmprv r0, 22
 ; PIC-NEXT:    jmpgtrel .LBB3_10
 ; PIC-NEXT:  # %bb.1: # %entry
@@ -633,7 +625,7 @@ define i64 @sparse_third(i64 %x, i64 %a) nounwind {
 ; PIC-NEXT:    jmpnerel .LBB3_27
 ; PIC-NEXT:  # %bb.5: # %c2
 ; PIC-NEXT:    xorv r12, r1, 17
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB3_10: # %entry
 ; PIC-NEXT:    cmprv r0, 31
 ; PIC-NEXT:    jmpgtrel .LBB3_15
@@ -648,7 +640,7 @@ define i64 @sparse_third(i64 %x, i64 %a) nounwind {
 ; PIC-NEXT:    jmpnerel .LBB3_27
 ; PIC-NEXT:  # %bb.14: # %c8
 ; PIC-NEXT:    addi r12, r1, 59
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB3_6: # %entry
 ; PIC-NEXT:    cmprv r0, 14
 ; PIC-NEXT:    jmperel .LBB3_21
@@ -660,7 +652,7 @@ define i64 @sparse_third(i64 %x, i64 %a) nounwind {
 ; PIC-NEXT:    jmpnerel .LBB3_27
 ; PIC-NEXT:  # %bb.9: # %c5
 ; PIC-NEXT:    andv r12, r1, 38
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB3_15: # %entry
 ; PIC-NEXT:    cmprv r0, 32
 ; PIC-NEXT:    jmperel .LBB3_25
@@ -672,34 +664,34 @@ define i64 @sparse_third(i64 %x, i64 %a) nounwind {
 ; PIC-NEXT:    jmpnerel .LBB3_27
 ; PIC-NEXT:  # %bb.18: # %c11
 ; PIC-NEXT:    mulv r12, r1, 80
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB3_19: # %c0
 ; PIC-NEXT:    addi r12, r1, 3
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB3_23: # %c6
 ; PIC-NEXT:    shlv r12, r1, 5
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB3_21: # %c3
 ; PIC-NEXT:    mulv r12, r1, 24
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB3_25: # %c9
 ; PIC-NEXT:    addi r12, r1, -66
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB3_20: # %c1
 ; PIC-NEXT:    addi r12, r1, -10
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB3_24: # %c7
 ; PIC-NEXT:    shrv r12, r1, 7
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB3_22: # %c4
 ; PIC-NEXT:    orv r12, r1, 31
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB3_26: # %c10
 ; PIC-NEXT:    xorv r12, r1, 73
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 ; PIC-NEXT:  .LBB3_27: # %def
 ; PIC-NEXT:    copy r12, r1
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
 entry:
   switch i64 %x, label %def [
     i64 5, label %c0

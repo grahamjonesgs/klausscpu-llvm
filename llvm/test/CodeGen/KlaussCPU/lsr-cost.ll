@@ -86,7 +86,6 @@ for.body:
 define void @scale32(ptr %a, ptr %b, i64 %n) nounwind {
 ; CHECK-LABEL: scale32:
 ; CHECK:       # %bb.0: # %entry
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    fbri r2, 1, 1, .LBB1_3
 ; CHECK-NEXT:  # %bb.1: # %for.body.preheader
 ; CHECK-NEXT:    setr r12, 0
@@ -100,11 +99,10 @@ define void @scale32(ptr %a, ptr %b, i64 %n) nounwind {
 ; CHECK-NEXT:    addi r12, r12, 4
 ; CHECK-NEXT:    fbri r2, 0, 8, .LBB1_2
 ; CHECK-NEXT:  .LBB1_3: # %for.cond.cleanup
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; REGS-LABEL: scale32:
 ; REGS:       # %bb.0: # %entry
-; REGS-NEXT:    enter 0
 ; REGS-NEXT:    fbri r2, 1, 1, .LBB1_2
 ; REGS-NEXT:    .p2align 4
 ; REGS-NEXT:  .LBB1_1: # %for.body
@@ -117,7 +115,7 @@ define void @scale32(ptr %a, ptr %b, i64 %n) nounwind {
 ; REGS-NEXT:    addi r0, r0, 4
 ; REGS-NEXT:    fbri r2, 0, 8, .LBB1_1
 ; REGS-NEXT:  .LBB1_2: # %for.cond.cleanup
-; REGS-NEXT:    leaveret
+; REGS-NEXT:    ret
 entry:
   %cmp5 = icmp sgt i64 %n, 0
   br i1 %cmp5, label %for.body, label %for.cond.cleanup
@@ -146,7 +144,6 @@ for.body:
 define void @mix() nounwind {
 ; CHECK-LABEL: mix:
 ; CHECK:       # %bb.0: # %entry
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr64 r14, -1985229329, 19088743
 ; CHECK-NEXT:    setr64 r13, 1985229328, -19088744
 ; CHECK-NEXT:    setr r12, -1
@@ -169,11 +166,10 @@ define void @mix() nounwind {
 ; CHECK-NEXT:    addr r12, r13, r14
 ; CHECK-NEXT:    setru r13, g_sink
 ; CHECK-NEXT:    stidx64 r12, r13, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; REGS-LABEL: mix:
 ; REGS:       # %bb.0: # %entry
-; REGS-NEXT:    enter 0
 ; REGS-NEXT:    setr64 r13, -1985229329, 19088743
 ; REGS-NEXT:    setr64 r14, 1985229328, -19088744
 ; REGS-NEXT:    setr r12, 0
@@ -199,7 +195,7 @@ define void @mix() nounwind {
 ; REGS-NEXT:    setru r14, g_sink
 ; REGS-NEXT:    decr r12, r12
 ; REGS-NEXT:    stidx64 r12, r14, 0
-; REGS-NEXT:    leaveret
+; REGS-NEXT:    ret
 entry:
   br label %for.body
 

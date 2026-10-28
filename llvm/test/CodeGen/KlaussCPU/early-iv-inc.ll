@@ -11,7 +11,6 @@
 define i64 @data_use() nounwind {
 ; CHECK-LABEL: data_use:
 ; CHECK:       # %bb.0: # %entry
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r12, 1
 ; CHECK-NEXT:    setr r14, -1
 ; CHECK-NEXT:    setr r11, 99
@@ -24,7 +23,7 @@ define i64 @data_use() nounwind {
 ; CHECK-NEXT:    addr r12, r12, r14
 ; CHECK-NEXT:    fbr r14, r11, 8, .LBB0_1
 ; CHECK-NEXT:  # %bb.2: # %exit
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 entry:
   br label %loop
 
@@ -46,7 +45,6 @@ exit:
 define i64 @load_use(ptr %p) nounwind {
 ; CHECK-LABEL: load_use:
 ; CHECK:       # %bb.0: # %entry
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r12, 0
 ; CHECK-NEXT:    setr r14, -1
 ; CHECK-NEXT:    setr r11, 99
@@ -59,7 +57,7 @@ define i64 @load_use(ptr %p) nounwind {
 ; CHECK-NEXT:    xorr r12, r13, r12
 ; CHECK-NEXT:    fbr r14, r11, 8, .LBB1_1
 ; CHECK-NEXT:  # %bb.2: # %exit
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 entry:
   br label %loop
 
@@ -82,7 +80,6 @@ exit:
 define i64 @index_use(ptr %p) nounwind {
 ; CHECK-LABEL: index_use:
 ; CHECK:       # %bb.0: # %entry
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r12, 0
 ; CHECK-NEXT:    setr r14, 0
 ; CHECK-NEXT:    setr r11, 800
@@ -94,7 +91,7 @@ define i64 @index_use(ptr %p) nounwind {
 ; CHECK-NEXT:    addr r12, r13, r12
 ; CHECK-NEXT:    fbr r14, r11, 8, .LBB2_1
 ; CHECK-NEXT:  # %bb.2: # %exit
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 entry:
   br label %loop
 
@@ -116,7 +113,6 @@ exit:
 define i64 @simm4_bound() nounwind {
 ; CHECK-LABEL: simm4_bound:
 ; CHECK:       # %bb.0: # %entry
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r12, 1
 ; CHECK-NEXT:    setr r14, -100
 ; CHECK-NEXT:    .p2align 4
@@ -128,7 +124,7 @@ define i64 @simm4_bound() nounwind {
 ; CHECK-NEXT:    incr r14, r14
 ; CHECK-NEXT:    fbri r14, -8, 8, .LBB3_1
 ; CHECK-NEXT:  # %bb.2: # %exit
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 entry:
   br label %loop
 
@@ -151,7 +147,6 @@ exit:
 define i64 @reg_bound(i64 %n) nounwind {
 ; CHECK-LABEL: reg_bound:
 ; CHECK:       # %bb.0: # %entry
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r12, 1
 ; CHECK-NEXT:    setr r14, 0
 ; CHECK-NEXT:    .p2align 4
@@ -163,7 +158,7 @@ define i64 @reg_bound(i64 %n) nounwind {
 ; CHECK-NEXT:    incr r14, r14
 ; CHECK-NEXT:    fbr r14, r0, 8, .LBB4_1
 ; CHECK-NEXT:  # %bb.2: # %exit
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 entry:
   br label %loop
 
@@ -186,7 +181,6 @@ exit:
 define i64 @ult_exit() nounwind {
 ; CHECK-LABEL: ult_exit:
 ; CHECK:       # %bb.0: # %entry
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r12, 1
 ; CHECK-NEXT:    setr r14, 0
 ; CHECK-NEXT:    setr r11, 100
@@ -199,7 +193,7 @@ define i64 @ult_exit() nounwind {
 ; CHECK-NEXT:    incr r14, r14
 ; CHECK-NEXT:    fbr r14, r11, 3, .LBB5_1
 ; CHECK-NEXT:  # %bb.2: # %exit
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 entry:
   br label %loop
 

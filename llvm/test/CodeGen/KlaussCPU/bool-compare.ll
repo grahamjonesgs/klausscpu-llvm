@@ -9,9 +9,8 @@
 define i64 @eq_imm(i64 %a) nounwind {
 ; CHECK-LABEL: eq_imm:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmpeqv r12, r0, 1000
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %c = icmp eq i64 %a, 1000
   %r = zext i1 %c to i64
   ret i64 %r
@@ -20,9 +19,8 @@ define i64 @eq_imm(i64 %a) nounwind {
 define i64 @ne_imm(i64 %a) nounwind {
 ; CHECK-LABEL: ne_imm:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmpnev r12, r0, -1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %c = icmp ne i64 %a, -1
   %r = zext i1 %c to i64
   ret i64 %r
@@ -31,9 +29,8 @@ define i64 @ne_imm(i64 %a) nounwind {
 define i64 @slt_imm(i64 %a) nounwind {
 ; CHECK-LABEL: slt_imm:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmpltv r12, r0, -100000
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %c = icmp slt i64 %a, -100000
   %r = zext i1 %c to i64
   ret i64 %r
@@ -42,9 +39,8 @@ define i64 @slt_imm(i64 %a) nounwind {
 define i64 @sgt_imm(i64 %a) nounwind {
 ; CHECK-LABEL: sgt_imm:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmpgtv r12, r0, 5
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %c = icmp sgt i64 %a, 5
   %r = zext i1 %c to i64
   ret i64 %r
@@ -53,9 +49,8 @@ define i64 @sgt_imm(i64 %a) nounwind {
 define i64 @ult_imm(i64 %a) nounwind {
 ; CHECK-LABEL: ult_imm:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmpultv r12, r0, 2147483647
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %c = icmp ult i64 %a, 2147483647
   %r = zext i1 %c to i64
   ret i64 %r
@@ -64,9 +59,8 @@ define i64 @ult_imm(i64 %a) nounwind {
 define i64 @ugt_imm(i64 %a) nounwind {
 ; CHECK-LABEL: ugt_imm:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmpugtv r12, r0, 12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %c = icmp ugt i64 %a, 12
   %r = zext i1 %c to i64
   ret i64 %r
@@ -76,10 +70,9 @@ define i64 @ugt_imm(i64 %a) nounwind {
 define i64 @ult_uimm32(i64 %a) nounwind {
 ; CHECK-LABEL: ult_uimm32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setru r12, 4000000000
 ; CHECK-NEXT:    cmpultr r12, r0, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %c = icmp ult i64 %a, 4000000000
   %r = zext i1 %c to i64
   ret i64 %r
@@ -88,9 +81,8 @@ define i64 @ult_uimm32(i64 %a) nounwind {
 define i64 @slt_w(i64 %a, i64 %b) nounwind {
 ; CHECK-LABEL: slt_w:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmpltrw r12, r0, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a1 = trunc i64 %a to i32
   %b1 = trunc i64 %b to i32
   %c = icmp slt i32 %a1, %b1
@@ -101,9 +93,8 @@ define i64 @slt_w(i64 %a, i64 %b) nounwind {
 define i64 @ule_w(i64 %a, i64 %b) nounwind {
 ; CHECK-LABEL: ule_w:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmpulerw r12, r0, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a1 = trunc i64 %a to i32
   %b1 = trunc i64 %b to i32
   %c = icmp ule i32 %a1, %b1
@@ -114,9 +105,8 @@ define i64 @ule_w(i64 %a, i64 %b) nounwind {
 define i64 @eq_w_imm(i64 %a) nounwind {
 ; CHECK-LABEL: eq_w_imm:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmpeqvw r12, r0, -7
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a1 = trunc i64 %a to i32
   %c = icmp eq i32 %a1, -7
   %r = zext i1 %c to i64
@@ -126,9 +116,8 @@ define i64 @eq_w_imm(i64 %a) nounwind {
 define i64 @uge_w_imm(i64 %a) nounwind {
 ; CHECK-LABEL: uge_w_imm:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmpugtvw r12, r0, -1294967297
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a1 = trunc i64 %a to i32
   %c = icmp uge i32 %a1, 3000000000
   %r = zext i1 %c to i64
@@ -140,9 +129,8 @@ define i64 @uge_w_imm(i64 %a) nounwind {
 define i64 @sge_w_one(i32 signext %a, i64 %b) nounwind {
 ; CHECK-LABEL: sge_w_one:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmpgerw r12, r0, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %b1 = trunc i64 %b to i32
   %c = icmp sge i32 %a, %b1
   %r = zext i1 %c to i64
@@ -153,9 +141,8 @@ define i64 @sge_w_one(i32 signext %a, i64 %b) nounwind {
 define i64 @slt_ext_args(i32 signext %a, i32 signext %b) nounwind {
 ; CHECK-LABEL: slt_ext_args:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmpltr r12, r0, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %c = icmp slt i32 %a, %b
   %r = zext i1 %c to i64
   ret i64 %r
@@ -165,12 +152,11 @@ define i64 @slt_ext_args(i32 signext %a, i32 signext %b) nounwind {
 define i64 @w_ext_used(i64 %a, i64 %b) nounwind {
 ; CHECK-LABEL: w_ext_used:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    sextw r12, r0
 ; CHECK-NEXT:    cmpgtv r14, r12, 100
 ; CHECK-NEXT:    addr r12, r14, r12
 ; CHECK-NEXT:    addr r12, r12, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a1 = trunc i64 %a to i32
   %c = icmp sgt i32 %a1, 100
   %r = zext i1 %c to i64
@@ -184,14 +170,13 @@ define i64 @w_ext_used(i64 %a, i64 %b) nounwind {
 define i64 @w_cse(i32 %a, i32 %b, i1 %p) nounwind {
 ; CHECK-LABEL: w_cse:
 ; CHECK:       # %bb.0: # %entry
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    andv r14, r2, 1
 ; CHECK-NEXT:    cmpltrw r12, r0, r1
 ; CHECK-NEXT:    fbri r14, 0, 0, .LBB14_2
 ; CHECK-NEXT:  # %bb.1: # %t
 ; CHECK-NEXT:    addr r12, r12, r12
 ; CHECK-NEXT:  .LBB14_2: # %f
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 entry:
   %c1 = icmp slt i32 %a, %b
   %z1 = zext i1 %c1 to i64
@@ -209,7 +194,6 @@ f:
 define i64 @w_licm(i32 %a, i32 %b, ptr %p, i64 %n) nounwind {
 ; CHECK-LABEL: w_licm:
 ; CHECK:       # %bb.0: # %entry
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r12, 0
 ; CHECK-NEXT:    cmpltrw r14, r0, r1
 ; CHECK-NEXT:    .p2align 4
@@ -221,7 +205,7 @@ define i64 @w_licm(i32 %a, i32 %b, ptr %p, i64 %n) nounwind {
 ; CHECK-NEXT:    addr r12, r12, r13
 ; CHECK-NEXT:    fbri r3, 0, 8, .LBB15_1
 ; CHECK-NEXT:  # %bb.2: # %exit
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 entry:
   br label %loop
 loop:

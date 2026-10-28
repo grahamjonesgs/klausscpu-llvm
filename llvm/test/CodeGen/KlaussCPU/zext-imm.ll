@@ -17,30 +17,26 @@
 define i64 @const_2g() nounwind {
 ; CHECK-LABEL: const_2g:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setru r12, 2147483648
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; PIC-LABEL: const_2g:
 ; PIC:       # %bb.0:
-; PIC-NEXT:    enter 0
 ; PIC-NEXT:    setru r12, 2147483648
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
   ret i64 2147483648
 }
 
 define i64 @const_u32max() nounwind {
 ; CHECK-LABEL: const_u32max:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setru r12, 4294967295
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; PIC-LABEL: const_u32max:
 ; PIC:       # %bb.0:
-; PIC-NEXT:    enter 0
 ; PIC-NEXT:    setru r12, 4294967295
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
   ret i64 4294967295
 }
 
@@ -48,45 +44,39 @@ define i64 @const_u32max() nounwind {
 define i64 @const_200() nounwind {
 ; CHECK-LABEL: const_200:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setru r12, 200
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; PIC-LABEL: const_200:
 ; PIC:       # %bb.0:
-; PIC-NEXT:    enter 0
 ; PIC-NEXT:    setru r12, 200
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
   ret i64 200
 }
 
 define i64 @const_neg() nounwind {
 ; CHECK-LABEL: const_neg:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r12, -2147483648
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; PIC-LABEL: const_neg:
 ; PIC:       # %bb.0:
-; PIC-NEXT:    enter 0
 ; PIC-NEXT:    setr r12, -2147483648
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
   ret i64 -2147483648
 }
 
 define i64 @const_64() nounwind {
 ; CHECK-LABEL: const_64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr64 r12, 0, 1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; PIC-LABEL: const_64:
 ; PIC:       # %bb.0:
-; PIC-NEXT:    enter 0
 ; PIC-NEXT:    setr64 r12, 0, 1
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
   ret i64 4294967296
 }
 
@@ -95,15 +85,13 @@ define i64 @const_64() nounwind {
 define i32 @mmio_read() nounwind {
 ; CHECK-LABEL: mmio_read:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    ldabs32 r12, 4026597376
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; PIC-LABEL: mmio_read:
 ; PIC:       # %bb.0:
-; PIC-NEXT:    enter 0
 ; PIC-NEXT:    ldabs32 r12, 4026597376
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
   %v = load volatile i32, ptr inttoptr (i64 4026597376 to ptr)
   ret i32 %v
 }
@@ -111,15 +99,13 @@ define i32 @mmio_read() nounwind {
 define i64 @add_u32(i64 %a) nounwind {
 ; CHECK-LABEL: add_u32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    addv r12, r0, 4026597376
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; PIC-LABEL: add_u32:
 ; PIC:       # %bb.0:
-; PIC-NEXT:    enter 0
 ; PIC-NEXT:    addv r12, r0, 4026597376
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
   %r = add i64 %a, 4026597376
   ret i64 %r
 }
@@ -127,15 +113,13 @@ define i64 @add_u32(i64 %a) nounwind {
 define i64 @sub_u32(i64 %a) nounwind {
 ; CHECK-LABEL: sub_u32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    minusv r12, r0, 4026597376
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; PIC-LABEL: sub_u32:
 ; PIC:       # %bb.0:
-; PIC-NEXT:    enter 0
 ; PIC-NEXT:    minusv r12, r0, 4026597376
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
   %r = sub i64 %a, 4026597376
   ret i64 %r
 }
@@ -145,23 +129,25 @@ declare void @f()
 define void @br_u32(i64 %a) nounwind {
 ; CHECK-LABEL: br_u32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmprvu r0, 3735928559
 ; CHECK-NEXT:    jmpnerel .LBB8_2
 ; CHECK-NEXT:  # %bb.1: # %t
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    callrel f
-; CHECK-NEXT:  .LBB8_2: # %e
 ; CHECK-NEXT:    leaveret
+; CHECK-NEXT:  .LBB8_2: # %e
+; CHECK-NEXT:    ret
 ;
 ; PIC-LABEL: br_u32:
 ; PIC:       # %bb.0:
-; PIC-NEXT:    enter 0
 ; PIC-NEXT:    cmprvu r0, 3735928559
 ; PIC-NEXT:    jmpnerel .LBB8_2
 ; PIC-NEXT:  # %bb.1: # %t
+; PIC-NEXT:    enter 0
 ; PIC-NEXT:    callrel f
-; PIC-NEXT:  .LBB8_2: # %e
 ; PIC-NEXT:    leaveret
+; PIC-NEXT:  .LBB8_2: # %e
+; PIC-NEXT:    ret
   %c = icmp eq i64 %a, 3735928559
   br i1 %c, label %t, label %e
 t:
@@ -174,25 +160,23 @@ e:
 define i64 @select_u32(i64 %a, i64 %b, i64 %c) nounwind {
 ; CHECK-LABEL: select_u32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmprvu r0, 4026597376
 ; CHECK-NEXT:    jmpultrel .LBB9_2
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    copy r1, r2
 ; CHECK-NEXT:  .LBB9_2:
 ; CHECK-NEXT:    copy r12, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; PIC-LABEL: select_u32:
 ; PIC:       # %bb.0:
-; PIC-NEXT:    enter 0
 ; PIC-NEXT:    cmprvu r0, 4026597376
 ; PIC-NEXT:    jmpultrel .LBB9_2
 ; PIC-NEXT:  # %bb.1:
 ; PIC-NEXT:    copy r1, r2
 ; PIC-NEXT:  .LBB9_2:
 ; PIC-NEXT:    copy r12, r1
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
   %t = icmp ult i64 %a, 4026597376
   %r = select i1 %t, i64 %b, i64 %c
   ret i64 %r
@@ -201,17 +185,15 @@ define i64 @select_u32(i64 %a, i64 %b, i64 %c) nounwind {
 define i64 @align8(i64 %a) nounwind {
 ; CHECK-LABEL: align8:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    addi r12, r0, 7
 ; CHECK-NEXT:    andi r12, r12, -8
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; PIC-LABEL: align8:
 ; PIC:       # %bb.0:
-; PIC-NEXT:    enter 0
 ; PIC-NEXT:    addi r12, r0, 7
 ; PIC-NEXT:    andi r12, r12, -8
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
   %s = add i64 %a, 7
   %r = and i64 %s, -8
   ret i64 %r
@@ -220,15 +202,13 @@ define i64 @align8(i64 %a) nounwind {
 define i64 @logic_neg(i64 %a) nounwind {
 ; CHECK-LABEL: logic_neg:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setru r12, 253
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; PIC-LABEL: logic_neg:
 ; PIC:       # %bb.0:
-; PIC-NEXT:    enter 0
 ; PIC-NEXT:    setru r12, 253
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
   %x = and i64 %a, -4096
   %y = or i64 %x, -256
   %z = xor i64 %y, -3
@@ -238,14 +218,12 @@ define i64 @logic_neg(i64 %a) nounwind {
 define ptr @addr() nounwind {
 ; CHECK-LABEL: addr:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setru r12, g
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; PIC-LABEL: addr:
 ; PIC:       # %bb.0:
-; PIC-NEXT:    enter 0
 ; PIC-NEXT:    leapc r12, g
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
   ret ptr @g
 }

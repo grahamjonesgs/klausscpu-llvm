@@ -31,9 +31,10 @@ enum Fixups {
   // ISA v3 B fused branch: simm13 word displacement in word0[20:8]. The
   // compiler only fuses when the whole function fits, so it always resolves.
   FK_KlaussCPU_PCREL13,
-  // ISA v3 A1 short call: the field of FK_KlaussCPU_PCREL18.  Resolved at
-  // assembly time when the callee is local (static) and in the same section
-  // (relaxed to CALLREL only if it is then out of range); otherwise, a
+  // ISA v3 A1 short call, and the short jump of a tail call (`tail`): the
+  // field of FK_KlaussCPU_PCREL18.  Resolved at assembly time when the callee
+  // is local (static) and in the same section (relaxed to CALLREL / the
+  // 2-word `tail` only if it is then out of range); otherwise, a
   // global or weak callee in the same section too, R_KLAUSSCPU_CALL18,
   // which lld resolves, through a thunk when the callee is out of range.
   FK_KlaussCPU_CALL18,

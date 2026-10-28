@@ -24,19 +24,17 @@
 define i64 @b(i64 %x) nounwind {
 ; STATIC-LABEL: b:
 ; STATIC:       # %bb.0:
-; STATIC-NEXT:    enter 0
 ; STATIC-NEXT:    setru r12, a
 ; STATIC-NEXT:    ldidx64 r12, r12, 0
 ; STATIC-NEXT:    addr r12, r12, r0
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ;
 ; PIC-LABEL: b:
 ; PIC:       # %bb.0:
-; PIC-NEXT:    enter 0
 ; PIC-NEXT:    leapc r12, a
 ; PIC-NEXT:    ldidx64 r12, r12, 0
 ; PIC-NEXT:    addr r12, r12, r0
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
   %v = load i64, ptr @a
   %s = add i64 %v, %x
   ret i64 %s
@@ -45,21 +43,19 @@ define i64 @b(i64 %x) nounwind {
 define i64 @sp() nounwind {
 ; STATIC-LABEL: sp:
 ; STATIC:       # %bb.0:
-; STATIC-NEXT:    enter 0
 ; STATIC-NEXT:    setru r12, K
 ; STATIC-NEXT:    setru r14, flags
 ; STATIC-NEXT:    ldidx64 r12, r12, 16
 ; STATIC-NEXT:    stidx64 r12, r14, 0
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ;
 ; PIC-LABEL: sp:
 ; PIC:       # %bb.0:
-; PIC-NEXT:    enter 0
 ; PIC-NEXT:    leapc r12, K
 ; PIC-NEXT:    leapc r14, flags
 ; PIC-NEXT:    ldidx64 r12, r12, 16
 ; PIC-NEXT:    stidx64 r12, r14, 0
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
   %p = getelementptr [4 x i64], ptr @K, i64 0, i64 2
   %v = load i64, ptr %p
   store i64 %v, ptr @flags
@@ -69,17 +65,15 @@ define i64 @sp() nounwind {
 define void @ra(ptr %f) nounwind {
 ; STATIC-LABEL: ra:
 ; STATIC:       # %bb.0:
-; STATIC-NEXT:    enter 0
 ; STATIC-NEXT:    setru r12, b
 ; STATIC-NEXT:    stidx64 r12, r0, 0
-; STATIC-NEXT:    leaveret
+; STATIC-NEXT:    ret
 ;
 ; PIC-LABEL: ra:
 ; PIC:       # %bb.0:
-; PIC-NEXT:    enter 0
 ; PIC-NEXT:    leapc r12, b
 ; PIC-NEXT:    stidx64 r12, r0, 0
-; PIC-NEXT:    leaveret
+; PIC-NEXT:    ret
   store ptr @b, ptr %f
   ret void
 }

@@ -20,15 +20,15 @@ define ptr @neg_index(i64 %i) nounwind {
 ; CHECK-NOT:     arr-
 ; CHECK:         setru [[A:r[0-9]+]], arr{{$}}
 ; CHECK:         addi {{r[0-9]+}}, {{r[0-9]+}}, -800000
-; CHECK:         leaveret
+; CHECK:         ret
 ; O0-LABEL: neg_index:
 ; O0-NOT:      arr-
 ; O0:          setru {{r[0-9]+}}, arr{{$}}
-; O0:          leaveret
+; O0:          ret
 ; PIC-LABEL: neg_index:
 ; PIC-NOT:     arr-
 ; PIC:         leapc {{r[0-9]+}}, arr{{$}}
-; PIC:         leaveret
+; PIC:         ret
   %k = add i64 %i, -100000
   %p = getelementptr inbounds i64, ptr @arr, i64 %k
   ret ptr %p
@@ -40,7 +40,7 @@ define i64 @neg_index_load(i64 %i) nounwind {
 ; CHECK-NOT:     arr-
 ; CHECK:         setru [[A:r[0-9]+]], arr{{$}}
 ; CHECK:         ldidx64 {{r[0-9]+}}, {{r[0-9]+}}, -800000
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %k = add i64 %i, -100000
   %p = getelementptr inbounds i64, ptr @arr, i64 %k
   %v = load i64, ptr %p
@@ -52,10 +52,10 @@ define i64 @neg_int() nounwind {
 ; CHECK-LABEL: neg_int:
 ; CHECK:         setru [[R:r[0-9]+]], arr{{$}}
 ; CHECK-NEXT:    addi [[R]], [[R]], -1048576
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ; O0-LABEL: neg_int:
 ; O0-NOT:      arr-
-; O0:          leaveret
+; O0:          ret
   %a = ptrtoint ptr @arr to i64
   %r = sub i64 %a, 1048576
   ret i64 %r
@@ -65,7 +65,7 @@ define i64 @neg_int() nounwind {
 define i64 @pos_int() nounwind {
 ; CHECK-LABEL: pos_int:
 ; CHECK:         setru [[R:r[0-9]+]], arr+40{{$}}
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a = ptrtoint ptr @arr to i64
   %r = add i64 %a, 40
   ret i64 %r
@@ -76,7 +76,7 @@ define i64 @big_int() nounwind {
 ; CHECK-LABEL: big_int:
 ; CHECK:         setru [[R:r[0-9]+]], arr{{$}}
 ; CHECK-NEXT:    addv [[R]], [[R]], 2147483648
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a = ptrtoint ptr @arr to i64
   %r = add i64 %a, 2147483648
   ret i64 %r

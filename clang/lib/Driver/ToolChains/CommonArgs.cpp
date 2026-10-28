@@ -161,6 +161,10 @@ static bool useLeafFramePointerForTargetByDefault(const llvm::Triple &Triple) {
   if ((Triple.isARM() || Triple.isThumb()) && Triple.isOSBinFormatMachO())
     return false;
 
+  // KlaussCPU: a leaf function without stack objects needs no frame.
+  if (Triple.getArch() == llvm::Triple::klausscpu)
+    return false;
+
   return true;
 }
 
@@ -201,6 +205,11 @@ static bool mustMaintainValidFrameChain(const llvm::opt::ArgList &Args,
     // way to indicate during a stack walk that a frame has used the frame
     // pointer as a general purpose register.
     return Triple.isOSWindows();
+
+  case llvm::Triple::klausscpu:
+    // The backend always reserves R15, the frame pointer, so the chain stays
+    // valid in leaf functions without a frame.
+    return true;
   }
 }
 

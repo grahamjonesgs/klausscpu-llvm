@@ -1,0 +1,173 @@
+# RUN: llc -mtriple=klausscpu -run-pass=klausscpu-fold-leaveret -verify-machineinstrs \
+# RUN:   %s -o - | FileCheck %s
+#
+# KlaussCPULeaveRet: a shrink-wrapped epilogue's LEAVE becomes LEAVERET at
+# the return -- in front of a RET, past instructions that do not use the
+# frame (with the epilogue's CFI dropped), or in place of a jump or a
+# fall-through to a block that only returns.  Not past an instruction that
+# reads R15 or SP.
+
+--- |
+  define i64 @leave_ret() { ret i64 0 }
+  define i64 @leave_cfi_ret() { ret i64 0 }
+  define i64 @leave_sink() { ret i64 0 }
+  define i64 @leave_jump() { ret i64 0 }
+  define i64 @leave_fallthrough() { ret i64 0 }
+  define i64 @no_sink_past_r15() { ret i64 0 }
+  define i64 @copy_ret_block() { ret i64 0 }
+  define i64 @no_fold_ret_block_work() { ret i64 0 }
+...
+---
+# CHECK-LABEL: name: leave_ret
+# CHECK:       renamable $r12 = INCR
+# CHECK-NEXT:  frame-destroy LEAVERET_I {{.*}}implicit killed $r12
+# CHECK-NOT:   RET_I
+name: leave_ret
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r12
+    renamable $r12 = INCR killed renamable $r12, implicit-def dead $flags
+    frame-destroy LEAVE_I implicit-def $sp, implicit-def $r15, implicit $r15
+    RET_I implicit killed $r12
+...
+---
+# CHECK-LABEL: name: leave_cfi_ret
+# CHECK:       renamable $r12 = INCR
+# CHECK-NEXT:  frame-destroy LEAVERET_I {{.*}}implicit killed $r12
+# CHECK-NOT:   CFI_INSTRUCTION
+name: leave_cfi_ret
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r12
+    renamable $r12 = INCR killed renamable $r12, implicit-def dead $flags
+    frame-destroy LEAVE_I implicit-def $sp, implicit-def $r15, implicit $r15
+    frame-destroy CFI_INSTRUCTION def_cfa $sp, 8
+    frame-destroy CFI_INSTRUCTION same_value $r15
+    RET_I implicit killed $r12
+...
+---
+# The return block's own add (tail-duplicated) stays in front of LEAVERET.
+# CHECK-LABEL: name: leave_sink
+# CHECK:       renamable $r4 = LDIDX64 $r15, -8
+# CHECK-NEXT:  renamable $r12 = ADDIW killed renamable $r12, 1
+# CHECK-NEXT:  frame-destroy LEAVERET_I {{.*}}implicit killed $r12
+name: leave_sink
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r12
+    renamable $r4 = LDIDX64 $r15, -8
+    frame-destroy LEAVE_I implicit-def $sp, implicit-def $r15, implicit $r15
+    frame-destroy CFI_INSTRUCTION def_cfa $sp, 8
+    renamable $r12 = ADDIW killed renamable $r12, 1, implicit-def dead $flags
+    RET_I implicit killed $r12
+...
+---
+# The return block, left without predecessors, goes.
+# CHECK-LABEL: name: leave_jump
+# CHECK:       bb.0:
+# CHECK-NOT:   successors:
+# CHECK:       frame-destroy LEAVERET_I {{.*}}implicit killed $r12
+# CHECK:       bb.1:
+# CHECK-NOT:   bb.2:
+name: leave_jump
+tracksRegLiveness: true
+body: |
+  bb.0:
+    successors: %bb.2
+    liveins: $r12
+    frame-destroy LEAVE_I implicit-def $sp, implicit-def $r15, implicit $r15
+    JMP %bb.2
+
+  bb.1:
+    $r12 = SETR 0
+    RET_I implicit killed $r12
+
+  bb.2:
+    liveins: $r12
+    RET_I implicit killed $r12
+...
+---
+# CHECK-LABEL: name: leave_fallthrough
+# CHECK:       bb.0:
+# CHECK-NOT:   successors:
+# CHECK:       frame-destroy LEAVERET_I {{.*}}implicit killed $r12
+name: leave_fallthrough
+tracksRegLiveness: true
+body: |
+  bb.0:
+    successors: %bb.1
+    liveins: $r12
+    frame-destroy LEAVE_I implicit-def $sp, implicit-def $r15, implicit $r15
+
+  bb.1:
+    liveins: $r12
+    RET_I implicit killed $r12
+...
+---
+# CHECK-LABEL: name: no_sink_past_r15
+# CHECK:       frame-destroy LEAVE_I
+# CHECK-NEXT:  $r12 = COPY $r15
+# CHECK-NEXT:  RET_I
+name: no_sink_past_r15
+tracksRegLiveness: true
+body: |
+  bb.0:
+    frame-destroy LEAVE_I implicit-def $sp, implicit-def $r15, implicit $r15
+    $r12 = COPY $r15
+    RET_I implicit killed $r12
+...
+---
+# A return block shared with a frameless path, with up to two instructions
+# before its RET: they are copied in front of the LEAVERET.
+# CHECK-LABEL: name: copy_ret_block
+# CHECK:       bb.0:
+# CHECK-NOT:   successors:
+# CHECK:       renamable $r12 = INCR killed renamable $r12
+# CHECK-NEXT:  frame-destroy LEAVERET_I {{.*}}implicit killed $r12
+# CHECK:       bb.2:
+# CHECK-NEXT:  liveins: $r12
+# CHECK:       renamable $r12 = INCR
+# CHECK-NEXT:  RET_I
+name: copy_ret_block
+tracksRegLiveness: true
+body: |
+  bb.0:
+    successors: %bb.1
+    liveins: $r12
+    frame-destroy LEAVE_I implicit-def $sp, implicit-def $r15, implicit $r15
+    JMP %bb.1
+
+  bb.2:
+    successors: %bb.1
+    liveins: $r12
+    JMP %bb.1
+
+  bb.1:
+    liveins: $r12
+    renamable $r12 = INCR killed renamable $r12, implicit-def dead $flags
+    RET_I implicit killed $r12
+...
+---
+# Three instructions: the LEAVE stays.
+# CHECK-LABEL: name: no_fold_ret_block_work
+# CHECK:       frame-destroy LEAVE_I
+# CHECK-NEXT:  JMP %bb.1
+name: no_fold_ret_block_work
+tracksRegLiveness: true
+body: |
+  bb.0:
+    successors: %bb.1
+    liveins: $r12
+    frame-destroy LEAVE_I implicit-def $sp, implicit-def $r15, implicit $r15
+    JMP %bb.1
+
+  bb.1:
+    liveins: $r12
+    renamable $r12 = INCR killed renamable $r12, implicit-def dead $flags
+    renamable $r12 = INCR killed renamable $r12, implicit-def dead $flags
+    renamable $r12 = INCR killed renamable $r12, implicit-def dead $flags
+    RET_I implicit killed $r12
+...

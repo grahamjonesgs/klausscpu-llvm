@@ -2,11 +2,13 @@
 //
 // KlaussCPU LLVM backend — frame lowering class declaration.
 //
-// KlaussCPU always uses a frame pointer (R15 = P).  Frame slots are addressed
-// P+offset via LDIDX64/STIDX64, except in a function that realigns its stack
-// (a local aligned above 8 bytes), whose locals are addressed from a base
-// pointer (R7 = H) holding P rounded down to that alignment.  The hardware
-// stack pointer (SP) is not a GPR: only GETSP / SETSP / ADDSP reach it.
+// A function with a frame uses a frame pointer (R15 = P).  Frame slots are
+// addressed P+offset via LDIDX64/STIDX64, except in a function that realigns
+// its stack (a local aligned above 8 bytes), whose locals are addressed from a
+// base pointer (R7 = H) holding P rounded down to that alignment.  The
+// hardware stack pointer (SP) is not a GPR: only GETSP / SETSP / ADDSP reach
+// it, so a function needs a frame for any stack object.  A leaf function
+// without stack objects has none (hasFPImpl): R15 keeps the caller's frame.
 //
 // Stack grows downward; the ABI stack alignment is 8 bytes.
 //
@@ -34,6 +36,12 @@ public:
 
   void emitEpilogue(MachineFunction &MF,
                     MachineBasicBlock &MBB) const override;
+
+  // Shrink-wrapping (see KlaussCPUFrameLowering.cpp): ENTER/LEAVE and the
+  // callee-saved spills/reloads can go in any block.
+  bool enableShrinkWrapping(const MachineFunction &MF) const override;
+  // The epilogue only where it can become LEAVERET.
+  bool canUseAsEpilogue(const MachineBasicBlock &MBB) const override;
 
   // Reserve a call frame at the bottom of each function's stack frame so that
   // CALLSEQ_START/END pseudos need not emit SP adjustments.  This requires the
@@ -73,11 +81,15 @@ public:
   bool hasBP(const MachineFunction &MF) const;
   static Register getBPReg();
 
+  // -klausscpu-leaveret: a plain return after LEAVE is LEAVERET
+  // (emitEpilogue; KlaussCPULeaveRet.cpp after shrink-wrapping).
+  static bool useLeaveRet();
+
   // CFIFixup hook: reset the unwind state to the CIE's (CFA = SP+8).
   void resetCFIToInitialState(MachineBasicBlock &MBB) const override;
 
-  // KlaussCPU always frames (R15 = P is always the frame pointer).
-  bool hasFPImpl(const MachineFunction &MF) const override { return true; }
+  // True unless the function is a leaf that needs no stack frame.
+  bool hasFPImpl(const MachineFunction &MF) const override;
 };
 
 } // namespace llvm

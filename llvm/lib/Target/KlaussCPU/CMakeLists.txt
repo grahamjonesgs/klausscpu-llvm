@@ -25,6 +25,7 @@ add_llvm_target(KlaussCPUCodeGen
   KlaussCPUFrameLowering.cpp
   KlaussCPUInstrInfo.cpp
   KlaussCPUJumpTableHoist.cpp
+  KlaussCPULeaveRet.cpp
   KlaussCPUOptExtensions.cpp
   KlaussCPUISelDAGToDAG.cpp
   KlaussCPUISelLowering.cpp

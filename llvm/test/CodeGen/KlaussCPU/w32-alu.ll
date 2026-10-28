@@ -60,7 +60,7 @@ define i64 @addiw_multi_use(i32 %a) {
 ; CHECK-NOT: {{^\s+addiw}}
 ; CHECK: addi r14, r0, 1000
 ; CHECK: sextw r12, r14
-; CHECK: leaveret
+; CHECK: ret
   %s = add i32 %a, 1000
   store i32 %s, ptr @g
   %r = sext i32 %s to i64

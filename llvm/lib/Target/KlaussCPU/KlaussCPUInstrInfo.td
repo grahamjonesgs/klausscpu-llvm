@@ -35,6 +35,10 @@ def KlaussCPUCallNode : SDNode<"KlaussCPUISD::CALL", SDT_KlaussCPUCall,
                                [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                                 SDNPVariadic]>;
 
+// Tail call (LowerCall): a jump to the callee in place of the return.
+def KlaussCPUTailNode : SDNode<"KlaussCPUISD::TAIL", SDT_KlaussCPUCall,
+                               [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+
 // Call frame setup/teardown (ADJCALLSTACKDOWN/UP).  LowerCall builds them
 // with getCALLSEQ_START/END, whose operands are pointer-sized (i64) target
 // constants.
@@ -1582,6 +1586,12 @@ def JMPULEREL : Vbr_relcond<0xA1400000, "jmpulerel\t$target">;
 def JMPUGTREL : Vbr_relcond<0xA1440000, "jmpugtrel\t$target">;
 def JMPUGEREL : Vbr_relcond<0xA13C0000, "jmpugerel\t$target">;
 
+// Tail-call jump (PseudoTAIL): JMPREL's encoding, spelled `tail` so that a
+// jump to a symbol compresses to TAIL_SH, the short jump with a short call's
+// fixup.  The disassembler shows both as jmprel.
+let isAsmParserOnly = 1 in
+def TAILREL : Vbr_uncond<0xA1000000, "tail\t$target", [], PCRelCallTarget32>;
+
 // PC-relative direct call: push PC+8 (return addr), PC += sign_ext(imm32)
 let Uses = [SP],
     Defs = [FLAGS] in
@@ -1859,6 +1869,22 @@ def : Pat<(KlaussCPUCallNode (i64 func:$func)), (CALLREL func:$func)>;
 def : Pat<(KlaussCPUCallNode (i64 GPR:$func)),
           (CALLR_R GPR:$func)>;
 
+// Tail calls (LowerCall, isEligibleForTailCallOptimization): a return that
+// jumps to the callee.  emitEpilogue puts the epilogue (LEAVE) in front, so
+// the callee is entered with the caller's return address at [SP] and returns
+// to the caller's caller.  The AsmPrinter emits PseudoTAIL as TAILREL (which
+// becomes the 1-word TAIL_SH, as a call becomes CALL_SH) and
+// PseudoTAILIndirect as JMPR.  An indirect callee is in a GPRTC
+// register: the epilogue reloads R4-R7, so it cannot be one of them.
+let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1,
+    isCodeGenOnly = 1, Uses = [SP] in {
+def PseudoTAIL : Pseudo<(outs), (ins CallTarget32:$dst), []>;
+def PseudoTAILIndirect : Pseudo<(outs), (ins GPRTC:$rs), []>;
+}
+foreach func = [tglobaladdr, texternalsym] in
+def : Pat<(KlaussCPUTailNode (i64 func:$dst)), (PseudoTAIL func:$dst)>;
+def : Pat<(KlaussCPUTailNode (i64 GPRTC:$rs)), (PseudoTAILIndirect GPRTC:$rs)>;
+
 // Unconditional and indirect branches.  BR_CC (compare glued to a
 // conditional jump, with the W-compare choice) is selected in
 // KlaussCPUDAGToDAGISel::Select.
@@ -2086,6 +2112,13 @@ foreach c = ["z", "nz", "c", "nc", "o", "no", "s", "ns", "lt", "ge", "le",
 }
 let isBranch = 1, isTerminator = 1, isBarrier = 1 in
 def JMP_SH : ShortBranch<JMP, "jmprel\t$target">;
+// The short jump of a tail call (TAILREL's CompressPat): JMP_SH's encoding,
+// but its target is a CallTarget18 like CALL_SH's, so a callee the assembler
+// cannot resolve keeps it short with an R_KLAUSSCPU_CALL18 relocation (lld
+// reaches a far callee through its jmprel thunk) instead of relaxing to the
+// 2-word TAILREL.
+let isBranch = 1, isTerminator = 1, isBarrier = 1, isAsmParserOnly = 1 in
+def TAIL_SH : ShortBranch<JMP, "tail\t$target", CallTarget18, HasShortCalls>;
 // A1 short PC-relative call (0x63000000): pushes PC+4, the address of the
 // next instruction (pipeline_core.sv U_CALL: exo_wdata = ex_pc_next).
 // Produced by its CompressPats for any call to a symbol; relaxed to CALLREL
@@ -2168,12 +2201,14 @@ foreach c = ["", "Z", "NZ", "C", "NC", "O", "NO", "S", "NS", "LT", "GE", "LE",
 }
 
 // A call to a symbol, absolute (non-PIC) or PC-relative, is the short call;
-// it expands to CALLREL.
+// it expands to CALLREL.  A tail call's jump likewise (TAIL_SH / TAILREL).
 let Predicates = [HasShortCalls] in {
 let isCompressOnly = true in
 def : CompressPat<(CALL_I CallTarget18:$target), (CALL_SH CallTarget18:$target)>;
 def : CompressPat<(CALLREL CallTarget18:$target),
                   (CALL_SH CallTarget18:$target)>;
+def : CompressPat<(TAILREL CallTarget18:$target),
+                  (TAIL_SH CallTarget18:$target)>;
 }
 
 // ISA v3 B: fused compare-and-branch (class 0xD, 1 word, flags untouched).

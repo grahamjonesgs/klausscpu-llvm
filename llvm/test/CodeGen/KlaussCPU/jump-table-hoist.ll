@@ -19,7 +19,6 @@
 define i64 @sw(i8 %x, i64 %a) nounwind {
 ; CHECK-LABEL: sw:
 ; CHECK:       # %bb.0: # %entry
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    zextb r13, r0
 ; CHECK-NEXT:    setru r14, .LJTI0_0
 ; CHECK-NEXT:    shlv r12, r13, 2
@@ -30,47 +29,46 @@ define i64 @sw(i8 %x, i64 %a) nounwind {
 ; CHECK-NEXT:    jmpr r12
 ; CHECK-NEXT:  .LBB0_2: # %c0
 ; CHECK-NEXT:    addi r12, r1, 3
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB0_13: # %c11
 ; CHECK-NEXT:    mulv r12, r1, 80
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB0_6: # %c4
 ; CHECK-NEXT:    orv r12, r1, 31
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB0_11: # %c9
 ; CHECK-NEXT:    addi r12, r1, -66
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB0_4: # %c2
 ; CHECK-NEXT:    xorv r12, r1, 17
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB0_5: # %c3
 ; CHECK-NEXT:    mulv r12, r1, 24
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB0_9: # %c7
 ; CHECK-NEXT:    shrv r12, r1, 7
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB0_3: # %c1
 ; CHECK-NEXT:    addi r12, r1, -10
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB0_7: # %c5
 ; CHECK-NEXT:    andv r12, r1, 38
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB0_8: # %c6
 ; CHECK-NEXT:    shlv r12, r1, 5
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB0_12: # %c10
 ; CHECK-NEXT:    xorv r12, r1, 73
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB0_10: # %c8
 ; CHECK-NEXT:    addi r12, r1, 59
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB0_14: # %def
 ; CHECK-NEXT:    copy r12, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; NOHOIST-LABEL: sw:
 ; NOHOIST:       # %bb.0: # %entry
-; NOHOIST-NEXT:    enter 0
 ; NOHOIST-NEXT:    zextb r12, r0
 ; NOHOIST-NEXT:    cmprv r12, 11
 ; NOHOIST-NEXT:    jmpugtrel .LBB0_14
@@ -81,47 +79,46 @@ define i64 @sw(i8 %x, i64 %a) nounwind {
 ; NOHOIST-NEXT:    jmpr r12
 ; NOHOIST-NEXT:  .LBB0_2: # %c0
 ; NOHOIST-NEXT:    addi r12, r1, 3
-; NOHOIST-NEXT:    leaveret
+; NOHOIST-NEXT:    ret
 ; NOHOIST-NEXT:  .LBB0_13: # %c11
 ; NOHOIST-NEXT:    mulv r12, r1, 80
-; NOHOIST-NEXT:    leaveret
+; NOHOIST-NEXT:    ret
 ; NOHOIST-NEXT:  .LBB0_6: # %c4
 ; NOHOIST-NEXT:    orv r12, r1, 31
-; NOHOIST-NEXT:    leaveret
+; NOHOIST-NEXT:    ret
 ; NOHOIST-NEXT:  .LBB0_11: # %c9
 ; NOHOIST-NEXT:    addi r12, r1, -66
-; NOHOIST-NEXT:    leaveret
+; NOHOIST-NEXT:    ret
 ; NOHOIST-NEXT:  .LBB0_4: # %c2
 ; NOHOIST-NEXT:    xorv r12, r1, 17
-; NOHOIST-NEXT:    leaveret
+; NOHOIST-NEXT:    ret
 ; NOHOIST-NEXT:  .LBB0_5: # %c3
 ; NOHOIST-NEXT:    mulv r12, r1, 24
-; NOHOIST-NEXT:    leaveret
+; NOHOIST-NEXT:    ret
 ; NOHOIST-NEXT:  .LBB0_9: # %c7
 ; NOHOIST-NEXT:    shrv r12, r1, 7
-; NOHOIST-NEXT:    leaveret
+; NOHOIST-NEXT:    ret
 ; NOHOIST-NEXT:  .LBB0_3: # %c1
 ; NOHOIST-NEXT:    addi r12, r1, -10
-; NOHOIST-NEXT:    leaveret
+; NOHOIST-NEXT:    ret
 ; NOHOIST-NEXT:  .LBB0_7: # %c5
 ; NOHOIST-NEXT:    andv r12, r1, 38
-; NOHOIST-NEXT:    leaveret
+; NOHOIST-NEXT:    ret
 ; NOHOIST-NEXT:  .LBB0_8: # %c6
 ; NOHOIST-NEXT:    shlv r12, r1, 5
-; NOHOIST-NEXT:    leaveret
+; NOHOIST-NEXT:    ret
 ; NOHOIST-NEXT:  .LBB0_12: # %c10
 ; NOHOIST-NEXT:    xorv r12, r1, 73
-; NOHOIST-NEXT:    leaveret
+; NOHOIST-NEXT:    ret
 ; NOHOIST-NEXT:  .LBB0_10: # %c8
 ; NOHOIST-NEXT:    addi r12, r1, 59
-; NOHOIST-NEXT:    leaveret
+; NOHOIST-NEXT:    ret
 ; NOHOIST-NEXT:  .LBB0_14: # %def
 ; NOHOIST-NEXT:    copy r12, r1
-; NOHOIST-NEXT:    leaveret
+; NOHOIST-NEXT:    ret
 ;
 ; OFF-LABEL: sw:
 ; OFF:       # %bb.0: # %entry
-; OFF-NEXT:    enter 0
 ; OFF-NEXT:    zextb r12, r0
 ; OFF-NEXT:    fbri r12, 5, 10, .LBB0_10
 ; OFF-NEXT:  # %bb.1: # %entry
@@ -134,7 +131,7 @@ define i64 @sw(i8 %x, i64 %a) nounwind {
 ; OFF-NEXT:    fbri r12, 2, 8, .LBB0_27
 ; OFF-NEXT:  # %bb.5: # %c2
 ; OFF-NEXT:    xorv r12, r1, 17
-; OFF-NEXT:    leaveret
+; OFF-NEXT:    ret
 ; OFF-NEXT:  .LBB0_10: # %entry
 ; OFF-NEXT:    cmprv r12, 8
 ; OFF-NEXT:    jmpgtrel .LBB0_15
@@ -147,7 +144,7 @@ define i64 @sw(i8 %x, i64 %a) nounwind {
 ; OFF-NEXT:    jmpnerel .LBB0_27
 ; OFF-NEXT:  # %bb.14: # %c8
 ; OFF-NEXT:    addi r12, r1, 59
-; OFF-NEXT:    leaveret
+; OFF-NEXT:    ret
 ; OFF-NEXT:  .LBB0_6: # %entry
 ; OFF-NEXT:    fbri r12, 3, 0, .LBB0_21
 ; OFF-NEXT:  # %bb.7: # %entry
@@ -156,7 +153,7 @@ define i64 @sw(i8 %x, i64 %a) nounwind {
 ; OFF-NEXT:    fbri r12, 5, 8, .LBB0_27
 ; OFF-NEXT:  # %bb.9: # %c5
 ; OFF-NEXT:    andv r12, r1, 38
-; OFF-NEXT:    leaveret
+; OFF-NEXT:    ret
 ; OFF-NEXT:  .LBB0_15: # %entry
 ; OFF-NEXT:    cmprv r12, 9
 ; OFF-NEXT:    jmperel .LBB0_25
@@ -168,34 +165,34 @@ define i64 @sw(i8 %x, i64 %a) nounwind {
 ; OFF-NEXT:    jmpnerel .LBB0_27
 ; OFF-NEXT:  # %bb.18: # %c11
 ; OFF-NEXT:    mulv r12, r1, 80
-; OFF-NEXT:    leaveret
+; OFF-NEXT:    ret
 ; OFF-NEXT:  .LBB0_19: # %c0
 ; OFF-NEXT:    addi r12, r1, 3
-; OFF-NEXT:    leaveret
+; OFF-NEXT:    ret
 ; OFF-NEXT:  .LBB0_23: # %c6
 ; OFF-NEXT:    shlv r12, r1, 5
-; OFF-NEXT:    leaveret
+; OFF-NEXT:    ret
 ; OFF-NEXT:  .LBB0_21: # %c3
 ; OFF-NEXT:    mulv r12, r1, 24
-; OFF-NEXT:    leaveret
+; OFF-NEXT:    ret
 ; OFF-NEXT:  .LBB0_25: # %c9
 ; OFF-NEXT:    addi r12, r1, -66
-; OFF-NEXT:    leaveret
+; OFF-NEXT:    ret
 ; OFF-NEXT:  .LBB0_20: # %c1
 ; OFF-NEXT:    addi r12, r1, -10
-; OFF-NEXT:    leaveret
+; OFF-NEXT:    ret
 ; OFF-NEXT:  .LBB0_24: # %c7
 ; OFF-NEXT:    shrv r12, r1, 7
-; OFF-NEXT:    leaveret
+; OFF-NEXT:    ret
 ; OFF-NEXT:  .LBB0_22: # %c4
 ; OFF-NEXT:    orv r12, r1, 31
-; OFF-NEXT:    leaveret
+; OFF-NEXT:    ret
 ; OFF-NEXT:  .LBB0_26: # %c10
 ; OFF-NEXT:    xorv r12, r1, 73
-; OFF-NEXT:    leaveret
+; OFF-NEXT:    ret
 ; OFF-NEXT:  .LBB0_27: # %def
 ; OFF-NEXT:    copy r12, r1
-; OFF-NEXT:    leaveret
+; OFF-NEXT:    ret
 entry:
   switch i8 %x, label %def [
     i8 0, label %c0

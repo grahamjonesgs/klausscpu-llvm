@@ -10,7 +10,7 @@
 //
 // Reserved registers:
 //   SP  — hardware stack pointer, never visible to register allocator
-//   R15 — frame pointer, always active (we always emit a frame pointer)
+//   R15 — frame pointer; a frameless leaf leaves the caller's value in it
 //   R7  — base pointer, only in a function that realigns its stack
 //
 //===----------------------------------------------------------------------===//
@@ -54,7 +54,7 @@ BitVector
 KlaussCPURegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   BitVector Reserved(getNumRegs());
   Reserved.set(KlaussCPU::SP);    // hardware stack pointer
-  Reserved.set(KlaussCPU::R15);   // frame pointer (always active)
+  Reserved.set(KlaussCPU::R15);   // frame pointer (also in frameless leaves)
   // Base pointer, only in a function that realigns its stack.
   const KlaussCPUFrameLowering *TFI =
       MF.getSubtarget<KlaussCPUSubtarget>().getFrameLowering();
@@ -220,7 +220,9 @@ bool KlaussCPURegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   return false;
 }
 
+// The frame base of the debug info (DW_AT_frame_base): R15, or SP in a
+// frameless leaf, which has no frame-relative locations.
 Register
 KlaussCPURegisterInfo::getFrameRegister(const MachineFunction &MF) const {
-  return KlaussCPU::R15; // P
+  return getFrameLowering(MF)->hasFP(MF) ? KlaussCPU::R15 : KlaussCPU::SP;
 }

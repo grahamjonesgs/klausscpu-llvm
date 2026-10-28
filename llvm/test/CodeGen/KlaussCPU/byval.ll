@@ -148,7 +148,7 @@ define i64 @callee(ptr byval(%struct.S) align 8 %s) {
 ; CHECK:         setr r12, 7
 ; CHECK-NEXT:    stidx64 r12, r0, 0
 ; CHECK-NEXT:    ldidx64 r12, r0, 24
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   store i64 7, ptr %s
   %v = getelementptr i8, ptr %s, i64 24
   %r = load i64, ptr %v

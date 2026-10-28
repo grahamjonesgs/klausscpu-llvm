@@ -12,9 +12,6 @@
 define i64 @chase(ptr %b) {
 ; CHECK-LABEL: chase:
 ; CHECK:       # %bb.0: # %entry
-; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    .cfi_def_cfa r15, 16
-; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    setr r12, 0
 ; CHECK-NEXT:    setr r14, 200000
 ; CHECK-NEXT:    setr r13, 0
@@ -29,13 +26,10 @@ define i64 @chase(ptr %b) {
 ; CHECK-NEXT:    cmprvw r14, 0
 ; CHECK-NEXT:    jmpnerel .LBB0_1
 ; CHECK-NEXT:  # %bb.2: # %exit
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; NOOPT-LABEL: chase:
 ; NOOPT:       # %bb.0: # %entry
-; NOOPT-NEXT:    enter 0
-; NOOPT-NEXT:    .cfi_def_cfa r15, 16
-; NOOPT-NEXT:    .cfi_offset r15, -16
 ; NOOPT-NEXT:    setr r12, 0
 ; NOOPT-NEXT:    setr r14, 200000
 ; NOOPT-NEXT:    setr r13, 0
@@ -51,7 +45,7 @@ define i64 @chase(ptr %b) {
 ; NOOPT-NEXT:    cmprvw r14, 0
 ; NOOPT-NEXT:    jmpnerel .LBB0_1
 ; NOOPT-NEXT:  # %bb.2: # %exit
-; NOOPT-NEXT:    leaveret
+; NOOPT-NEXT:    ret
 entry:
   br label %loop
 

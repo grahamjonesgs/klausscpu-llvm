@@ -11,14 +11,16 @@
 //
 // Calling convention (KlaussCPUCallingConv.td):
 //   arg 0–3    : A B C D  (R0–R3)   caller-saved
-//   arg 4+     : [incoming SP+32+n*8] = [P+40+n*8] inside the callee
+//   arg 4+     : [incoming SP+8+n*8] = [P+16+n*8] inside the callee
+//                (variadic: 32 bytes higher, the R0-R3 home area)
 //   return val : M, L     (R12, R11) caller-saved
 //   callee-saved: E F G H (R4–R7)  + P (R15 / frame pointer)
 //   temporaries : I J K L N O      (R8–R11, R13–R14)  caller-saved
 //
 // Frame pointer convention:
-//   LLVM always emits a frame pointer (P = R15).  Frame-slot accesses use P
-//   as the base register (LDIDX64 / STIDX64 rd, P, offset), or the base
+//   Every function with a frame uses the frame pointer (P = R15, reserved
+//   everywhere; a leaf without stack objects has no frame and leaves P
+//   alone).  Frame-slot accesses use P as the base register (LDIDX64 / STIDX64 rd, P, offset), or the base
 //   pointer R7 for the locals of a function that realigns its stack.  SP is
 //   set by the prologue (ENTER) and epilogue (LEAVE / LEAVERET), and moved by
 //   dynamic allocas.
@@ -106,6 +108,13 @@ def GPR : RegisterClass<"KlaussCPU", [i64], 64, (add
   R4, R5, R6, R7,             // E F G H
   // Frame pointer (effectively reserved)
   R15                         // P
+)>;
+
+// ---- Tail-call target registers ----
+// The callee address of an indirect tail call: a register the epilogue does
+// not restore (not R4-R7) and not the frame pointer.
+def GPRTC : RegisterClass<"KlaussCPU", [i64], 64, (add
+  R12, R14, R13, R11, R10, R9, R8, R0, R1, R2, R3
 )>;
 
 // ---- FLAGS register class ----

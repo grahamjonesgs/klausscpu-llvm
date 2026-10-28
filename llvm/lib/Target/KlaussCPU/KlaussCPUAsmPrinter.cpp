@@ -104,7 +104,16 @@ void KlaussCPUAsmPrinter::emitInstruction(const MachineInstr *MI) {
       MI->getOpcode(), getSubtargetInfo().getFeatureBits());
 
   MCInst Inst;
-  Inst.setOpcode(MI->getOpcode());
+  switch (MI->getOpcode()) {
+  case KlaussCPU::PseudoTAIL:
+    Inst.setOpcode(KlaussCPU::TAILREL);
+    break;
+  case KlaussCPU::PseudoTAILIndirect:
+    Inst.setOpcode(KlaussCPU::JMPR_R);
+    break;
+  default:
+    Inst.setOpcode(MI->getOpcode());
+  }
 
   for (const MachineOperand &MO : MI->explicit_operands()) {
     MCOperand Op = lowerMachineOperand(MO, *this);

@@ -54,33 +54,31 @@ define void @swap(i64 %a, i64 %b, ptr %p, ptr %q, i64 %c, i64 %d) nounwind {
 define i64 @minmax(i64 %a, i64 %b, i64 %c, i64 %d) nounwind {
 ; CHECK-LABEL: minmax:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    fbr r0, r1, 9, .LBB1_2
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    copy r12, r2
 ; CHECK-NEXT:    subr r12, r12, r3
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB1_2:
 ; CHECK-NEXT:    subr r12, r3, r2
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; NOGROUP-LABEL: minmax:
 ; NOGROUP:       # %bb.0:
-; NOGROUP-NEXT:    enter 0
 ; NOGROUP-NEXT:    copy r12, r2
 ; NOGROUP-NEXT:    fbr r0, r1, 9, .LBB1_1
 ; NOGROUP-NEXT:  # %bb.2:
 ; NOGROUP-NEXT:    fbr r0, r1, 9, .LBB1_3
 ; NOGROUP-NEXT:  .LBB1_4:
 ; NOGROUP-NEXT:    subr r12, r12, r3
-; NOGROUP-NEXT:    leaveret
+; NOGROUP-NEXT:    ret
 ; NOGROUP-NEXT:  .LBB1_1:
 ; NOGROUP-NEXT:    copy r12, r3
 ; NOGROUP-NEXT:    fbr r0, r1, 1, .LBB1_4
 ; NOGROUP-NEXT:  .LBB1_3:
 ; NOGROUP-NEXT:    copy r3, r2
 ; NOGROUP-NEXT:    subr r12, r12, r3
-; NOGROUP-NEXT:    leaveret
+; NOGROUP-NEXT:    ret
   %cmp = icmp slt i64 %a, %b
   %x = select i1 %cmp, i64 %c, i64 %d
   %y = select i1 %cmp, i64 %d, i64 %c
@@ -109,7 +107,6 @@ define i64 @three(i32 signext %a, i32 signext %b, i64 %c, i64 %d, ptr %p) nounwi
 ;
 ; NOGROUP-LABEL: three:
 ; NOGROUP:       # %bb.0:
-; NOGROUP-NEXT:    enter 0
 ; NOGROUP-NEXT:    copy r12, r2
 ; NOGROUP-NEXT:    fbr r0, r1, 3, .LBB2_2
 ; NOGROUP-NEXT:  # %bb.1:
@@ -119,6 +116,7 @@ define i64 @three(i32 signext %a, i32 signext %b, i64 %c, i64 %d, ptr %p) nounwi
 ; NOGROUP-NEXT:  # %bb.3:
 ; NOGROUP-NEXT:    setr r3, 7
 ; NOGROUP-NEXT:  .LBB2_4:
+; NOGROUP-NEXT:    enter 0
 ; NOGROUP-NEXT:    ldidx64 r14, r15, 16
 ; NOGROUP-NEXT:    fbr r0, r1, 3, .LBB2_6
 ; NOGROUP-NEXT:  # %bb.5:
@@ -140,7 +138,6 @@ define i64 @three(i32 signext %a, i32 signext %b, i64 %c, i64 %d, ptr %p) nounwi
 define i128 @shl128(i128 %a, i128 %b) nounwind {
 ; CHECK-LABEL: shl128:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    andv r14, r2, 64
 ; CHECK-NEXT:    shlr r12, r0, r2
 ; CHECK-NEXT:    fbri r14, 0, 8, .LBB3_2
@@ -150,15 +147,14 @@ define i128 @shl128(i128 %a, i128 %b) nounwind {
 ; CHECK-NEXT:    shlr r11, r1, r2
 ; CHECK-NEXT:    shrr r14, r13, r14
 ; CHECK-NEXT:    orr r11, r11, r14
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB3_2:
 ; CHECK-NEXT:    copy r11, r12
 ; CHECK-NEXT:    setr r12, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; NOGROUP-LABEL: shl128:
 ; NOGROUP:       # %bb.0:
-; NOGROUP-NEXT:    enter 0
 ; NOGROUP-NEXT:    andv r14, r2, 64
 ; NOGROUP-NEXT:    shlr r12, r0, r2
 ; NOGROUP-NEXT:    fbri r14, 0, 8, .LBB3_2
@@ -176,7 +172,7 @@ define i128 @shl128(i128 %a, i128 %b) nounwind {
 ; NOGROUP-NEXT:  .LBB3_4:
 ; NOGROUP-NEXT:    setr r12, 0
 ; NOGROUP-NEXT:  .LBB3_5:
-; NOGROUP-NEXT:    leaveret
+; NOGROUP-NEXT:    ret
   %r = shl i128 %a, %b
   ret i128 %r
 }
@@ -186,37 +182,35 @@ define i128 @shl128(i128 %a, i128 %b) nounwind {
 define i64 @chain(i64 %a, i64 %b, i64 %c, i64 %d) nounwind {
 ; CHECK-LABEL: chain:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    fbr r0, r1, 9, .LBB4_1
 ; CHECK-NEXT:  # %bb.2:
 ; CHECK-NEXT:    fbr r0, r1, 1, .LBB4_3
 ; CHECK-NEXT:  .LBB4_4:
 ; CHECK-NEXT:    mulr r12, r2, r3
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB4_1:
 ; CHECK-NEXT:    copy r2, r3
 ; CHECK-NEXT:    fbr r0, r1, 9, .LBB4_4
 ; CHECK-NEXT:  .LBB4_3:
 ; CHECK-NEXT:    incr r3, r2
 ; CHECK-NEXT:    mulr r12, r2, r3
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; NOGROUP-LABEL: chain:
 ; NOGROUP:       # %bb.0:
-; NOGROUP-NEXT:    enter 0
 ; NOGROUP-NEXT:    fbr r0, r1, 9, .LBB4_1
 ; NOGROUP-NEXT:  # %bb.2:
 ; NOGROUP-NEXT:    fbr r0, r1, 1, .LBB4_3
 ; NOGROUP-NEXT:  .LBB4_4:
 ; NOGROUP-NEXT:    mulr r12, r2, r3
-; NOGROUP-NEXT:    leaveret
+; NOGROUP-NEXT:    ret
 ; NOGROUP-NEXT:  .LBB4_1:
 ; NOGROUP-NEXT:    copy r2, r3
 ; NOGROUP-NEXT:    fbr r0, r1, 9, .LBB4_4
 ; NOGROUP-NEXT:  .LBB4_3:
 ; NOGROUP-NEXT:    incr r3, r2
 ; NOGROUP-NEXT:    mulr r12, r2, r3
-; NOGROUP-NEXT:    leaveret
+; NOGROUP-NEXT:    ret
   %cmp = icmp slt i64 %a, %b
   %x = select i1 %cmp, i64 %c, i64 %d
   %t = add i64 %x, 1
@@ -229,39 +223,37 @@ define i64 @chain(i64 %a, i64 %b, i64 %c, i64 %d) nounwind {
 define i64 @different(i64 %a, i64 %b, i64 %c, i64 %d) nounwind {
 ; CHECK-LABEL: different:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    copy r12, r2
 ; CHECK-NEXT:    fbr r0, r1, 9, .LBB5_1
 ; CHECK-NEXT:  # %bb.2:
 ; CHECK-NEXT:    fbr r0, r1, 11, .LBB5_3
 ; CHECK-NEXT:  .LBB5_4:
 ; CHECK-NEXT:    subr r12, r12, r3
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB5_1:
 ; CHECK-NEXT:    copy r12, r3
 ; CHECK-NEXT:    fbr r0, r1, 3, .LBB5_4
 ; CHECK-NEXT:  .LBB5_3:
 ; CHECK-NEXT:    copy r3, r2
 ; CHECK-NEXT:    subr r12, r12, r3
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; NOGROUP-LABEL: different:
 ; NOGROUP:       # %bb.0:
-; NOGROUP-NEXT:    enter 0
 ; NOGROUP-NEXT:    copy r12, r2
 ; NOGROUP-NEXT:    fbr r0, r1, 9, .LBB5_1
 ; NOGROUP-NEXT:  # %bb.2:
 ; NOGROUP-NEXT:    fbr r0, r1, 11, .LBB5_3
 ; NOGROUP-NEXT:  .LBB5_4:
 ; NOGROUP-NEXT:    subr r12, r12, r3
-; NOGROUP-NEXT:    leaveret
+; NOGROUP-NEXT:    ret
 ; NOGROUP-NEXT:  .LBB5_1:
 ; NOGROUP-NEXT:    copy r12, r3
 ; NOGROUP-NEXT:    fbr r0, r1, 3, .LBB5_4
 ; NOGROUP-NEXT:  .LBB5_3:
 ; NOGROUP-NEXT:    copy r3, r2
 ; NOGROUP-NEXT:    subr r12, r12, r3
-; NOGROUP-NEXT:    leaveret
+; NOGROUP-NEXT:    ret
   %cmp1 = icmp slt i64 %a, %b
   %cmp2 = icmp ult i64 %a, %b
   %x = select i1 %cmp1, i64 %c, i64 %d
@@ -325,7 +317,6 @@ define void @swap32(i64 %a, i64 %b, ptr %p, ptr %q, i64 %c, i64 %d) nounwind {
 define i64 @swap32_ext_used(i64 %a, i64 %b, i64 %c, i64 %d) nounwind {
 ; CHECK-LABEL: swap32_ext_used:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    zextw r12, r0
 ; CHECK-NEXT:    zextw r14, r1
 ; CHECK-NEXT:    fbr r12, r14, 4, .LBB7_2
@@ -339,11 +330,10 @@ define i64 @swap32_ext_used(i64 %a, i64 %b, i64 %c, i64 %d) nounwind {
 ; CHECK-NEXT:    subr r13, r13, r2
 ; CHECK-NEXT:    addr r12, r12, r14
 ; CHECK-NEXT:    addr r12, r13, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; NOGROUP-LABEL: swap32_ext_used:
 ; NOGROUP:       # %bb.0:
-; NOGROUP-NEXT:    enter 0
 ; NOGROUP-NEXT:    zextw r12, r0
 ; NOGROUP-NEXT:    zextw r14, r1
 ; NOGROUP-NEXT:    copy r13, r2
@@ -358,7 +348,7 @@ define i64 @swap32_ext_used(i64 %a, i64 %b, i64 %c, i64 %d) nounwind {
 ; NOGROUP-NEXT:    subr r13, r13, r3
 ; NOGROUP-NEXT:    addr r12, r12, r14
 ; NOGROUP-NEXT:    addr r12, r13, r12
-; NOGROUP-NEXT:    leaveret
+; NOGROUP-NEXT:    ret
   %a1 = trunc i64 %a to i32
   %b1 = trunc i64 %b to i32
   %cmp = icmp ugt i32 %a1, %b1
@@ -391,12 +381,12 @@ define i64 @add_between(i64 %a, i64 %b, i64 %c, i64 %d, i64 %x) nounwind {
 ;
 ; NOGROUP-LABEL: add_between:
 ; NOGROUP:       # %bb.0:
-; NOGROUP-NEXT:    enter 0
 ; NOGROUP-NEXT:    copy r12, r2
 ; NOGROUP-NEXT:    fbr r0, r1, 1, .LBB8_2
 ; NOGROUP-NEXT:  # %bb.1:
 ; NOGROUP-NEXT:    copy r12, r3
 ; NOGROUP-NEXT:  .LBB8_2:
+; NOGROUP-NEXT:    enter 0
 ; NOGROUP-NEXT:    ldidx64 r14, r15, 16
 ; NOGROUP-NEXT:    fbr r0, r1, 9, .LBB8_4
 ; NOGROUP-NEXT:  # %bb.3:

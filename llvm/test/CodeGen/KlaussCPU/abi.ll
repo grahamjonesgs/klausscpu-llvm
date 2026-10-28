@@ -19,9 +19,8 @@ declare i64 @vararg(i64, ...)
 define i64 @sext_param(i32 signext %a) nounwind {
 ; CHECK-LABEL: sext_param:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    copy r12, r0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %r = sext i32 %a to i64
   ret i64 %r
 }
@@ -53,13 +52,12 @@ define signext i32 @sext_arg(i32 signext %a) nounwind {
 define i64 @ult32(i32 signext %a, i32 signext %b) nounwind {
 ; CHECK-LABEL: ult32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r12, 1
 ; CHECK-NEXT:    fbr r0, r1, 3, .LBB3_2
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    setr r12, 2
 ; CHECK-NEXT:  .LBB3_2:
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %c = icmp ult i32 %a, %b
   %r = select i1 %c, i64 1, i64 2
   ret i64 %r
@@ -151,10 +149,9 @@ define void @pass_pair(i64 %a, i64 %b) nounwind {
 define [2 x i64] @ret_pair(i64 %a, i64 %b) nounwind {
 ; CHECK-LABEL: ret_pair:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    copy r12, r0
 ; CHECK-NEXT:    copy r11, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %p0 = insertvalue [2 x i64] poison, i64 %a, 0
   %p1 = insertvalue [2 x i64] %p0, i64 %b, 1
   ret [2 x i64] %p1

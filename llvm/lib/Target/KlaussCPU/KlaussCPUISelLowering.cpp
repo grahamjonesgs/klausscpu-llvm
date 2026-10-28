@@ -51,6 +51,21 @@ static cl::opt<unsigned>
                   cl::desc("Preferred loop-header alignment in bytes "
                            "(16 = I-cache line; 0 = off)."));
 
+// Tail calls (isEligibleForTailCallOptimization).
+static cl::opt<bool> EnableTailCalls(
+    "klausscpu-tail-calls", cl::init(true), cl::Hidden,
+    cl::desc("Make sibling calls whose arguments are all in registers tail "
+             "calls (a jump after the epilogue)"));
+// CodeGenPrepare can duplicate a return block into its predecessors so that
+// a call in each becomes a tail call (mayBeEmittedAsTailCall).  Each copy
+// then needs its own epilogue (the callee-saved reloads): on the bare-metal
+// corpus that tripled the tail calls but cost 0.15% of .text for no
+// measurable cycles on the board, so it is off.
+static cl::opt<bool> TailCallDupRet(
+    "klausscpu-tail-call-dup-ret", cl::init(false), cl::Hidden,
+    cl::desc("Let CodeGenPrepare duplicate a return into its predecessors "
+             "so that their calls become tail calls"));
+
 // Jump tables (LowerBR_JT).  A dispatch through the table costs about the
 // same whatever the switch's size, a compare tree grows with it; on the board
 // the table breaks even at 12 cases (see the constructor).  0 disables them.
@@ -1008,8 +1023,9 @@ SDValue KlaussCPUTargetLowering::LowerATOMIC_FENCE(SDValue Op,
                      Op.getOperand(0));
 }
 
-// Every function has a frame (hasFP is always true): R15 points at the saved
-// caller R15, and the return address is the slot above it, so
+// A function that takes a frame or return address has a frame (hasFPImpl),
+// and so does every function that calls one: R15 points at the saved caller
+// R15, and the return address is the slot above it, so
 //   frameaddress(0)  = R15
 //   frameaddress(N)  = [frameaddress(N-1)]
 //   returnaddress(N) = [frameaddress(N) + 8]
@@ -1100,6 +1116,7 @@ KlaussCPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   switch (Opcode) {
   case KlaussCPUISD::RET_GLUE: return "KlaussCPUISD::RET_GLUE";
   case KlaussCPUISD::CALL:     return "KlaussCPUISD::CALL";
+  case KlaussCPUISD::TAIL:     return "KlaussCPUISD::TAIL";
   case KlaussCPUISD::ADDR:     return "KlaussCPUISD::ADDR";
   case KlaussCPUISD::LEAPC:    return "KlaussCPUISD::LEAPC";
   case KlaussCPUISD::SELECT_CC: return "KlaussCPUISD::SELECT_CC";
@@ -1255,13 +1272,45 @@ SDValue KlaussCPUTargetLowering::LowerReturn(
 // non-variadic call without stack arguments reserves no call frame.
 //===----------------------------------------------------------------------===//
 
+// A tail call is a jump to the callee after the epilogue (PseudoTAIL): the
+// callee finds the caller's return address at [SP] and returns to the
+// caller's caller (as RISC-V: sibling calls only).  It must not need
+// anything the caller's frame held, nor anything the caller's caller did
+// not provide:
+//  - no stack argument: they would go in the caller's own incoming argument
+//    area, which may be smaller;
+//  - not variadic: a variadic callee stores R0-R3 in the home area above its
+//    return address, which only a variadic call reserves (ABI.md);
+//  - no byval argument: its copy is in the caller's frame;
+//  - no sret on either side (as RISC-V);
+//  - the callee preserves at least the registers the caller must (every
+//    calling convention is lowered as the C one, CC_KlaussCPU, so this holds
+//    also for the fastcc that GlobalOpt gives internal functions).
+// IR `tail` already promises that the callee does not use the caller's
+// allocas.
+bool KlaussCPUTargetLowering::isEligibleForTailCallOptimization(
+    const CCState &CCInfo, const TargetLowering::CallLoweringInfo &CLI,
+    const MachineFunction &MF) const {
+  const Function &Caller = MF.getFunction();
+  if (!EnableTailCalls || CLI.IsVarArg || CCInfo.getStackSize() != 0 ||
+      Caller.hasStructRetAttr())
+    return false;
+  for (const ISD::OutputArg &Out : CLI.Outs)
+    if (Out.Flags.isByVal() || Out.Flags.isSRet())
+      return false;
+  const TargetRegisterInfo *TRI = Subtarget.getRegisterInfo();
+  const uint32_t *CallerPreserved =
+      TRI->getCallPreservedMask(MF, Caller.getCallingConv());
+  const uint32_t *CalleePreserved = TRI->getCallPreservedMask(MF, CLI.CallConv);
+  return TRI->regmaskSubsetEqual(CallerPreserved, CalleePreserved);
+}
+
+bool KlaussCPUTargetLowering::mayBeEmittedAsTailCall(const CallInst *CI) const {
+  return EnableTailCalls && TailCallDupRet && CI->isTailCall();
+}
+
 SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                                             SmallVectorImpl<SDValue> &InVals) const {
-  // KlaussCPU has no tail-call optimization — our calling convention uses a
-  // dedicated CALL instruction that saves LR, so TCO would need a special
-  // JMP-to-callee sequence we haven't implemented.
-  CLI.IsTailCall = false;
-
   SelectionDAG &DAG          = CLI.DAG;
   SDLoc        &DL           = CLI.DL;
   SDValue       Chain        = CLI.Chain;
@@ -1289,6 +1338,14 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
   CCInfo.AnalyzeCallOperands(CLI.Outs, CC_KlaussCPU);
 
   unsigned StackSize = CCInfo.getStackSize();
+
+  bool IsTailCall = CLI.IsTailCall &&
+                    isEligibleForTailCallOptimization(CCInfo, CLI, MF);
+  if (CLI.IsTailCall && !IsTailCall && CLI.CB && CLI.CB->isMustTailCall())
+    reportFatalUsageError("KlaussCPU: failed to perform a musttail call (it "
+                          "needs stack, byval or sret arguments, or is "
+                          "variadic)");
+  CLI.IsTailCall = IsTailCall;
 
   // ---- Make private copies of byval arguments ----------------------------
   // A byval argument is passed as a pointer (CC_KlaussCPU treats it as an
@@ -1325,7 +1382,9 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
     ByValArgs.push_back(FIPtr);
   }
 
-  Chain = DAG.getCALLSEQ_START(Chain, StackSize, 0, DL);
+  // A tail call has no call frame: it leaves through the epilogue.
+  if (!IsTailCall)
+    Chain = DAG.getCALLSEQ_START(Chain, StackSize, 0, DL);
 
   // ---- Collect register and memory args ----------------------------------
   SmallVector<std::pair<Register, SDValue>, 8> RegsToPass;
@@ -1391,13 +1450,19 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
   for (auto &[Reg, Val] : RegsToPass)
     Ops.push_back(DAG.getRegister(Reg, Val.getValueType()));
   // Keep SP live-in to the call node so the scheduler doesn't move stores.
-  Ops.push_back(DAG.getRegister(KlaussCPU::SP, MVT::i32));
+  if (!IsTailCall)
+    Ops.push_back(DAG.getRegister(KlaussCPU::SP, MVT::i32));
   // The registers the callee preserves (CSR_KlaussCPU_Call: R4-R7, R15,
   // SP); every other one is clobbered.
   const TargetRegisterInfo *TRI = Subtarget.getRegisterInfo();
   Ops.push_back(DAG.getRegisterMask(TRI->getCallPreservedMask(MF, CallConv)));
   if (Glue.getNode())
     Ops.push_back(Glue);
+
+  if (IsTailCall) {
+    MF.getFrameInfo().setHasTailCall();
+    return DAG.getNode(KlaussCPUISD::TAIL, DL, MVT::Other, Ops);
+  }
 
   SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
   Chain = DAG.getNode(KlaussCPUISD::CALL, DL, NodeTys, Ops);

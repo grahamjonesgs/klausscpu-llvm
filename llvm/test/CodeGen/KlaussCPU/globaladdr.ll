@@ -12,12 +12,9 @@ declare void @ext()
 define i64 @read_global_i64() {
 ; CHECK-LABEL: read_global_i64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    .cfi_def_cfa r15, 16
-; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    setru r12, g_i64
 ; CHECK-NEXT:    ldidx64 r12, r12, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %v = load i64, ptr @g_i64
   ret i64 %v
 }
@@ -25,12 +22,9 @@ define i64 @read_global_i64() {
 define void @write_global_i64(i64 %v) {
 ; CHECK-LABEL: write_global_i64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    .cfi_def_cfa r15, 16
-; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    setru r12, g_i64
 ; CHECK-NEXT:    stidx64 r0, r12, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   store i64 %v, ptr @g_i64
   ret void
 }
@@ -38,12 +32,9 @@ define void @write_global_i64(i64 %v) {
 define i64 @read_global_i32_zext() {
 ; CHECK-LABEL: read_global_i32_zext:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    .cfi_def_cfa r15, 16
-; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    setru r12, g_i32
 ; CHECK-NEXT:    memget32 r12, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %v = load i32, ptr @g_i32
   %r = zext i32 %v to i64
   ret i64 %r
@@ -53,13 +44,10 @@ define i64 @read_global_i32_zext() {
 define i64 @read_array_elem(i64 %i) {
 ; CHECK-LABEL: read_array_elem:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    .cfi_def_cfa r15, 16
-; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    shlv r12, r0, 3
 ; CHECK-NEXT:    setru r14, g_arr
 ; CHECK-NEXT:    ldidx64r r12, r14, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %p = getelementptr [4 x i64], ptr @g_arr, i64 0, i64 %i
   %v = load i64, ptr %p
   ret i64 %v
@@ -69,11 +57,8 @@ define i64 @read_array_elem(i64 %i) {
 define ptr @global_addr() {
 ; CHECK-LABEL: global_addr:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    .cfi_def_cfa r15, 16
-; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    setru r12, g_i64
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   ret ptr @g_i64
 }
 

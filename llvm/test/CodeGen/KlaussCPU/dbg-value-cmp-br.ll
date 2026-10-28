@@ -22,7 +22,7 @@ define void @spin(i64 %k, i1 %c) !dbg !4 {
 ; FUSE-NOT:      cmprv
 ; FUSE:          fbri r12, 0, 0, .LBB0_1
 ; FUSE-NEXT:   # %bb.2:
-; FUSE-NEXT:     leaveret
+; FUSE-NEXT:     ret
 entry:
   br label %loop
 
@@ -44,7 +44,7 @@ define void @count_down(i64 %k, i64 %n0, ptr %p) !dbg !10 {
 ; CHECK-NOT:     cmprv
 ; CHECK:         jmpnzrel .LBB1_1
 ; CHECK-NEXT:  # %bb.2:
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 entry:
   br label %loop
 

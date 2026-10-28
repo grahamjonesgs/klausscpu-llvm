@@ -434,7 +434,8 @@ public:
 
 // KlaussCPU: a short call (R_KLAUSSCPU_CALL18, ±512 KiB) whose callee is out
 // of reach calls this instead: a PC-relative `jmprel` to the callee, so it is
-// position independent and the callee returns directly to the caller.
+// position independent and the callee returns directly to the caller.  A tail
+// call's short jump (also R_KLAUSSCPU_CALL18) jumps to it the same way.
 class KlaussCPUThunk final : public Thunk {
 public:
   KlaussCPUThunk(Ctx &ctx, Symbol &dest, int64_t addend)

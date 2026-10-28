@@ -15,17 +15,15 @@
 define i32 @load_relaxed() nounwind {
 ; CHECK-LABEL: load_relaxed:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setru r12, counter
 ; CHECK-NEXT:    ldidx32 r12, r12, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: load_relaxed:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    setru r12, counter
 ; O0-NEXT:    ldidx32 r12, r12, 0
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   %v = load atomic i32, ptr @counter monotonic, align 4
   ret i32 %v
 }
@@ -33,18 +31,16 @@ define i32 @load_relaxed() nounwind {
 define void @store_seq_cst(i32 %x) nounwind {
 ; CHECK-LABEL: store_seq_cst:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setru r12, counter
 ; CHECK-NEXT:    stidx32 r0, r12, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: store_seq_cst:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    # kill: def $r12 killed $r0
 ; O0-NEXT:    setru r12, counter
 ; O0-NEXT:    stidx32 r0, r12, 0
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   store atomic i32 %x, ptr @counter seq_cst, align 4
   ret void
 }
@@ -52,17 +48,15 @@ define void @store_seq_cst(i32 %x) nounwind {
 define i64 @load_acquire_i64() nounwind {
 ; CHECK-LABEL: load_acquire_i64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setru r12, wide
 ; CHECK-NEXT:    ldidx64 r12, r12, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: load_acquire_i64:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    setru r12, wide
 ; O0-NEXT:    ldidx64 r12, r12, 0
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   %v = load atomic i64, ptr @wide acquire, align 8
   ret i64 %v
 }
@@ -133,15 +127,13 @@ define i32 @cas(i32 %expected, i32 %desired) nounwind {
 define void @fence_seq_cst() nounwind {
 ; CHECK-LABEL: fence_seq_cst:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    #MEMBARRIER
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: fence_seq_cst:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    #MEMBARRIER
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   fence seq_cst
   ret void
 }
@@ -149,15 +141,13 @@ define void @fence_seq_cst() nounwind {
 define void @fence_singlethread() nounwind {
 ; CHECK-LABEL: fence_singlethread:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    #MEMBARRIER
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: fence_singlethread:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    #MEMBARRIER
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   fence syncscope("singlethread") acquire
   ret void
 }
@@ -166,21 +156,19 @@ define void @fence_singlethread() nounwind {
 define void @fence_orders_stores(ptr %p, ptr %flag) nounwind {
 ; CHECK-LABEL: fence_orders_stores:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r12, 1
 ; CHECK-NEXT:    stidx64 r12, r0, 0
 ; CHECK-NEXT:    #MEMBARRIER
 ; CHECK-NEXT:    stidx64 r12, r1, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: fence_orders_stores:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    setr r12, 1
 ; O0-NEXT:    stidx64 r12, r0, 0
 ; O0-NEXT:    #MEMBARRIER
 ; O0-NEXT:    stidx64 r12, r1, 0
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   store i64 1, ptr %p
   fence release
   store i64 1, ptr %flag

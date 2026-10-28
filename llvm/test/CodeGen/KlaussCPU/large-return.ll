@@ -7,13 +7,12 @@
 define { i64, i64, i64 } @ret3(i64 %a) nounwind {
 ; CHECK-LABEL: ret3:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r12, 3
 ; CHECK-NEXT:    setr r14, 2
 ; CHECK-NEXT:    stidx64 r12, r0, 16
 ; CHECK-NEXT:    stidx64 r14, r0, 8
 ; CHECK-NEXT:    stidx64 r1, r0, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %r0 = insertvalue { i64, i64, i64 } poison, i64 %a, 0
   %r1 = insertvalue { i64, i64, i64 } %r0, i64 2, 1
   %r2 = insertvalue { i64, i64, i64 } %r1, i64 3, 2
@@ -38,10 +37,9 @@ define i64 @call_ret3(i64 %a) nounwind {
 define { i64, i64 } @ret2(i64 %a, i64 %b) nounwind {
 ; CHECK-LABEL: ret2:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    copy r12, r0
 ; CHECK-NEXT:    copy r11, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %r0 = insertvalue { i64, i64 } poison, i64 %a, 0
   %r1 = insertvalue { i64, i64 } %r0, i64 %b, 1
   ret { i64, i64 } %r1

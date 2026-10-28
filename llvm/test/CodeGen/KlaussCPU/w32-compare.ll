@@ -11,13 +11,14 @@ declare void @f()
 define void @rr_both(i64 %a, i64 %b) nounwind {
 ; CHECK-LABEL: rr_both:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmprrw r0, r1
 ; CHECK-NEXT:    jmpgerel .LBB0_2
 ; CHECK-NEXT:  # %bb.1: # %t
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    callrel f
-; CHECK-NEXT:  .LBB0_2: # %e
 ; CHECK-NEXT:    leaveret
+; CHECK-NEXT:  .LBB0_2: # %e
+; CHECK-NEXT:    ret
   %a1 = trunc i64 %a to i32
   %b1 = trunc i64 %b to i32
   %c = icmp slt i32 %a1, %b1
@@ -33,13 +34,14 @@ e:
 define void @rr_one(i32 signext %a, i64 %b) nounwind {
 ; CHECK-LABEL: rr_one:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmprrw r0, r1
 ; CHECK-NEXT:    jmpgerel .LBB1_2
 ; CHECK-NEXT:  # %bb.1: # %t
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    callrel f
-; CHECK-NEXT:  .LBB1_2: # %e
 ; CHECK-NEXT:    leaveret
+; CHECK-NEXT:  .LBB1_2: # %e
+; CHECK-NEXT:    ret
   %b1 = trunc i64 %b to i32
   %c = icmp slt i32 %a, %b1
   br i1 %c, label %t, label %e
@@ -54,13 +56,14 @@ e:
 define void @imm_large(i64 %a) nounwind {
 ; CHECK-LABEL: imm_large:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmprvw r0, 999
 ; CHECK-NEXT:    jmpgtrel .LBB2_2
 ; CHECK-NEXT:  # %bb.1: # %t
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    callrel f
-; CHECK-NEXT:  .LBB2_2: # %e
 ; CHECK-NEXT:    leaveret
+; CHECK-NEXT:  .LBB2_2: # %e
+; CHECK-NEXT:    ret
   %a1 = trunc i64 %a to i32
   %c = icmp slt i32 %a1, 1000
   br i1 %c, label %t, label %e
@@ -75,13 +78,14 @@ e:
 define void @imm_small(i64 %a) nounwind {
 ; CHECK-LABEL: imm_small:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmprvw r0, 4
 ; CHECK-NEXT:    jmpgtrel .LBB3_2
 ; CHECK-NEXT:  # %bb.1: # %t
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    callrel f
-; CHECK-NEXT:  .LBB3_2: # %e
 ; CHECK-NEXT:    leaveret
+; CHECK-NEXT:  .LBB3_2: # %e
+; CHECK-NEXT:    ret
   %a1 = trunc i64 %a to i32
   %c = icmp slt i32 %a1, 5
   br i1 %c, label %t, label %e
@@ -96,14 +100,13 @@ e:
 define i64 @sel_imm_large(i64 %a, i64 %x, i64 %y) nounwind {
 ; CHECK-LABEL: sel_imm_large:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmprvw r0, 1000
 ; CHECK-NEXT:    jmpultrel .LBB4_2
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    copy r1, r2
 ; CHECK-NEXT:  .LBB4_2:
 ; CHECK-NEXT:    copy r12, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a1 = trunc i64 %a to i32
   %c = icmp ult i32 %a1, 1000
   %r = select i1 %c, i64 %x, i64 %y
@@ -114,7 +117,6 @@ define i64 @sel_imm_large(i64 %a, i64 %x, i64 %y) nounwind {
 define i64 @ext_used(i64 %a, i64 %b) nounwind {
 ; CHECK-LABEL: ext_used:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    sextw r12, r0
 ; CHECK-NEXT:    cmprv r12, 1000
 ; CHECK-NEXT:    jmpgerel .LBB5_2
@@ -122,7 +124,7 @@ define i64 @ext_used(i64 %a, i64 %b) nounwind {
 ; CHECK-NEXT:    addr r1, r12, r1
 ; CHECK-NEXT:  .LBB5_2:
 ; CHECK-NEXT:    copy r12, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a1 = trunc i64 %a to i32
   %c = icmp slt i32 %a1, 1000
   %ax = sext i32 %a1 to i64

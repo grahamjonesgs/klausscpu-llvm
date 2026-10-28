@@ -17,8 +17,9 @@
 // spill (the write would depend on the spill).
 //
 // Spill slots are R15-relative (getFrameIndexReference) and R15 = CFA-16.
-// The spills are the entry block's FrameSetup stores
-// (spillCalleeSavedRegisters); the target has no shrink-wrapping.
+// The spills are the FrameSetup stores of the prologue block
+// (spillCalleeSavedRegisters): the entry block, or the save point that
+// shrink-wrapping chose.
 //
 //===----------------------------------------------------------------------===//
 
@@ -80,18 +81,21 @@ bool KlaussCPUCalleeSavedCFI::runOnMachineFunction(MachineFunction &MF) {
     CFAOffset[CS.getReg()] = Offset.getFixed() - 16;
   }
 
-  MachineBasicBlock &Entry = MF.front();
-  for (MachineInstr &MI : Entry) {
-    if (!MI.getFlag(MachineInstr::FrameSetup) || !MI.mayStore() ||
-        !MI.getOperand(0).isReg())
-      continue;
-    auto It = CFAOffset.find(MI.getOperand(0).getReg().asMCReg());
-    if (It == CFAOffset.end())
-      continue;
-    CFIInstBuilder(Entry, std::next(MI.getIterator()),
-                   MachineInstr::FrameSetup)
-        .buildOffset(It->first, It->second);
-    CFAOffset.erase(It);
+  // PEI has dropped the save point by now; the spills are the only
+  // FrameSetup stores of a callee-saved register.
+  for (MachineBasicBlock &MBB : MF) {
+    for (MachineInstr &MI : MBB) {
+      if (!MI.getFlag(MachineInstr::FrameSetup) || !MI.mayStore() ||
+          !MI.getOperand(0).isReg())
+        continue;
+      auto It = CFAOffset.find(MI.getOperand(0).getReg().asMCReg());
+      if (It == CFAOffset.end())
+        continue;
+      CFIInstBuilder(MBB, std::next(MI.getIterator()),
+                     MachineInstr::FrameSetup)
+          .buildOffset(It->first, It->second);
+      CFAOffset.erase(It);
+    }
   }
   assert(CFAOffset.empty() && "Callee-saved register without a spill");
   return true;

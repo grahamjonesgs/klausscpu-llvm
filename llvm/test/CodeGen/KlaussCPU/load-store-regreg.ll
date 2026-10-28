@@ -12,9 +12,8 @@ target triple = "klausscpu-unknown-elf"
 define i64 @zext_i8(ptr %p, i64 %i) nounwind {
 ; CHECK-LABEL: zext_i8:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    ldidx8r r12, r0, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a = getelementptr i8, ptr %p, i64 %i
   %v = load i8, ptr %a
   %r = zext i8 %v to i64
@@ -24,9 +23,8 @@ define i64 @zext_i8(ptr %p, i64 %i) nounwind {
 define i64 @sext_i8(ptr %p, i64 %i) nounwind {
 ; CHECK-LABEL: sext_i8:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    ldidx8sr r12, r0, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a = getelementptr i8, ptr %p, i64 %i
   %v = load i8, ptr %a
   %r = sext i8 %v to i64
@@ -36,10 +34,9 @@ define i64 @sext_i8(ptr %p, i64 %i) nounwind {
 define i64 @zext_i16(ptr %p, i64 %i) nounwind {
 ; CHECK-LABEL: zext_i16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    shlv r12, r1, 1
 ; CHECK-NEXT:    ldidx16r r12, r0, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a = getelementptr i16, ptr %p, i64 %i
   %v = load i16, ptr %a
   %r = zext i16 %v to i64
@@ -49,10 +46,9 @@ define i64 @zext_i16(ptr %p, i64 %i) nounwind {
 define i64 @sext_i16(ptr %p, i64 %i) nounwind {
 ; CHECK-LABEL: sext_i16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    shlv r12, r1, 1
 ; CHECK-NEXT:    ldidx16sr r12, r0, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a = getelementptr i16, ptr %p, i64 %i
   %v = load i16, ptr %a
   %r = sext i16 %v to i64
@@ -62,10 +58,9 @@ define i64 @sext_i16(ptr %p, i64 %i) nounwind {
 define i64 @zext_i32(ptr %p, i64 %i) nounwind {
 ; CHECK-LABEL: zext_i32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    shlv r12, r1, 2
 ; CHECK-NEXT:    ldidx32r r12, r0, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a = getelementptr i32, ptr %p, i64 %i
   %v = load i32, ptr %a
   %r = zext i32 %v to i64
@@ -75,10 +70,9 @@ define i64 @zext_i32(ptr %p, i64 %i) nounwind {
 define i64 @sext_i32(ptr %p, i64 %i) nounwind {
 ; CHECK-LABEL: sext_i32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    shlv r12, r1, 2
 ; CHECK-NEXT:    ldidx32sr r12, r0, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a = getelementptr i32, ptr %p, i64 %i
   %v = load i32, ptr %a
   %r = sext i32 %v to i64
@@ -89,10 +83,9 @@ define i64 @sext_i32(ptr %p, i64 %i) nounwind {
 define i32 @anyext_i32(ptr %p, i64 %i) nounwind {
 ; CHECK-LABEL: anyext_i32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    ldidx32r r12, r0, r1
 ; CHECK-NEXT:    incr r12, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a = getelementptr i8, ptr %p, i64 %i
   %v = load i32, ptr %a
   %r = add i32 %v, 1
@@ -102,10 +95,9 @@ define i32 @anyext_i32(ptr %p, i64 %i) nounwind {
 define i64 @load_i64(ptr %p, i64 %i) nounwind {
 ; CHECK-LABEL: load_i64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    shlv r12, r1, 3
 ; CHECK-NEXT:    ldidx64r r12, r0, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a = getelementptr i64, ptr %p, i64 %i
   %v = load i64, ptr %a
   ret i64 %v
@@ -114,9 +106,8 @@ define i64 @load_i64(ptr %p, i64 %i) nounwind {
 define void @store_i8(ptr %p, i64 %i, i8 %v) nounwind {
 ; CHECK-LABEL: store_i8:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    stidx8r r2, r0, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a = getelementptr i8, ptr %p, i64 %i
   store i8 %v, ptr %a
   ret void
@@ -125,10 +116,9 @@ define void @store_i8(ptr %p, i64 %i, i8 %v) nounwind {
 define void @store_i16(ptr %p, i64 %i, i16 %v) nounwind {
 ; CHECK-LABEL: store_i16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    shlv r12, r1, 1
 ; CHECK-NEXT:    stidx16r r2, r0, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a = getelementptr i16, ptr %p, i64 %i
   store i16 %v, ptr %a
   ret void
@@ -137,10 +127,9 @@ define void @store_i16(ptr %p, i64 %i, i16 %v) nounwind {
 define void @store_i32(ptr %p, i64 %i, i32 %v) nounwind {
 ; CHECK-LABEL: store_i32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    shlv r12, r1, 2
 ; CHECK-NEXT:    stidx32r r2, r0, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a = getelementptr i32, ptr %p, i64 %i
   store i32 %v, ptr %a
   ret void
@@ -149,10 +138,9 @@ define void @store_i32(ptr %p, i64 %i, i32 %v) nounwind {
 define void @store_i64(ptr %p, i64 %i, i64 %v) nounwind {
 ; CHECK-LABEL: store_i64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    shlv r12, r1, 3
 ; CHECK-NEXT:    stidx64r r2, r0, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a = getelementptr i64, ptr %p, i64 %i
   store i64 %v, ptr %a
   ret void
@@ -162,7 +150,6 @@ define void @store_i64(ptr %p, i64 %i, i64 %v) nounwind {
 define i64 @slen(ptr %s) nounwind {
 ; CHECK-LABEL: slen:
 ; CHECK:       # %bb.0: # %entry
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r14, 0
 ; CHECK-NEXT:    .p2align 4
 ; CHECK-NEXT:  .LBB12_1: # %loop
@@ -172,7 +159,7 @@ define i64 @slen(ptr %s) nounwind {
 ; CHECK-NEXT:    incr r14, r14
 ; CHECK-NEXT:    fbri r13, 0, 8, .LBB12_1
 ; CHECK-NEXT:  # %bb.2: # %done
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 entry:
   br label %loop
 loop:
@@ -190,9 +177,8 @@ done:
 define i64 @imm_offset(ptr %p) nounwind {
 ; CHECK-LABEL: imm_offset:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    ldidx8 r12, r0, 100
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a = getelementptr i8, ptr %p, i64 100
   %v = load i8, ptr %a
   %r = zext i8 %v to i64
@@ -203,10 +189,9 @@ define i64 @imm_offset(ptr %p) nounwind {
 define void @big_offset(ptr %p, i64 %v) nounwind {
 ; CHECK-LABEL: big_offset:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr64 r12, 0, 1
 ; CHECK-NEXT:    stidx16r r1, r0, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a = getelementptr i8, ptr %p, i64 4294967296
   %t = trunc i64 %v to i16
   store i16 %t, ptr %a
@@ -243,10 +228,9 @@ declare void @fill(ptr)
 define i64 @unaligned_i32(ptr %p, i64 %i) nounwind {
 ; CHECK-LABEL: unaligned_i32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    addr r12, r0, r1
 ; CHECK-NEXT:    memget32 r12, r12
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a = getelementptr i8, ptr %p, i64 %i
   %v = load i32, ptr %a, align 1
   %r = zext i32 %v to i64
@@ -256,12 +240,11 @@ define i64 @unaligned_i32(ptr %p, i64 %i) nounwind {
 define void @unaligned_store_i16(ptr %p, i64 %i, i16 %v) nounwind {
 ; CHECK-LABEL: unaligned_store_i16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    addr r12, r0, r1
 ; CHECK-NEXT:    shrv r14, r2, 8
 ; CHECK-NEXT:    stidx8r r2, r0, r1
 ; CHECK-NEXT:    stidx8 r14, r12, 1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
   %a = getelementptr i8, ptr %p, i64 %i
   store i16 %v, ptr %a, align 1
   ret void

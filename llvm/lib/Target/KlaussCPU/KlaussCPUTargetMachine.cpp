@@ -43,6 +43,7 @@ FunctionPass *createKlaussCPUEarlyIVIncPass();
 FunctionPass *createKlaussCPUFlagReusePass();
 FunctionPass *createKlaussCPUFuseCmpBrPass(bool LoopConstsOnly = false);
 FunctionPass *createKlaussCPUJumpTableHoistPass();
+FunctionPass *createKlaussCPULeaveRetPass();
 FunctionPass *createKlaussCPUOptExtensionsPass();
 void initializeKlaussCPUCalleeSavedCFIPass(PassRegistry &);
 void initializeKlaussCPUConstAddrBasePass(PassRegistry &);
@@ -51,6 +52,7 @@ void initializeKlaussCPUEarlyIVIncPass(PassRegistry &);
 void initializeKlaussCPUFlagReusePass(PassRegistry &);
 void initializeKlaussCPUFuseCmpBrPass(PassRegistry &);
 void initializeKlaussCPUJumpTableHoistPass(PassRegistry &);
+void initializeKlaussCPULeaveRetPass(PassRegistry &);
 void initializeKlaussCPUOptExtensionsPass(PassRegistry &);
 } // namespace llvm
 
@@ -69,6 +71,7 @@ LLVMInitializeKlaussCPUTarget() {
   initializeKlaussCPUFlagReusePass(PR);
   initializeKlaussCPUFuseCmpBrPass(PR);
   initializeKlaussCPUJumpTableHoistPass(PR);
+  initializeKlaussCPULeaveRetPass(PR);
   initializeKlaussCPUOptExtensionsPass(PR);
 }
 
@@ -231,6 +234,10 @@ void KlaussCPUPassConfig::addPreSched2() {
 }
 
 void KlaussCPUPassConfig::addPreEmitPass() {
+  // A shrink-wrapped epilogue's LEAVE + RET (after tail duplication and
+  // block placement) becomes LEAVERET (KlaussCPULeaveRet.cpp).
+  if (getOptLevel() != CodeGenOptLevel::None)
+    addPass(createKlaussCPULeaveRetPass());
   // A3a — arithmetic Z-flag reuse.  Runs on the final (post-RA, post-
   // scheduling) instruction stream so adjacency is meaningful.  On by default;
   // -klausscpu-arith-flag-reuse=false disables it.

@@ -17,9 +17,6 @@
 define void @update(i32 %n) {
 ; CHECK-LABEL: update:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    .cfi_def_cfa r15, 16
-; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    leapc r12, .L_MergedGlobals
 ; CHECK-NEXT:    leapc r11, ext
 ; CHECK-NEXT:    ldidx32 r14, r12, 4
@@ -34,13 +31,10 @@ define void @update(i32 %n) {
 ; CHECK-NEXT:    addr r14, r9, r14
 ; CHECK-NEXT:    memset8 r10, r12
 ; CHECK-NEXT:    stidx64 r14, r11, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; NOMERGE-LABEL: update:
 ; NOMERGE:       # %bb.0:
-; NOMERGE-NEXT:    enter 0
-; NOMERGE-NEXT:    .cfi_def_cfa r15, 16
-; NOMERGE-NEXT:    .cfi_offset r15, -16
 ; NOMERGE-NEXT:    leapc r12, count
 ; NOMERGE-NEXT:    leapc r13, total
 ; NOMERGE-NEXT:    memget32 r14, r12
@@ -57,7 +51,7 @@ define void @update(i32 %n) {
 ; NOMERGE-NEXT:    addr r12, r9, r8
 ; NOMERGE-NEXT:    memset8 r10, r11
 ; NOMERGE-NEXT:    stidx64 r12, r14, 0
-; NOMERGE-NEXT:    leaveret
+; NOMERGE-NEXT:    ret
   %c = load i32, ptr @count, align 4
   %c1 = add i32 %c, 1
   store i32 %c1, ptr @count, align 4

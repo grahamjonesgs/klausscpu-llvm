@@ -575,6 +575,13 @@
 # CHECK-NEXT: fixup A - offset: 0, value: lab, kind: FK_KlaussCPU_CALL18
         callrel	lab
 
+## Class 8 tail-call jump (JMPREL; to a symbol the short jump, CALL18 fixup)
+# CHECK: tail 64 # encoding: [0x00,0x00,0x00,0xa1,0x40,0x00,0x00,0x00]
+        tail	64
+# CHECK: tail lab # encoding: [A,A,0b000000AA,0x61]
+# CHECK-NEXT: fixup A - offset: 0, value: lab, kind: FK_KlaussCPU_CALL18
+        tail	lab
+
 ## Class 9 stack
 # CHECK: push r2 # encoding: [0x20,0x00,0x00,0x64]
         push	r2

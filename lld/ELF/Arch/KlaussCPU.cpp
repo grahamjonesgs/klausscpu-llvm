@@ -25,7 +25,8 @@
 //   R_KLAUSSCPU_PC64   (5) — 64-bit PC-relative data, as PC32 for an 8-byte
 //                             field (`.quad A − B`, e.g. InstrProf's
 //                             __profd_* CounterPtr).
-//   R_KLAUSSCPU_CALL18 (6) — ISA v3 short CALL (word 0 0x63000000): simm18
+//   R_KLAUSSCPU_CALL18 (6) — ISA v3 short CALL (word 0 0x63000000), or the
+//                             short jump of a tail call (0x61000000): simm18
 //                             word displacement (S + A − P) / 4 in word0[17:0],
 //                             P = the instruction (r_offset).  It reaches
 //                             ±512 KiB; a callee further away is called

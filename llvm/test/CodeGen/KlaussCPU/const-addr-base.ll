@@ -14,20 +14,18 @@
 define void @three(i32 %v) nounwind {
 ; CHECK-LABEL: three:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setru r12, 4026531840
 ; CHECK-NEXT:    stidx32 r0, r12, 0
 ; CHECK-NEXT:    stidx32 r0, r12, 8
 ; CHECK-NEXT:    ldidx32 r12, r12, 16
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; OFF-LABEL: three:
 ; OFF:       # %bb.0:
-; OFF-NEXT:    enter 0
 ; OFF-NEXT:    stabs32 r0, 4026531840
 ; OFF-NEXT:    stabs32 r0, 4026531848
 ; OFF-NEXT:    ldabs32 r12, 4026531856
-; OFF-NEXT:    leaveret
+; OFF-NEXT:    ret
   store volatile i32 %v, ptr inttoptr (i64 4026531840 to ptr)
   store volatile i32 %v, ptr inttoptr (i64 4026531848 to ptr)
   %s = load volatile i32, ptr inttoptr (i64 4026531856 to ptr)
@@ -38,17 +36,15 @@ define void @three(i32 %v) nounwind {
 define void @two(i32 %v) nounwind {
 ; CHECK-LABEL: two:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    stabs32 r0, 4026531840
 ; CHECK-NEXT:    stabs32 r0, 4026531848
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; OFF-LABEL: two:
 ; OFF:       # %bb.0:
-; OFF-NEXT:    enter 0
 ; OFF-NEXT:    stabs32 r0, 4026531840
 ; OFF-NEXT:    stabs32 r0, 4026531848
-; OFF-NEXT:    leaveret
+; OFF-NEXT:    ret
   store volatile i32 %v, ptr inttoptr (i64 4026531840 to ptr)
   store volatile i32 %v, ptr inttoptr (i64 4026531848 to ptr)
   ret void
@@ -59,7 +55,6 @@ define void @two(i32 %v) nounwind {
 define i32 @spi(i32 %b) nounwind {
 ; CHECK-LABEL: spi:
 ; CHECK:       # %bb.0: # %entry
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setru r12, 4026531848
 ; CHECK-NEXT:    .p2align 4
 ; CHECK-NEXT:  .LBB2_1: # %w1
@@ -77,11 +72,10 @@ define i32 @spi(i32 %b) nounwind {
 ; CHECK-NEXT:    fbri r14, 0, 8, .LBB2_3
 ; CHECK-NEXT:  # %bb.4: # %rx
 ; CHECK-NEXT:    ldidx32 r12, r12, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; OFF-LABEL: spi:
 ; OFF:       # %bb.0: # %entry
-; OFF-NEXT:    enter 0
 ; OFF-NEXT:    .p2align 4
 ; OFF-NEXT:  .LBB2_1: # %w1
 ; OFF-NEXT:    # =>This Inner Loop Header: Depth=1
@@ -98,7 +92,7 @@ define i32 @spi(i32 %b) nounwind {
 ; OFF-NEXT:    fbri r12, 0, 8, .LBB2_3
 ; OFF-NEXT:  # %bb.4: # %rx
 ; OFF-NEXT:    ldabs32 r12, 4026531848
-; OFF-NEXT:    leaveret
+; OFF-NEXT:    ret
 entry:
   br label %w1
 w1:
@@ -372,24 +366,22 @@ exit:
 define void @two_devices(i32 %v) nounwind {
 ; CHECK-LABEL: two_devices:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setru r12, 4026531840
 ; CHECK-NEXT:    stidx32 r0, r12, 0
 ; CHECK-NEXT:    stabs32 r0, 4026597376
 ; CHECK-NEXT:    stidx32 r0, r12, 8
 ; CHECK-NEXT:    stabs32 r0, 4026597384
 ; CHECK-NEXT:    stidx32 r0, r12, 16
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; OFF-LABEL: two_devices:
 ; OFF:       # %bb.0:
-; OFF-NEXT:    enter 0
 ; OFF-NEXT:    stabs32 r0, 4026531840
 ; OFF-NEXT:    stabs32 r0, 4026597376
 ; OFF-NEXT:    stabs32 r0, 4026531848
 ; OFF-NEXT:    stabs32 r0, 4026597384
 ; OFF-NEXT:    stabs32 r0, 4026531856
-; OFF-NEXT:    leaveret
+; OFF-NEXT:    ret
   store volatile i32 %v, ptr inttoptr (i64 4026531840 to ptr)
   store volatile i32 %v, ptr inttoptr (i64 4026597376 to ptr)
   store volatile i32 %v, ptr inttoptr (i64 4026531848 to ptr)
@@ -404,7 +396,6 @@ define void @two_devices(i32 %v) nounwind {
 define i64 @widths() nounwind {
 ; CHECK-LABEL: widths:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setru r12, 4027384008
 ; CHECK-NEXT:    ldidx64 r14, r12, -200
 ; CHECK-NEXT:    ldidx64 r13, r12, 800
@@ -415,11 +406,10 @@ define i64 @widths() nounwind {
 ; CHECK-NEXT:    addr r14, r14, r11
 ; CHECK-NEXT:    addr r12, r14, r12
 ; CHECK-NEXT:    addr r12, r12, r13
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; OFF-LABEL: widths:
 ; OFF:       # %bb.0:
-; OFF-NEXT:    enter 0
 ; OFF-NEXT:    memreadr r12, 4027383808
 ; OFF-NEXT:    memreadr r14, 4027384808
 ; OFF-NEXT:    ldabs8 r13, 4027384008
@@ -429,7 +419,7 @@ define i64 @widths() nounwind {
 ; OFF-NEXT:    ldabs8 r13, 4027384208
 ; OFF-NEXT:    addr r12, r12, r14
 ; OFF-NEXT:    addr r12, r12, r13
-; OFF-NEXT:    leaveret
+; OFF-NEXT:    ret
   %a = load volatile i64, ptr inttoptr (i64 4027383808 to ptr)
   %b = load volatile i64, ptr inttoptr (i64 4027384808 to ptr)
   %c = load volatile i8, ptr inttoptr (i64 4027384008 to ptr)

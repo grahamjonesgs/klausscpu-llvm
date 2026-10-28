@@ -18,17 +18,15 @@
 define i8 @load_i8_monotonic() nounwind {
 ; CHECK-LABEL: load_i8_monotonic:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setru r12, b
 ; CHECK-NEXT:    ldidx8 r12, r12, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: load_i8_monotonic:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    setru r12, b
 ; O0-NEXT:    ldidx8 r12, r12, 0
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   %v = load atomic i8, ptr @b monotonic, align 1
   ret i8 %v
 }
@@ -36,17 +34,15 @@ define i8 @load_i8_monotonic() nounwind {
 define i16 @load_i16_acquire() nounwind {
 ; CHECK-LABEL: load_i16_acquire:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setru r12, h
 ; CHECK-NEXT:    ldidx16 r12, r12, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: load_i16_acquire:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    setru r12, h
 ; O0-NEXT:    ldidx16 r12, r12, 0
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   %v = load atomic i16, ptr @h acquire, align 2
   ret i16 %v
 }
@@ -54,17 +50,15 @@ define i16 @load_i16_acquire() nounwind {
 define i32 @load_i32_seq_cst() nounwind {
 ; CHECK-LABEL: load_i32_seq_cst:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setru r12, w
 ; CHECK-NEXT:    ldidx32 r12, r12, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: load_i32_seq_cst:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    setru r12, w
 ; O0-NEXT:    ldidx32 r12, r12, 0
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   %v = load atomic i32, ptr @w seq_cst, align 4
   ret i32 %v
 }
@@ -72,17 +66,15 @@ define i32 @load_i32_seq_cst() nounwind {
 define i64 @load_i64_seq_cst() nounwind {
 ; CHECK-LABEL: load_i64_seq_cst:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setru r12, d
 ; CHECK-NEXT:    ldidx64 r12, r12, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: load_i64_seq_cst:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    setru r12, d
 ; O0-NEXT:    ldidx64 r12, r12, 0
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   %v = load atomic i64, ptr @d seq_cst, align 8
   ret i64 %v
 }
@@ -90,15 +82,13 @@ define i64 @load_i64_seq_cst() nounwind {
 define ptr @load_ptr_acquire(ptr %p) nounwind {
 ; CHECK-LABEL: load_ptr_acquire:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    ldidx64 r12, r0, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: load_ptr_acquire:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    ldidx64 r12, r0, 0
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   %v = load atomic ptr, ptr %p acquire, align 8
   ret ptr %v
 }
@@ -106,18 +96,16 @@ define ptr @load_ptr_acquire(ptr %p) nounwind {
 define void @store_i8_monotonic(i8 %x) nounwind {
 ; CHECK-LABEL: store_i8_monotonic:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setru r12, b
 ; CHECK-NEXT:    stidx8 r0, r12, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: store_i8_monotonic:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    # kill: def $r12 killed $r0
 ; O0-NEXT:    setru r12, b
 ; O0-NEXT:    stidx8 r0, r12, 0
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   store atomic i8 %x, ptr @b monotonic, align 1
   ret void
 }
@@ -125,18 +113,16 @@ define void @store_i8_monotonic(i8 %x) nounwind {
 define void @store_i16_release(i16 %x) nounwind {
 ; CHECK-LABEL: store_i16_release:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setru r12, h
 ; CHECK-NEXT:    stidx16 r0, r12, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: store_i16_release:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    # kill: def $r12 killed $r0
 ; O0-NEXT:    setru r12, h
 ; O0-NEXT:    stidx16 r0, r12, 0
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   store atomic i16 %x, ptr @h release, align 2
   ret void
 }
@@ -144,18 +130,16 @@ define void @store_i16_release(i16 %x) nounwind {
 define void @store_i32_seq_cst(i32 %x) nounwind {
 ; CHECK-LABEL: store_i32_seq_cst:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setru r12, w
 ; CHECK-NEXT:    stidx32 r0, r12, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: store_i32_seq_cst:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    # kill: def $r12 killed $r0
 ; O0-NEXT:    setru r12, w
 ; O0-NEXT:    stidx32 r0, r12, 0
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   store atomic i32 %x, ptr @w seq_cst, align 4
   ret void
 }
@@ -163,17 +147,15 @@ define void @store_i32_seq_cst(i32 %x) nounwind {
 define void @store_i64_seq_cst(i64 %x) nounwind {
 ; CHECK-LABEL: store_i64_seq_cst:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setru r12, d
 ; CHECK-NEXT:    stidx64 r0, r12, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: store_i64_seq_cst:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    setru r12, d
 ; O0-NEXT:    stidx64 r0, r12, 0
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   store atomic i64 %x, ptr @d seq_cst, align 8
   ret void
 }
@@ -182,15 +164,13 @@ define void @store_i64_seq_cst(i64 %x) nounwind {
 define i64 @load_i8_sext(ptr %p) nounwind {
 ; CHECK-LABEL: load_i8_sext:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    ldidx8s r12, r0, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: load_i8_sext:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    ldidx8s r12, r0, 0
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   %v = load atomic i8, ptr %p seq_cst, align 1
   %e = sext i8 %v to i64
   ret i64 %e
@@ -199,15 +179,13 @@ define i64 @load_i8_sext(ptr %p) nounwind {
 define i64 @load_i8_zext(ptr %p) nounwind {
 ; CHECK-LABEL: load_i8_zext:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    ldidx8 r12, r0, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: load_i8_zext:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    ldidx8 r12, r0, 0
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   %v = load atomic i8, ptr %p seq_cst, align 1
   %e = zext i8 %v to i64
   ret i64 %e
@@ -216,15 +194,13 @@ define i64 @load_i8_zext(ptr %p) nounwind {
 define i64 @load_i16_sext(ptr %p) nounwind {
 ; CHECK-LABEL: load_i16_sext:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    ldidx16s r12, r0, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: load_i16_sext:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    ldidx16s r12, r0, 0
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   %v = load atomic i16, ptr %p seq_cst, align 2
   %e = sext i16 %v to i64
   ret i64 %e
@@ -233,15 +209,13 @@ define i64 @load_i16_sext(ptr %p) nounwind {
 define i64 @load_i16_zext(ptr %p) nounwind {
 ; CHECK-LABEL: load_i16_zext:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    ldidx16 r12, r0, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: load_i16_zext:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    ldidx16 r12, r0, 0
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   %v = load atomic i16, ptr %p seq_cst, align 2
   %e = zext i16 %v to i64
   ret i64 %e
@@ -250,15 +224,13 @@ define i64 @load_i16_zext(ptr %p) nounwind {
 define i64 @load_i32_sext(ptr %p) nounwind {
 ; CHECK-LABEL: load_i32_sext:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    ldidx32s r12, r0, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: load_i32_sext:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    ldidx32s r12, r0, 0
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   %v = load atomic i32, ptr %p seq_cst, align 4
   %e = sext i32 %v to i64
   ret i64 %e
@@ -267,15 +239,13 @@ define i64 @load_i32_sext(ptr %p) nounwind {
 define i64 @load_i32_zext(ptr %p) nounwind {
 ; CHECK-LABEL: load_i32_zext:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    ldidx32 r12, r0, 0
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: load_i32_zext:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    ldidx32 r12, r0, 0
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   %v = load atomic i32, ptr %p seq_cst, align 4
   %e = zext i32 %v to i64
   ret i64 %e
@@ -285,15 +255,13 @@ define i64 @load_i32_zext(ptr %p) nounwind {
 define i32 @load_i32_offset(ptr %p) nounwind {
 ; CHECK-LABEL: load_i32_offset:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    ldidx32 r12, r0, 40
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: load_i32_offset:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    ldidx32 r12, r0, 40
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   %a = getelementptr inbounds i32, ptr %p, i64 10
   %v = load atomic i32, ptr %a acquire, align 4
   ret i32 %v
@@ -302,16 +270,14 @@ define i32 @load_i32_offset(ptr %p) nounwind {
 define void @store_i16_offset(ptr %p, i16 %x) nounwind {
 ; CHECK-LABEL: store_i16_offset:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    stidx16 r1, r0, -6
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: store_i16_offset:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    # kill: def $r12 killed $r1
 ; O0-NEXT:    stidx16 r1, r0, -6
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   %a = getelementptr inbounds i16, ptr %p, i64 -3
   store atomic i16 %x, ptr %a release, align 2
   ret void
@@ -321,15 +287,13 @@ define void @store_i16_offset(ptr %p, i16 %x) nounwind {
 define i64 @load_i64_index(ptr %p, i64 %i) nounwind {
 ; CHECK-LABEL: load_i64_index:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    ldidx64r r12, r0, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: load_i64_index:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    ldidx64r r12, r0, r1
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   %a = getelementptr inbounds i8, ptr %p, i64 %i
   %v = load atomic i64, ptr %a seq_cst, align 8
   ret i64 %v
@@ -338,15 +302,13 @@ define i64 @load_i64_index(ptr %p, i64 %i) nounwind {
 define i64 @load_i8_index_sext(ptr %p, i64 %i) nounwind {
 ; CHECK-LABEL: load_i8_index_sext:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    ldidx8sr r12, r0, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: load_i8_index_sext:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    ldidx8sr r12, r0, r1
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   %a = getelementptr inbounds i8, ptr %p, i64 %i
   %v = load atomic i8, ptr %a seq_cst, align 1
   %e = sext i8 %v to i64
@@ -356,16 +318,14 @@ define i64 @load_i8_index_sext(ptr %p, i64 %i) nounwind {
 define void @store_i32_index(ptr %p, i64 %i, i32 %x) nounwind {
 ; CHECK-LABEL: store_i32_index:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    stidx32r r2, r0, r1
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: store_i32_index:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    # kill: def $r12 killed $r2
 ; O0-NEXT:    stidx32r r2, r0, r1
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   %a = getelementptr inbounds i8, ptr %p, i64 %i
   store atomic i32 %x, ptr %a seq_cst, align 4
   ret void
@@ -422,23 +382,21 @@ define void @store_i8_frame(i8 %x) nounwind {
 define i64 @order(ptr %p, ptr %q) nounwind {
 ; CHECK-LABEL: order:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r12, 1
 ; CHECK-NEXT:    setr r14, 2
 ; CHECK-NEXT:    stidx64 r12, r0, 0
 ; CHECK-NEXT:    stidx64 r14, r1, 0
 ; CHECK-NEXT:    ldidx64 r12, r0, 8
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    ret
 ;
 ; O0-LABEL: order:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 0
 ; O0-NEXT:    setr r12, 1
 ; O0-NEXT:    stidx64 r12, r0, 0
 ; O0-NEXT:    setr r12, 2
 ; O0-NEXT:    stidx64 r12, r1, 0
 ; O0-NEXT:    ldidx64 r12, r0, 8
-; O0-NEXT:    leaveret
+; O0-NEXT:    ret
   store i64 1, ptr %p
   store atomic i64 2, ptr %q release, align 8
   %a = getelementptr inbounds i64, ptr %p, i64 1
