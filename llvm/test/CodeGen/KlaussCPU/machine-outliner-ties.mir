@@ -1,0 +1,156 @@
+# RUN: llc -mtriple=klausscpu -run-pass=machine-outliner -verify-machineinstrs \
+# RUN:   %s -o - | FileCheck %s
+#
+# Two repeated sequences that overlap (A B and B C, both in p3) with the same
+# priority: the outliner takes the one that occurs first in the module and
+# the other loses its p3 occurrence.  Without this tie-break the choice
+# followed the suffix tree's DenseMap order of the instruction numbers, so -g
+# (whose DBG_VALUEs split runs of illegal instructions and so renumber them)
+# could change what is outlined (MachineOutliner.cpp, outline()).  The GETSP
+# (never outlined) in front of each RET keeps both sequences plain calls.
+#
+# Group 1: A B occurs first.
+# CHECK-LABEL: name: t1_p3
+# CHECK:       CALL_I @[[AB1:OUTLINED_FUNCTION_[0-9]+]],
+# CHECK-NEXT:  $r14 = XORV $r3, 3000
+# CHECK-LABEL: name: t1_q1
+# CHECK:       CALL_I @[[BC1:OUTLINED_FUNCTION_[0-9]+]],
+#
+# Group 2: B C occurs first.
+# CHECK-LABEL: name: t2_p3
+# CHECK:       $r12 = XORV $r1, 1007
+# CHECK-NEXT:  CALL_I @[[BC2:OUTLINED_FUNCTION_[0-9]+]],
+# CHECK-LABEL: name: t2_p1
+# CHECK:       CALL_I @[[AB2:OUTLINED_FUNCTION_[0-9]+]],
+#
+# CHECK:       name: [[AB1]]{{$}}
+# CHECK:       $r12 = XORV $r1, 1000
+# CHECK-NEXT:  $r13 = XORV $r2, 2000
+# CHECK-NEXT:  RET_I
+# CHECK:       name: [[BC1]]{{$}}
+# CHECK:       $r13 = XORV $r2, 2000
+# CHECK-NEXT:  $r14 = XORV $r3, 3000
+# CHECK-NEXT:  RET_I
+# CHECK:       name: [[BC2]]{{$}}
+# CHECK:       $r13 = XORV $r2, 2007
+# CHECK-NEXT:  $r14 = XORV $r3, 3007
+# CHECK-NEXT:  RET_I
+# CHECK:       name: [[AB2]]{{$}}
+# CHECK:       $r12 = XORV $r1, 1007
+# CHECK-NEXT:  $r13 = XORV $r2, 2007
+# CHECK-NEXT:  RET_I
+
+--- |
+  define void @t1_p1() minsize nounwind { ret void }
+  define void @t1_p2() minsize nounwind { ret void }
+  define void @t1_p3() minsize nounwind { ret void }
+  define void @t1_q1() minsize nounwind { ret void }
+  define void @t1_q2() minsize nounwind { ret void }
+  define void @t2_q1() minsize nounwind { ret void }
+  define void @t2_q2() minsize nounwind { ret void }
+  define void @t2_p3() minsize nounwind { ret void }
+  define void @t2_p1() minsize nounwind { ret void }
+  define void @t2_p2() minsize nounwind { ret void }
+...
+---
+name: t1_p1
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r1, $r2, $r3
+    $r12 = XORV $r1, 1000
+    $r13 = XORV $r2, 2000
+    $r11 = GETSP_R implicit $sp
+    RET_I implicit $r11
+---
+name: t1_p2
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r1, $r2, $r3
+    $r12 = XORV $r1, 1000
+    $r13 = XORV $r2, 2000
+    $r11 = GETSP_R implicit $sp
+    RET_I implicit $r11
+---
+name: t1_p3
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r1, $r2, $r3
+    $r12 = XORV $r1, 1000
+    $r13 = XORV $r2, 2000
+    $r14 = XORV $r3, 3000
+    $r11 = GETSP_R implicit $sp
+    RET_I implicit $r11
+---
+name: t1_q1
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r1, $r2, $r3
+    $r13 = XORV $r2, 2000
+    $r14 = XORV $r3, 3000
+    $r11 = GETSP_R implicit $sp
+    RET_I implicit $r11
+---
+name: t1_q2
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r1, $r2, $r3
+    $r13 = XORV $r2, 2000
+    $r14 = XORV $r3, 3000
+    $r11 = GETSP_R implicit $sp
+    RET_I implicit $r11
+---
+name: t2_q1
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r1, $r2, $r3
+    $r13 = XORV $r2, 2007
+    $r14 = XORV $r3, 3007
+    $r11 = GETSP_R implicit $sp
+    RET_I implicit $r11
+---
+name: t2_q2
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r1, $r2, $r3
+    $r13 = XORV $r2, 2007
+    $r14 = XORV $r3, 3007
+    $r11 = GETSP_R implicit $sp
+    RET_I implicit $r11
+---
+name: t2_p3
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r1, $r2, $r3
+    $r12 = XORV $r1, 1007
+    $r13 = XORV $r2, 2007
+    $r14 = XORV $r3, 3007
+    $r11 = GETSP_R implicit $sp
+    RET_I implicit $r11
+---
+name: t2_p1
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r1, $r2, $r3
+    $r12 = XORV $r1, 1007
+    $r13 = XORV $r2, 2007
+    $r11 = GETSP_R implicit $sp
+    RET_I implicit $r11
+---
+name: t2_p2
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $r1, $r2, $r3
+    $r12 = XORV $r1, 1007
+    $r13 = XORV $r2, 2007
+    $r11 = GETSP_R implicit $sp
+    RET_I implicit $r11

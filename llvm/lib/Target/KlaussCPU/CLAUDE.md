@@ -505,15 +505,23 @@ when clobbered.
   frame accesses are.  CALL and RET write no flag, so FLAGS may be live into
   or out of a sequence (the call carries the uses/defs; its own FLAGS clobber
   is dropped).  Not outlined: CFI instructions and the prologue's FrameSetup
-  spills that -g follows with CFI (so -g and -g0 outline alike,
-  `DebugInfo/KlaussCPU/outliner-cfi.ll`), inline asm, IRET, jump-table and
+  spills that -g follows with CFI, inline asm, IRET, jump-table and
   block operands; nothing from naked functions, functions that call
   `returns_twice` ones, or ones with an explicit section.  CFI: a called or
   Thunk OUT runs with the CIE's CFA = SP + 8; an outlined epilogue runs in
   the frame of the function it came from, so it gets `CFA = R15 + 16`, R15
   at CFA-16 and the slots of the callee-saved registers it restores, and
   only candidates that restore the same registers from the same slots share
-  one (`machine-outliner.ll`, `.mir`).  A backtrace from an outlined epilogue
+  one (`machine-outliner.ll`, `.mir`).  -g and -g0 give the same code: CFI
+  and FrameSetup instructions split candidates either way, and the generic
+  outliner (`MachineOutliner.cpp`, `outline()`, a change in this fork) breaks
+  ties between equally profitable candidates by the position of the first
+  occurrence, then length, instead of the suffix tree's DenseMap order of
+  the instruction numbers, which DBG_VALUEs shift by splitting runs of
+  illegal instructions (`machine-outliner-ties.mir`, `outliner-cfi.ll`; the
+  runtime's `validate.sh g-invariance` compares Csmith programs' `.text`
+  with -g and -g0).  An outlined call pushes 8 bytes, also from a frameless
+  leaf, so -Oz code can need 8 bytes more stack per call depth.  A backtrace from an outlined epilogue
   skips the function it came from, as after a tail call.  The cost model is
   `getInstSizeInBytes` (the emitted size, short forms included).  Measured
   ('size-opts' step): -Oz bare-metal corpus `.text` -2.7% (picolibc and the

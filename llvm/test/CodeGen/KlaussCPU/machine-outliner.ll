@@ -181,19 +181,19 @@ define i64 @epi3(i64 %a, i64 %b) minsize {
 ; CHECK-LABEL: thunk1:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    callrel OUTLINED_FUNCTION_3
+; CHECK-NEXT:    callrel OUTLINED_FUNCTION_2
 ; CHECK-NEXT:    tail OUTLINED_FUNCTION_7
 ;
 ; CHECK-LABEL: thunk2:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    callrel OUTLINED_FUNCTION_3
-; CHECK-NEXT:    tail OUTLINED_FUNCTION_9
+; CHECK-NEXT:    callrel OUTLINED_FUNCTION_2
+; CHECK-NEXT:    tail OUTLINED_FUNCTION_8
 ;
 ; CHECK-LABEL: thunk3:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    callrel OUTLINED_FUNCTION_3
+; CHECK-NEXT:    callrel OUTLINED_FUNCTION_2
 ; CHECK-NEXT:    addi r12, r12, 3
 ; CHECK-NEXT:    leaveret
 ;
@@ -216,7 +216,7 @@ define i64 @epi3(i64 %a, i64 %b) minsize {
 ; CHECK-NEXT:    enter 1
 ; CHECK-NEXT:    getsp r12
 ; CHECK-NEXT:    callrel OUTLINED_FUNCTION_1
-; CHECK-NEXT:    tail OUTLINED_FUNCTION_9
+; CHECK-NEXT:    tail OUTLINED_FUNCTION_8
 ;
 ; CHECK-LABEL: leaf4:
 ; CHECK:       # %bb.0:
@@ -242,7 +242,7 @@ define i64 @epi3(i64 %a, i64 %b) minsize {
 ; CHECK-NEXT:    copy r1, r2
 ; CHECK-NEXT:    callrel OUTLINED_FUNCTION_6
 ; CHECK-NEXT:    callrel g
-; CHECK-NEXT:    tail OUTLINED_FUNCTION_9
+; CHECK-NEXT:    tail OUTLINED_FUNCTION_8
 ;
 ; CHECK-LABEL: mid3:
 ; CHECK:       # %bb.0:
@@ -271,9 +271,8 @@ define i64 @epi3(i64 %a, i64 %b) minsize {
 ; CHECK-NEXT:    callrel h
 ; CHECK-NEXT:    callrel OUTLINED_FUNCTION_4
 ; CHECK-NEXT:    copy r0, r5
-; CHECK-NEXT:    copy r1, r12
-; CHECK-NEXT:    callrel OUTLINED_FUNCTION_8
-; CHECK-NEXT:    tail OUTLINED_FUNCTION_2
+; CHECK-NEXT:    callrel OUTLINED_FUNCTION_9
+; CHECK-NEXT:    tail OUTLINED_FUNCTION_3
 ;
 ; CHECK-LABEL: epi2:
 ; CHECK:       # %bb.0:
@@ -290,8 +289,9 @@ define i64 @epi3(i64 %a, i64 %b) minsize {
 ; CHECK-NEXT:    callrel OUTLINED_FUNCTION_4
 ; CHECK-NEXT:    copy r0, r12
 ; CHECK-NEXT:    copy r1, r5
-; CHECK-NEXT:    callrel OUTLINED_FUNCTION_8
-; CHECK-NEXT:    tail OUTLINED_FUNCTION_2
+; CHECK-NEXT:    copy r4, r12
+; CHECK-NEXT:    callrel g
+; CHECK-NEXT:    tail OUTLINED_FUNCTION_3
 ;
 ; CHECK-LABEL: epi3:
 ; CHECK:       # %bb.0:
@@ -307,9 +307,8 @@ define i64 @epi3(i64 %a, i64 %b) minsize {
 ; CHECK-NEXT:    callrel h
 ; CHECK-NEXT:    callrel OUTLINED_FUNCTION_4
 ; CHECK-NEXT:    copy r0, r12
-; CHECK-NEXT:    copy r1, r12
-; CHECK-NEXT:    callrel OUTLINED_FUNCTION_8
-; CHECK-NEXT:    tail OUTLINED_FUNCTION_2
+; CHECK-NEXT:    callrel OUTLINED_FUNCTION_9
+; CHECK-NEXT:    tail OUTLINED_FUNCTION_3
 ;
 ; CHECK-LABEL: OUTLINED_FUNCTION_0:
 ; CHECK:       # %bb.0:
@@ -331,6 +330,13 @@ define i64 @epi3(i64 %a, i64 %b) minsize {
 ;
 ; CHECK-LABEL: OUTLINED_FUNCTION_2:
 ; CHECK:       # %bb.0:
+; CHECK-NEXT:    ldidx64 r12, r0, 0
+; CHECK-NEXT:    setr r1, 77
+; CHECK-NEXT:    mulv r0, r12, 1000
+; CHECK-NEXT:    tail g
+;
+; CHECK-LABEL: OUTLINED_FUNCTION_3:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    .cfi_def_cfa r15, 16
 ; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    .cfi_offset r4, -24
@@ -340,13 +346,6 @@ define i64 @epi3(i64 %a, i64 %b) minsize {
 ; CHECK-NEXT:    mulr r12, r12, r4
 ; CHECK-NEXT:    ldidx64 r4, r15, -8
 ; CHECK-NEXT:    leaveret
-;
-; CHECK-LABEL: OUTLINED_FUNCTION_3:
-; CHECK:       # %bb.0:
-; CHECK-NEXT:    ldidx64 r12, r0, 0
-; CHECK-NEXT:    setr r1, 77
-; CHECK-NEXT:    mulv r0, r12, 1000
-; CHECK-NEXT:    tail g
 ;
 ; CHECK-LABEL: OUTLINED_FUNCTION_4:
 ; CHECK:       # %bb.0:
@@ -376,13 +375,14 @@ define i64 @epi3(i64 %a, i64 %b) minsize {
 ;
 ; CHECK-LABEL: OUTLINED_FUNCTION_8:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    copy r4, r12
-; CHECK-NEXT:    tail g
+; CHECK-NEXT:    addi r12, r12, 2
+; CHECK-NEXT:    leaveret
 ;
 ; CHECK-LABEL: OUTLINED_FUNCTION_9:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    addi r12, r12, 2
-; CHECK-NEXT:    leaveret
+; CHECK-NEXT:    copy r1, r12
+; CHECK-NEXT:    copy r4, r12
+; CHECK-NEXT:    tail g
 ;
 ; NEVER-LABEL: leaf1:
 ; NEVER:       # %bb.0:

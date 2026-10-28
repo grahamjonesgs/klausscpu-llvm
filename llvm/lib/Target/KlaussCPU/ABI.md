@@ -128,9 +128,13 @@ compiler builds frames, which the unwinders depend on.
   caller's R15 and `[R15 + 8]` the return address.  The R15 chain seen from
   any call site is therefore complete (`__builtin_frame_address(N)` walks
   it).  The exception is the MachineOutliner (-Oz, or `-moutline`): its
-  `OUTLINED_FUNCTION_<n>` have no frame and use no stack (CFA = SP+8, the
-  return address at `[SP]`), and a frameless function may call one; seen
-  from inside such a function the R15 chain skips the frameless caller.  An
+  `OUTLINED_FUNCTION_<n>` have no frame and use no stack beyond the 8-byte
+  return address their CALL pushes (CFA = SP+8, the return address at
+  `[SP]`), and a frameless function may call one; seen from inside such a
+  function the R15 chain skips the frameless caller.  So the worst-case
+  stack depth of -Oz code is 8 bytes deeper wherever an outlined function
+  is called (a frameless leaf that now calls one: size thread stacks with
+  that in mind).  An
   outlined epilogue (it ends in `LEAVERET`) is jumped to, and runs in the
   frame of the function it came from (its CFI says so): it returns to that
   function's caller, as a tail call does.  None of this is visible to code

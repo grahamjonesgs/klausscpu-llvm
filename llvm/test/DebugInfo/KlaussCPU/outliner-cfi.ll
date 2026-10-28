@@ -8,7 +8,10 @@
 ; RUN: llvm-dwarfdump --debug-frame %t/g/x.o | FileCheck %s --check-prefix=FRAME
 ;
 ; The MachineOutliner (minsize) with debug info: -g changes no code (CFI
-; instructions and the FrameSetup spills they follow are never outlined),
+; instructions and the FrameSetup spills they follow are never outlined, and
+; ties between candidates do not depend on the DBG_VALUEs: see
+; CodeGen/KlaussCPU/machine-outliner-ties.mir; the runtime's validate.sh
+; g-invariance checks Csmith programs),
 ; and an outlined epilogue, which restores R4 and R5 and returns with
 ; LEAVERET from inside the frame of e1/e2/e3, has CFI that describes that
 ; frame, so a backtrace from it is right.  The other outlined functions

@@ -33,15 +33,15 @@
 # CHECK-NEXT:  STIDX64 renamable $r2, renamable $r0, 8
 # CHECK-NEXT:  CALL_I @[[AFTERCFI]],
 #
-# CHECK:       name: [[IN]]{{$}}
-# CHECK:       renamable $r14 = SETFR killed renamable $r14, implicit $flags
-# CHECK-NEXT:  renamable $r12 = XORV renamable $r14, 222
-# CHECK-COUNT-3: STIDX64
-# CHECK-NEXT:  RET_I
-#
 # CHECK:       name: [[OUT]]{{$}}
 # CHECK:       renamable $r14 = ADDR killed renamable $r1, killed renamable $r2, implicit-def $flags
 # CHECK-NEXT:  renamable $r12 = XORV renamable $r14, 111
+# CHECK-COUNT-3: STIDX64
+# CHECK-NEXT:  RET_I
+#
+# CHECK:       name: [[IN]]{{$}}
+# CHECK:       renamable $r14 = SETFR killed renamable $r14, implicit $flags
+# CHECK-NEXT:  renamable $r12 = XORV renamable $r14, 222
 # CHECK-COUNT-3: STIDX64
 # CHECK-NEXT:  RET_I
 #
@@ -176,8 +176,8 @@ body: |
     STIDX64 renamable $r12, renamable $r0, 0
     renamable $r13 = GETSP_R implicit $sp
     STIDX64 renamable $r12, renamable $r13, 0
-    STIDX64 renamable $r2, renamable $r0, 8
-    STIDX64 renamable $r12, renamable $r0, 16
+    STIDX64 renamable $r2, renamable $r0, 40
+    STIDX64 renamable $r12, renamable $r0, 48
     $r12 = ADDV killed $r12, 31, implicit-def dead $flags
     RET_I implicit killed $r12
 ---
@@ -190,8 +190,8 @@ body: |
     STIDX64 renamable $r12, renamable $r0, 0
     renamable $r13 = GETSP_R implicit $sp
     STIDX64 renamable $r12, renamable $r13, 0
-    STIDX64 renamable $r2, renamable $r0, 8
-    STIDX64 renamable $r12, renamable $r0, 16
+    STIDX64 renamable $r2, renamable $r0, 40
+    STIDX64 renamable $r12, renamable $r0, 48
     $r12 = ADDV killed $r12, 32, implicit-def dead $flags
     RET_I implicit killed $r12
 ---
@@ -204,8 +204,8 @@ body: |
     STIDX64 renamable $r12, renamable $r0, 0
     renamable $r13 = GETSP_R implicit $sp
     STIDX64 renamable $r12, renamable $r13, 0
-    STIDX64 renamable $r2, renamable $r0, 8
-    STIDX64 renamable $r12, renamable $r0, 16
+    STIDX64 renamable $r2, renamable $r0, 40
+    STIDX64 renamable $r12, renamable $r0, 48
     $r12 = ADDV killed $r12, 33, implicit-def dead $flags
     RET_I implicit killed $r12
 ---

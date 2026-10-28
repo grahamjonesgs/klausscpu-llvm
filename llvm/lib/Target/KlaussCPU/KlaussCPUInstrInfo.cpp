@@ -477,10 +477,10 @@ unsigned KlaussCPUInstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
 // slots; every candidate must restore the same registers from the same
 // slots (the others are already restored).  Such a function returns to the
 // caller of the one it came from, which leaves the backtrace as a tail
-// call does.  In a Thunk, OUTLINED's CALL pushed the same return address that the call it
-// replaces would have, so f is entered with SP and [SP] as before: its
-// stack arguments (stored before the sequence through a GETSP outside it)
-// and a variadic call's home area are where it looks.
+// call does.  In a Thunk, OUTLINED's CALL pushed the same return address
+// that the call it replaces would have, so f is entered with SP and [SP] as
+// before: its stack arguments (stored before the sequence through a GETSP
+// outside it) and a variadic call's home area are where it looks.
 //
 // FLAGS: CALL and RET write no flag (pipeline_core.sv: no fmask for U_CALL /
 // U_RET; nor does the emulator), so a sequence may read flags set before it
@@ -488,7 +488,10 @@ unsigned KlaussCPUInstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
 // branch's compare).  The outliner adds the uses and defs to the call.
 //
 // CFI instructions are never outlined, nor are the prologue's FrameSetup
-// instructions they follow, so -g changes nothing that is outlined.
+// instructions they follow, so -g changes nothing that may be outlined.
+// (The generic outliner breaks ties between candidates by position, not by
+// the instruction numbers that -g's DBG_VALUEs shift, so -g does not change
+// what is outlined either.)
 
 enum MachineOutlinerConstructionID {
   MachineOutlinerDefault,

@@ -1054,10 +1054,24 @@ bool MachineOutliner::outline(
 
   // Sort by priority where priority := getNotOutlinedCost / getOutliningCost.
   // The function with highest priority should be outlined first.
+  //
+  // FunctionList is in suffix-tree order, which follows the DenseMap order of
+  // the instruction numbers, and debug instructions (which are invisible to
+  // the mapping but split runs of illegal instructions) change the illegal
+  // numbers.  Break ties by the position of the first occurrence, then by
+  // length, which debug instructions do not change, so that -g does not
+  // change which sequences are outlined.
   stable_sort(FunctionList, [](const std::unique_ptr<OutlinedFunction> &LHS,
                                const std::unique_ptr<OutlinedFunction> &RHS) {
-    return LHS->getNotOutlinedCost() * RHS->getOutliningCost() >
-           RHS->getNotOutlinedCost() * LHS->getOutliningCost();
+    unsigned L = LHS->getNotOutlinedCost() * RHS->getOutliningCost();
+    unsigned R = RHS->getNotOutlinedCost() * LHS->getOutliningCost();
+    if (L != R)
+      return L > R;
+    const Candidate &LC = LHS->Candidates.front();
+    const Candidate &RC = RHS->Candidates.front();
+    if (LC.getStartIdx() != RC.getStartIdx())
+      return LC.getStartIdx() < RC.getStartIdx();
+    return LC.getLength() > RC.getLength();
   });
 
   // Walk over each function, outlining them as we go along. Functions are
