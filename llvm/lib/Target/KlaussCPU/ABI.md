@@ -160,8 +160,18 @@ compiler builds frames, which the unwinders depend on.
 - Unwinding: the CFI (`.debug_frame` with `-g`) describes every instruction
   (CFA = SP+8 in a frameless stretch, R15+16 in a frame), and lldb uses it.
   Without CFI, lldb's fallback plan (the ABI plugin) follows the R15 chain,
-  which is right for every frame above frame 0; a frame 0 without a frame is
-  then shown as its caller's frame (the caller itself is skipped).  A
+  which is right for every frame that made a call; a frame 0 without a frame
+  is then shown as its caller's frame (the caller itself is skipped).  A frame
+  entered by an interrupt rather than a call breaks that rule: the hardware
+  pushes one IRET word and saves nothing anywhere else, and the handler pushes
+  as many registers as its own code does, so no fixed rule finds the
+  interrupted PC or SP.  An interrupt handler needs CFI to be unwound through
+  (the Zephyr and FreeRTOS ones have it: `.cfi_signal_frame`, every saved
+  register described).  The function it interrupted is then unwound with its
+  own CFI, which covers every instruction; without CFI, that function is
+  unwound with the R15 chain too, so if it had no frame at the interrupted
+  instruction (a leaf, or outside a shrink-wrapped frame) it is shown and its
+  caller is skipped, as for a frame 0 without a frame.  A
   function left by a tail call is not on the stack (with `-g`, the
   `DW_AT_call_tail_call` call sites let lldb show it as an artificial frame).
 - Crash dumps (hardware `CRASH_DUMP.md`: the registers and `S0`–`S3`, the
