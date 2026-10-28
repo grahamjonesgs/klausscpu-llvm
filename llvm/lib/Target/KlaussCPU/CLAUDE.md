@@ -23,7 +23,7 @@ the consumers and the measurements behind the design.
 | Memory bus / register file | little-endian |
 | DataLayout | `e-m:e-p:64:64-i64:64-i128:128-n32:64` (only in `TargetDataLayout.cpp`; `rust-target-spec.test` checks the Rust spec's copy) |
 | C type model | `int`=32; `long`/`long long`/`void*`=64 |
-| Hardware FP | none — soft-float (compiler-rt builtins) |
+| Hardware FP | none — soft-float (compiler-rt builtins); `fabs`/`fneg`/`copysign` are bit operations on the integer representation (`BCLR`/`ANDV`, `BTGL`/`XORI`, a masked OR), never libcalls (`fp-sign-ops.ll`) |
 | CMOV | none — `select` becomes a `SELECT_CC_RR/RI` pseudo, expanded to compare + branch; a run of selects on the same condition shares one compare/branch (one PHI each) |
 | Atomics | no instructions — "forced atomics" (as RISC-V `+forced-atomics`), **atomic within one core only**: an aligned atomic load/store of 1/2/4/8 bytes is the plain access (patterns), a fence a compiler barrier, every RMW / cmpxchg a `__sync_*_N` libcall (LibCall actions) that the runtime's `src/atomic.c` runs with `INT_MASK` saved/zeroed/restored; FP / `uinc_wrap` / `udec_wrap` / `usub_*` RMWs are cmpxchg loops (`shouldExpandAtomicRMWInIR`); wider or misaligned atomics are `__atomic_*` libcalls (not provided).  The type legaliser promotes a 1/2/4-byte RMW to i64 first, so those libcall values go in any-extended and come back zero-extended (not the C ABI's sign-extended i32; `atomic.c` takes and returns `uint64_t`).  Clang inlines atomics up to 64 bits (`MaxAtomicInlineWidth`).  Nothing makes them atomic against core 2 (AMP), whose DDR view also bypasses core 1's D-cache |
 | Sign-extending loads | i8/i16/i32: hardware (`LDIDX8_S`/`LDIDX16_S`/`LDIDX32_S`) |
