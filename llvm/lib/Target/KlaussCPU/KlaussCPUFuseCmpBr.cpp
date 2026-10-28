@@ -62,7 +62,8 @@
 //    ID, where neither has started). The emulator has no pipeline, so only
 //    the board shows this;
 //  * the target is in simm13 word range (+-16 KB) at worst case: every
-//    instruction at its long (.td) size, every aligned block after its
+//    instruction at its long (.td) size (a tail call's PseudoTAIL as the
+//    2-word TAILREL, PseudoTAILIndirect as JMPR), every aligned block after its
 //    maximum padding. Compression and fusion only shrink code, so the PCREL13
 //    fixup always resolves at assembly time (no relaxation needed). An inline
 //    asm statement has no bounded size (directives, macros) unless it is

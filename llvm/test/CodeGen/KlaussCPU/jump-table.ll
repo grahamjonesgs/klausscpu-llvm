@@ -13,7 +13,8 @@
 ; a compare tree on the board.
 ;
 ; Each EK_Custom32 entry is the ABSOLUTE 32-bit block address, in PIC mode
-; too (R_KLAUSSCPU_ABS32; lld links statically).  The generic BR_JT
+; too (R_KLAUSSCPU_ABS32: the image is linked at its run address or its
+; loader applies the relocation, as for its data pointers).  The generic BR_JT
 ; expansion treats PIC tables as relative and would add the table base to
 ; the loaded entry, jumping to table+target.  LowerBR_JT loads the entry
 ; (zero-extended, one register-offset LDIDX32R off the 4-byte aligned table)

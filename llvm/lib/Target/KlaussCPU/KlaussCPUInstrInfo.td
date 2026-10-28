@@ -1912,10 +1912,14 @@ def : Pat<(KlaussCPUCallNode (i64 GPR:$func)),
 // to the caller's caller.  The AsmPrinter emits PseudoTAIL as TAILREL (which
 // becomes the 1-word TAIL_SH, as a call becomes CALL_SH) and
 // PseudoTAILIndirect as JMPR.  An indirect callee is in a GPRTC
-// register: the epilogue reloads R4-R7, so it cannot be one of them.
+// register: the epilogue reloads R4-R7, so it cannot be one of them.  Size is
+// the emitted worst case, which FuseCmpBr's range check reads: the 2-word
+// TAILREL (a short tail jump the assembler relaxes) and the 1-word JMPR.
 let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1,
     isCodeGenOnly = 1, Uses = [SP] in {
+let Size = 8 in
 def PseudoTAIL : Pseudo<(outs), (ins CallTarget32:$dst), []>;
+let Size = 4 in
 def PseudoTAILIndirect : Pseudo<(outs), (ins GPRTC:$rs), []>;
 }
 foreach func = [tglobaladdr, texternalsym] in

@@ -422,11 +422,12 @@ unsigned KlaussCPUInstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
     return getInlineAsmLength(MI.getOperand(0).getSymbolName(),
                               *MF.getTarget().getMCAsmInfo());
   }
-  // TAILREL / JMPR (KlaussCPUAsmPrinter::emitInstruction).
+  // TAILREL (KlaussCPUAsmPrinter::emitInstruction; the .td Size is the
+  // 2-word worst case), compressed like a call below.
   case KlaussCPU::PseudoTAIL:
-    return FB[KlaussCPU::FeatureShortCalls] ? 4 : 8;
-  case KlaussCPU::PseudoTAILIndirect:
-    return 4;
+    if (FB[KlaussCPU::FeatureShortCalls])
+      return 4;
+    break;
   // A call to a symbol is the short CALL (CALL_SH), relaxed or thunked by
   // the assembler / lld when out of reach.  isCompressibleInst only knows
   // a literal target.

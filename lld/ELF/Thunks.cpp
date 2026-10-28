@@ -1592,13 +1592,24 @@ void KlaussCPUThunk::writeTo(uint8_t *buf) {
 }
 
 void KlaussCPUThunk::addSymbols(ThunkSection &isec) {
-  // A static callee in another section is called through its section symbol,
-  // which has no name: name the thunk after the section and the offset.
+  // Thunks are made per (symbol, addend), so each gets its own name: a named
+  // callee's, plus a nonzero addend.  A static callee in another section is
+  // called through its section symbol, which has no name: the thunk is named
+  // after the section and the offset.  A call to an absolute address (an
+  // absolute symbol the assembler resolved) has no symbol at all, only the
+  // address in its addend: the thunk is named after the address.
   std::string name = destination.getName().str();
-  if (name.empty())
-    if (auto *d = dyn_cast<Defined>(&destination); d && d->section)
-      name = (d->section->name + "+0x" +
-              Twine::utohexstr(d->value + addend)).str();
+  if (name.empty()) {
+    auto *d = dyn_cast<Defined>(&destination);
+    if (d && d->section)
+      name = (d->section->name + "+0x" + Twine::utohexstr(d->value + addend))
+                 .str();
+    else
+      name = ("0x" + Twine::utohexstr(destination.getVA(ctx, addend))).str();
+  } else if (addend) {
+    name += (addend < 0 ? "-0x" : "+0x") +
+            utohexstr(addend < 0 ? -uint64_t(addend) : uint64_t(addend));
+  }
   addSymbol(ctx.saver.save("__KlaussCPUThunk_" + name), STT_FUNC, 0, isec);
 }
 

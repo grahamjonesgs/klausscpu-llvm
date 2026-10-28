@@ -1,0 +1,34 @@
+# FuseCmpBr's range check counts a tail call at its emitted worst case:
+# PseudoTAIL as the 2-word TAILREL (the short `tail` relaxes when out of
+# reach), PseudoTAILIndirect as the 1-word JMPR.  At size 0 a branch over
+# 4100 case blocks that are only a tail jump each (16400 bytes, beyond FBR's
+# +-16 KB) fused and failed to assemble: "fused branch target out of range".
+# Block placement and tail merging are off so that the cases stay in IR
+# order, between the branch and its target.
+
+# RUN: %python %S/Inputs/tail-call-switch.py 4100 direct > %t.d4100.ll
+# RUN: llc -mtriple=klausscpu -O2 -disable-block-placement -verify-machineinstrs \
+# RUN:   -filetype=obj %t.d4100.ll -o %t.d4100.o
+# RUN: llvm-objdump -d --no-show-raw-insn %t.d4100.o | FileCheck %s --check-prefix=FAR
+# RUN: %python %S/Inputs/tail-call-switch.py 4100 indirect > %t.i4100.ll
+# RUN: llc -mtriple=klausscpu -O2 -disable-block-placement -enable-tail-merge=false \
+# RUN:   -verify-machineinstrs -filetype=obj %t.i4100.ll -o %t.i4100.o
+# RUN: llvm-objdump -d --no-show-raw-insn %t.i4100.o | FileCheck %s --check-prefix=FAR
+
+# FAR:      <t>:
+# FAR-NEXT: cmprv r2, 0
+# FAR-NEXT: jmpltrel
+
+# Within range at the worst case (8 bytes per direct, 4 per indirect tail
+# call), the branch still fuses.
+# RUN: %python %S/Inputs/tail-call-switch.py 1900 direct > %t.d1900.ll
+# RUN: llc -mtriple=klausscpu -O2 -disable-block-placement -verify-machineinstrs \
+# RUN:   -filetype=obj %t.d1900.ll -o %t.d1900.o
+# RUN: llvm-objdump -d --no-show-raw-insn %t.d1900.o | FileCheck %s --check-prefix=NEAR
+# RUN: %python %S/Inputs/tail-call-switch.py 3900 indirect > %t.i3900.ll
+# RUN: llc -mtriple=klausscpu -O2 -disable-block-placement -enable-tail-merge=false \
+# RUN:   -verify-machineinstrs -filetype=obj %t.i3900.ll -o %t.i3900.o
+# RUN: llvm-objdump -d --no-show-raw-insn %t.i3900.o | FileCheck %s --check-prefix=NEAR
+
+# NEAR:      <t>:
+# NEAR-NEXT: fbri r2, 0, 1,

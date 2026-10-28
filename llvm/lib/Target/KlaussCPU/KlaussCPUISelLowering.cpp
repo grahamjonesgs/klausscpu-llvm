@@ -1012,7 +1012,12 @@ SDValue KlaussCPUTargetLowering::LowerJumpTable(SDValue Op,
 // linker fills them in regardless of which ELF section the table lands in.
 // Dispatch: load 4-byte entry (absolute address), zero-extend, BRIND.
 // The entry is used as-is (never added to the table base) — see
-// isJumpTableRelative().  Under -fPIC only the table base is PC-relative.
+// isJumpTableRelative().  Under -fPIC only the table base is PC-relative:
+// the entries, like a PIC image's data pointers (R_KLAUSSCPU_ABS64), need
+// the image linked at its run address or relocated by its loader (the
+// runtime's ELF loaders, Zephyr LLEXT).  Table-relative entries
+// (EK_LabelDifference32) would cost a dependent add in every dispatch, and
+// everything in the runtime is built -fPIC.
 SDValue KlaussCPUTargetLowering::LowerBR_JT(SDValue Op,
                                               SelectionDAG &DAG) const {
   SDValue Chain = Op.getOperand(0);
@@ -1486,10 +1491,15 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
 
   bool IsTailCall = CLI.IsTailCall &&
                     isEligibleForTailCallOptimization(CCInfo, CLI, MF);
+  // A musttail call that cannot be one is an error (a diagnostic, not a
+  // crash); the call is then lowered as an ordinary call so that compilation
+  // can finish reporting.
   if (CLI.IsTailCall && !IsTailCall && CLI.CB && CLI.CB->isMustTailCall())
-    reportFatalUsageError("KlaussCPU: failed to perform a musttail call (it "
-                          "needs stack, byval or sret arguments, or is "
-                          "variadic)");
+    DAG.getContext()->diagnose(DiagnosticInfoUnsupported(
+        MF.getFunction(),
+        "musttail call cannot be a tail call on KlaussCPU: it has stack, "
+        "byval or sret arguments, is variadic, or tail calls are disabled",
+        CLI.CB->getDebugLoc()));
   CLI.IsTailCall = IsTailCall;
 
   // ---- Make private copies of byval arguments ----------------------------

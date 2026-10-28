@@ -211,9 +211,11 @@ public:
                               uint64_t Range, ProfileSummaryInfo *PSI,
                               BlockFrequencyInfo *BFI) const override;
 
-  // EK_Custom32 entries are ABSOLUTE block addresses, in PIC mode too.  The
-  // default (== isPositionIndependent()) would make BR_JT add the table base
-  // to each entry under -fPIC, jumping to table+target.
+  // EK_Custom32 entries are ABSOLUTE block addresses, in PIC mode too (a PIC
+  // image's loader applies their R_KLAUSSCPU_ABS32, as it does for its data
+  // pointers; see LowerBR_JT).  The default (== isPositionIndependent())
+  // would make BR_JT add the table base to each entry under -fPIC, jumping
+  // to table+target.
   bool isJumpTableRelative() const override { return false; }
 
   // EK_Custom32: emit each entry as a 4-byte absolute target address.

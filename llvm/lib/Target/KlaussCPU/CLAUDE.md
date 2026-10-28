@@ -35,7 +35,7 @@ the consumers and the measurements behind the design.
 | Addresses | 32-bit, zero-extended in a register: `SETRU sym` (static), `LEAPC` (PIC); `sym+off` is folded only for `off` in [0, 2^31), other offsets are a separate add so a negative S + off stays negative; `R_KLAUSSCPU_ABS64` data is the exact 64-bit S + A (lld) |
 | Direct call | the 1-word short `CALL` (ISA v3 A1, LINK=1: PC + 4·simm18, ±512 KiB, pushes PC+4; written `callrel`; a tail call's jump likewise, `tail`) for every call to a symbol: resolved by the assembler for a local (static) callee in its own section (relaxed to the 2-word `CALLREL` if out of reach), else (a global or weak callee too, which the link may override) an `R_KLAUSSCPU_CALL18` relocation, for which lld calls an out-of-reach callee through a `jmprel` thunk.  Code a loader without thunks relocates (Zephyr LLEXT) is built with `-mllvm -klausscpu-short-calls=false` (2-word `CALL` / `CALLREL`) |
 | Indirect branch / call | `JMPR` / `CALLR` |
-| Switches | a compare tree, or a jump table from 12 cases (clusters) at 40% density (the board break-even): a 4-byte-aligned table of absolute 32-bit block addresses (`EK_Custom32`, `R_KLAUSSCPU_ABS32`, also under PIC: only the base is PC-relative, `LEAPC`), dispatched by `LDIDX32R` + `JMPR` (`LowerBR_JT`) |
+| Switches | a compare tree, or a jump table from 12 cases (clusters) at 40% density (the board break-even): a 4-byte-aligned table of absolute 32-bit block addresses (`EK_Custom32`, `R_KLAUSSCPU_ABS32`, also under PIC: only the base is PC-relative, `LEAPC`), dispatched by `LDIDX32R` + `JMPR` (`LowerBR_JT`).  So `-fPIC` gives position-independent code, not a position-independent image: like its pointer initialisers (`R_KLAUSSCPU_ABS64`), its jump tables need the image linked at its run address or a loader that applies the ABS32 relocations (the runtime's ELF loaders, which need `--emit-relocs`; Zephyr LLEXT); a flat binary (`objcopy -O binary`) runs only at its link address.  Table-relative entries (`EK_LabelDifference32`, an `R_KLAUSSCPU_PC32` each) would add a dependent add to every dispatch in every program (the whole runtime is built `-fPIC`) and serve no loader in use |
 | `llvm.trap` / `llvm.debugtrap` | both `TRAP`: an abnormal stop (crash dump; `stop = Trap` in the emulator; a debug halt with SIGTRAP under the debugger).  `HALT` is the clean stop the runtime ends a program with (exit status in R12) |
 | Shifts / rotates | 64-bit only; a register amount uses only rs2[5:0], so isel drops masks/extensions of it (`shamt`); an i32 rotate is a 64-bit rotate of the value copied into both halves (`ROLW`/`RORW`) |
 | Bit fields | `BEXTR` for `(x >> s) & (2^l - 1)` with s, l in [1, 31]; other fields and high/low masks beyond an imm32 as a shift pair (a mask stays SETR64 + ANDR in a loop, where MachineLICM hoists the SETR64, unless optsize) |
@@ -152,7 +152,9 @@ liveness:
   from the branch to the nearest FLAGS writer, so PHI copies, constants and
   spills between the pair do not stop it; it gives up at a FLAGS reader, a
   redefined compare operand, a call or inline asm.  Range is checked per
-  branch at worst-case sizes plus alignment padding; a non-empty inline asm
+  branch at worst-case sizes (the .td `Size`: the long encodings, a tail
+  call's `PseudoTAIL` as the 2-word `TAILREL`, `fuse-cmp-br-tail-size.test`)
+  plus alignment padding; a non-empty inline asm
   (unbounded size) blocks only the branches that span it.  At -O1 and up, a
   loop compare with a constant outside simm4 (in the header or the only
   latch) gets the constant in a register free throughout the loop, set by a
@@ -238,7 +240,10 @@ ABI version 2 (`KlaussCPUABI::ABIVersion`; RISC-V LP64, integer only):
   address at `[SP]` and returns to the caller's caller.  Not for a variadic
   callee (its home area belongs to a variadic call), stack, byval or sret
   arguments, or `"disable-tail-calls"`; a `musttail` call that cannot be one
-  is a fatal error.  Any calling convention qualifies (all are lowered as
+  is an error diagnostic at the call (`DiagnosticInfoUnsupported`; it is then
+  lowered as an ordinary call so that every such call is reported,
+  `tail-call-musttail.ll`, clang `klausscpu-musttail-error.c`).  Any calling
+  convention qualifies (all are lowered as
   `CC_KlaussCPU`, so the preserved-register masks match; GlobalOpt makes
   internal functions `fastcc`).  CodeGenPrepare does not duplicate a shared
   return block to put calls in tail position (`mayBeEmittedAsTailCall`,
@@ -828,6 +833,9 @@ classification, `ABI.md`; `va_arg`), `llvm/lib/Analysis/TargetLibraryInfo.cpp`
 `llvm/include/llvm/Analysis/TargetLibraryInfo.h`),
 `lld/ELF/Arch/KlaussCPU.cpp` (relocations; `R_KLAUSSCPU_CALL18` range and
 thunk decision; the ABI version check of `e_flags`) with the `jmprel` call thunk in `lld/ELF/Thunks.cpp`
+(one per symbol and addend, named `__KlaussCPUThunk_<symbol>[+addend]`,
+`_<section>+0x<offset>` for a section symbol, `_0x<address>` for an absolute
+target; `klausscpu-thunk-names.s`)
 and, for LTO, KlaussCPU bitcode read as an ELFCLASS32 `EM_KLAUSSCPU` file in `lld/ELF/InputFiles.cpp`
 (`lld/test/ELF/klausscpu-lto.ll`; the runtime's `make LTO=1`),
 `llvm/include/llvm/BinaryFormat/ELFRelocs/KlaussCPU.def`,
