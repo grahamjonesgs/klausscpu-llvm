@@ -3725,8 +3725,15 @@ VariableSP SymbolFileDWARF::ParseVariableDIE(const SymbolContext &sc,
               strm.GetData());
         }
       }
-      if (location_DW_OP_addr != LLDB_INVALID_ADDRESS)
+      if (location_DW_OP_addr != LLDB_INVALID_ADDRESS) {
+        // lld writes the -1 tombstone for the address of a variable whose
+        // section --gc-sections removed (for KlaussCPU, or with
+        // -z dead-reloc-in-nonalloc): it is not in the executable.
+        if (location_DW_OP_addr == llvm::dwarf::computeTombstoneAddress(
+                                       die.GetCU()->GetAddressByteSize()))
+          return nullptr;
         is_static_lifetime = true;
+      }
     }
     SymbolFileDWARFDebugMap *debug_map_symfile = GetDebugMapSymfile();
     if (debug_map_symfile)
