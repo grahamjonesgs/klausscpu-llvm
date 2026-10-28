@@ -415,7 +415,9 @@ a BTB.
   - `WriteALU` and `WriteFlags` latency 2 → 1;
   - `KlaussCPUEarlyIVInc` and the pre-RA compare/branch pairing lose their
     reason to exist;
-  - the open phase-4 mandel item disappears.
+  - the post-RA EX-hold hazard (1697618593b9), which already fixed the
+    phase-4 mandel slowdown in software (1840 -> 2059 kiter/s at
+    milestone 5), would cover only MUL/DIV holds.
 
 **6: FBR with a W compare and a wide immediate.**
 
