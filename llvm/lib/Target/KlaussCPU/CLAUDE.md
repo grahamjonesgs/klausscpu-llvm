@@ -376,7 +376,11 @@ when clobbered.
   `INCR` + `CMPRRW` + `JMPcc` (`w32-compare-branch.ll`).  An i32 is promoted
   by sign extension wherever either extension would do (unsigned compares;
   `isSExtCheaperThanZExt`, as RV64), since arguments arrive sign-extended
-  and the W ops produce sign-extended values.  A frame index, or a frame index plus a constant in
+  and the W ops produce sign-extended values.  This moves the 32-bit wrap
+  point of an unsigned `switch` as on RV64: a case range that crosses
+  0x7FFFFFFF/0x80000000 is no longer contiguous and becomes a compare tree
+  instead of a jump table, while one that crosses 0xFFFFFFFF/0 becomes
+  contiguous and gets a jump table (`switch-sext-i32.ll`).  A frame index, or a frame index plus a constant in
   [-2^29, 2^29) (`add` or disjoint `or`), is the `AddrFI` / `AddrFIMem`
   ComplexPattern `(TargetFrameIndex, offset)`: one
   `ADDI rd, FI, offset` as a value, or the base and offset of an
