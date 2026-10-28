@@ -8,6 +8,7 @@
 #define LLVM_LIB_TARGET_KLAUSSCPU_MCTARGETDESC_KLAUSSCPUMCTARGETDESC_H
 
 #include "llvm/ADT/StringRef.h"
+#include "llvm/MC/MCInstrDesc.h"
 #include <string>
 
 namespace llvm {
@@ -40,6 +41,20 @@ bool compress(MCInst &OutInst, const MCInst &MI, const MCSubtargetInfo &STI);
 bool uncompress(MCInst &OutInst, const MCInst &MI,
                 const MCSubtargetInfo &STI);
 } // namespace KlaussCPU
+
+namespace KlaussCPUII {
+/// TSFlags bits (KCInst in KlaussCPUInstrInfo.td).
+enum { ActsInEXShadowMask = 1 << 0 };
+
+/// True for an instruction whose effect a squash in EX does not undo: it
+/// starts the RTL divider (DIVR/DIVUR/MODR/MODUR/DIVV/MODV) or strobes the
+/// LCD (LCDCMDV/LCDDATAV/LCDDATAR) from EX.  A taken fused branch (FBR)
+/// redirects from MEM and squashes the instruction behind it in EX, so such
+/// an instruction must not follow an FBR directly (KlaussCPUFuseCmpBr.cpp).
+inline bool actsInEXShadow(const MCInstrDesc &Desc) {
+  return Desc.TSFlags & ActsInEXShadowMask;
+}
+} // namespace KlaussCPUII
 } // namespace llvm
 
 // Defines symbolic names for the subtarget features.

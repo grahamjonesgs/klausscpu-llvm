@@ -336,6 +336,12 @@ class KCInst<int size, bits<32> word0, dag outs, dag ins, string asmstr,
   // Word-0 template (operand fields zero); the short forms derive theirs
   // from their 2-word twin's.  Its LEN must match Size.
   bits<32> Word0 = word0;
+  // An effect that a squash in EX does not undo: the instruction starts the
+  // divider or strobes the LCD from EX, so it must not sit directly behind a
+  // fused branch (FBR), which squashes it there when taken
+  // (KlaussCPUII::actsInEXShadow: FuseCmpBr, and the assembler's warning).
+  bit ActsInEXShadow = 0;
+  let TSFlags{0} = ActsInEXShadow;
 }
 
 class KCInst32<bits<32> word0, dag outs, dag ins, string asmstr,
@@ -793,7 +799,7 @@ def MULHUR : RRR<0x68400000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
 }
 
 // Divide / modulo (EX-serialized, iterative — M8)
-let SchedRW = [WriteDiv, WriteDivFlags] in {
+let SchedRW = [WriteDiv, WriteDivFlags], ActsInEXShadow = 1 in {
 def DIVR   : RRR<0x69800000, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
                 "divr\t$rd, $rs1, $rs2",
                 [(set GPR:$rd, (sdiv GPR:$rs1, GPR:$rs2))]>;
@@ -1126,7 +1132,7 @@ def SHRAV   : ShiftImmN<0x50A04000, "shrav">;
 // MULR/DIVR (pipeline_core.sv class A decode: U_MUL/U_DIV/U_MOD for LEN=10).
 let SchedRW = [WriteMul, WriteMulFlags] in
 def MULV    : RV_imm<0xA8800000, "mulv">;
-let SchedRW = [WriteDiv, WriteDivFlags] in {
+let SchedRW = [WriteDiv, WriteDivFlags], ActsInEXShadow = 1 in {
 def DIVV    : RV_imm<0xA9800000, "divv">;
 def MODV    : RV_imm<0xAA800000, "modv">;
 }
@@ -1847,12 +1853,17 @@ def PUSHV64 : V64_imm<0xE4400000, "pushv64\t$lo, $hi"> { let mayStore = 1; }
 let hasSideEffects = 1 in {
   // R_in (single source register)
   def DELAYR   : R_in<0x6C050000, (ins GPR:$reg), "delayr\t$reg">;
+  let ActsInEXShadow = 1 in
   def LCDDATAR : R_in<0x71000000, (ins GPR:$reg), "lcddatar\t$reg">;
   // V (fixed op32 + imm32)
   def DELAYV   : Vsp<0xAC050000, "delayv\t$imm", imm32>;
+  // LCDRST is gated by the squash (pipeline_core.sv U_LCDRST), the LCD
+  // writes are not.
   def LCD      : Vsp<0xB2000000, "lcd\t$imm", imm32>;   // ISA map LCDRST
+  let ActsInEXShadow = 1 in {
   def LCDCMDV  : Vsp<0xB0000000, "lcdcmdv\t$imm", imm32>;
   def LCDDATAV : Vsp<0xB1000000, "lcddatav\t$imm", imm32>;
+  }
 }
 
 // ── Mnemonic aliases for the ISA map's spellings ────────────────────────────

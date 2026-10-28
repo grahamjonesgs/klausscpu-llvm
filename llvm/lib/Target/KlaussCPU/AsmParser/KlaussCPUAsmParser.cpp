@@ -200,6 +200,11 @@ class KlaussCPUAsmParser : public MCTargetAsmParser {
   MCSymbol *PCRelAbsSym = nullptr;
   int64_t PCRelAbsVal = 0;
 
+  // Where the last instruction was a fused branch (FBR_RR/FBR_RI) with only
+  // labels after it, for the warning about a divide or LCD write directly
+  // behind it (KlaussCPUII::actsInEXShadow); a directive clears it.
+  SMLoc PrevFBRLoc;
+
   AsmLexer    &getLexer() { return Parser.getLexer(); }
 
   // TableGen-generated: ComputeAvailableFeatures, convertToMCInst,
@@ -236,7 +241,12 @@ public:
                                 SMLoc &EndLoc) override;
   bool parseInstruction(ParseInstructionInfo &Info, StringRef Name,
                          SMLoc NameLoc, OperandVector &Operands) override;
-  bool ParseDirective(AsmToken DirectiveID) override { return true; }
+  bool ParseDirective(AsmToken DirectiveID) override {
+    // A directive may emit data or padding behind the branch, so only an
+    // instruction that directly follows it (labels aside) is checked.
+    PrevFBRLoc = SMLoc();
+    return true;
+  }
   bool parsePrimaryExpr(const MCExpr *&Res, SMLoc &EndLoc) override;
   bool matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
                                 OperandVector &Operands, MCStreamer &Out,
@@ -449,6 +459,23 @@ bool KlaussCPUAsmParser::matchAndEmitInstruction(SMLoc IDLoc,
     // ISA v3 short 1-word forms.
     MCInst CInst;
     bool Compressed = KlaussCPU::compress(CInst, Inst, getSTI());
+    // A taken FBR redirects from MEM and squashes the next instruction in
+    // EX, but the squash does not stop the divider or the LCD strobe that a
+    // divide or an LCD write starts there (pipeline_core.sv).  The compiler
+    // never fuses a branch into that position (KlaussCPUFuseCmpBr); warn
+    // when assembly does.
+    if (PrevFBRLoc.isValid() &&
+        KlaussCPUII::actsInEXShadow(MII.get(Inst.getOpcode()))) {
+      Warning(IDLoc, "a divide or LCD write directly behind a fused branch "
+                     "(fbr/fbri) still acts when the branch is taken: the "
+                     "squash does not stop the divider or the LCD strobe; put "
+                     "another instruction between them");
+      Note(PrevFBRLoc, "fused branch here");
+    }
+    PrevFBRLoc = (Inst.getOpcode() == KlaussCPU::FBR_RR ||
+                  Inst.getOpcode() == KlaussCPU::FBR_RI)
+                     ? IDLoc
+                     : SMLoc();
     Out.emitInstruction(Compressed ? CInst : Inst, getSTI());
     return false;
   }

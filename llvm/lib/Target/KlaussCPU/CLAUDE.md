@@ -169,7 +169,11 @@ liveness:
   reset, so the next real divide would complete with the wrong-path result;
   the LCD strobe fires from EX in that same cycle, so the wrong-path byte
   reaches the LCD (board-only bugs: the emulator has no pipeline;
-  `fuse-cmp-br-div-shadow.ll`/`.mir`).
+  `fuse-cmp-br-div-shadow.ll`/`.mir`).  Those instructions carry the
+  `ActsInEXShadow` flag (`TSFlags`, `KlaussCPUII::actsInEXShadow`), which the
+  assembler also reads: it warns when assembly puts one directly behind an
+  `fbr`/`fbri` (labels between them do not count, a directive does;
+  `MC/KlaussCPU/fbr-shadow-warning.s`).
 - Both rewrite only when FLAGS is dead after the branch
   (`KlaussCPUInstrInfo::flagsDeadAfter`): no later reader in the block and
   no successor with FLAGS live-in (MachineCSE can leave a successor reading

@@ -74,6 +74,7 @@
 
 #include "KlaussCPUInstrInfo.h"
 #include "KlaussCPUSubtarget.h"
+#include "MCTargetDesc/KlaussCPUMCTargetDesc.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -248,22 +249,10 @@ MachineInstr *findFusableCompare(MachineInstr &Br,
 
 // True for an instruction whose effect a squash in EX does not undo (see the
 // header): one that starts the RTL divider (pipeline_core.sv class A decode,
-// :663-668: U_DIV / U_MOD) or strobes the LCD (:702-709: U_LCD).
+// :663-668: U_DIV / U_MOD) or strobes the LCD (:702-709: U_LCD).  The
+// ActsInEXShadow flag of KlaussCPUInstrInfo.td.
 bool actsInShadow(const MachineInstr &MI) {
-  switch (MI.getOpcode()) {
-  case KlaussCPU::DIVR:
-  case KlaussCPU::DIVUR:
-  case KlaussCPU::MODR:
-  case KlaussCPU::MODUR:
-  case KlaussCPU::DIVV:
-  case KlaussCPU::MODV:
-  case KlaussCPU::LCDCMDV:
-  case KlaussCPU::LCDDATAV:
-  case KlaussCPU::LCDDATAR:
-    return true;
-  default:
-    return false;
-  }
+  return KlaussCPUII::actsInEXShadow(MI.getDesc());
 }
 
 // True if the instruction emitted right after Br, which a taken fused branch
