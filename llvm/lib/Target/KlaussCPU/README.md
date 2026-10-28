@@ -75,5 +75,6 @@ the emulator.
 | `HISTORY.md` | development log (superseded statements kept as written) |
 | `ISA_ENCODING_V2.md` | historical snapshot of the v2 encoding map (see its header) |
 | `ISA_V3_PROPOSAL.md`, `M8_SCHED_MODEL_SPEC.md`, `FLAG_UNIFICATION_CHANGES` | design notes for ISA v3, the scheduling model and the flag unification |
+| `HARDWARE_PROPOSALS.md` | measured, ranked hardware changes for compiled code (2026-10, for the RTL session) |
 | `FPGA_*.md`, `*_HANDOFF.md`, `RTOS_NOTES.md` | hardware errata and handoff notes |
 | `RUST_PLAN.md`, `rust/` | Rust target spec, rustc patches and demo crates |

@@ -752,6 +752,7 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPU.td                target root: subtarget features, AsmWriter/AsmParser, includes the other .td files
 ├── KlaussCPURegisterInfo.td    16 GPRs (r0–r15, alt names a–p) + SP + FLAGS; allocation order
 ├── ABI.md                      the C ABI (version 2): rules, consumers, measurements
+├── HARDWARE_PROPOSALS.md       measured, ranked RTL/ISA changes for compiled code (for the hardware session)
 ├── KlaussCPUCallingConv.td     CC_KlaussCPU, RetCC_KlaussCPU, CSR_KlaussCPU, the call mask CSR_KlaussCPU_Call
 ├── KlaussCPUSchedule.td        scheduling model (RTL interlock latencies); processors `generic` and `no-sched`
 ├── KlaussCPUInstrInfo.td       encodings, operand types, isel patterns, short forms + CompressPats, aliases
