@@ -50,7 +50,9 @@
 // measured and dropped: 2-3 cycles per Dhrystone run slower on the board.)
 // The post-RA list scheduler is top-down by latency, issues one instruction
 // per cycle (KlaussCPUInstrInfo::CreateTargetPostRAHazardRecognizer; without
-// itineraries LLVM's default recognizer sets no issue limit) and renames
+// itineraries LLVM's default recognizer sets no issue limit), issues nothing
+// behind a MUL/DIV for its ReleaseAtCycles (the same recognizer: the list
+// scheduler does not read them) and renames
 // registers to break anti-dependencies on the critical path
 // (KlaussCPUSubtarget::getAntiDepBreakMode).  A loop counter read by the
 // exit branch would still sit directly in front of it after its last use;

@@ -414,6 +414,9 @@ when clobbered.
   stops FuseCmpBr (`sched-cmp-br-pair.ll`).  An inline memcpy is
   lowered as groups of four loads then four stores
   (`MaxGluedStoresPerMemcpy`), so no store directly follows its load.
+  The post-RA recognizer also keeps the issue slot busy behind a MUL or DIV
+  for its `ReleaseAtCycles` (the RTL's EX hold), which the list scheduler
+  does not read on its own (`sched-ex-busy.ll`).
   `-mcpu=no-sched` is the A/B baseline without either scheduler (and
   without `KlaussCPUEarlyIVInc` or the TTI unrolling, which serve them).
 - Before register allocation (-O1 and up): `KlaussCPUJumpTableHoist` moves
@@ -509,6 +512,7 @@ when clobbered.
 | `-klausscpu-sched-cmp-br-pair` | on | pre-RA scheduler keeps a compare next to its branch (for FuseCmpBr) |
 | `-klausscpu-break-anti-deps` | on | post-RA scheduler renames registers to break critical-path anti-dependencies |
 | `-klausscpu-postra-single-issue` | on | post-RA scheduler issues one instruction per cycle (=false: LLVM's unlimited default) |
+| `-klausscpu-postra-ex-busy` | on | post-RA scheduler issues nothing behind a MUL/DIV until its EX hold ends (=false: every op takes one slot) |
 | `-klausscpu-early-iv-inc` | on | count a single-block loop from Init - C so its increment can issue early |
 | `-klausscpu-min-jump-table-entries` | 12 | jump tables from N cases (0 = none) |
 | `-klausscpu-jump-table-density` | 40 | minimum % of a jump table's entries that are cases |

@@ -11,6 +11,7 @@
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/ScheduleDAGInstrs.h"
 #include "llvm/CodeGen/ScheduleHazardRecognizer.h"
 #include "llvm/Support/CommandLine.h"
 
@@ -23,6 +24,12 @@ static cl::opt<bool> PostRASingleIssue(
     "klausscpu-postra-single-issue", cl::Hidden, cl::init(true),
     cl::desc("Post-RA list scheduler issues one instruction per cycle.  "
              "=false restores LLVM's default (unlimited issue) for A/B."));
+
+static cl::opt<bool> PostRAExBusy(
+    "klausscpu-postra-ex-busy", cl::Hidden, cl::init(true),
+    cl::desc("Post-RA list scheduler keeps the issue slot busy for a "
+             "multi-cycle op's ReleaseAtCycles (MUL 4, DIV 20), as the RTL's "
+             "EX hold does.  =false: every op takes one slot (A/B)."));
 
 KlaussCPUInstrInfo::KlaussCPUInstrInfo(const KlaussCPUSubtarget &STI_,
                                         const KlaussCPURegisterInfo &RI)
@@ -319,16 +326,63 @@ namespace {
 // XORR, ... stalled behind each other).  Counting one instruction per cycle
 // makes CurCycle the issue slot, so an instruction that is not ready yet
 // leaves its slot to the highest-priority ready one.  Latencies are the
-// scheduler's own (KlaussCPUSchedule.td); this adds no hazards.
+// scheduler's own (KlaussCPUSchedule.td).
+//
+// A multiply or divide also holds EX (the RTL's ex_busy: MUL 4 cycles, see
+// KlaussCPUSchedule.td), so nothing issues behind it until the hold ends.
+// The list scheduler does not read ReleaseAtCycles, so without this it
+// counted the slots behind a MULR as free: it put an ALU op that could have
+// gone in front of the multiply behind it, where it lost the slot and stalled
+// the next multiply that reads it (the Zephyr mandel loop: `addr r8 ; mulr
+// r11, r8, r8` behind `mulr r2, ...`, 2 cycles per iteration on the board).
+// The recognizer therefore reports a hazard in the cycles an issued
+// instruction keeps its resource beyond the first (its largest
+// ReleaseAtCycle - 1).  (KCUnit is a buffered resource, so the pre-RA
+// scheduler counts these cycles as pressure, not as a hazard.)
 class KlaussCPUPostRAHazardRecognizer : public ScheduleHazardRecognizer {
+  const ScheduleDAGInstrs &DAG;
   bool Issued = false;
+  unsigned BusyCycles = 0; // cycles left in which nothing may issue
+
+  unsigned occupancy(SUnit *SU) const {
+    if (!PostRAExBusy || !SU || !SU->getInstr())
+      return 1;
+    const TargetSchedModel *SM = DAG.getSchedModel();
+    if (!SM->hasInstrSchedModel())
+      return 1;
+    unsigned Cycles = 1;
+    const MCSchedClassDesc *SC = DAG.getSchedClass(SU);
+    if (!SC || !SC->isValid())
+      return 1;
+    for (const MCWriteProcResEntry &PRE :
+         make_range(SM->getWriteProcResBegin(SC), SM->getWriteProcResEnd(SC)))
+      Cycles = std::max<unsigned>(Cycles, PRE.ReleaseAtCycle);
+    return Cycles;
+  }
 
 public:
-  KlaussCPUPostRAHazardRecognizer() { MaxLookAhead = 1; }
-  bool atIssueLimit() const override { return Issued; }
-  void EmitInstruction(SUnit *) override { Issued = true; }
-  void AdvanceCycle() override { Issued = false; }
-  void Reset() override { Issued = false; }
+  explicit KlaussCPUPostRAHazardRecognizer(const ScheduleDAGInstrs &DAG)
+      : DAG(DAG) {
+    MaxLookAhead = 1;
+  }
+  HazardType getHazardType(SUnit *, int) override {
+    return BusyCycles ? Hazard : NoHazard;
+  }
+  bool atIssueLimit() const override { return Issued || BusyCycles; }
+  void EmitInstruction(SUnit *SU) override {
+    Issued = true;
+    BusyCycles = occupancy(SU) - 1;
+  }
+  void AdvanceCycle() override {
+    if (Issued)
+      Issued = false;
+    else if (BusyCycles)
+      --BusyCycles;
+  }
+  void Reset() override {
+    Issued = false;
+    BusyCycles = 0;
+  }
 };
 } // end anonymous namespace
 
@@ -336,7 +390,8 @@ ScheduleHazardRecognizer *KlaussCPUInstrInfo::CreateTargetPostRAHazardRecognizer
     const InstrItineraryData *II, const ScheduleDAG *DAG) const {
   if (!PostRASingleIssue)
     return TargetInstrInfo::CreateTargetPostRAHazardRecognizer(II, DAG);
-  return new KlaussCPUPostRAHazardRecognizer();
+  return new KlaussCPUPostRAHazardRecognizer(
+      *static_cast<const ScheduleDAGInstrs *>(DAG));
 }
 
 ArrayRef<std::pair<MachineMemOperand::Flags, const char *>>
