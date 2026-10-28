@@ -408,8 +408,12 @@ objects, +44 bytes at -Os, +40 at -Oz).
   C caller/Rust callee, Rust caller/C callee and Rust/Rust, C at
   -O0/-O1/-O2/-Os and Rust at opt-level 0/1/2/s, 2,880 runs on the emulator,
   all identical to host gcc; three of the ELFs also on the board, identical.  The rustc with the
-  version-0 module differs in 53 of 80 tests of the same seeds.  The
+  version-0 module differs in 53 of 80 tests of the same seeds.  With
+  `i128`/`u128` and `bool` record fields and records of up to 32 bytes
+  added to the generator: seeds 1–30, 1,440 runs, all identical, and three
+  ELFs of seed 3 on the board, identical.  The
   `rust/crates/examples/ffi-check` self-check (structs of 3–24 bytes, a
   16-byte-aligned one and a union by value both ways, `u32` arguments and
-  results, atomics of every width shared with C) passes on the emulator at
-  opt-level 0/1/2/3/s/z with C at -O0..-Os, and on the board.
+  results, atomics of every width shared with C, `INT_MASK` restored, a
+  timer-interrupt race) passes on the emulator at opt-level 0/1/2/3/s/z with
+  C at -O0..-Os, and on the board.

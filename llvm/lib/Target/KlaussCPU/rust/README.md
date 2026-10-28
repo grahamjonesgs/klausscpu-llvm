@@ -164,15 +164,17 @@ KLAUSSCPU_RUSTC=<stage1 rustc> KLAUSSCPU_LLVM_BIN=<repo>/build/bin \
 
 For each seed `gen_rust_abi_test.py` writes a caller and a callee in C and in
 Rust (integers of every width, `bool`, pointers, `f32`/`f64`, `i128`,
-`#[repr(C)]` structs and unions of 1–24 bytes, variadic functions); host gcc
+`#[repr(C)]` structs and unions of 1–32 bytes with fields of every integer
+width up to `i128`/`u128`, `bool` and floats, variadic functions); host gcc
 gives the expected output, and C→Rust, Rust→C and Rust→Rust are run on the
 klausscc emulator at every mix of C -O0/-O1/-O2/-Os and Rust opt-level
 0/1/2/s (48 runs per seed).  It needs the runtime checkout (crt0, picolibc;
 `KLAUSSCPU_RUNTIME`) and builds `core` once with cargo `-Zbuild-std`.
 `crates/examples/ffi-check` is the hand-written counterpart for the board
 (`./klauss-build elf ffi-check`, then load `ffi_check.elf`): structs both
-ways, `u32` arguments and results, atomics of every width shared with C; it
-prints `Result: PASS` and halts.
+ways, `u32` arguments and results, atomics of every width shared with C,
+`INT_MASK` restored, a timer-interrupt race; it prints `Result: PASS` and
+halts.
 
 ## 6. Gotchas (each cost real debugging time)
 

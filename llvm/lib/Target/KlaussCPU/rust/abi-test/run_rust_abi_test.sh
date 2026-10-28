@@ -4,7 +4,7 @@
 # Rust <-> C ABI conformance test (C ABI version 2, ../../ABI.md).  For each
 # seed, gen_rust_abi_test.py writes a caller and a callee, each in C and in
 # Rust (random argument/return type mixes: integers of every width, bool,
-# pointers, f32/f64, i128, #[repr(C)] structs and unions of 1-24 bytes,
+# pointers, f32/f64, i128, #[repr(C)] structs and unions of 1-32 bytes,
 # variadic functions).  Host gcc runs the C pair for the expected output; then
 # a C caller with a Rust callee, a Rust caller with a C callee and Rust with
 # Rust are built for KlaussCPU at every combination of the optimisation levels

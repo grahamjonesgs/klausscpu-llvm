@@ -11,7 +11,8 @@ Writes, for one seed, a C and a Rust version of each side:
 
 The functions take and return random mixes of signed and unsigned 8-64-bit
 integers, bool, pointers, f32/f64 (soft float), i128, and #[repr(C)] structs
-and unions of 1 to 24 bytes, some variadic.  The two versions of each side
+and unions of 1 to 32 bytes (fields of every integer width up to 128 bits,
+bool, f32/f64), some variadic.  The two versions of each side
 compute the same thing: host gcc runs support.c + caller.c + callee.c for the
 expected output, and the target build pairs a C caller with a Rust callee, a
 Rust caller with a C callee, and Rust with Rust (all calls are extern "C").
@@ -45,16 +46,22 @@ INT_TYPES = [
 ]
 VA_INT_TYPES = [('int', 4, True), ('unsigned', 4, False),
                 ('long', 8, True), ('unsigned long', 8, False)]
+# A 128-bit field makes the record 16-byte aligned (an i128 in registers when
+# it is 16 bytes, by reference beyond); _Bool fields hold 0 or 1.
 FIELD_TYPES = ['signed char', 'unsigned char', 'short', 'unsigned short',
-               'int', 'unsigned', 'long', 'unsigned long', 'float', 'double']
+               'int', 'unsigned', 'long', 'unsigned long', 'float', 'double',
+               '_Bool', '__int128', 'unsigned __int128']
 SIZES = {'signed char': 1, 'unsigned char': 1, 'short': 2,
          'unsigned short': 2, 'int': 4, 'unsigned': 4, 'long': 8,
-         'unsigned long': 8, 'float': 4, 'double': 8, '_Bool': 1}
+         'unsigned long': 8, 'float': 4, 'double': 8, '_Bool': 1,
+         '__int128': 16, 'unsigned __int128': 16}
 RUST = {'signed char': 'i8', 'unsigned char': 'u8', 'short': 'i16',
         'unsigned short': 'u16', 'int': 'i32', 'unsigned': 'u32',
         'long': 'i64', 'unsigned long': 'u64', 'float': 'f32',
-        'double': 'f64', '_Bool': 'bool'}
+        'double': 'f64', '_Bool': 'bool', '__int128': 'i128',
+        'unsigned __int128': 'u128'}
 SIGNED = {'signed char', 'short', 'int', 'long'}
+WIDE = {'__int128', 'unsigned __int128'}
 
 
 def layout(fields):
@@ -139,7 +146,7 @@ class Gen:
             for _ in range(r.randint(1, 5)):
                 t = r.choice(FIELD_TYPES)
                 fields.append((t, 1 if r.random() < 0.8 else r.randint(2, 5)))
-            if 1 <= layout(fields) <= 24:
+            if 1 <= layout(fields) <= 32:
                 break
         kind = 'union' if r.random() < 0.12 else 'struct'
         name = 'R%d' % len(self.records)
@@ -237,6 +244,8 @@ class Gen:
                 fe = 'r_.m%d%s' % (j, '' if n == 1 else '[%d]' % k)
                 if ft in ('float', 'double'):
                     out.append('  { %s v_ = %s; h = mixbytes(h, &v_, sizeof v_); }' % (ft, fe))
+                elif ft in WIDE:
+                    out.append('  h = mix(h, (u64)%s); h = mix(h, (u64)(%s >> 64));' % (fe, fe))
                 elif ft in SIGNED:
                     out.append('  h = mixs(h, (long)%s);' % fe)
                 else:
@@ -272,6 +281,11 @@ class Gen:
                 v = '(%s) * %d + %d' % (src, 2 * idx + 3, idx)
                 if ft in ('float', 'double'):
                     out.append('%s = (%s)(long)(int)(%s);' % (fe, ft, v))
+                elif ft == '_Bool':
+                    out.append('%s = ((%s) & 4) != 0;' % (fe, v))
+                elif ft in WIDE:
+                    out.append('{ u64 t_ = %s; %s = (%s)(((__int128)(long)t_ << 64) | (__int128)(t_ * 3)); }'
+                               % (v, fe, ft))
                 else:
                     out.append('%s = (%s)(%s);' % (fe, ft, v))
                 idx += 1
@@ -392,6 +406,8 @@ int main(void) { run_tests(); printf("ABI-DONE\n"); return 0; }
                 fe = 'r_.m%d%s' % (j, '' if n == 1 else '[%d]' % k)
                 if ft in ('float', 'double'):
                     out.append('  h = mixbytes(h, &%s.to_ne_bytes());' % fe)
+                elif ft in WIDE:
+                    out.append('  h = mix(h, %s as u64); h = mix(h, (%s >> 64) as u64);' % (fe, fe))
                 elif ft in SIGNED:
                     out.append('  h = mixs(h, %s as i64);' % fe)
                 else:
@@ -425,6 +441,11 @@ int main(void) { run_tests(); printf("ABI-DONE\n"); return 0; }
                 v = '(%s).wrapping_mul(%d).wrapping_add(%d)' % (src, 2 * idx + 3, idx)
                 if ft in ('float', 'double'):
                     out.append('%s = (%s as i32 as i64) as %s;' % (fe, v, RUST[ft]))
+                elif ft == '_Bool':
+                    out.append('%s = (%s & 4) != 0;' % (fe, v))
+                elif ft in WIDE:
+                    out.append('{ let t_: u64 = %s; %s = (((t_ as i64 as i128) << 64) | (t_.wrapping_mul(3) as i128)) as %s; }'
+                               % (v, fe, RUST[ft]))
                 else:
                     out.append('%s = %s as %s;' % (fe, v, RUST[ft]))
                 idx += 1
