@@ -782,22 +782,18 @@ the `klausscpu-runtime` repo root; see its READMEs for build/run detail:
   `r + r` selects `LDIDX32R` instead of `ADDR` + `MEMGET32`, a type-punned
   `*(uint32_t *)(buf + i)` with odd `i` no longer gets away with it; `buf + 4`
   (`LDIDX32`) never did.  Use `memcpy` or a packed struct for unaligned data.
-- **klausscc's disassembly shows only `rd` for the in-place forms, so it is
-  wrong when this backend gives them a separate `rs1`.**  klausscc (since
-  its commit 63cdab9) names every instruction in
-  `test/MC/KlaussCPU/encoding-coverage.s`: the MODE=11 sub-word
-  `LDIDX{8,16,32}[S]R`/`STIDX{8,16,32}R`, `SETRU`, `ANDI`/`ORI`/`XORI` and
-  their `.S` forms, `CMPRVU`, the boolean compare-immediates and W boolean
-  compares (`CMPLTV`, `CMPLTRW`, `CMPLTVW`, …), and the 2-word `JMP*REL`/
-  `CALLREL` (shown as `PC+n`).  But its in-place operand (`ADDV`,
-  `MINUSV`, `ANDV`, `ORV`, `XORV` and their `.S` forms, `MULV`/`DIVV`/
-  `MODV`, the shift/bit-by-immediate and unary ops) reads `rd` only, and
-  `addv r1, r2, 5` lists as `ADDV B 5` (r1 += 5).  Over half of those in
-  the bare-metal programs have `rd != rs1`.  The emulator executes them
-  correctly; only klausscc's listing is affected.  Other spellings differ
-  without changing meaning: `ldidx64`/`stidx64` are klausscc's
-  `LDIDX64A`/`STIDX64A` and `ldidx64u`/`stidx64u` its `LDIDX64`/`STIDX64`,
-  `ldidx8s` is `LDIDX8_S`, `fbr`/`fbri` are `BEQ`…`BUGTI`, `lcd` is
+- **`ldidx64`/`stidx64` mean a different encoding in klausscc.**  LLVM's
+  `ldidx64`/`stidx64` (A=1, address `& ~7`) are klausscc's
+  `LDIDX64A`/`STIDX64A`; klausscc's `LDIDX64`/`STIDX64` are LLVM's
+  `ldidx64u`/`stidx64u` (A=0).  A line copied from LLVM output into a
+  `.kla` file unchanged assembles to the other form, which differs only for
+  an address that is not 8-byte aligned.  Write `LDIDX64U`/`LDIDX64A` (both
+  assemblers accept them; klausscc's listing uses only those).  Otherwise
+  klausscc's listing (since its commit e8e82f3) matches `llvm-objdump -d`
+  operand for operand over the bare-metal corpus, including a separate
+  `rs1` on the in-place forms (`addv r1, r2, 5` is `ADDV B C 5`).  Other
+  spellings differ without changing meaning: `ldidx8s` is `LDIDX8_S`
+  (`LDIDX8S` also accepted), `fbr`/`fbri` are `BEQ`…`BUGTI`, `lcd` is
   `LCDRST`, and klausscc names the 1-word forms LLVM picks by value with a
   `.S` suffix (`jmpzrel` near is `JMPZ.S`, the short `callrel` `CALL.S`).
 - **A data initializer `sym + A` with `A` outside int32 does not assemble.**
