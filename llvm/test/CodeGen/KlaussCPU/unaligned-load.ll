@@ -8,8 +8,9 @@
 ; LDIDX32_S align the address down and no 64-bit load reads an unaligned
 ; doubleword.  So an under-aligned i32 load is MEMGET32 of the computed
 ; address, never a base + offset or reg + reg form, and an under-aligned i64
-; load is two 32-bit loads (KlaussCPUDAGToDAGISel::PreprocessISelDAG), which
-; lets the combiner build one from 8 byte loads (-klausscpu-unaligned-load64).
+; load is two 32-bit loads (LowerLOAD, at legalization), which lets the
+; combiner build one from 8 byte loads (-klausscpu-unaligned-load64).  The
+; backstop in PreprocessISelDAG is unaligned-load-backstop.ll.
 
 %packed = type <{ i8, i32, i32, i64, i16 }>
 

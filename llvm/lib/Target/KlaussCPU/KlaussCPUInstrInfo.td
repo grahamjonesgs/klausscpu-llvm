@@ -1436,9 +1436,9 @@ def : Pat<(add GPR:$rs, -1), (DECR GPR:$rs)>;
 // 64-bit loads take only 8-aligned ones: no 64-bit load reads an unaligned
 // doubleword (A=1 aligns the EA down, A=0 must be given an aligned one).
 // LowerLOAD (at legalization) and KlaussCPUDAGToDAGISel::PreprocessISelDAG
-// (after the last combine) split every under-aligned i64 load into two 32-bit
-// loads first, so one reaching these patterns would be a "cannot select"
-// error, not a load of the aligned-down doubleword.
+// (a backstop after the last combine) split every under-aligned i64 load
+// into two 32-bit loads first, so one reaching these patterns would be a
+// "cannot select" error, not a load of the aligned-down doubleword.
 let IsLoad = 1, MinAlignment = 8 in
 def load_a8 : PatFrag<(ops node:$ptr), (load node:$ptr)>;
 

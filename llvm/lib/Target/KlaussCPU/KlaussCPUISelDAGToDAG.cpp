@@ -277,9 +277,12 @@ INITIALIZE_PASS(KlaussCPUDAGToDAGISelLegacy, DEBUG_TYPE, PASS_NAME,
 // be given an aligned one (CPU_ARCHITECTURE.md 8.3), so the i64 load patterns
 // take only 8-aligned loads (load_a8).  LowerLOAD splits an under-aligned i64
 // load at legalization (allowsMisalignedMemoryAccesses lets the combiner form
-// one); one that a combine forms after that is split here, after the last
-// combine, into the same two 32-bit loads (MEMGET32 below 4-byte alignment,
-// LDIDX32 at 4) + SHLV + ORR.
+// one), and the post-legalize combiner legalizes every node it creates, so
+// none is expected here.  This is a defensive backstop: should one reach isel
+// anyway, it is split, after the last combine, into the same two 32-bit loads
+// (MEMGET32 below 4-byte alignment, LDIDX32 at 4) + SHLV + ORR, rather than
+// fail to select.  -klausscpu-split-load64-at-legalize=false sends every such
+// non-volatile load here, which is how unaligned-load-backstop.ll tests it.
 void KlaussCPUDAGToDAGISel::PreprocessISelDAG() {
   SmallVector<LoadSDNode *, 8> Loads;
   for (SDNode &N : CurDAG->allnodes())

@@ -110,6 +110,14 @@ static cl::opt<bool> UnalignedLoad64(
     cl::desc("Let the DAG combiner form an under-aligned i64 load (e.g. from "
              "8 byte loads), which is then split into two 32-bit loads"));
 
+// Testing only: =false leaves an under-aligned non-volatile i64 load to the
+// backstop in PreprocessISelDAG, which nothing else reaches
+// (unaligned-load-backstop.ll).
+static cl::opt<bool> SplitLoad64AtLegalize(
+    "klausscpu-split-load64-at-legalize", cl::Hidden, cl::init(true),
+    cl::desc("Split an under-aligned i64 load at legalization (=false: "
+             "leave it to PreprocessISelDAG; for testing)"));
+
 // Generated calling convention functions.  Must be included inside namespace
 // llvm because the generated code uses unqualified names (MVT, CCState, etc.).
 namespace llvm {
@@ -584,9 +592,11 @@ EVT KlaussCPUTargetLowering::getOptimalMemOpType(
 // loads ORed together, MatchLoadCombine, with BSWAP for a big-endian one: 6
 // instructions instead of 14-16).  Wherever one comes from, it is split
 // before it is selected: by LowerLOAD at legalization, as the legalizer
-// splits a load it does not allow, so the later combines see the halves; by
-// PreprocessISelDAG if a combine made one after that; and some copies of one
-// by the STORE combine (PerformDAGCombine).  The halves carry MOSplitHalf,
+// splits a load it does not allow, so the later combines see the halves (the
+// post-legalize combiner legalizes the nodes it creates, so this covers a
+// load formed then too); by PreprocessISelDAG, a backstop for one that still
+// reaches isel; and some copies of one by the STORE combine
+// (PerformDAGCombine).  The halves carry MOSplitHalf,
 // so no combine joins them again.
 bool KlaussCPUTargetLowering::allowsMisalignedMemoryAccesses(
     EVT VT, unsigned AddrSpace, Align Alignment, MachineMemOperand::Flags Flags,
@@ -645,7 +655,8 @@ SDValue KlaussCPUTargetLowering::joinHalves(const SplitLoad64 &S,
 SDValue KlaussCPUTargetLowering::LowerLOAD(SDValue Op,
                                            SelectionDAG &DAG) const {
   auto *LD = cast<LoadSDNode>(Op);
-  if (LD->getAlign() >= Align(8) || !LD->isUnindexed())
+  if (LD->getAlign() >= Align(8) || !LD->isUnindexed() ||
+      (!SplitLoad64AtLegalize && !LD->isVolatile()))
     return SDValue();
   SplitLoad64 S = splitUnalignedLoad64(LD, DAG);
   SDLoc DL(Op);
