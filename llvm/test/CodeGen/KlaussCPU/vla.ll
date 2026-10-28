@@ -31,12 +31,12 @@ define void @two_vlas(i64 %n, i64 %m) {
 define void @vla_stackargs(i64 %n) {
 ; CHECK-LABEL: vla_stackargs:
 ; CHECK:         callrel use
-; CHECK:         addsp -40
+; CHECK:         addsp -16
 ; CHECK-NEXT:    getsp [[SP:r[0-9]+]]
-; CHECK:         stidx64 {{r[0-9]+}}, [[SP]], 32
-; CHECK-NEXT:    stidx64 {{r[0-9]+}}, [[SP]], 24
+; CHECK:         stidx64 {{r[0-9]+}}, [[SP]], 8
+; CHECK-NEXT:    stidx64 {{r[0-9]+}}, [[SP]], 0
 ; CHECK-NEXT:    callrel many
-; CHECK-NEXT:    addsp 40
+; CHECK-NEXT:    addsp 16
   %a = alloca i8, i64 %n, align 8
   call void @use(ptr %a, ptr %a)
   call void @many(i64 1, i64 2, i64 3, i64 4, i64 5, i64 6)

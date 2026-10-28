@@ -6,7 +6,7 @@
 ; A byval struct argument is passed as a pointer to a caller-made copy.  When
 ; that pointer arrives on the stack, the callee's fixed slot holds the
 ; struct's address, not the struct, so the location must dereference the slot
-; (DW_OP_fbreg +40, DW_OP_deref).  SelectionDAG used to describe the
+; (DW_OP_fbreg +16, DW_OP_deref).  SelectionDAG used to describe the
 ; dbg.declare as living in the slot itself, so the debugger showed the pointer
 ; and the following stack words as the struct's fields.  A byval pointer that
 ; arrives in a register is described by DW_OP_breg0.
@@ -22,8 +22,8 @@
 ; ASM-LABEL: r:
 ; ASM:       #DEBUG_VALUE: r:bb <- [$r0+0]
 ; ASM-LABEL: s:
-; ASM:       #DEBUG_VALUE: s:bb <- [DW_OP_plus_uconst 40, DW_OP_deref] [$r15+0]
-; ASM-NEXT:  ldidx64 r12, r15, 40
+; ASM:       #DEBUG_VALUE: s:bb <- [DW_OP_plus_uconst 16, DW_OP_deref] [$r15+0]
+; ASM-NEXT:  ldidx64 r12, r15, 16
 ; ASM:       ldidx64 r12, r12, 16
 
 ; INFO:      DW_AT_name ("r")
@@ -35,7 +35,7 @@
 ; INFO:      DW_TAG_formal_parameter
 ; INFO-NEXT:   DW_AT_location (DW_OP_fbreg -8)
 ; INFO-NEXT:   DW_AT_name ("a")
-; INFO:        DW_AT_location (DW_OP_fbreg +40, DW_OP_deref)
+; INFO:        DW_AT_location (DW_OP_fbreg +16, DW_OP_deref)
 ; INFO-NEXT:   DW_AT_name ("bb")
 
 ; VERIFY: No errors.

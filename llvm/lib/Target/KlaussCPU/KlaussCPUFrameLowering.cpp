@@ -7,10 +7,10 @@
 //
 //   High addresses (caller)
 //   ┌──────────────┐
-//   │  Stack args  │    [incoming SP+32 ..]  (8-byte slots)
-//   ├──────────────┤
-//   │   (reserved) │    [incoming SP+8 .. +31]  R1-R3 home area (varargs)
-//   ├──────────────┤
+//   │  Stack args  │    [incoming SP+8 ..] (+40 in a variadic call), 8-byte
+//   ├──────────────┤    slots
+//   │  (variadic)  │    [incoming SP+8 .. +39]  R0-R3 home area, only in a
+//   ├──────────────┤    variadic call (ABI.md)
 //   │  Return addr │    [incoming SP+0 .. +7]   (written by CALL)
 //   ├──────────────┤  ← incoming SP
 //   │   Saved R15  │    [R15+0 .. +7]

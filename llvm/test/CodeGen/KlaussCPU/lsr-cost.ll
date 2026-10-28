@@ -17,7 +17,7 @@ define void @add3(ptr %a, ptr %b, ptr %c, ptr %d, i64 %n) nounwind {
 ; CHECK-LABEL: add3:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    ldidx64 r12, r15, 40
+; CHECK-NEXT:    ldidx64 r12, r15, 16
 ; CHECK-NEXT:    fbri r12, 1, 1, .LBB0_3
 ; CHECK-NEXT:  # %bb.1: # %for.body.preheader
 ; CHECK-NEXT:    setr r14, 0
@@ -39,7 +39,7 @@ define void @add3(ptr %a, ptr %b, ptr %c, ptr %d, i64 %n) nounwind {
 ; REGS-LABEL: add3:
 ; REGS:       # %bb.0: # %entry
 ; REGS-NEXT:    enter 0
-; REGS-NEXT:    ldidx64 r12, r15, 40
+; REGS-NEXT:    ldidx64 r12, r15, 16
 ; REGS-NEXT:    fbri r12, 1, 1, .LBB0_2
 ; REGS-NEXT:    .p2align 4
 ; REGS-NEXT:  .LBB0_1: # %for.body

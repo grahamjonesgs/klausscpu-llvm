@@ -43,6 +43,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "InputFiles.h"
+#include "InputSection.h"
 #include "Symbols.h"
 #include "Target.h"
 #include "llvm/BinaryFormat/ELF.h"
@@ -60,6 +62,7 @@ namespace {
 class KlaussCPU final : public TargetInfo {
 public:
   KlaussCPU(Ctx &);
+  uint32_t calcEFlags() const override;
   RelExpr getRelExpr(RelType type, const Symbol &s,
                      const uint8_t *loc) const override;
   void relocate(uint8_t *loc, const Relocation &rel,
@@ -79,6 +82,35 @@ KlaussCPU::KlaussCPU(Ctx &ctx) : TargetInfo(ctx) {
   // breakpoint, nor HALT, which would look like a clean exit.
   write32le(trapInstr.data(), KlaussCPUABI::InvalidWord);
   needsThunks = true;
+}
+
+// The low byte of e_flags is the calling convention the code follows
+// (KlaussCPUABI::ABIVersion; 0 for code built before ABI version 2).  Objects
+// with code must agree: an object compiled for another convention, such as one
+// a build system left behind from an older toolchain, would otherwise call and
+// be called wrongly.  Objects without code (data, -b binary) do not count.
+uint32_t KlaussCPU::calcEFlags() const {
+  const InputFile *first = nullptr;
+  uint32_t target = KlaussCPUABI::ABIVersion;
+  for (InputFile *f : ctx.objectFiles) {
+    auto *obj = cast<ObjFile<ELF32LE>>(f);
+    bool hasCode = llvm::any_of(obj->getSections(), [](InputSectionBase *s) {
+      return s && s != &InputSection::discarded &&
+             (s->flags & SHF_EXECINSTR) && s->getSize() != 0;
+    });
+    if (!hasCode)
+      continue;
+    uint32_t abi = obj->getObj().getHeader().e_flags & KlaussCPUABI::EFlagsABIMask;
+    if (!first) {
+      first = f;
+      target = abi;
+    } else if (abi != target) {
+      Err(ctx) << f << ": KlaussCPU ABI version " << abi
+               << " cannot be linked with ABI version " << target << " in "
+               << first << "; rebuild it with the current toolchain";
+    }
+  }
+  return target;
 }
 
 RelExpr KlaussCPU::getRelExpr(RelType type, const Symbol &s,

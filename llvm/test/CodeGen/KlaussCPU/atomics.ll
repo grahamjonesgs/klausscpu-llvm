@@ -70,7 +70,7 @@ define i64 @load_acquire_i64() nounwind {
 define i32 @fetch_add(i32 %x) nounwind {
 ; CHECK-LABEL: fetch_add:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 3
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    copy r1, r0
 ; CHECK-NEXT:    setru r0, counter
 ; CHECK-NEXT:    callrel __sync_fetch_and_add_4
@@ -78,7 +78,7 @@ define i32 @fetch_add(i32 %x) nounwind {
 ;
 ; O0-LABEL: fetch_add:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 3
+; O0-NEXT:    enter 0
 ; O0-NEXT:    copy r1, r0
 ; O0-NEXT:    # kill: def $r0 killed $r1
 ; O0-NEXT:    setru r0, counter
@@ -91,13 +91,13 @@ define i32 @fetch_add(i32 %x) nounwind {
 define i8 @xchg_i8(ptr %p, i8 %x) nounwind {
 ; CHECK-LABEL: xchg_i8:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 3
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    callrel __sync_lock_test_and_set_1
 ; CHECK-NEXT:    leaveret
 ;
 ; O0-LABEL: xchg_i8:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 3
+; O0-NEXT:    enter 0
 ; O0-NEXT:    # kill: def $r12 killed $r1
 ; O0-NEXT:    callrel __sync_lock_test_and_set_1
 ; O0-NEXT:    leaveret
@@ -108,7 +108,7 @@ define i8 @xchg_i8(ptr %p, i8 %x) nounwind {
 define i32 @cas(i32 %expected, i32 %desired) nounwind {
 ; CHECK-LABEL: cas:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 3
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    copy r2, r1
 ; CHECK-NEXT:    copy r1, r0
 ; CHECK-NEXT:    setru r0, counter
@@ -117,7 +117,7 @@ define i32 @cas(i32 %expected, i32 %desired) nounwind {
 ;
 ; O0-LABEL: cas:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 3
+; O0-NEXT:    enter 0
 ; O0-NEXT:    copy r2, r1
 ; O0-NEXT:    copy r1, r0
 ; O0-NEXT:    # kill: def $r12 killed $r2

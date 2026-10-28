@@ -217,7 +217,7 @@ define void @big_offset(ptr %p, i64 %v) nounwind {
 define i64 @local_array(i64 %i) nounwind {
 ; CHECK-LABEL: local_array:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 9
+; CHECK-NEXT:    enter 6
 ; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
 ; CHECK-NEXT:    addi r5, r15, -48
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill

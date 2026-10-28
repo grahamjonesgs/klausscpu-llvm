@@ -87,7 +87,7 @@ define void @ra(ptr %f) nounwind {
 define i64 @p() nounwind {
 ; STATIC-LABEL: p:
 ; STATIC:       # %bb.0:
-; STATIC-NEXT:    enter 4
+; STATIC-NEXT:    enter 1
 ; STATIC-NEXT:    setr r0, 3
 ; STATIC-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; STATIC-NEXT:    callrel b
@@ -102,7 +102,7 @@ define i64 @p() nounwind {
 ;
 ; PIC-LABEL: p:
 ; PIC:       # %bb.0:
-; PIC-NEXT:    enter 4
+; PIC-NEXT:    enter 1
 ; PIC-NEXT:    setr r0, 3
 ; PIC-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; PIC-NEXT:    callrel b

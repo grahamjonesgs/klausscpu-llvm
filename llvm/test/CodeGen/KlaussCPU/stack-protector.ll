@@ -9,7 +9,7 @@ declare void @use(ptr)
 define void @protected() nounwind sspstrong {
 ; CHECK-LABEL: protected:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 7
+; CHECK-NEXT:    enter 4
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    setru r4, __stack_chk_guard
 ; CHECK-NEXT:    addi r0, r15, -32

@@ -14,7 +14,7 @@ declare i64 @g(i64)
 define i64 @one_csr(i64 %x) nounwind {
 ; CHECK-LABEL: one_csr:
 ; CHECK-NOT:     .cfi
-; CHECK:         enter 4
+; CHECK:         enter 1
 ; CHECK-NEXT:    setr r0, 3
 ; CHECK-NEXT:    stidx64 r4, r15, -8
 ; CHECK-NEXT:    callrel g
@@ -28,7 +28,7 @@ define i64 @one_csr(i64 %x) nounwind {
 define i64 @one_csr_cfi(i64 %x) {
 ; CHECK-LABEL: one_csr_cfi:
 ; CHECK:         .cfi_startproc
-; CHECK:         enter 4
+; CHECK:         enter 1
 ; CHECK-NEXT:    .cfi_def_cfa r15, 16
 ; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    setr r0, 3
@@ -44,7 +44,7 @@ define i64 @one_csr_cfi(i64 %x) {
 ; Each rule follows its own spill.
 define i64 @two_csr_cfi(i64 %x, i64 %y) {
 ; CHECK-LABEL: two_csr_cfi:
-; CHECK:         enter 5
+; CHECK:         enter 2
 ; CHECK-NEXT:    .cfi_def_cfa r15, 16
 ; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    setr r0, 5

@@ -12,8 +12,8 @@ define void @swap(i64 %a, i64 %b, ptr %p, ptr %q, i64 %c, i64 %d) nounwind {
 ; CHECK-LABEL: swap:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    ldidx64 r14, r15, 48
-; CHECK-NEXT:    ldidx64 r12, r15, 40
+; CHECK-NEXT:    ldidx64 r14, r15, 24
+; CHECK-NEXT:    ldidx64 r12, r15, 16
 ; CHECK-NEXT:    fbr r0, r1, 4, .LBB0_2
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    copy r13, r12
@@ -29,8 +29,8 @@ define void @swap(i64 %a, i64 %b, ptr %p, ptr %q, i64 %c, i64 %d) nounwind {
 ; NOGROUP-LABEL: swap:
 ; NOGROUP:       # %bb.0:
 ; NOGROUP-NEXT:    enter 0
-; NOGROUP-NEXT:    ldidx64 r14, r15, 40
-; NOGROUP-NEXT:    ldidx64 r12, r15, 48
+; NOGROUP-NEXT:    ldidx64 r14, r15, 16
+; NOGROUP-NEXT:    ldidx64 r12, r15, 24
 ; NOGROUP-NEXT:    copy r13, r14
 ; NOGROUP-NEXT:    fbr r0, r1, 12, .LBB0_2
 ; NOGROUP-NEXT:  # %bb.1:
@@ -93,7 +93,7 @@ define i64 @three(i32 signext %a, i32 signext %b, i64 %c, i64 %d, ptr %p) nounwi
 ; CHECK-LABEL: three:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    ldidx64 r14, r15, 40
+; CHECK-NEXT:    ldidx64 r14, r15, 16
 ; CHECK-NEXT:    fbr r0, r1, 11, .LBB2_2
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    copy r12, r2
@@ -119,7 +119,7 @@ define i64 @three(i32 signext %a, i32 signext %b, i64 %c, i64 %d, ptr %p) nounwi
 ; NOGROUP-NEXT:  # %bb.3:
 ; NOGROUP-NEXT:    setr r3, 7
 ; NOGROUP-NEXT:  .LBB2_4:
-; NOGROUP-NEXT:    ldidx64 r14, r15, 40
+; NOGROUP-NEXT:    ldidx64 r14, r15, 16
 ; NOGROUP-NEXT:    fbr r0, r1, 3, .LBB2_6
 ; NOGROUP-NEXT:  # %bb.5:
 ; NOGROUP-NEXT:    setr r2, 9
@@ -276,8 +276,8 @@ define void @swap32(i64 %a, i64 %b, ptr %p, ptr %q, i64 %c, i64 %d) nounwind {
 ; CHECK-LABEL: swap32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    ldidx64 r14, r15, 48
-; CHECK-NEXT:    ldidx64 r12, r15, 40
+; CHECK-NEXT:    ldidx64 r14, r15, 24
+; CHECK-NEXT:    ldidx64 r12, r15, 16
 ; CHECK-NEXT:    cmprrw r0, r1
 ; CHECK-NEXT:    jmpulerel .LBB6_2
 ; CHECK-NEXT:  # %bb.1:
@@ -294,8 +294,8 @@ define void @swap32(i64 %a, i64 %b, ptr %p, ptr %q, i64 %c, i64 %d) nounwind {
 ; NOGROUP-LABEL: swap32:
 ; NOGROUP:       # %bb.0:
 ; NOGROUP-NEXT:    enter 0
-; NOGROUP-NEXT:    ldidx64 r14, r15, 40
-; NOGROUP-NEXT:    ldidx64 r12, r15, 48
+; NOGROUP-NEXT:    ldidx64 r14, r15, 16
+; NOGROUP-NEXT:    ldidx64 r12, r15, 24
 ; NOGROUP-NEXT:    cmprrw r0, r1
 ; NOGROUP-NEXT:    copy r13, r14
 ; NOGROUP-NEXT:    jmpugtrel .LBB6_2
@@ -379,7 +379,7 @@ define i64 @add_between(i64 %a, i64 %b, i64 %c, i64 %d, i64 %x) nounwind {
 ; CHECK-LABEL: add_between:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    ldidx64 r12, r15, 40
+; CHECK-NEXT:    ldidx64 r12, r15, 16
 ; CHECK-NEXT:    fbr r0, r1, 9, .LBB8_2
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    addr r12, r2, r12
@@ -397,7 +397,7 @@ define i64 @add_between(i64 %a, i64 %b, i64 %c, i64 %d, i64 %x) nounwind {
 ; NOGROUP-NEXT:  # %bb.1:
 ; NOGROUP-NEXT:    copy r12, r3
 ; NOGROUP-NEXT:  .LBB8_2:
-; NOGROUP-NEXT:    ldidx64 r14, r15, 40
+; NOGROUP-NEXT:    ldidx64 r14, r15, 16
 ; NOGROUP-NEXT:    fbr r0, r1, 9, .LBB8_4
 ; NOGROUP-NEXT:  # %bb.3:
 ; NOGROUP-NEXT:    addr r14, r2, r14
@@ -418,8 +418,8 @@ define i64 @wbool_between(i32 %a, i32 %b, i32 %c, i32 %d, i64 %x, i64 %y) nounwi
 ; CHECK-LABEL: wbool_between:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    ldidx64 r13, r15, 48
-; CHECK-NEXT:    ldidx64 r12, r15, 40
+; CHECK-NEXT:    ldidx64 r13, r15, 24
+; CHECK-NEXT:    ldidx64 r12, r15, 16
 ; CHECK-NEXT:    cmprrw r0, r1
 ; CHECK-NEXT:    cmpultrw r14, r2, r3
 ; CHECK-NEXT:    jmpgerel .LBB9_2
@@ -437,8 +437,8 @@ define i64 @wbool_between(i32 %a, i32 %b, i32 %c, i32 %d, i64 %x, i64 %y) nounwi
 ; NOGROUP-LABEL: wbool_between:
 ; NOGROUP:       # %bb.0:
 ; NOGROUP-NEXT:    enter 0
-; NOGROUP-NEXT:    ldidx64 r14, r15, 40
-; NOGROUP-NEXT:    ldidx64 r12, r15, 48
+; NOGROUP-NEXT:    ldidx64 r14, r15, 16
+; NOGROUP-NEXT:    ldidx64 r12, r15, 24
 ; NOGROUP-NEXT:    cmprrw r0, r1
 ; NOGROUP-NEXT:    copy r13, r14
 ; NOGROUP-NEXT:    jmpltrel .LBB9_2

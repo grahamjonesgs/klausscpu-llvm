@@ -152,6 +152,26 @@ TEST_F(KlaussCPUABITest, CallingConvention) {
   for (const MCPhysReg *R = TRI.getCalleeSavedRegs(nullptr); *R; ++R)
     CSRs.push_back(*R);
   EXPECT_EQ(numbers(CSRs), Sorted(KlaussCPUABI::CalleeSavedGPRs));
+
+  // A call's register mask preserves the callee-saved GPRs and the frame
+  // pointer (the callee's prologue saves it), and clobbers every other GPR.
+  LLVMContext Ctx;
+  Module M("cc", Ctx);
+  M.setDataLayout(TM->createDataLayout());
+  Function *F = Function::Create(FunctionType::get(Type::getVoidTy(Ctx), false),
+                                 GlobalValue::ExternalLinkage, "f", M);
+  MachineModuleInfo MMI(TM.get());
+  MachineFunction MF(*F, *TM, *TM->getSubtargetImpl(*F), MMI.getContext(), 0);
+  const uint32_t *Mask = TRI.getCallPreservedMask(MF, CallingConv::C);
+  for (MCRegister R : MRI().getRegClass(KlaussCPU::GPRRegClassID)) {
+    unsigned N = MRI().getEncodingValue(R);
+    bool Preserved = N == KlaussCPUABI::FPReg ||
+                     llvm::is_contained(KlaussCPUABI::CalleeSavedGPRs, N);
+    EXPECT_EQ(!MachineOperand::clobbersPhysReg(Mask, R), Preserved)
+        << KlaussCPUABI::GPRNames[N];
+  }
+  EXPECT_FALSE(MachineOperand::clobbersPhysReg(Mask, KlaussCPU::SP));
+  EXPECT_TRUE(MachineOperand::clobbersPhysReg(Mask, KlaussCPU::FLAGS));
 }
 
 // The register lists above are sorted, but their order matters too: lldb
@@ -231,6 +251,9 @@ TEST_F(KlaussCPUABITest, Frame) {
   EXPECT_EQ(Init[1].getOffset(), -int(KlaussCPUABI::RetAddrSize));
   EXPECT_EQ(KlaussCPUABI::IncomingArgOffset,
             KlaussCPUABI::OutgoingArgOffset + KlaussCPUABI::RetAddrSize);
+  // A variadic call's home area holds every argument register.
+  EXPECT_EQ(KlaussCPUABI::VarArgHomeSize,
+            KlaussCPUABI::NumArgGPRs * KlaussCPUABI::SlotSize);
 }
 
 TEST_F(KlaussCPUABITest, DataLayout) {

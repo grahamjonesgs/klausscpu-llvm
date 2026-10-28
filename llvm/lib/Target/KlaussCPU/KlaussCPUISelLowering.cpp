@@ -169,9 +169,11 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   //    Atomic within one core only.
   // AtomicExpandPass turns larger or misaligned atomics into __atomic_*
   // libcalls and the RMWs without a __sync libcall into cmpxchg loops
-  // (shouldExpandAtomicRMWInIR).  The libcalls pass sub-word values
-  // any-extended and return them zero-extended (the default
-  // getExtendForAtomicOps, which the runtime matches).
+  // (shouldExpandAtomicRMWInIR).  The type legaliser promotes a 1/2/4-byte
+  // RMW to i64 before it becomes a libcall, so these values go in
+  // any-extended and come back zero-extended (the default
+  // getExtendForAtomicOps), unlike the C ABI's sign-extended i32; the
+  // runtime's functions take and return uint64_t to match.
   setMaxAtomicSizeInBitsSupported(64);
   setOperationAction(ISD::ATOMIC_FENCE, MVT::Other, Custom);
   // The sign- and zero-extending loads are atomic too, so a [sz]ext of an
@@ -1113,10 +1115,11 @@ KlaussCPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
 // Stack layout (from the callee's incoming SP, which CALL has decremented
 // by 8 to push the return address):
 //   [SP+0..SP+7]   return address
-//   [SP+8..SP+31]  reserved: home area for R1-R3 (varargs)
-//   [SP+32..]      stack arguments (8 bytes each)
+//   [SP+8..SP+39]  a variadic function only: home slots of R0-R3
+//   [SP+8.. / SP+40..]  stack arguments (8 bytes each)
 //
-// We pre-reserve 32 bytes in CCState so stack args land at offset ≥ 32.
+// We pre-reserve the return address slot (and the home area) in CCState so
+// stack args land at offset >= 8 (>= 40).
 //===----------------------------------------------------------------------===//
 
 SDValue KlaussCPUTargetLowering::LowerFormalArguments(
@@ -1128,9 +1131,13 @@ SDValue KlaussCPUTargetLowering::LowerFormalArguments(
 
   SmallVector<CCValAssign, 16> ArgLocs;
   CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
-  // Reserve [SP+0..SP+31]: return address + ABI reserved area.
+  // Reserve [SP+0..SP+7]: the return address, and [SP+8..SP+39], the home
+  // area of a variadic function.
   CCInfo.AllocateStack(KlaussCPUABI::IncomingArgOffset,
                        Align(KlaussCPUABI::SlotSize));
+  if (IsVarArg)
+    CCInfo.AllocateStack(KlaussCPUABI::VarArgHomeSize,
+                         Align(KlaussCPUABI::SlotSize));
   CCInfo.AnalyzeFormalArguments(Ins, CC_KlaussCPU);
 
   for (const CCValAssign &VA : ArgLocs) {
@@ -1140,7 +1147,7 @@ SDValue KlaussCPUTargetLowering::LowerFormalArguments(
       InVals.push_back(DAG.getCopyFromReg(Chain, DL, VReg, MVT::i64));
     } else {
       assert(VA.isMemLoc() && "Unexpected CCValAssign loc type");
-      // Offset is relative to incoming SP (≥ 32 due to pre-reserve).
+      // Offset is relative to incoming SP (>= 8 due to the pre-reserve).
       // getFrameIndexReference adds 8 for fixed objects
       // (R15 = incoming_SP - 8).
       int FI = MF.getFrameInfo().CreateFixedObject(8, VA.getLocMemOffset(),
@@ -1152,44 +1159,24 @@ SDValue KlaussCPUTargetLowering::LowerFormalArguments(
   }
 
   if (IsVarArg) {
-    static const MCPhysReg ArgRegs[] = {
-        KlaussCPU::R0, KlaussCPU::R1, KlaussCPU::R2, KlaussCPU::R3};
-    constexpr unsigned NumArgRegs = std::size(ArgRegs);
-    static_assert(NumArgRegs == KlaussCPUABI::NumArgGPRs);
+    static const MCPhysReg ArgRegs[] = {KlaussCPU::R0, KlaussCPU::R1,
+                                        KlaussCPU::R2, KlaussCPU::R3};
+    static_assert(std::size(ArgRegs) == KlaussCPUABI::NumArgGPRs);
+    MachineFrameInfo &MFI = MF.getFrameInfo();
 
-    // Index of the first unallocated (= first potential vararg) register.
-    unsigned FirstVaReg =
-        CCInfo.getFirstUnallocated(ArrayRef<MCPhysReg>(ArgRegs, NumArgRegs));
-
-    // The caller reserves home slots for R1–R3 only: R0's would be
-    // [incoming_SP+0], the return address.  So a function with no named
-    // parameter (C23 `f(...)`, or IR) cannot spill R0 next to the others.
-    if (FirstVaReg == 0) {
-      DAG.getContext()->diagnose(DiagnosticInfoUnsupported(
-          MF.getFunction(),
-          "variadic functions without a named parameter are not supported "
-          "by the KlaussCPU calling convention",
-          DL.getDebugLoc()));
-      FirstVaReg = 1;
-    }
-
-    auto &MFI = MF.getFrameInfo();
-
-    // Arg register R_I sits in the caller's "reserved area" at [incoming_SP + I*8].
-    // We save R_{FirstVaReg}..R3 there so they are contiguous with stack args at
-    // [incoming_SP+32..], allowing va_arg to advance a plain pointer through all args.
-    //
-    // getFrameIndexReference adds 8 for fixed objects (R15 = incoming_SP - 8),
-    // so CreateFixedObject with offset F yields the R15-relative offset F+8.
-
+    // The caller reserved a home slot for each argument register at
+    // [incoming_SP + 8 + I*8], just below the stack arguments.  Store the
+    // unnamed register arguments there, so all unnamed arguments are
+    // contiguous and va_arg advances a plain pointer.  getFrameIndexReference
+    // adds 8 to these incoming-SP offsets (R15 = incoming_SP - 8).
+    unsigned FirstVaReg = CCInfo.getFirstUnallocated(ArgRegs);
     std::optional<int> VaArgFI;
     SmallVector<SDValue, 4> Stores;
-    for (unsigned I = FirstVaReg; I < NumArgRegs; ++I) {
-      // R_I → [incoming_SP + I*8]
-      int SlotOff =
-          KlaussCPUABI::RetAddrSize + (I - 1) * KlaussCPUABI::SlotSize;
-      int FI = MFI.CreateFixedObject(KlaussCPUABI::SlotSize, SlotOff,
-                                     /*isImmutable=*/false);
+    for (unsigned I = FirstVaReg; I < std::size(ArgRegs); ++I) {
+      int FI = MFI.CreateFixedObject(
+          KlaussCPUABI::SlotSize,
+          KlaussCPUABI::RetAddrSize + I * KlaussCPUABI::SlotSize,
+          /*IsImmutable=*/false);
       if (!VaArgFI)
         VaArgFI = FI;
       Register VReg = RegInfo.createVirtualRegister(&KlaussCPU::GPRRegClass);
@@ -1197,16 +1184,17 @@ SDValue KlaussCPUTargetLowering::LowerFormalArguments(
       SDValue FIN = DAG.getFrameIndex(FI, getPointerTy(DAG.getDataLayout()));
       SDValue Val = DAG.getCopyFromReg(Chain, DL, VReg, MVT::i64);
       Stores.push_back(DAG.getStore(Chain, DL, Val, FIN,
-                                     MachinePointerInfo::getFixedStack(MF, FI)));
+                                    MachinePointerInfo::getFixedStack(MF, FI)));
     }
     if (!Stores.empty())
       Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other, Stores);
 
-    // If all registers were used for named args, the first vararg is on the stack.
+    // If the named arguments took every register, the first unnamed one is
+    // the next stack slot.
     if (!VaArgFI)
-      VaArgFI = MFI.CreateFixedObject(8, (int)CCInfo.getStackSize(),
-                                       /*isImmutable=*/false);
-
+      VaArgFI = MFI.CreateFixedObject(KlaussCPUABI::SlotSize,
+                                      CCInfo.getStackSize(),
+                                      /*IsImmutable=*/false);
     MF.getInfo<KlaussCPUMachineFunctionInfo>()->setVarArgsFrameIndex(*VaArgFI);
   }
 
@@ -1261,9 +1249,10 @@ SDValue KlaussCPUTargetLowering::LowerReturn(
 // Call — outgoing side
 //
 // CALL pushes the return address (SP -= 8), so the callee's incoming SP is
-// the caller's SP - 8.  Callee sees: [SP+0..7] = return address,
-// [SP+8..31] = reserved, [SP+32..] = stack args; the caller therefore stores
-// stack args from its SP + 24 and pre-reserves 24 bytes in CCState.
+// the caller's SP - 8.  Callee sees: [SP+0..7] = return address, then the
+// home area of R0-R3 for a variadic call (32 bytes), then the stack args; the
+// caller therefore stores stack args from its SP + 0 (+ 32), and a
+// non-variadic call without stack arguments reserves no call frame.
 //===----------------------------------------------------------------------===//
 
 SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
@@ -1290,16 +1279,16 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
   // CALL pre-decrements SP by 8 (stores return address at [SP-8], SP -= 8).
   // So incoming_SP = CallerSP - 8.  From the caller's GETSP_R perspective:
   //   [GETSP-8..-1]  = return address slot  (incoming_SP +0..+7)
-  //   [GETSP+0..23]  = reserved area for R1-R3 saves (incoming_SP +8..+31)
-  //   [GETSP+24..]   = stack args (incoming_SP +32 onwards)
-  // The callee pre-reserves 32 bytes from incoming_SP.  The caller's GETSP
-  // value is incoming_SP + 8, so pre-reserve only 24 bytes here so the first
-  // stack arg offset (24) maps to incoming_SP + 32 on the callee side.
-  CCInfo.AllocateStack(KlaussCPUABI::OutgoingArgOffset,
-                       Align(KlaussCPUABI::SlotSize));
+  //   [GETSP+0..31]  = variadic call only: home slots of R0-R3, which the
+  //                    callee fills (incoming_SP +8..+39)
+  //   [GETSP+0.. / GETSP+32..] = stack args (incoming_SP +8 / +40 onwards)
+  static_assert(KlaussCPUABI::OutgoingArgOffset == 0);
+  if (IsVarArg)
+    CCInfo.AllocateStack(KlaussCPUABI::VarArgHomeSize,
+                         Align(KlaussCPUABI::SlotSize));
   CCInfo.AnalyzeCallOperands(CLI.Outs, CC_KlaussCPU);
 
-  unsigned StackSize = CCInfo.getStackSize(); // ≥ 24
+  unsigned StackSize = CCInfo.getStackSize();
 
   // ---- Make private copies of byval arguments ----------------------------
   // A byval argument is passed as a pointer (CC_KlaussCPU treats it as an
@@ -1313,10 +1302,10 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
     if (!Flags.isByVal())
       continue;
 
-    // Clang's DefaultABIInfo passes empty records (GNU C `struct {}`, or a
-    // struct holding only a zero-length array) byval.  The callee can read
-    // no bytes, so pass the original pointer; a zero-size stack object
-    // is not allowed.
+    // A zero-size byval record (GNU C `struct {}`, or a struct holding only
+    // a zero-length array; clang itself no longer passes records byval) has
+    // no bytes to copy, so pass the original pointer; a zero-size stack
+    // object is not allowed.
     unsigned Size = Flags.getByValSize();
     if (Size == 0) {
       ByValArgs.push_back(CLI.OutVals[I]);
@@ -1370,7 +1359,6 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
       RegsToPass.push_back({VA.getLocReg(), Arg});
     } else {
       assert(VA.isMemLoc());
-      // Offset already includes the 24-byte pre-reservation.
       SDValue Addr = DAG.getNode(ISD::ADD, DL, PtrVT, SP,
                                   DAG.getConstant(VA.getLocMemOffset(), DL, PtrVT));
       MemOpChains.push_back(
@@ -1404,6 +1392,10 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
     Ops.push_back(DAG.getRegister(Reg, Val.getValueType()));
   // Keep SP live-in to the call node so the scheduler doesn't move stores.
   Ops.push_back(DAG.getRegister(KlaussCPU::SP, MVT::i32));
+  // The registers the callee preserves (CSR_KlaussCPU_Call: R4-R7, R15,
+  // SP); every other one is clobbered.
+  const TargetRegisterInfo *TRI = Subtarget.getRegisterInfo();
+  Ops.push_back(DAG.getRegisterMask(TRI->getCallPreservedMask(MF, CallConv)));
   if (Glue.getNode())
     Ops.push_back(Glue);
 

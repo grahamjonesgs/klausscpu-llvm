@@ -145,7 +145,7 @@ declare void @f()
 define void @br_u32(i64 %a) nounwind {
 ; CHECK-LABEL: br_u32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 3
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmprvu r0, 3735928559
 ; CHECK-NEXT:    jmpnerel .LBB8_2
 ; CHECK-NEXT:  # %bb.1: # %t
@@ -155,7 +155,7 @@ define void @br_u32(i64 %a) nounwind {
 ;
 ; PIC-LABEL: br_u32:
 ; PIC:       # %bb.0:
-; PIC-NEXT:    enter 3
+; PIC-NEXT:    enter 0
 ; PIC-NEXT:    cmprvu r0, 3735928559
 ; PIC-NEXT:    jmpnerel .LBB8_2
 ; PIC-NEXT:  # %bb.1: # %t

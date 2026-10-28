@@ -9,6 +9,8 @@ the hardware repo (`klaussCPU/CPU_ARCHITECTURE.md`, `ISA_ENCODING_V2_MAP.md`,
 `ISA_V3_IMPL.md`; RTL ground truth `pipeline_core.sv` / `klauss_pkg.sv`).
 `HISTORY.md` is the step-by-step development log; many of its statements
 describe earlier states of the backend and are superseded by this file.
+[`ABI.md`](ABI.md) is the C ABI (calling convention version 2): the rules,
+the consumers and the measurements behind the design.
 
 ---
 
@@ -23,7 +25,7 @@ describe earlier states of the backend and are superseded by this file.
 | C type model | `int`=32; `long`/`long long`/`void*`=64 |
 | Hardware FP | none — soft-float (compiler-rt builtins) |
 | CMOV | none — `select` becomes a `SELECT_CC_RR/RI` pseudo, expanded to compare + branch; a run of selects on the same condition shares one compare/branch (one PHI each) |
-| Atomics | no instructions — "forced atomics" (as RISC-V `+forced-atomics`), **atomic within one core only**: an aligned atomic load/store of 1/2/4/8 bytes is the plain access (patterns), a fence a compiler barrier, every RMW / cmpxchg a `__sync_*_N` libcall (LibCall actions) that the runtime's `src/atomic.c` runs with `INT_MASK` saved/zeroed/restored; FP / `uinc_wrap` / `udec_wrap` / `usub_*` RMWs are cmpxchg loops (`shouldExpandAtomicRMWInIR`); wider or misaligned atomics are `__atomic_*` libcalls (not provided).  Sub-word libcall values go in any-extended and come back zero-extended.  Clang inlines atomics up to 64 bits (`MaxAtomicInlineWidth`).  Nothing makes them atomic against core 2 (AMP), whose DDR view also bypasses core 1's D-cache |
+| Atomics | no instructions — "forced atomics" (as RISC-V `+forced-atomics`), **atomic within one core only**: an aligned atomic load/store of 1/2/4/8 bytes is the plain access (patterns), a fence a compiler barrier, every RMW / cmpxchg a `__sync_*_N` libcall (LibCall actions) that the runtime's `src/atomic.c` runs with `INT_MASK` saved/zeroed/restored; FP / `uinc_wrap` / `udec_wrap` / `usub_*` RMWs are cmpxchg loops (`shouldExpandAtomicRMWInIR`); wider or misaligned atomics are `__atomic_*` libcalls (not provided).  The type legaliser promotes a 1/2/4-byte RMW to i64 first, so those libcall values go in any-extended and come back zero-extended (not the C ABI's sign-extended i32; `atomic.c` takes and returns `uint64_t`).  Clang inlines atomics up to 64 bits (`MaxAtomicInlineWidth`).  Nothing makes them atomic against core 2 (AMP), whose DDR view also bypasses core 1's D-cache |
 | Sign-extending loads | i8/i16/i32: hardware (`LDIDX8_S`/`LDIDX16_S`/`LDIDX32_S`) |
 | Load/store addressing | `[r]` (`MEMGETn`/`MEMSETn`), `r + simm32` (`LDIDXn`/`STIDXn`, 1-word short form for a small scaled offset), `r + r` at every width (`LDIDXnR`/`LDIDXn_SR`/`STIDXnR`, MODE=11), an absolute imm32 at every width (`LDABSn`/`LDABSn_S`/`STABSn`, `MEMREADR`/`MEMSETR`, MODE=10, 2 words) for a naturally aligned constant address such as an MMIO register; 16/32-bit forms other than `MEMGET32` force-align the EA, so an under-aligned non-volatile 32-bit load is `MEMGET32` of the computed address (`allowsMisalignedMemoryAccesses`, loads only; an under-aligned i64 load is two of them), every other under-aligned access is split |
 | C environment | hosted by default (the driver no longer adds `-ffreestanding`): `memcpy`/`memset`/`memmove` of a constant size are intrinsics, inline up to 8 accesses (4 under optsize) at the width both sides' alignment allows (a source below 4-byte alignment still allows 4, `MEMGET32`); a constant source is stored as immediates (`shouldConvertConstantLoadToIntImm`); stack objects and module globals they touch get 8-byte alignment (`shouldAlignPointerArgs`).  `printf`/`fprintf` are not turned into `puts`/`putchar`/`fputc`/`fputs`/`fwrite` (`TargetLibraryInfo`: each would link another stdio function for UART-bound output).  Code that implements the C library (picolibc, compiler-rt, crt0's BSS loop, kernels) is built `-ffreestanding` / `no_builtin` |
@@ -175,27 +177,46 @@ liveness:
 
 ---
 
-## Calling convention (`KlaussCPUCallingConv.td`)
+## Calling convention (`KlaussCPUCallingConv.td`, [`ABI.md`](ABI.md))
+
+ABI version 2 (`KlaussCPUABI::ABIVersion`; RISC-V LP64, integer only):
 
 | Role | Register |
 |---|---|
-| Arg 0–3 | R0–R3 (A–D), caller-saved; i8/i16/i32 promoted to i64 |
-| Args 4+ | stack: `[CallerSP + 24 + n×8]` = `[incoming_SP + 32 + n×8]` = `[R15 + 40 + n×8]` |
-| Return | R12 (M) for i64; R12+R11 (M+L) for i128, caller-saved; larger returns go through a hidden sret pointer (`CanLowerReturn`) |
+| Arg 0–3 | R0–R3 (A–D), caller-saved, named or unnamed |
+| Args 4+ | stack, 8-byte slots: `[CallerSP + n×8]` = `[incoming_SP + 8 + n×8]` = `[R15 + 16 + n×8]`; a variadic call puts them 32 bytes higher (home area) |
+| Return | R12 (M); R12+R11 (M+L) for an i128 or a 9–16 byte aggregate, caller-saved; larger returns go through a hidden sret pointer (clang; `CanLowerReturn` for other IR) |
 | Callee-saved | R4–R7 (E–H) + R15 (P, frame pointer, saved by the prologue) |
 | Temporaries | R8–R11, R13–R14 (I–L, N–O) caller-saved |
 
-- **byval**: the argument is passed as a pointer to a copy the caller makes
+- **Extension**: i8/i16/i32 are promoted to i64 as the IR's `signext`/
+  `zeroext` says, and clang (`clang/lib/CodeGen/Targets/KlaussCPU.cpp`)
+  marks every i32 `signext`, also `unsigned int` (as RV64), narrower
+  integers by their signedness: the producer extends, the consumer relies on
+  it (`AssertSext`/`AssertZext`).  The backend's libcalls do the same
+  (`shouldSignExtendTypeInLibCall`), and `TargetLibraryInfo` marks the i32s
+  of the library calls the optimiser creates `signext`.
+- **Aggregates** (clang): up to 16 bytes direct, coerced to iN / i128 /
+  `[2 x i64]` (one or two GPRs; two parts may straddle R3 and the stack);
+  larger ones by reference to a copy the caller makes.  **byval** (other
+  frontends): the argument is passed as a pointer to a copy the caller makes
   in its own frame (`LowerCall`), so the callee may modify it.
-- **Varargs**: the caller reserves `[incoming_SP+8..31]` as a home area for
-  R1–R3; a variadic callee stores the unnamed register args there, so they
-  are contiguous with the stack args and `va_arg` walks 8-byte slots, never
-  realigned (nothing is aligned beyond 8; an i128 takes two).  Clang emits
-  the walk as IR (`clang/lib/CodeGen/Targets/KlaussCPU.cpp`, an aggregate's
-  slot holds its address), so the pointer can stay in a register; the IR
-  `va_arg` of other frontends is `LowerVAARG` (full slot + truncate).  R0 has
-  no home slot (it would be the return address), so a variadic function
-  with no named parameter (C23 `f(...)`) is diagnosed as unsupported.
+- **Varargs**: unnamed arguments are assigned like named ones.  A variadic
+  call reserves a 32-byte home area for R0–R3 at `[incoming_SP+8..39]`
+  (`VarArgHomeSize`), and the variadic callee stores its unnamed register
+  arguments there, so they are contiguous with the stack args and `va_arg`
+  walks 8-byte slots, never realigned (nothing is aligned beyond 8; an i128
+  takes two).  A call to a non-variadic function reserves nothing (no call
+  frame at all without stack args).  Clang emits the walk as IR (a slot of
+  an aggregate over 16 bytes holds its address), so the pointer can stay in
+  a register; the IR `va_arg` of other frontends is `LowerVAARG` (full slot
+  + truncate).  C23 `f(...)` works (R0 has a home slot).
+- **Call clobbers**: the call instructions `Def` only FLAGS; the registers a
+  call clobbers come from its register-mask operand, `CSR_KlaussCPU_Call`
+  (R4–R7, R15 and SP preserved).
+- **Version**: every object carries the ABI version in `e_flags` (an MC
+  target streamer), lld refuses to link code of different versions, and
+  clang predefines `__klausscpu_abi__`.
 - No tail calls.
 
 ### Frame layout
@@ -205,8 +226,9 @@ So `incoming_SP = CallerSP - 8`.  From the **caller's** `GETSP_R` value (= Calle
 
 ```
   CallerSP ─────┐  (GETSP_R reads this; SP before CALL pre-decrements)
-  Stack args     │  [CallerSP+24 .. CallerSP+24+N×8]  = [incoming_SP+32 ..]
-                 │  [CallerSP+0 .. CallerSP+23]  R1-R3 vararg save area
+  Stack args     │  [CallerSP+0 .. CallerSP+N×8]  = [incoming_SP+8 ..]
+                 │    (variadic call: [CallerSP+0 .. +31] R0-R3 home area,
+                 │     the stack args from CallerSP+32 = incoming_SP+40)
                  │  [CallerSP-8 .. CallerSP-1]   return address (CALL writes here)
   incoming_SP ──┘  ← CallerSP - 8  (SP after CALL pre-decrement; callee entry SP)
   Saved R15      │  ← ENTER pushes R15
@@ -219,13 +241,13 @@ So `incoming_SP = CallerSP - 8`.  From the **caller's** `GETSP_R` value (= Calle
 
 From the **callee's** `incoming_SP` perspective (what `LowerFormalArguments` uses):
 - `[incoming_SP+0..7]`   return address
-- `[incoming_SP+8..31]`  reserved (R1–R3 vararg save slots)
-- `[incoming_SP+32..]`   stack arguments
+- `[incoming_SP+8..39]`  a variadic function only: the R0–R3 home slots
+- `[incoming_SP+8..]` (variadic: `+40..`) stack arguments
 
-`LowerCall` pre-reserves **24** bytes (`AllocateStack(24)`) so that the first
-stack-arg offset of 24 maps to `CallerSP+24 = incoming_SP+32` on the callee side.
-`LowerFormalArguments` pre-reserves **32** bytes (`AllocateStack(32)`) from
-`incoming_SP`, matching the callee-side layout above.  Fixed objects are
+`LowerFormalArguments` pre-reserves the return address (8 bytes,
+`IncomingArgOffset`) and, in a variadic function, the home area
+(`VarArgHomeSize`) in `CCState`; `LowerCall` reserves only the home area of a
+variadic call (`OutgoingArgOffset` is 0), so the offsets agree.  Fixed objects are
 created relative to `incoming_SP`; `getFrameIndexReference` adds 8 to make
 them R15-relative (and the debug info uses the same function, so
 `DW_OP_fbreg` agrees).
@@ -520,7 +542,9 @@ the DataLayout `TargetDataLayout.cpp`, `EM_KLAUSSCPU`
 `BinaryFormat/ELF.h`, the relocations `BinaryFormat/ELFRelocs/KlaussCPU.def`,
 and everything else `llvm/include/llvm/TargetParser/KlaussCPUABI.h`:
 register names and DWARF numbers, the argument / return / callee-saved
-registers, the stack alignment and the stack-argument / CFA offsets, the
+registers, the ABI version (`e_flags`), the largest aggregate passed in
+registers, the stack alignment and the stack-argument / home-area / CFA
+offsets, the
 NOP / HALT / TRAP / JMPREL words and lld's fill word (`InvalidWord`, a
 reserved encoding that traps as an invalid opcode), the 32-bit address
 space.  The backend's code generation follows the .td files, so a change to
@@ -543,7 +567,8 @@ llvm/lib/Target/KlaussCPU/
 ├── CMakeLists.txt              tablegen steps + add_llvm_target
 ├── KlaussCPU.td                target root: subtarget features, AsmWriter/AsmParser, includes the other .td files
 ├── KlaussCPURegisterInfo.td    16 GPRs (r0–r15, alt names a–p) + SP + FLAGS; allocation order
-├── KlaussCPUCallingConv.td     CC_KlaussCPU, RetCC_KlaussCPU, CSR_KlaussCPU
+├── ABI.md                      the C ABI (version 2): rules, consumers, measurements
+├── KlaussCPUCallingConv.td     CC_KlaussCPU, RetCC_KlaussCPU, CSR_KlaussCPU, the call mask CSR_KlaussCPU_Call
 ├── KlaussCPUSchedule.td        scheduling model (RTL interlock latencies); processors `generic` and `no-sched`
 ├── KlaussCPUInstrInfo.td       encodings, operand types, isel patterns, short forms + CompressPats, aliases
 ├── KlaussCPUInstrInfo.h/.cpp   branch analysis, copies, spills, flagsDeadAfter, post-RA hazard recognizer (single issue)
@@ -574,7 +599,7 @@ llvm/lib/Target/KlaussCPU/
 │   ├── KlaussCPUMCCodeEmitter.cpp  generated getBinaryCodeForInstr (encodings = .td Inst fields) + fixup operand hooks
 │   ├── KlaussCPUFixupKinds.h   ABS32, PCREL32, PCREL18 (short branch), PCREL13 (FBR), CALL18 (short call)
 │   ├── KlaussCPUAsmBackend.cpp fixups, ELF relocations, short-branch / short-call relaxation, NOP fill
-│   └── KlaussCPUMCTargetDesc.h/.cpp  LLVMInitializeKlaussCPUTargetMC; MCInstrAnalysis; generated CompressPat compress/uncompress
+│   └── KlaussCPUMCTargetDesc.h/.cpp  LLVMInitializeKlaussCPUTargetMC; MCInstrAnalysis; generated CompressPat compress/uncompress; ELF target streamer (ABI version in e_flags)
 ├── TargetInfo/
 │   ├── KlaussCPUTargetInfo.h   declares getTheKlaussCPUTarget()
 │   └── KlaussCPUTargetInfo.cpp LLVMInitializeKlaussCPUTargetInfo
@@ -584,11 +609,12 @@ llvm/lib/Target/KlaussCPU/
 Outside this directory: `clang/lib/Basic/Targets/KlaussCPU.*` and
 `clang/lib/Driver/ToolChains/KlaussCPU.*` (clang target + driver, which
 compiles hosted and links with `ld.lld -m elf32klausscpu`),
-`clang/lib/CodeGen/Targets/KlaussCPU.cpp` (argument classification as
-DefaultABIInfo; `va_arg`), `llvm/lib/Analysis/TargetLibraryInfo.cpp` (no
-synthesised stdio calls),
+`clang/lib/CodeGen/Targets/KlaussCPU.cpp` (the C ABI's argument
+classification, `ABI.md`; `va_arg`), `llvm/lib/Analysis/TargetLibraryInfo.cpp`
+(no synthesised stdio calls; `signext` i32 in
+`llvm/include/llvm/Analysis/TargetLibraryInfo.h`),
 `lld/ELF/Arch/KlaussCPU.cpp` (relocations; `R_KLAUSSCPU_CALL18` range and
-thunk decision) with the `jmprel` call thunk in `lld/ELF/Thunks.cpp`,
+thunk decision; the ABI version check of `e_flags`) with the `jmprel` call thunk in `lld/ELF/Thunks.cpp`,
 `llvm/include/llvm/BinaryFormat/ELFRelocs/KlaussCPU.def`,
 `llvm/lib/TargetParser/TargetDataLayout.cpp` (the DataLayout),
 `llvm/include/llvm/TargetParser/KlaussCPUABI.h` (shared constants) with its
@@ -632,7 +658,7 @@ SelectionDAGTargetInfo    TSI;
   (register enum must precede instr MC desc because implicit Uses/Defs reference register identifiers)
 - `SelectionDAGISel::getPassName()` is not virtual — do not try to override it
 - `INITIALIZE_PASS` expands to `void llvm::initializeXxxPass(PassRegistry&)` — experimental targets are not in `InitializePasses.h`, so add a manual forward declaration before the macro, and call the initializer from `LLVMInitializeKlaussCPUTarget` so `-run-pass` / `-stop-after` know the pass
-- R15 (frame pointer) must **not** be in `CSR_KlaussCPU` — the prologue saves it (ENTER / PUSH R15); listing it would make PEI spill it a second time
+- R15 (frame pointer) must **not** be in `CSR_KlaussCPU` — the prologue saves it (ENTER / PUSH R15); listing it would make PEI spill it a second time.  It is in the call register mask (`CSR_KlaussCPU_Call`), or a call would end every R15-based debug location range
 - Branch/call target operands have no `PrintMethod`: `printOperand` prints them, and the `Address` overload turns an `OPERAND_PCREL` displacement into a target address under `PrintBranchImmAsAddress` (llvm-objdump)
 - Do not define `PRINT_ALIAS_INSTR` unless `printAliasInstr` / `printCustomAliasOperand` are declared in the InstPrinter header
 

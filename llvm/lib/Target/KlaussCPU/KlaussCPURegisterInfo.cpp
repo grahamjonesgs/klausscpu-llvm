@@ -42,10 +42,12 @@ KlaussCPURegisterInfo::getCalleeSavedRegs(const MachineFunction *) const {
   return CSR_KlaussCPU_SaveList;
 }
 
+// A call preserves R4–R7, R15 and SP (CSR_KlaussCPU_Call) and clobbers every
+// other register (and FLAGS).
 const uint32_t *
 KlaussCPURegisterInfo::getCallPreservedMask(const MachineFunction &MF,
                                              CallingConv::ID) const {
-  return CSR_KlaussCPU_RegMask;
+  return CSR_KlaussCPU_Call_RegMask;
 }
 
 BitVector

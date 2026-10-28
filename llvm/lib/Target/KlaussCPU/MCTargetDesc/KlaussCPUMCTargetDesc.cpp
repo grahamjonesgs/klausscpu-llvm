@@ -18,6 +18,8 @@
 #include "KlaussCPUMCTargetDesc.h"
 #include "TargetInfo/KlaussCPUTargetInfo.h"
 #include "llvm/MC/MCDwarf.h"
+#include "llvm/MC/MCELFObjectWriter.h"
+#include "llvm/MC/MCELFStreamer.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrAnalysis.h"
 #include "llvm/MC/MCInstrInfo.h"
@@ -182,6 +184,30 @@ static MCInstrAnalysis *createKlaussCPUInstrAnalysis(const MCInstrInfo *Info) {
   return new KlaussCPUMCInstrAnalysis(Info);
 }
 
+namespace {
+// Marks every ELF object with the calling convention its code follows
+// (KlaussCPUABI::ABIVersion in e_flags), so lld can refuse to link code built
+// for an older one: an object compiled before the ABI change and left behind
+// by a build system would otherwise fail at run time.
+class KlaussCPUTargetELFStreamer : public MCTargetStreamer {
+public:
+  explicit KlaussCPUTargetELFStreamer(MCStreamer &S) : MCTargetStreamer(S) {}
+  void finish() override {
+    ELFObjectWriter &W = static_cast<MCELFStreamer &>(Streamer).getWriter();
+    W.setELFHeaderEFlags((W.getELFHeaderEFlags() &
+                          ~KlaussCPUABI::EFlagsABIMask) |
+                         KlaussCPUABI::ABIVersion);
+  }
+};
+} // namespace
+
+static MCTargetStreamer *
+createKlaussCPUObjectTargetStreamer(MCStreamer &S, const MCSubtargetInfo &STI) {
+  if (STI.getTargetTriple().isOSBinFormatELF())
+    return new KlaussCPUTargetELFStreamer(S);
+  return nullptr;
+}
+
 extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void
 LLVMInitializeKlaussCPUTargetMC() {
   Target &T = getTheKlaussCPUTarget();
@@ -201,4 +227,6 @@ LLVMInitializeKlaussCPUTargetMC() {
   // Code emitter + assembler backend: enables -filetype=obj ELF output.
   TargetRegistry::RegisterMCCodeEmitter(T, createKlaussCPUMCCodeEmitter);
   TargetRegistry::RegisterMCAsmBackend(T, createKlaussCPUAsmBackend);
+  TargetRegistry::RegisterObjectTargetStreamer(
+      T, createKlaussCPUObjectTargetStreamer);
 }

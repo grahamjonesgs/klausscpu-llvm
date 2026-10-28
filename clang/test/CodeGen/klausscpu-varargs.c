@@ -3,8 +3,9 @@
 
 // va_list is a pointer to 8-byte slots (every argument is promoted to i64 or
 // split into i64 parts, nothing is aligned beyond 8), so va_arg is a plain
-// load and a pointer bump by the slot-rounded size, never realigned; an
-// aggregate's slot holds its address.  No IR va_arg instruction.
+// load and a pointer bump by the slot-rounded size, never realigned.  An
+// aggregate of up to 16 bytes is in its slots; a larger one's slot holds its
+// address.  No IR va_arg instruction.
 
 #include <stdarg.h>
 
@@ -41,3 +42,18 @@ __int128 va_i128(va_list ap) { return va_arg(ap, __int128); }
 // CHECK:         [[P:%.*]] = load ptr, ptr %argp.cur, align 8
 // CHECK:         call void @llvm.memcpy.p0.p0.i64(ptr align 8 %agg.result, ptr align 8 [[P]], i64 24, i1 false)
 struct S va_struct(va_list ap) { return va_arg(ap, struct S); }
+
+// A 12-byte aggregate is passed in two slots: read in place, bump by 16.
+struct T { int a, b, c; };
+// CHECK-LABEL: define{{.*}} [2 x i64] @va_small_struct(
+// CHECK:         %argp.next = getelementptr inbounds i8, ptr %argp.cur, i64 16
+// CHECK-NOT:     load ptr, ptr %argp.cur
+// CHECK:         call void @llvm.memcpy.p0.p0.i64(ptr align 4 %retval, ptr align 8 %argp.cur, i64 12, i1 false)
+struct T va_small_struct(va_list ap) { return va_arg(ap, struct T); }
+
+// A zero-size record takes no slot.
+struct Z {};
+// CHECK-LABEL: define{{.*}} void @va_empty(
+// CHECK-NOT:     %argp.next
+// CHECK:         ret void
+struct Z va_empty(va_list ap) { return va_arg(ap, struct Z); }

@@ -11,7 +11,7 @@ declare void @f()
 define void @rr_both(i64 %a, i64 %b) nounwind {
 ; CHECK-LABEL: rr_both:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 3
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmprrw r0, r1
 ; CHECK-NEXT:    jmpgerel .LBB0_2
 ; CHECK-NEXT:  # %bb.1: # %t
@@ -33,7 +33,7 @@ e:
 define void @rr_one(i32 signext %a, i64 %b) nounwind {
 ; CHECK-LABEL: rr_one:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 3
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmprrw r0, r1
 ; CHECK-NEXT:    jmpgerel .LBB1_2
 ; CHECK-NEXT:  # %bb.1: # %t
@@ -54,7 +54,7 @@ e:
 define void @imm_large(i64 %a) nounwind {
 ; CHECK-LABEL: imm_large:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 3
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmprvw r0, 999
 ; CHECK-NEXT:    jmpgtrel .LBB2_2
 ; CHECK-NEXT:  # %bb.1: # %t
@@ -75,7 +75,7 @@ e:
 define void @imm_small(i64 %a) nounwind {
 ; CHECK-LABEL: imm_small:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 3
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    cmprvw r0, 4
 ; CHECK-NEXT:    jmpgtrel .LBB3_2
 ; CHECK-NEXT:  # %bb.1: # %t

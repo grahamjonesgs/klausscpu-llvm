@@ -376,7 +376,7 @@ declare void @use(ptr)
 define i32 @load_i32_frame() nounwind {
 ; CHECK-LABEL: load_i32_frame:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 4
+; CHECK-NEXT:    enter 1
 ; CHECK-NEXT:    addi r0, r15, -4
 ; CHECK-NEXT:    callrel use
 ; CHECK-NEXT:    ldidx32 r12, r15, -4
@@ -384,7 +384,7 @@ define i32 @load_i32_frame() nounwind {
 ;
 ; O0-LABEL: load_i32_frame:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 4
+; O0-NEXT:    enter 1
 ; O0-NEXT:    addi r0, r15, -4
 ; O0-NEXT:    callrel use
 ; O0-NEXT:    ldidx32 r12, r15, -4
@@ -398,7 +398,7 @@ define i32 @load_i32_frame() nounwind {
 define void @store_i8_frame(i8 %x) nounwind {
 ; CHECK-LABEL: store_i8_frame:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 4
+; CHECK-NEXT:    enter 1
 ; CHECK-NEXT:    stidx8 r0, r15, -1
 ; CHECK-NEXT:    addi r0, r15, -1
 ; CHECK-NEXT:    callrel use
@@ -406,7 +406,7 @@ define void @store_i8_frame(i8 %x) nounwind {
 ;
 ; O0-LABEL: store_i8_frame:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 4
+; O0-NEXT:    enter 1
 ; O0-NEXT:    # kill: def $r12 killed $r0
 ; O0-NEXT:    stidx8 r0, r15, -1
 ; O0-NEXT:    addi r0, r15, -1
@@ -450,14 +450,14 @@ define i64 @order(ptr %p, ptr %q) nounwind {
 define i128 @load_i128(ptr %p) nounwind {
 ; CHECK-LABEL: load_i128:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 3
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r1, 5
 ; CHECK-NEXT:    callrel __atomic_load_16
 ; CHECK-NEXT:    leaveret
 ;
 ; O0-LABEL: load_i128:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 3
+; O0-NEXT:    enter 0
 ; O0-NEXT:    setr r1, 5
 ; O0-NEXT:    callrel __atomic_load_16
 ; O0-NEXT:    leaveret
@@ -468,14 +468,14 @@ define i128 @load_i128(ptr %p) nounwind {
 define void @store_i128(ptr %p, i128 %x) nounwind {
 ; CHECK-LABEL: store_i128:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 3
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r3, 5
 ; CHECK-NEXT:    callrel __atomic_store_16
 ; CHECK-NEXT:    leaveret
 ;
 ; O0-LABEL: store_i128:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 3
+; O0-NEXT:    enter 0
 ; O0-NEXT:    # kill: def $r12 killed $r2
 ; O0-NEXT:    # kill: def $r12 killed $r1
 ; O0-NEXT:    setr r3, 5
@@ -488,7 +488,7 @@ define void @store_i128(ptr %p, i128 %x) nounwind {
 define i32 @load_i32_misaligned(ptr %p) nounwind {
 ; CHECK-LABEL: load_i32_misaligned:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 4
+; CHECK-NEXT:    enter 1
 ; CHECK-NEXT:    copy r1, r0
 ; CHECK-NEXT:    addi r2, r15, -4
 ; CHECK-NEXT:    setr r0, 4
@@ -499,7 +499,7 @@ define i32 @load_i32_misaligned(ptr %p) nounwind {
 ;
 ; O0-LABEL: load_i32_misaligned:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 4
+; O0-NEXT:    enter 1
 ; O0-NEXT:    copy r1, r0
 ; O0-NEXT:    setr r0, 4
 ; O0-NEXT:    addi r2, r15, -4
@@ -514,7 +514,7 @@ define i32 @load_i32_misaligned(ptr %p) nounwind {
 define void @store_i64_misaligned(ptr %p, i64 %x) nounwind {
 ; CHECK-LABEL: store_i64_misaligned:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 4
+; CHECK-NEXT:    enter 1
 ; CHECK-NEXT:    copy r12, r0
 ; CHECK-NEXT:    stidx64 r1, r15, -8
 ; CHECK-NEXT:    addi r2, r15, -8
@@ -526,7 +526,7 @@ define void @store_i64_misaligned(ptr %p, i64 %x) nounwind {
 ;
 ; O0-LABEL: store_i64_misaligned:
 ; O0:       # %bb.0:
-; O0-NEXT:    enter 4
+; O0-NEXT:    enter 1
 ; O0-NEXT:    copy r12, r1
 ; O0-NEXT:    copy r1, r0
 ; O0-NEXT:    stidx64 r12, r15, -8

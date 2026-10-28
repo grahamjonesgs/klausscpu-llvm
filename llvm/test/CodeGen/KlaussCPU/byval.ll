@@ -23,7 +23,7 @@ declare void @use(ptr)
 ; picks) and R0 is never overwritten.
 define void @pass_const() {
 ; CHECK-LABEL: pass_const:
-; CHECK:         enter 7
+; CHECK:         enter 4
 ; CHECK-NOT:     {{(setr|copy) r0,}}
 ; CHECK-DAG:     setr [[W3:r([1-9]|1[0-5])]], 4
 ; CHECK-DAG:     stidx64 [[W3]], r15, -8
@@ -43,14 +43,14 @@ define void @pass_const() {
 ; byval in a stack argument slot: the copy's address is stored to the slot.
 define void @pass_stack_slot(ptr %p) {
 ; CHECK-LABEL: pass_stack_slot:
-; CHECK:         enter 8
+; CHECK:         enter 5
 ; CHECK-DAG:     ldidx64 [[W3:r[0-9]+]], r0, 24
 ; CHECK-DAG:     ldidx64 [[W0:r[0-9]+]], r0, 0
 ; CHECK-DAG:     addi [[COPY:r[0-9]+]], r15, -32
 ; CHECK-DAG:     stidx64 [[W3]], r15, -8
 ; CHECK-DAG:     stidx64 [[W0]], r15, -32
 ; CHECK-DAG:     getsp [[SP:r[0-9]+]]
-; CHECK:         stidx64 [[COPY]], [[SP]], 24
+; CHECK:         stidx64 [[COPY]], [[SP]], 0
 ; CHECK-NEXT:    callrel take5
   call void @take5(i64 10, i64 20, i64 30, i64 40, ptr byval(%struct.S) align 8 %p)
   ret void
@@ -71,20 +71,22 @@ define void @pass_large() {
 }
 
 ; No reserved call frame: the copy is made before ADJCALLSTACKDOWN's addsp.
+; The call to @use has no stack arguments, so no call frame at all.
 define void @pass_vla(i64 %n, ptr %p) {
 ; CHECK-LABEL: pass_vla:
+; CHECK-NOT:     addsp
 ; CHECK:         callrel use
-; CHECK-NEXT:    addsp 24
+; CHECK-NOT:     addsp 0
 ; CHECK-DAG:     ldidx64 [[W3:r[0-9]+]], [[P:r[0-9]+]], 24
 ; CHECK-DAG:     ldidx64 [[W0:r[0-9]+]], [[P]], 0
 ; CHECK-DAG:     stidx64 [[W3]], r15, -16
 ; CHECK-DAG:     stidx64 [[W0]], r15, -40
-; CHECK:         addsp -32
+; CHECK:         addsp -8
 ; CHECK-NEXT:    getsp [[SP:r[0-9]+]]
 ; CHECK-NEXT:    addi [[COPY:r[0-9]+]], r15, -40
-; CHECK:         stidx64 [[COPY]], [[SP]], 24
+; CHECK:         stidx64 [[COPY]], [[SP]], 0
 ; CHECK-NEXT:    callrel take5
-; CHECK-NEXT:    addsp 32
+; CHECK-NEXT:    addsp 8
   %a = alloca i8, i64 %n, align 8
   call void @use(ptr %a)
   call void @take5(i64 10, i64 20, i64 30, i64 40, ptr byval(%struct.S) align 8 %p)
@@ -129,7 +131,7 @@ declare void @take_zla(ptr byval([0 x i32]) align 4)
 
 define void @pass_empty(ptr %p, ptr %q) {
 ; CHECK-LABEL: pass_empty:
-; CHECK:         enter 4
+; CHECK:         enter 1
 ; CHECK-NOT:     addi
 ; CHECK:         copy r4, r1
 ; CHECK-NEXT:    callrel take_empty

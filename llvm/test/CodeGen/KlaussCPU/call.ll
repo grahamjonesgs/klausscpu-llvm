@@ -10,7 +10,7 @@ declare void @ext_void()
 define i64 @call_4_args(i64 %a, i64 %b, i64 %c, i64 %d) {
 ; CHECK-LABEL: call_4_args:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 3
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    .cfi_def_cfa r15, 16
 ; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    callrel ext
@@ -19,17 +19,18 @@ define i64 @call_4_args(i64 %a, i64 %b, i64 %c, i64 %d) {
   ret i64 %r
 }
 
-; 5th argument spills to stack at [SP+32].
+; 5th argument spills to stack at [SP+8] (the caller's [SP+0]): a call that
+; is not variadic reserves no home area.
 declare i64 @ext5(i64, i64, i64, i64, i64)
 define i64 @call_5_args(i64 %a, i64 %b, i64 %c, i64 %d, i64 %e) {
 ; CHECK-LABEL: call_5_args:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 4
+; CHECK-NEXT:    enter 1
 ; CHECK-NEXT:    .cfi_def_cfa r15, 16
 ; CHECK-NEXT:    .cfi_offset r15, -16
-; CHECK-NEXT:    ldidx64 r12, r15, 40
+; CHECK-NEXT:    ldidx64 r12, r15, 16
 ; CHECK-NEXT:    getsp r14
-; CHECK-NEXT:    stidx64 r12, r14, 24
+; CHECK-NEXT:    stidx64 r12, r14, 0
 ; CHECK-NEXT:    callrel ext5
 ; CHECK-NEXT:    leaveret
   %r = call i64 @ext5(i64 %a, i64 %b, i64 %c, i64 %d, i64 %e)
@@ -40,7 +41,7 @@ define i64 @call_5_args(i64 %a, i64 %b, i64 %c, i64 %d, i64 %e) {
 define i64 @callee_saved_live_across_call(i64 %x) {
 ; CHECK-LABEL: callee_saved_live_across_call:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 4
+; CHECK-NEXT:    enter 1
 ; CHECK-NEXT:    .cfi_def_cfa r15, 16
 ; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
@@ -85,7 +86,7 @@ define i64 @return_const() {
 define i64 @indirect_call(ptr %fp, i64 %a) {
 ; CHECK-LABEL: indirect_call:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 3
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    .cfi_def_cfa r15, 16
 ; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    copy r12, r0

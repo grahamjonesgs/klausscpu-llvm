@@ -81,7 +81,7 @@ define ptr @global_addr() {
 define i64 @call_ext_and_use() {
 ; CHECK-LABEL: call_ext_and_use:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 3
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    .cfi_def_cfa r15, 16
 ; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    callrel ext

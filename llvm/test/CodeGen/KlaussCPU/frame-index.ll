@@ -65,7 +65,7 @@ define i64 @loads_stores(i64 %a, i32 %b, i16 %c, i8 %d) nounwind {
 define i64 @address_taken() nounwind {
 ; CHECK-LABEL: address_taken:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 6
+; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    addi r0, r15, -24
 ; CHECK-NEXT:    callrel use
 ; CHECK-NEXT:    ldidx64 r12, r15, -16
@@ -82,7 +82,7 @@ define i64 @address_taken() nounwind {
 define i64 @field_offsets(i64 %a, i64 %b) nounwind {
 ; CHECK-LABEL: field_offsets:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 9
+; CHECK-NEXT:    enter 6
 ; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r5, r0
 ; CHECK-NEXT:    addi r0, r15, -48
@@ -148,7 +148,7 @@ define i64 @field_offsets(i64 %a, i64 %b) nounwind {
 define void @address_plus_offset() nounwind {
 ; CHECK-LABEL: address_plus_offset:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 6
+; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    addi r0, r15, -8
 ; CHECK-NEXT:    callrel use
 ; CHECK-NEXT:    leaveret
@@ -163,7 +163,7 @@ define void @address_plus_offset() nounwind {
 define i64 @or_offset(i32 %v) nounwind {
 ; CHECK-LABEL: or_offset:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 5
+; CHECK-NEXT:    enter 2
 ; CHECK-NEXT:    stidx32 r0, r15, -12
 ; CHECK-NEXT:    addi r0, r15, -16
 ; CHECK-NEXT:    callrel use
@@ -212,7 +212,7 @@ define i64 @offset_over_limit() nounwind {
 define void @far_many(i64 %v) nounwind {
 ; CHECK-LABEL: far_many:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 264
+; CHECK-NEXT:    enter 261
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    addi r0, r15, -2056
@@ -240,7 +240,7 @@ define void @far_many(i64 %v) nounwind {
 define void @far_few(i64 %v) nounwind {
 ; CHECK-LABEL: far_few:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 264
+; CHECK-NEXT:    enter 261
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    addi r0, r15, -2056
@@ -264,7 +264,7 @@ define void @far_few(i64 %v) nounwind {
 define void @near_after_far(i64 %v) nounwind {
 ; CHECK-LABEL: near_after_far:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 12
+; CHECK-NEXT:    enter 9
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    addi r0, r15, -40
@@ -293,7 +293,7 @@ define void @near_after_far(i64 %v) nounwind {
 define i64 @realigned(i64 %v) nounwind {
 ; CHECK-LABEL: realigned:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 15
+; CHECK-NEXT:    enter 11
 ; CHECK-NEXT:    stidx64 r7, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    andi r7, r15, -32
 ; CHECK-NEXT:    stidx64 r0, r7, -40
@@ -321,13 +321,9 @@ define i64 @with_vla(i64 %n, i64 %v) nounwind {
 ; CHECK-NEXT:    getsp r14
 ; CHECK-NEXT:    subr r0, r14, r12
 ; CHECK-NEXT:    setsp r0
-; CHECK-NEXT:    addsp -24
 ; CHECK-NEXT:    callrel use
-; CHECK-NEXT:    addsp 24
-; CHECK-NEXT:    addsp -24
 ; CHECK-NEXT:    addi r0, r15, -16
 ; CHECK-NEXT:    callrel use
-; CHECK-NEXT:    addsp 24
 ; CHECK-NEXT:    ldidx64 r12, r15, -8
 ; CHECK-NEXT:    leaveret
   %st = alloca [2 x i64]

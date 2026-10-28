@@ -21,7 +21,7 @@
 ; ASM-LABEL: realigned:
 ; ASM:       andi r7, r15, -32
 ; ASM:       stidx64 r0, r7, -16
-; ASM:       ldidx64 {{r[0-9]+}}, r15, 40
+; ASM:       ldidx64 {{r[0-9]+}}, r15, 16
 ; ASM:       stidx64 {{r[0-9]+}}, r7, -104
 ; ASM:       addi r0, r7, -96
 ; ASM:       addi r0, r7, -104
@@ -34,7 +34,7 @@
 ; INFO-NEXT:     DW_AT_name ("a")
 ; INFO:          DW_AT_name ("d")
 ; INFO:        DW_TAG_formal_parameter
-; INFO-NEXT:     DW_AT_location (DW_OP_fbreg +40)
+; INFO-NEXT:     DW_AT_location (DW_OP_fbreg +16)
 ; INFO-NEXT:     DW_AT_name ("e")
 ; INFO:        DW_TAG_variable
 ; INFO-NEXT:     DW_AT_location (DW_OP_breg7 R7-96)

@@ -24,6 +24,15 @@ Pinned versions (re-verify on any change — see "Rebasing" below):
 | rust-lang/rust | commit `09a371361240e42b0d69438fd1179efcf212e576` (master, 1.98.0-dev, bundles LLVM 22.1) |
 | host cargo | any rustup nightly ≥ 1.95 (only used to drive builds; supplies `-Zbuild-std`/`-Zjson-target-spec`) |
 
+> **C ABI version 2 (`../ABI.md`).**  The callconv module in
+> `rustc-patches/0001-*.patch` (`callconv/klausscpu.rs`) still classifies
+> arguments the version-0 way: aggregates always indirect, `u32` zero-extended.
+> Rust code is consistent with itself, but calls between Rust and C now
+> disagree on `u32` arguments/results and on structs passed or returned by
+> value, and lld cannot tell (rustc's objects carry version 2 in `e_flags`).
+> `../ABI.md` ("Rust") gives the classification the module needs; rebuild
+> rustc with it before mixing Rust and C across such signatures.
+
 Host prerequisites (macOS): `cmake`, `ninja`, `ccache` (optional), `python3`,
 rustup with a nightly toolchain, and **zstd** (`brew install zstd`) — the
 fork's LLVM links against it.

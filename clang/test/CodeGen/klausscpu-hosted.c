@@ -32,7 +32,7 @@ struct B { long a, b, c, d; };
 void clear(struct B *d) { memset(d, 0, sizeof *d); }
 
 // CHECK-LABEL: @hello(
-// CHECK:         call i32 (ptr, ...) @printf(
+// CHECK:         call signext i32 (ptr, ...) @printf(
 // CHECK-NOT:     @puts
 // CHECK-NOT:     @putchar
 void hello(int c) {

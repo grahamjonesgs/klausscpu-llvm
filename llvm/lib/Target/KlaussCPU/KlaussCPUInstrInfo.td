@@ -1054,11 +1054,12 @@ let isReturn = 1, isTerminator = 1, isBarrier = 1,
 def LEAVERET_I : I0<0x66800000, (outs), (ins), "leaveret">;
 
 // Indirect call / jump via register
-// Defs: all caller-saved GPRs clobbered by the ABI (R0-R3=args, R8-R14=temps+return)
-// plus FLAGS (the callee is free to change them).
+// The registers a call clobbers are given by its register-mask operand
+// (CSR_KlaussCPU_Call, added by LowerCall); FLAGS too (the callee is free to
+// change them).
 let isCall = 1,
     Uses = [SP],
-    Defs = [R0, R1, R2, R3, R8, R9, R10, R11, R12, R13, R14, FLAGS] in
+    Defs = [FLAGS] in
 def CALLR_R : R_ind<0x62800000, (ins GPR:$reg), "callr\t$reg">;
 def JMPR_R  : R_ind<0x60800000, (ins GPR:$reg), "jmpr\t$reg"> {
   let isBranch         = 1;
@@ -1545,9 +1546,9 @@ def JMPULE  : Vbr_cond<0xA0400000, "jmpule\t$target">;
 def JMPUGT  : Vbr_cond<0xA0440000, "jmpugt\t$target">;
 def JMPUGE  : Vbr_cond<0xA03C0000, "jmpuge\t$target">;
 
-// Defs: all caller-saved GPRs clobbered by the ABI (R0-R3=args, R8-R14=temps+return)
+// Clobbers: the call's register mask (CSR_KlaussCPU_Call), and FLAGS.
 let Uses = [SP],
-    Defs = [R0, R1, R2, R3, R8, R9, R10, R11, R12, R13, R14, FLAGS] in
+    Defs = [FLAGS] in
 def CALL_I  : Vcall<0xA2000000, "call\t$target">;
 
 //===----------------------------------------------------------------------===//
@@ -1583,7 +1584,7 @@ def JMPUGEREL : Vbr_relcond<0xA13C0000, "jmpugerel\t$target">;
 
 // PC-relative direct call: push PC+8 (return addr), PC += sign_ext(imm32)
 let Uses = [SP],
-    Defs = [R0, R1, R2, R3, R8, R9, R10, R11, R12, R13, R14, FLAGS] in
+    Defs = [FLAGS] in
 def CALLREL : Vcall<0xA3000000, "callrel\t$target", PCRelCallTarget32>;
 
 // LEAPC: rd = PC_of_instruction + sign_ext(imm32)  (address materialisation)
@@ -1803,9 +1804,10 @@ def JMPO  : Vbr_cond<0xA0180000, "jmpo\t$target">;
 def JMPNO : Vbr_cond<0xA01C0000, "jmpno\t$target">;
 
 // ── Vcall (conditional calls) ───────────────────────────────────────────────
-// They read the flags; taken, they clobber what a call does.
+// They read the flags.  Assembler only: no isel pattern, so no register mask
+// says what they clobber; code that uses them must assume a call's clobbers.
 let Uses = [SP, FLAGS],
-    Defs = [R0, R1, R2, R3, R8, R9, R10, R11, R12, R13, R14, FLAGS] in {
+    Defs = [FLAGS] in {
 def CALLZ  : Vcall<0xA2080000, "callz\t$target">;
 def CALLNZ : Vcall<0xA20C0000, "callnz\t$target">;
 def CALLE  : Vcall<0xA2480000, "calle\t$target">;
@@ -2089,7 +2091,7 @@ def JMP_SH : ShortBranch<JMP, "jmprel\t$target">;
 // Produced by its CompressPats for any call to a symbol; relaxed to CALLREL
 // only when the assembler resolves the target and it is out of range.
 let isCall = 1, Uses = [SP],
-    Defs = [R0, R1, R2, R3, R8, R9, R10, R11, R12, R13, R14, FLAGS] in
+    Defs = [FLAGS] in
 def CALL_SH : ShortBranch<CALL_I, "callrel\t$target", CallTarget18,
                           HasShortCalls>;
 

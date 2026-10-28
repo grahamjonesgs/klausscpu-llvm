@@ -59,6 +59,17 @@ inline constexpr uint32_t JmpRelWord = 0xA1000000;
 /// as an invalid opcode, neither a breakpoint (TRAP) nor a clean stop (HALT).
 inline constexpr uint32_t InvalidWord = 0x00000000;
 
+//===-- ABI version -------------------------------------------------------===//
+
+/// The calling convention (ABI.md in the backend): 2 is the one with i32
+/// arguments and results sign-extended, aggregates of up to 16 bytes in
+/// registers and the vararg home area only in variadic calls.  Code built for
+/// the earlier convention has 0 here.  Every ELF object carries it in the low
+/// byte of e_flags, lld refuses to link code of different versions, and clang
+/// predefines __klausscpu_abi__ to it.
+inline constexpr unsigned ABIVersion = 2;
+inline constexpr unsigned EFlagsABIMask = 0xFF;
+
 //===-- Address space -----------------------------------------------------===//
 
 /// The PC, the SP and every effective address are 32 bits (ELFCLASS32),
@@ -78,12 +89,17 @@ inline constexpr const char *GPRNames[NumGPRs] = {
 inline constexpr unsigned DwarfSP = 16;
 inline constexpr unsigned DwarfRA = 17;
 
-/// Calling convention (KlaussCPUCallingConv.td), as GPR numbers.
-/// Arguments, in order.
+/// Calling convention (KlaussCPUCallingConv.td, ABI.md), as GPR numbers.
+/// Arguments, in order (named or not).
 inline constexpr unsigned ArgGPRs[] = {0, 1, 2, 3};
 inline constexpr unsigned NumArgGPRs = sizeof(ArgGPRs) / sizeof(ArgGPRs[0]);
-/// Return value: bits [63:0], then [127:64] of an i128.
+/// Return value: bits [63:0], then [127:64] of an i128 or of an aggregate
+/// of 9 to 16 bytes.
 inline constexpr unsigned RetGPRs[] = {12, 11};
+/// An aggregate up to this size is passed in up to two GPRs (or stack
+/// slots) and returned in RetGPRs; a larger one is passed by reference to a
+/// copy the caller makes, and returned through a hidden pointer argument.
+inline constexpr unsigned MaxDirectAggregateSize = 16;
 /// Callee-saved registers the register allocator may use (CSR_KlaussCPU).
 /// The frame pointer is callee-saved too, by the prologue itself.
 inline constexpr unsigned CalleeSavedGPRs[] = {4, 5, 6, 7};
@@ -95,7 +111,9 @@ inline constexpr unsigned BPReg = 7;
 //===-- Stack and frame layout --------------------------------------------===//
 //
 //   [entry SP + IncomingArgOffset ..]  stack arguments, SlotSize each
-//   [entry SP + RetAddrSize ..]        home slots of R1-R3 (varargs)
+//   [entry SP + RetAddrSize ..]        a variadic call only: the home slots
+//                                      of R0-R3 (VarArgHomeSize), so the
+//                                      stack arguments start that much higher
 //   [entry SP + 0]                     return address (CALL pushes it)
 //   [entry SP - SavedFPSize]           the caller's R15 (ENTER pushes it)
 //   R15 = entry SP - SavedFPSize
@@ -112,14 +130,15 @@ inline constexpr unsigned SlotSize = 8;
 inline constexpr unsigned RetAddrSize = 8;
 /// The prologue pushes the caller's R15 below the return address.
 inline constexpr unsigned SavedFPSize = 8;
-/// The caller reserves home slots for R1-R3 (not R0: its slot would be the
-/// return address) so a variadic callee can store them next to the stack
-/// arguments.
-inline constexpr unsigned VarArgHomeSize = (NumArgGPRs - 1) * SlotSize;
-/// The first stack argument, from the callee's entry SP and from the
-/// caller's SP before the CALL.
-inline constexpr unsigned IncomingArgOffset = RetAddrSize + VarArgHomeSize;
-inline constexpr unsigned OutgoingArgOffset = VarArgHomeSize;
+/// The first stack argument of a non-variadic call, from the callee's entry
+/// SP and from the caller's SP before the CALL.  A call without stack
+/// arguments reserves nothing.
+inline constexpr unsigned IncomingArgOffset = RetAddrSize;
+inline constexpr unsigned OutgoingArgOffset = 0;
+/// A variadic call reserves home slots for all of R0-R3 in front of its
+/// stack arguments; the callee stores the unnamed register arguments there,
+/// so they are contiguous with the stack arguments and va_list is a pointer.
+inline constexpr unsigned VarArgHomeSize = NumArgGPRs * SlotSize;
 /// CFA = the caller's SP = entry SP + RetAddrSize = R15 + FPToCFAOffset; the
 /// return address is at CFA - RetAddrSize, the caller's R15 at
 /// CFA - FPToCFAOffset.

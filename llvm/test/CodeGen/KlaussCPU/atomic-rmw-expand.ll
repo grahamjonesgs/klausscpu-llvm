@@ -10,30 +10,27 @@
 define float @fadd_f32(ptr %p, float %x) nounwind {
 ; CHECK-LABEL: fadd_f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 7
-; CHECK-NEXT:    stidx64 r6, r15, -24 # 8-byte Folded Spill
-; CHECK-NEXT:    memget32 r6, r0
+; CHECK-NEXT:    enter 3
+; CHECK-NEXT:    memget32 r12, r0
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r0
-; CHECK-NEXT:    zextw r5, r1
-; CHECK-NEXT:    stidx64 r7, r15, -32 # 8-byte Folded Spill
+; CHECK-NEXT:    copy r5, r1
+; CHECK-NEXT:    stidx64 r6, r15, -24 # 8-byte Folded Spill
 ; CHECK-NEXT:    .p2align 4
 ; CHECK-NEXT:  .LBB0_1: # %atomicrmw.start
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
-; CHECK-NEXT:    zextw r7, r6
+; CHECK-NEXT:    copy r0, r12
 ; CHECK-NEXT:    copy r1, r5
-; CHECK-NEXT:    copy r0, r7
+; CHECK-NEXT:    copy r6, r12
 ; CHECK-NEXT:    callrel __addsf3
 ; CHECK-NEXT:    copy r2, r12
 ; CHECK-NEXT:    copy r0, r4
 ; CHECK-NEXT:    copy r1, r6
 ; CHECK-NEXT:    callrel __sync_val_compare_and_swap_4
-; CHECK-NEXT:    copy r6, r12
-; CHECK-NEXT:    fbr r12, r7, 8, .LBB0_1
+; CHECK-NEXT:    cmprrw r12, r6
+; CHECK-NEXT:    jmpnerel .LBB0_1
 ; CHECK-NEXT:  # %bb.2: # %atomicrmw.end
-; CHECK-NEXT:    copy r12, r6
-; CHECK-NEXT:    ldidx64 r7, r15, -32 # 8-byte Folded Reload
 ; CHECK-NEXT:    ldidx64 r6, r15, -24 # 8-byte Folded Reload
 ; CHECK-NEXT:    ldidx64 r5, r15, -16 # 8-byte Folded Reload
 ; CHECK-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
@@ -45,7 +42,7 @@ define float @fadd_f32(ptr %p, float %x) nounwind {
 define double @fmax_f64(ptr %p, double %x) nounwind {
 ; CHECK-LABEL: fmax_f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 6
+; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    ldidx64 r12, r0, 0
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
@@ -76,7 +73,7 @@ define double @fmax_f64(ptr %p, double %x) nounwind {
 define i32 @uinc_wrap_i32(ptr %p, i32 %x) nounwind {
 ; CHECK-LABEL: uinc_wrap_i32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 6
+; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    memget32 r12, r0
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
@@ -113,7 +110,7 @@ define i32 @uinc_wrap_i32(ptr %p, i32 %x) nounwind {
 define i16 @udec_wrap_i16(ptr %p, i16 %x) nounwind {
 ; CHECK-LABEL: udec_wrap_i16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 7
+; CHECK-NEXT:    enter 4
 ; CHECK-NEXT:    memget16 r12, r0
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
@@ -159,7 +156,7 @@ define i16 @udec_wrap_i16(ptr %p, i16 %x) nounwind {
 define i8 @usub_cond_i8(ptr %p, i8 %x) nounwind {
 ; CHECK-LABEL: usub_cond_i8:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 7
+; CHECK-NEXT:    enter 4
 ; CHECK-NEXT:    memget8 r12, r0
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
@@ -199,7 +196,7 @@ define i8 @usub_cond_i8(ptr %p, i8 %x) nounwind {
 define i64 @usub_sat_i64(ptr %p, i64 %x) nounwind {
 ; CHECK-LABEL: usub_sat_i64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 6
+; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    ldidx64 r12, r0, 0
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
@@ -228,7 +225,7 @@ define i64 @usub_sat_i64(ptr %p, i64 %x) nounwind {
 define i128 @add_i128(ptr %p, i128 %x) nounwind {
 ; CHECK-LABEL: add_i128:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 3
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r3, 5
 ; CHECK-NEXT:    callrel __atomic_fetch_add_16
 ; CHECK-NEXT:    leaveret
@@ -239,7 +236,7 @@ define i128 @add_i128(ptr %p, i128 %x) nounwind {
 define i32 @add_i32_misaligned(ptr %p, i32 %x) nounwind {
 ; CHECK-LABEL: add_i32_misaligned:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 11
+; CHECK-NEXT:    enter 8
 ; CHECK-NEXT:    memget32 r12, r0
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
@@ -262,8 +259,8 @@ define i32 @add_i32_misaligned(ptr %p, i32 %x) nounwind {
 ; CHECK-NEXT:    getsp r12
 ; CHECK-NEXT:    copy r2, r6
 ; CHECK-NEXT:    copy r3, r7
-; CHECK-NEXT:    stidx64 r5, r12, 32
-; CHECK-NEXT:    stidx64 r5, r12, 24
+; CHECK-NEXT:    stidx64 r5, r12, 8
+; CHECK-NEXT:    stidx64 r5, r12, 0
 ; CHECK-NEXT:    callrel __atomic_compare_exchange
 ; CHECK-NEXT:    copy r14, r12
 ; CHECK-NEXT:    ldidx32 r12, r15, -36

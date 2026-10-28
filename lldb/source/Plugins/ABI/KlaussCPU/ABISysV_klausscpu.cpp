@@ -20,6 +20,7 @@
 #include "lldb/Utility/RegisterValue.h"
 #include "lldb/ValueObject/ValueObjectConstResult.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/TargetParser/KlaussCPUABI.h"
 #include "llvm/TargetParser/Triple.h"
 
@@ -124,15 +125,27 @@ ValueObjectSP
 ABISysV_klausscpu::GetReturnValueObjectImpl(Thread &thread,
                                             CompilerType &type) const {
   // Scalars (integers, enums, pointers, and soft-float floating point) up to
-  // 64 bits come back in r12; 128-bit values in r12 (low) and r11 (high).
+  // 64 bits come back in r12; 128-bit values in r12 (low) and r11 (high).  An
+  // aggregate (struct, union, class, complex, GNU vector) of up to 16 bytes
+  // comes back the same way, its bytes in memory order; a larger one through
+  // a hidden pointer that is not returned, so it cannot be shown.  (As in the
+  // AArch64 plugin, a C++ class that is returned in memory because it is not
+  // trivially copyable is not told apart.)
   if (!type)
     return {};
   const uint32_t flags = type.GetTypeInfo();
-  if (!(flags & (eTypeIsScalar | eTypeIsPointer | eTypeIsEnumeration)))
+  const bool is_scalar =
+      flags & (eTypeIsScalar | eTypeIsPointer | eTypeIsEnumeration);
+  const bool is_aggregate = flags & (eTypeIsStructUnion | eTypeIsClass |
+                                     eTypeIsComplex | eTypeIsVector);
+  if (!is_scalar && !is_aggregate)
     return {};
   const uint64_t size =
       llvm::expectedToOptional(type.GetByteSize(&thread)).value_or(0);
-  if (size == 0 || size > 16)
+  const uint64_t max_size = is_scalar
+                                ? 2 * KlaussCPUABI::SlotSize
+                                : KlaussCPUABI::MaxDirectAggregateSize;
+  if (size == 0 || size > max_size)
     return {};
 
   RegisterContextSP reg_ctx = thread.GetRegisterContext();
@@ -178,6 +191,11 @@ Status ABISysV_klausscpu::SetReturnValueObject(StackFrameSP &frame_sp,
                                    "cannot be set");
   offset_t offset = 0;
   uint64_t raw = data.GetMaxU64(&offset, num_bytes);
+  // The caller relies on the upper bits (ABI.md): a 32-bit integer comes
+  // back sign-extended even when it is unsigned, a narrower one extended by
+  // its signedness.
+  if (num_bytes < 8 && (num_bytes == 4 || is_signed))
+    raw = llvm::SignExtend64(raw, num_bytes * 8);
   RegisterContext &reg_ctx = *frame_sp->GetThread()->GetRegisterContext();
   llvm::StringRef ret_reg = gprName(KlaussCPUABI::RetGPRs[0]);
   if (!reg_ctx.WriteRegisterFromUnsigned(reg_ctx.GetRegisterInfoByName(ret_reg),

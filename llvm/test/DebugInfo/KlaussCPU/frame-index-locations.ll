@@ -30,17 +30,17 @@
 ;   }
 
 ; The slots the code uses: a register argument stored to its home slot, the
-; stack-passed argument (fixed object, R15+40), a local and a local array.
+; stack-passed argument (fixed object, R15+16), a local and a local array.
 ; ASM-LABEL: frame:
 ; ASM:       stidx64 r0, r15, -8
-; ASM:       ldidx64 r14, r15, 40
+; ASM:       ldidx64 r14, r15, 16
 ; ASM:       stidx64 r12, r15, -40
 ; ASM:       addi r0, r15, -72
 
 ; A register argument spilled by the register allocator, and the stack-passed
 ; argument described by a DBG_VALUE of its fixed slot.
 ; ASM-LABEL: spill:
-; ASM:       #DEBUG_VALUE: spill:e <- [DW_OP_plus_uconst 40] [$r15+0]
+; ASM:       #DEBUG_VALUE: spill:e <- [DW_OP_plus_uconst 16] [$r15+0]
 ; ASM:       stidx64 r0, r15, -40 # 8-byte Folded Spill
 ; ASM:       #DEBUG_VALUE: spill:a <- [DW_OP_constu 40, DW_OP_minus] [$r15+0]
 
@@ -60,7 +60,7 @@
 ; INFO-NEXT:     DW_AT_location (DW_OP_fbreg -32)
 ; INFO-NEXT:     DW_AT_name ("d")
 ; INFO:        DW_TAG_formal_parameter
-; INFO-NEXT:     DW_AT_location (DW_OP_fbreg +40)
+; INFO-NEXT:     DW_AT_location (DW_OP_fbreg +16)
 ; INFO-NEXT:     DW_AT_name ("e")
 ; INFO:        DW_TAG_variable
 ; INFO-NEXT:     DW_AT_location (DW_OP_fbreg -40)
@@ -77,7 +77,7 @@
 ; INFO-NEXT:       [{{.*}}): DW_OP_reg0 R0
 ; INFO-NEXT:       [{{.*}}): DW_OP_breg15 R15-40
 ; INFO:          DW_AT_name ("a")
-; INFO:          DW_AT_location (DW_OP_fbreg +40)
+; INFO:          DW_AT_location (DW_OP_fbreg +16)
 ; INFO-NEXT:     DW_AT_name ("e")
 
 ; VERIFY: No errors.

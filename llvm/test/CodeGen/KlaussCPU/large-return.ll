@@ -23,7 +23,7 @@ define { i64, i64, i64 } @ret3(i64 %a) nounwind {
 define i64 @call_ret3(i64 %a) nounwind {
 ; CHECK-LABEL: call_ret3:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 6
+; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    copy r1, r0
 ; CHECK-NEXT:    addi r0, r15, -24
 ; CHECK-NEXT:    callrel ret3
@@ -51,7 +51,7 @@ define i256 @ret_i256(i256 %a) nounwind {
 ; CHECK-LABEL: ret_i256:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
-; CHECK-NEXT:    ldidx64 r12, r15, 40
+; CHECK-NEXT:    ldidx64 r12, r15, 16
 ; CHECK-NEXT:    stidx64 r12, r0, 24
 ; CHECK-NEXT:    stidx64 r3, r0, 16
 ; CHECK-NEXT:    stidx64 r2, r0, 8

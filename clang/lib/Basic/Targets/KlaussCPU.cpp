@@ -27,4 +27,8 @@ void KlaussCPUTargetInfo::getTargetDefines(const LangOptions &Opts,
                                            MacroBuilder &Builder) const {
   Builder.defineMacro("__klausscpu__");
   Builder.defineMacro("__KlaussCPU__");
+  // The calling convention (KlaussCPUABI.h), for code that depends on it,
+  // such as hand-written assembly.
+  Builder.defineMacro("__klausscpu_abi__",
+                      llvm::Twine(llvm::KlaussCPUABI::ABIVersion));
 }

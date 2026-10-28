@@ -26,7 +26,7 @@ declare void @use(ptr)
 define void @init_ints() nounwind {
 ; CHECK-LABEL: init_ints:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 6
+; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    setr64 r12, 5, 6
 ; CHECK-NEXT:    setr64 r13, 3, 4
 ; CHECK-NEXT:    setr64 r14, 1, 2
@@ -46,7 +46,7 @@ define void @init_ints() nounwind {
 define void @init_str() nounwind {
 ; CHECK-LABEL: init_str:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 5
+; CHECK-NEXT:    enter 2
 ; CHECK-NEXT:    setr r12, 6581362
 ; CHECK-NEXT:    setr64 r14, 1819043176, 1870078063
 ; CHECK-NEXT:    addi r0, r15, -16
@@ -64,7 +64,7 @@ define void @init_str() nounwind {
 define void @copy_global() nounwind {
 ; CHECK-LABEL: copy_global:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 6
+; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    setru r12, gint
 ; CHECK-NEXT:    setru r14, gint+8
 ; CHECK-NEXT:    setru r13, gint+16
@@ -87,7 +87,7 @@ define void @copy_global() nounwind {
 define void @copy_src4(ptr align 4 %p) nounwind {
 ; CHECK-LABEL: copy_src4:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 5
+; CHECK-NEXT:    enter 2
 ; CHECK-NEXT:    memget32 r12, r0
 ; CHECK-NEXT:    ldidx32 r14, r0, 12
 ; CHECK-NEXT:    ldidx32 r13, r0, 8
@@ -110,7 +110,7 @@ define void @copy_src4(ptr align 4 %p) nounwind {
 define void @copy_src1(ptr %p) nounwind {
 ; CHECK-LABEL: copy_src1:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 5
+; CHECK-NEXT:    enter 2
 ; CHECK-NEXT:    addi r14, r0, 4
 ; CHECK-NEXT:    addi r13, r0, 12
 ; CHECK-NEXT:    addi r11, r0, 8
@@ -190,7 +190,7 @@ define void @move24(ptr align 8 %d, ptr align 8 %s) nounwind {
 define void @copy_large(ptr align 8 %d, ptr align 8 %s) nounwind {
 ; CHECK-LABEL: copy_large:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 3
+; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    setr r2, 72
 ; CHECK-NEXT:    callrel memcpy
 ; CHECK-NEXT:    leaveret
@@ -314,7 +314,7 @@ define i32 @le32(ptr %p) nounwind {
 define i64 @load32_unaligned_frame() nounwind {
 ; CHECK-LABEL: load32_unaligned_frame:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 5
+; CHECK-NEXT:    enter 2
 ; CHECK-NEXT:    addi r0, r15, -12
 ; CHECK-NEXT:    callrel use
 ; CHECK-NEXT:    addi r12, r15, -11

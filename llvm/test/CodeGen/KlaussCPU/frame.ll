@@ -26,7 +26,7 @@ define i64 @with_alloca(i64 %x) {
 define void @pass_local_addr() {
 ; CHECK-LABEL: pass_local_addr:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 4
+; CHECK-NEXT:    enter 1
 ; CHECK-NEXT:    .cfi_def_cfa r15, 16
 ; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    addi r0, r15, -8
@@ -61,7 +61,7 @@ define i64 @stack_array(i64 %i, i64 %v) {
 define i64 @spill_across_call(i64 %a) {
 ; CHECK-LABEL: spill_across_call:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 4
+; CHECK-NEXT:    enter 1
 ; CHECK-NEXT:    .cfi_def_cfa r15, 16
 ; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
