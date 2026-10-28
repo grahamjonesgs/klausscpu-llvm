@@ -11,7 +11,7 @@ directory:
 | `hello-smoke/` | bare-metal MMIO smoke test (M1 artifact; no C runtime at all) |
 | `hello-uart/` | bare-metal UART hello via `core::fmt` + C shim (M2 artifact) |
 | `hello-ext/` | Zephyr LLEXT extension with `alloc` over the kernel heap (M3 artifact); `build-llext.sh` is the packaging pipeline |
-| `crates/` | the `klauss-*` reusable library crates (a Cargo workspace) + `blinky`/`ext-hello`/`ffi-check` examples built from them — see `crates/README.md` |
+| `crates/` | the `klauss-*` reusable library crates (a Cargo workspace) + `blinky`/`ext-hello`/`ext-atomics`/`ffi-check` examples built from them — see `crates/README.md` |
 | `abi-test/` | Rust <-> C ABI conformance test (generated callers/callees in both languages against host gcc, on the emulator) — see "Checking the ABI" |
 | `klauss-build` | one driver for both flavors (`elf` / `llext`), with path discovery, section-merge, and loader/import verification baked in |
 | `klausscpu.ld` | bundled bare-metal linker script (mirror of the runtime's, which klausscpu-runtime's `check-toolchain-constants.py` compares; makes bare-metal links self-contained) |
@@ -104,7 +104,8 @@ the one required external path once:
 cp .klaussbuild.env.sample .klaussbuild.env   # edit KLAUSSCPU_RUSTC (stage1 rustc)
 ./klauss-build elf   blinky        # -> crates/examples/blinky/blinky.elf + .bin
 ./klauss-build llext ext-hello     # -> crates/examples/ext-hello/ext_hello.llext
-./klauss-build all                 # both
+./klauss-build llext ext-atomics   # -> crates/examples/ext-atomics/ext_atomics.llext
+./klauss-build all                 # all of them
 ```
 
 It operates on the `crates/` workspace; see `crates/README.md`. Setting
@@ -140,10 +141,11 @@ second (AMP) core**.  Who provides them:
   `crates/klauss-rt/src/sync.rs`, the twin of the C runtime's `atomic.c`);
   turn the feature off when the program also links `atomic.c`;
 - a Rust staticlib in a C program: the C runtime's `src/atomic.c`;
-- an LLEXT extension: nothing yet — the Zephyr kernel has `atomic.c` but
-  `ssh/llext_exports.c` does not export `__sync_*`, so `klauss-build llext`
-  rejects an extension that uses an atomic read-modify-write (plain atomic
-  loads and stores are fine).
+- an LLEXT extension: the Zephyr kernel's own, from the runtime's
+  `atomic.c`, which `ssh/llext_exports.c` exports (`EXPORT_SYNC_ALL(N)` for
+  N = 1, 2, 4, 8; `klauss-build llext` accepts these imports).
+  `crates/examples/ext-atomics` uses every one of them and checks the
+  results (`run ext_atomics.llext` on the board: 63 pass, 0 fail).
 
 The spec no longer sets `singlethread`: it only reaches LLVM's thread model,
 which no KlaussCPU code reads, and it would claim that nothing interrupts

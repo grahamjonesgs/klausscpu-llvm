@@ -1,0 +1,12 @@
+[package]
+name = "ext-atomics"
+version = "0.1.0"
+edition = "2021"
+description = "Zephyr LLEXT extension: core::sync::atomic through the kernel's __sync_* exports"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+klauss-llext-rt = { path = "../../klauss-llext-rt" }
+klauss-io = { path = "../../klauss-io", features = ["kernel"] }

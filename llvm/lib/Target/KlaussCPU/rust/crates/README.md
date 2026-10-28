@@ -22,6 +22,7 @@ addresses, the console, the allocator, and the startup/panic glue.
 |---|---|---|---|
 | `examples/blinky` | bare-metal ELF | mmio + rt + io/uart | `../klauss-build elf blinky` |
 | `examples/ext-hello` | Zephyr `.llext` | llext-rt + io/kernel (alloc) | `../klauss-build llext ext-hello` |
+| `examples/ext-atomics` | Zephyr `.llext`, self-check (`0 fail`, exit 0) | llext-rt + io/kernel; the kernel's `__sync_*` | `../klauss-build llext ext-atomics` |
 | `examples/ffi-check` | bare-metal ELF, self-check (`Result: PASS`, halts) | rt + io/uart, C in `src/ffi.c` | `../klauss-build elf ffi-check` |
 
 ## Building — use the `klauss-build` driver
@@ -36,7 +37,8 @@ discovered relative to the repo:
 cp ../.klaussbuild.env.sample ../.klaussbuild.env   # then edit KLAUSSCPU_RUSTC
 ../klauss-build elf   blinky        # -> examples/blinky/blinky.elf + .bin
 ../klauss-build llext ext-hello     # -> examples/ext-hello/ext_hello.llext
-../klauss-build all                 # both
+../klauss-build llext ext-atomics   # -> examples/ext-atomics/ext_atomics.llext
+../klauss-build all                 # all of them
 ```
 
 `KLAUSSCPU_RUNTIME` (optional) makes the llext build cross-check every import

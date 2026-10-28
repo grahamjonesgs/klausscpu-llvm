@@ -3,7 +3,8 @@
 #
 #   klauss-build elf   <pkg>   bare-metal binary  -> <pkg>.elf + <pkg>.bin
 #   klauss-build llext <pkg>   Zephyr LLEXT object -> <pkg>.llext
-#   klauss-build all           build blinky + ffi-check (elf), ext-hello (llext)
+#   klauss-build all           build blinky + ffi-check (elf), ext-hello and
+#                              ext-atomics (llext)
 #
 # Replaces the per-example build-llext.sh scripts and the manual
 # "cargo build + cp to .elf" dance, with the section-merge and the loader
@@ -139,6 +140,15 @@ verify_llext() {
         exp="$KLAUSSCPU_RUNTIME/zephyr-ws/klausscpu-zephyr/ssh/llext_exports.c"
         if [ -f "$exp" ]; then
             for s in $("$LLVM_BIN/llvm-nm" -u "$out" | awk '{print $2}'); do
+                # The __sync_*_N atomics (forced atomics: every RMW, swap and
+                # compare-and-swap is a call) are exported per size N by
+                # EXPORT_SYNC_ALL(N).
+                n=$(echo "$s" | sed -nE 's/^__sync_(fetch_and_(add|sub|and|or|xor|nand|max|min|umax|umin)|lock_test_and_set|val_compare_and_swap)_([1248])$/\3/p')
+                if [ -n "$n" ]; then
+                    grep -q "^EXPORT_SYNC_ALL($n);" "$exp" \
+                        || die "import '$s' is not exported by the kernel (no EXPORT_SYNC_ALL($n))"
+                    continue
+                fi
                 grep -q "EXPORT_SYMBOL($s)" "$exp" \
                     || die "import '$s' is not EXPORT_SYMBOL'd in the kernel"
             done
@@ -151,6 +161,7 @@ cmd="${1:-}"; pkg="${2:-}"
 case "$cmd" in
     elf)   [ -n "$pkg" ] || die "usage: klauss-build elf <pkg>";   build_elf "$pkg" ;;
     llext) [ -n "$pkg" ] || die "usage: klauss-build llext <pkg>"; build_llext "$pkg" ;;
-    all)   build_elf blinky; build_elf ffi-check; build_llext ext-hello ;;
+    all)   build_elf blinky; build_elf ffi-check; build_llext ext-hello
+           build_llext ext-atomics ;;
     *)     die "usage: klauss-build {elf|llext} <pkg> | all" ;;
 esac
