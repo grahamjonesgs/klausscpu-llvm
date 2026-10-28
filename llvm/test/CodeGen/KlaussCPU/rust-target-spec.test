@@ -12,3 +12,34 @@
 
 # CHECK:      rust [[DL:e-[^ ]*-p:]][[PW:[0-9]+]][[DLREST::[^ ]*]] klausscpu-unknown-elf little [[PW]] klausscpu
 # CHECK:      target datalayout = "[[DL]][[PW]][[DLREST]]"
+
+## Atomics.  rustc offers `AtomicN` loads and stores for every N from
+## min-atomic-width to max-atomic-width, and with atomic-cas also their
+## compare_exchange and fetch_* methods.  The backend must lower all of them
+## without the generic __atomic_* calls, which no runtime provides: a load or
+## store is a plain access, every read-modify-write and cmpxchg a __sync_*_N
+## call (klausscpu-runtime src/atomic.c; for Rust bare-metal programs the
+## klauss-rt crate).  clang's MaxAtomicInlineWidth is the same 64.  An RMW
+## twice as wide as max-atomic-width must not be lock-free.
+
+# RUN: %python %S/Inputs/rust-spec-atomics.py \
+# RUN:   %S/../../../lib/Target/KlaussCPU/rust/klausscpu-unknown-none-elf.json \
+# RUN:   %t.ll > %t.atomics
+# RUN: llc -mtriple=klausscpu-unknown-elf -O1 %t.ll -o - >> %t.atomics
+# RUN: FileCheck %s --check-prefix=ATOMIC --input-file=%t.atomics
+
+# ATOMIC:       rust atomics min 8 max [[#W:]] cas true
+# ATOMIC-LABEL: load_min:
+# ATOMIC-NOT:   {{call|__sync|__atomic}}
+# ATOMIC-LABEL: store_max:
+# ATOMIC-NOT:   {{call|__sync|__atomic}}
+# ATOMIC-LABEL: load_max:
+# ATOMIC-NOT:   {{call|__sync|__atomic}}
+# ATOMIC-LABEL: rmw_max:
+# ATOMIC-NOT:   __atomic
+# ATOMIC:       __sync_fetch_and_add_[[#div(W,8)]]
+# ATOMIC-LABEL: cas_max:
+# ATOMIC-NOT:   __atomic
+# ATOMIC:       __sync_val_compare_and_swap_[[#div(W,8)]]
+# ATOMIC-LABEL: rmw_over:
+# ATOMIC:       __atomic_fetch_add_[[#div(W,4)]]

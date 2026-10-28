@@ -13,7 +13,7 @@ addresses, the console, the allocator, and the startup/panic glue.
 | `klauss-mmio` | typed volatile peripherals: `leds`, `switches`, `seg_all`, `rgb*`, `clock_ms`, `read32/write32/read64` | — |
 | `klauss-alloc` | `KernelHeap` `#[global_allocator]` over `malloc`/`free` (arbitrary alignment); `global_allocator!()` macro | sys |
 | `klauss-io` | `println!`/`print!` + `Console: Write`; feature `uart` (shim) or `kernel` (loader-routed `putchar`) | sys |
-| `klauss-rt` | bare-metal `entry!(main)` → `_start`/BSS/delay + `#[panic_handler]` | — |
+| `klauss-rt` | bare-metal `entry!(main)` → `_start`/BSS/delay + `#[panic_handler]`; the `__sync_*_N` functions behind atomic RMW / compare-exchange (feature `sync-libcalls`, default; see `../README.md` "Atomics") | — |
 | `klauss-llext-rt` | LLEXT `entry!(run)` → `extern "C" main`, kernel-heap allocator, panic handler | sys, alloc, io/kernel |
 
 ## Examples
@@ -22,6 +22,7 @@ addresses, the console, the allocator, and the startup/panic glue.
 |---|---|---|---|
 | `examples/blinky` | bare-metal ELF | mmio + rt + io/uart | `../klauss-build elf blinky` |
 | `examples/ext-hello` | Zephyr `.llext` | llext-rt + io/kernel (alloc) | `../klauss-build llext ext-hello` |
+| `examples/ffi-check` | bare-metal ELF, self-check (`Result: PASS`, halts) | rt + io/uart, C in `src/ffi.c` | `../klauss-build elf ffi-check` |
 
 ## Building — use the `klauss-build` driver
 

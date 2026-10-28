@@ -12,8 +12,8 @@
     "pre-link-args": {
         "gnu-lld": ["-m", "elf32klausscpu"]
     },
-    "max-atomic-width": 0,
-    "atomic-cas": false,
+    "max-atomic-width": 64,
+    "atomic-cas": true,
     "panic-strategy": "abort",
     "relocation-model": "static",
     "executables": true,
@@ -21,6 +21,5 @@
     "disable-redzone": true,
     "eh-frame-header": false,
     "emit-debug-gdb-scripts": false,
-    "singlethread": true,
     "no-default-libraries": true
 }

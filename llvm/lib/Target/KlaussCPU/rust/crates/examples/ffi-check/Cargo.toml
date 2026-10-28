@@ -1,0 +1,9 @@
+[package]
+name = "ffi-check"
+version = "0.1.0"
+edition = "2021"
+description = "Bare-metal self-check: atomics and Rust <-> C calls with structs (C ABI version 2)"
+
+[dependencies]
+klauss-rt = { path = "../../klauss-rt" }
+klauss-io = { path = "../../klauss-io", features = ["uart"] }

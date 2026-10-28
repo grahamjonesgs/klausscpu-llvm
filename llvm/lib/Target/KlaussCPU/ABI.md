@@ -236,7 +236,7 @@ high.
 | klausscpu-runtime assembly | `setjmp.S` (R4–R7, R15, SP, PC), `context_switch.S`, FreeRTOS `port.S`, Zephyr `swap.S` (save all 16 GPRs; R4 holds the saved SP across C calls), ISR wrappers that save the caller-saved set, `crt0.c` (`main`'s result in R12) | unchanged: the register roles did not change, and none of them passes stack or variadic arguments or relies on the old home area |
 | klausscpu-runtime libraries | picolibc, compiler-rt builtins, wolfSSL/wolfSSH archives | rebuilt (`build-picolibc.sh`, `build-builtins.sh`, `freertos/wolfssl/build-*.sh`) |
 | klausscc | gdbserver target XML (r0–r3 = arguments, r15 = fp) | unchanged; it has no other ABI knowledge (no unwinder: crash dumps are printed raw) |
-| Rust | rustc does its own argument classification | **not updated** — see below |
+| Rust | rustc does its own argument classification (`callconv/klausscpu.rs`, rustc patch) | updated (`rust/rustc-patches/0003-*`); test `rust/abi-test/run_rust_abi_test.sh` — see below |
 | CPU_ARCHITECTURE.md §2 (hardware repo) | "R4–R7 and R15 are callee-saved" | still true |
 
 ### Rust
@@ -244,63 +244,44 @@ high.
 The target spec (`rust/klausscpu-unknown-none-elf.json`) has nothing
 ABI-specific; the classification is rustc's
 `compiler/rustc_target/src/callconv/klausscpu.rs`, added by
-`rust/rustc-patches/0001-*.patch`.  It still implements version 0
-(DefaultABIInfo: aggregates indirect, integers extended by their own
-signedness), and objects rustc emits carry version 2 in `e_flags` anyway
-(the flag comes from LLVM's MC layer), so lld does not catch the mismatch.
-**Calls between Rust and C disagree for `u32` arguments/results (zero-
-vs sign-extended) and for aggregates passed or returned by value** until
-the patch is updated.  Rust code is not quite consistent with itself
-either: once rustc is built on this LLVM, the backend's library calls
-assume an i32 result is sign-extended (`shouldSignExtendTypeInLibCall`),
-while Rust's `compiler_builtins`, classified by the version-0 module,
-zero-extends a `u32` result (today no libcall the backend emits returns an
-unsigned 32-bit value that needs it: 32-bit division is in hardware, and
-`fptoui` to i32 goes through the 64-bit `__fixuns*di`).  What
-the callconv module needs, following rustc's RISC-V implementation
-(`callconv/riscv.rs`, integer-only, XLEN = 64, without the FP and vector
-cases); a sketch, not built (there is no rustc checkout here):
+`rust/rustc-patches/0001-*.patch` and brought to version 2 by `0003-*.patch`
+(before that it implemented version 0, and Rust and C disagreed on `u32` and
+on aggregates by value; lld cannot tell, since every object rustc emits
+carries the version of LLVM's MC layer in `e_flags`).  A rustc without
+the patch cannot build for this target at all: its LLVM has no KlaussCPU
+backend, and with a JSON spec of an architecture it does not know
+(`Arch::Other`) `adjust_for_foreign_abi` panics ("no lowering implemented")
+on the first `extern "C"` function and `va_arg` stops with `bug!`.  The module mirrors
+`KlaussCPUABIInfo` (clang) rule for rule, following rustc's RISC-V module
+(`callconv/riscv.rs`, integer-only, XLEN = 64):
 
-```rust
-fn classify<'a, Ty, C>(cx: &C, arg: &mut ArgAbi<'a, Ty>, is_ret: bool)
-where Ty: TyAbiInterface<'a, C> + Copy, C: HasDataLayout {
-    if !is_ret && arg.layout.pass_indirectly_in_non_rustic_abis(cx) {
-        arg.make_indirect();
-        return;
-    }
-    let size = arg.layout.size;
-    if arg.layout.is_aggregate() {
-        if size.bits() > 128 {
-            arg.make_indirect();           // by reference / sret
-        } else if size.bits() <= 64 {
-            arg.cast_to(Reg { kind: RegKind::Integer, size });
-        } else {
-            let align = arg.layout.align.abi.bytes();
-            arg.cast_to(if align == 16 { Reg::i128() } else {
-                Uniform::new(Reg::i64(), size).into()  // [2 x i64]
-            });
-        }
-        return;
-    }
-    // Scalars: every 32-bit integer sign-extended (also u32), narrower ones
-    // by signedness (riscv.rs extend_integer_width).
-    if let BackendRepr::Scalar(s) = arg.layout.backend_repr {
-        if let Primitive::Int(i, _) = s.primitive() {
-            if i.size().bits() == 32 {
-                if let PassMode::Direct(ref mut attrs) = arg.mode {
-                    attrs.ext(ArgExtension::Sext);
-                    return;
-                }
-            }
-        }
-    }
-    arg.extend_integer_width_to(64);
-}
-```
+- an aggregate (`ScalarPair` or `Memory` layout, a SIMD vector) of up to 16
+  bytes is cast to an integer of its size (`Reg { Integer, size }`, e.g.
+  `i24`), to `i128` if it is 16-byte aligned, else to `[2 x i64]`
+  (`Uniform`); a larger one is indirect (a pointer to a copy the caller makes,
+  not `byval`; returned through `sret`).  Arguments and the return value use
+  the same rules;
+- an integer scalar narrower than 64 bits is extended: 32 bits sign-extended
+  (also `u32`, `char`), narrower ones by their signedness (`bool`
+  zero-extended); floats and pointers are passed as they are;
+- `#[rustc_pass_indirectly_in_non_rustic_abis]` types are indirect, a
+  zero-sized argument is ignored (as GNU C `struct {}`), and an unsized one is
+  left alone;
+- the Rust ABI (`extern "Rust"`) keeps rustc's generic aggregate handling but
+  extends integers the same way (`compute_rust_abi_info`, as RISC-V does),
+  which also makes `compiler_builtins` (its intrinsics are `extern "C"`) agree
+  with the backend's libcall convention (`shouldSignExtendTypeInLibCall`);
+- c-variadic definitions (`#![feature(c_variadic,
+  c_variadic_experimental_arch)]`): rustc's `va_arg` for this target is the
+  void-pointer walk clang emits (`emit_ptr_va_arg`: 8-byte slots, never
+  realigned, over 16 bytes by reference; a patch in
+  `rustc_codegen_llvm/src/va_arg.rs`, which otherwise stops with `bug!` for a
+  JSON-spec architecture).  Calls to variadic C functions need nothing
+  special: LLVM reserves the home area.
 
-(called for the return value and each argument; a zero-sized argument is
-ignored as now.)  rustc's `extern "C" fn(...)` variadic calls need nothing
-special: LLVM reserves the home area.
+`rust/abi-test/run_rust_abi_test.sh` checks it like the C conformance test:
+generated callers and callees in C and in Rust, every Rust/C pairing at
+every optimisation level, against host gcc.
 
 ## Design and measurements
 
@@ -422,3 +403,13 @@ objects, +44 bytes at -Os, +40 at -Oz).
   `hello`, `irq_soak`, `llext_demo` on the emulator and the board, the lldb
   smoke tests (`debug/run_debug_smoke.sh` now checks a returned struct and an
   `unsigned int`; `debug/run_rtos_smoke.sh`).
+- Rust (phase 5, rustc 1.98-dev with `rust/rustc-patches/0001`–`0003`):
+  `rust/abi-test/run_rust_abi_test.sh` seeds 1–60 with 80 functions each —
+  C caller/Rust callee, Rust caller/C callee and Rust/Rust, C at
+  -O0/-O1/-O2/-Os and Rust at opt-level 0/1/2/s, 2,880 runs on the emulator,
+  all identical to host gcc; three of the ELFs also on the board, identical.  The rustc with the
+  version-0 module differs in 53 of 80 tests of the same seeds.  The
+  `rust/crates/examples/ffi-check` self-check (structs of 3–24 bytes, a
+  16-byte-aligned one and a union by value both ways, `u32` arguments and
+  results, atomics of every width shared with C) passes on the emulator at
+  opt-level 0/1/2/3/s/z with C at -O0..-Os, and on the board.

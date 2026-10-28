@@ -7,5 +7,9 @@ description = "Bare-metal runtime for KlaussCPU: _start/BSS/startup-delay glue +
 [features]
 # Provide the program's #[panic_handler] (LEDs = 0xAAAA, then park). Disable
 # to write your own (e.g. one that prints the panic over UART).
-default = ["panic-handler"]
+default = ["panic-handler", "sync-libcalls"]
 panic-handler = []
+# Provide the __sync_*_N functions behind atomic read-modify-write and
+# compare_exchange (src/sync.rs, the Rust twin of the C runtime's atomic.c).
+# Disable when the program also links atomic.c.
+sync-libcalls = []

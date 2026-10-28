@@ -20,6 +20,7 @@ members = [
     "klauss-llext-rt",
     "examples/blinky",
     "examples/ext-hello",
+    "examples/ffi-check",
 ]
 
 [profile.release]

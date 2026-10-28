@@ -37,7 +37,7 @@ impl Write for Console {
 #[cfg(feature = "uart")]
 #[inline]
 unsafe fn put_byte(b: u8) {
-    klauss_sys::uart_putc(b);
+    klauss_sys::uart_putc(b as core::ffi::c_char);
 }
 
 #[cfg(feature = "kernel")]

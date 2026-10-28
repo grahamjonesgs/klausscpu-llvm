@@ -3,7 +3,7 @@
 #
 #   klauss-build elf   <pkg>   bare-metal binary  -> <pkg>.elf + <pkg>.bin
 #   klauss-build llext <pkg>   Zephyr LLEXT object -> <pkg>.llext
-#   klauss-build all           build blinky (elf) + ext-hello (llext)
+#   klauss-build all           build blinky + ffi-check (elf), ext-hello (llext)
 #
 # Replaces the per-example build-llext.sh scripts and the manual
 # "cargo build + cp to .elf" dance, with the section-merge and the loader
@@ -17,6 +17,8 @@
 #   KLAUSSCPU_LD         bare-metal linker script (default: bundled klausscpu.ld)
 #   KLAUSSCPU_RUNTIME    klausscpu-runtime root; if set, llext imports are
 #                        cross-checked against ssh/llext_exports.c (optional)
+#   KLAUSSCPU_CARGO_TOOLCHAIN  cargo's +toolchain argument (default +nightly if
+#                        rustup has one, else none, with RUSTC_BOOTSTRAP=1)
 # A machine-local rust/.klaussbuild.env (gitignored), if present, is sourced
 # first so each dev sets these once.
 set -eu
@@ -33,6 +35,16 @@ LD_SCRIPT="${KLAUSSCPU_LD:-$RUSTDIR/klausscpu.ld}"
 MERGE_LD="$WS/llext-merge.ld"
 TARGET="klausscpu-unknown-none-elf"
 CARGO="${CARGO:-cargo}"
+# The -Z flags need a nightly cargo: rustup's +nightly if it is installed,
+# else the cargo at hand with RUSTC_BOOTSTRAP=1.
+if [ -z "${KLAUSSCPU_CARGO_TOOLCHAIN+set}" ]; then
+    if "$CARGO" +nightly --version >/dev/null 2>&1; then
+        KLAUSSCPU_CARGO_TOOLCHAIN=+nightly
+    else
+        KLAUSSCPU_CARGO_TOOLCHAIN=
+        export RUSTC_BOOTSTRAP=1
+    fi
+fi
 
 die() { echo "klauss-build: $*" >&2; exit 1; }
 need() { [ -x "$1" ] || die "missing tool: $1 (set KLAUSSCPU_LLVM_BIN)"; }
@@ -57,12 +69,12 @@ build_elf() {
       RUSTC="$KLAUSSCPU_RUSTC" \
       KLAUSSCPU_LLVM_BIN="$LLVM_BIN" \
       RUSTFLAGS="-Zunstable-options -Clinker=$LLVM_BIN/ld.lld -Clink-arg=-T$LD_SCRIPT" \
-        "$CARGO" +nightly build -p "$pkg" --release )
+        "$CARGO" $KLAUSSCPU_CARGO_TOOLCHAIN build -p "$pkg" --release )
     out="$WS/examples/$pkg/$cn.elf"
     cp "$REL/$cn" "$out" 2>/dev/null || cp "$REL/$pkg" "$out"
     "$LLVM_BIN/llvm-objcopy" -O binary "$out" "$WS/examples/$pkg/$cn.bin"
     # verify
-    "$LLVM_BIN/llvm-readelf" -h "$out" | grep -q "4b43" || die "$out: not EM_KLAUSSCPU"
+    "$LLVM_BIN/llvm-readelf" -h "$out" | grep -qE "Machine: +(KlaussCPU|.*4b43)" || die "$out: not EM_KLAUSSCPU"
     "$LLVM_BIN/llvm-readelf" -h "$out" | grep -qE "Entry.*0x20$" || die "$out: entry not 0x20"
     sz=$("$LLVM_BIN/llvm-size" "$out" | awk 'NR==2{print $1"B text"}')
     echo "    $out  ($sz)  + $cn.bin"
@@ -79,7 +91,7 @@ build_llext() {
     ( cd "$WS"
       RUSTC="$KLAUSSCPU_RUSTC" \
       RUSTFLAGS="-Zunstable-options -Cllvm-args=-klausscpu-short-calls=false" \
-        "$CARGO" +nightly build -p "$pkg" --release \
+        "$CARGO" $KLAUSSCPU_CARGO_TOOLCHAIN build -p "$pkg" --release \
           -Z build-std-features=optimize_for_size )
 
     # Drop compiler_builtins members that weakly define mem* (else they drag a
@@ -109,7 +121,7 @@ build_llext() {
 verify_llext() {
     out="$1"
     "$LLVM_BIN/llvm-readelf" -h "$out" | grep -qi "REL (Relocatable" || die "$out: not ET_REL"
-    "$LLVM_BIN/llvm-readelf" -h "$out" | grep -q "4b43" || die "$out: not EM_KLAUSSCPU"
+    "$LLVM_BIN/llvm-readelf" -h "$out" | grep -qE "Machine: +(KlaussCPU|.*4b43)" || die "$out: not EM_KLAUSSCPU"
     # Single loaded text/rodata (merge worked) — split sections crash the loader.
     split=$("$LLVM_BIN/llvm-readelf" -S "$out" | grep -cE '\] \.(text|rodata)\.' || true)
     [ "$split" -eq 0 ] || die "$out: $split un-merged sections — loader will crash (PC=0)"
@@ -135,6 +147,6 @@ cmd="${1:-}"; pkg="${2:-}"
 case "$cmd" in
     elf)   [ -n "$pkg" ] || die "usage: klauss-build elf <pkg>";   build_elf "$pkg" ;;
     llext) [ -n "$pkg" ] || die "usage: klauss-build llext <pkg>"; build_llext "$pkg" ;;
-    all)   build_elf blinky; build_llext ext-hello ;;
+    all)   build_elf blinky; build_elf ffi-check; build_llext ext-hello ;;
     *)     die "usage: klauss-build {elf|llext} <pkg> | all" ;;
 esac

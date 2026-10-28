@@ -114,15 +114,15 @@ Target {
         pre_link_args: ["-m", "elf32klausscpu"],
         cpu: "generic",
         features: "",
-        max_atomic_width: Some(0),         // no atomics at all
-        atomic_cas: false,
+        max_atomic_width: Some(64),        // phase 5: forced atomics + __sync_*
+        atomic_cas: true,                  // (was Some(0)/false; rust/README.md §4)
         panic_strategy: PanicStrategy::Abort,
         relocation_model: RelocModel::Static,
         executables: true,
         dynamic_linking: false,
         eh_frame_header: false,
         emit_debug_gdb_scripts: false,
-        singlethread: true,                // affects LLVM atomic lowering
+        // singlethread: dropped in phase 5 (only LLVM's thread model, unused here)
         ..Default::default()
     },
 }
@@ -202,6 +202,11 @@ pointers, vtables, jump tables), and i128 via register pairs.
   flags, and the full mask. Zephyr's `arch_irq_lock()` is already a
   read-then-clear of `INT_MASK`, race-free given the entry/IRET save-restore
   (analysis in `FPGA_HANDOFF_IRQ.md` §5).
+- **Superseded (phase 5)**: the backend's forced-atomics model and the spec's
+  `max-atomic-width` 64 / `atomic-cas` give native `core::sync::atomic` (RMW
+  and CAS call `__sync_*_N`, which mask `INT_MASK`: `klauss-rt`'s `sync`
+  module or the C runtime's `atomic.c`); `portable-atomic` is not needed.
+  `rust/README.md` §4.  The original reasoning:
 - **Why Rust cares**: with `max_atomic_width = 0`, `core::sync::atomic` types
   don't exist on the target. The ecosystem answer is the
   [`portable-atomic`](https://crates.io/crates/portable-atomic) crate with its
@@ -286,8 +291,8 @@ Not ISA changes — selection/robustness items to do during Phase 2:
 
 | Layer | Action |
 |---|---|
-| `core` | **Compiles unmodified** once the target exists. Soft-float via libcalls, i128 OK. `core::sync::atomic` absent until §3.2 + `portable-atomic`. |
-| `alloc` | **Compiles unmodified**; needs a `#[global_allocator]` (below). `Arc` needs atomics → available via `portable-atomic-util` once §3.2 lands; `Rc`, `Vec`, `String`, `BTreeMap`, `Box` work day one. |
+| `core` | **Compiles unmodified** once the target exists. Soft-float via libcalls, i128 OK. `core::sync::atomic` complete up to 64 bits since phase 5 (§3.2). |
+| `alloc` | **Compiles unmodified**; needs a `#[global_allocator]` (below). `Arc` works since phase 5 (native atomics); `Rc`, `Vec`, `String`, `BTreeMap`, `Box` work day one. |
 | `std` | **Not ported initially** (Phase 5 stretch, see below). |
 | `compiler_builtins` | Comes free with `-Zbuild-std`; replaces `libclang_rt` inside Rust artifacts. |
 | `panic` runtime | `panic=abort`. Bare metal: `#[panic_handler]` prints via UART shim then `core::intrinsics::abort()` → `HALT_I`. LLEXT: handler must **not** halt the kernel — print to the session and terminate only the extension (§6.5). |

@@ -19,7 +19,7 @@ const REG_LEDS: *mut u32 = 0xF004_0000 as *mut u32;
 const REG_SWITCHES: *const u32 = 0xF004_0008 as *const u32;
 
 extern "C" {
-    fn uart_putc(c: u8);
+    fn uart_putc(c: core::ffi::c_char); // C `char`: signed
     static mut __bss_start: u8;
     static mut __bss_end: u8;
 }
@@ -29,7 +29,7 @@ struct Uart;
 impl Write for Uart {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         for b in s.bytes() {
-            unsafe { uart_putc(b) }
+            unsafe { uart_putc(b as core::ffi::c_char) }
         }
         Ok(())
     }

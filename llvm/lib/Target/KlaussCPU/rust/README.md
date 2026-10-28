@@ -6,12 +6,13 @@ directory:
 | Path | What it is |
 |---|---|
 | `klausscpu-unknown-none-elf.json` | rustc target spec (data layout must byte-match `llvm/lib/TargetParser/TargetDataLayout.cpp`; `llvm/test/CodeGen/KlaussCPU/rust-target-spec.test` checks it) |
-| `rustc-patches/0001-*.patch`, `0002-*.patch` | the complete rustc fork delta (callconv module, `rustc_llvm` wiring, llvm-wrapper guard fixes) |
+| `rustc-patches/0001-*.patch` … `0003-*.patch` | the complete rustc fork delta (callconv module, `rustc_llvm` wiring, llvm-wrapper guard fixes; 0003: C ABI version 2 and `va_arg`) |
 | `rustc-patches/bootstrap.toml` | rustc bootstrap config template (edit the `llvm-config` path) |
 | `hello-smoke/` | bare-metal MMIO smoke test (M1 artifact; no C runtime at all) |
 | `hello-uart/` | bare-metal UART hello via `core::fmt` + C shim (M2 artifact) |
 | `hello-ext/` | Zephyr LLEXT extension with `alloc` over the kernel heap (M3 artifact); `build-llext.sh` is the packaging pipeline |
-| `crates/` | the `klauss-*` reusable library crates (a Cargo workspace) + `blinky`/`ext-hello` examples built from them — see `crates/README.md` |
+| `crates/` | the `klauss-*` reusable library crates (a Cargo workspace) + `blinky`/`ext-hello`/`ffi-check` examples built from them — see `crates/README.md` |
+| `abi-test/` | Rust <-> C ABI conformance test (generated callers/callees in both languages against host gcc, on the emulator) — see "Checking the ABI" |
 | `klauss-build` | one driver for both flavors (`elf` / `llext`), with path discovery, section-merge, and loader/import verification baked in |
 | `klausscpu.ld` | bundled bare-metal linker script (mirror of the runtime's, which klausscpu-runtime's `check-toolchain-constants.py` compares; makes bare-metal links self-contained) |
 | `.klaussbuild.env.sample` | template for the machine-local `.klaussbuild.env` (gitignored) the driver sources |
@@ -22,23 +23,20 @@ Pinned versions (re-verify on any change — see "Rebasing" below):
 |---|---|
 | this repo (LLVM fork) | LLVM 23.0.0git, `KlaussCPU` experimental target |
 | rust-lang/rust | commit `09a371361240e42b0d69438fd1179efcf212e576` (master, 1.98.0-dev, bundles LLVM 22.1) |
-| host cargo | any rustup nightly ≥ 1.95 (only used to drive builds; supplies `-Zbuild-std`/`-Zjson-target-spec`) |
+| host cargo | any rustup nightly ≥ 1.95, or any recent stable cargo with `RUSTC_BOOTSTRAP=1` (only used to drive builds; supplies `-Zbuild-std`/`-Zjson-target-spec`; `klauss-build` falls back to the stable one by itself) |
 
-> **C ABI version 2 (`../ABI.md`).**  The callconv module in
-> `rustc-patches/0001-*.patch` (`callconv/klausscpu.rs`) still classifies
-> arguments the version-0 way: aggregates always indirect, `u32` zero-extended.
-> Calls between Rust and C now disagree on `u32` arguments/results and on
-> structs passed or returned by value, and lld cannot tell (rustc's objects
-> carry version 2 in `e_flags`).  Within Rust, the backend's library calls
-> assume a sign-extended i32 result that `compiler_builtins` would return
-> zero-extended for a `u32` (no libcall the backend emits today depends on
-> it).
-> `../ABI.md` ("Rust") gives the classification the module needs; rebuild
-> rustc with it before mixing Rust and C across such signatures.
+> **C ABI version 2 (`../ABI.md`, section "Rust").**  Patch `0003` makes
+> the callconv module (`callconv/klausscpu.rs`) classify like clang: `u32`
+> sign-extended, aggregates of up to 16 bytes in one or two GPRs, larger ones
+> by reference / `sret`.  A rustc built from `0001`–`0002` alone still
+> implements version 0 and disagrees with C on `u32` and on structs by value;
+> rebuild it.  `abi-test/` checks the agreement.
 
 Host prerequisites (macOS): `cmake`, `ninja`, `ccache` (optional), `python3`,
 rustup with a nightly toolchain, and **zstd** (`brew install zstd`) — the
-fork's LLVM links against it.
+fork's LLVM links against it.  Linux (x86-64, phase 5): the same tools, the
+distribution's `libzstd`/`zlib` development files, and any rustup toolchain
+(stable is enough; see the cargo pin above).
 
 ---
 
@@ -81,11 +79,13 @@ git checkout 09a371361240e42b0d69438fd1179efcf212e576 -b klausscpu
 git am <this-repo>/llvm/lib/Target/KlaussCPU/rust/rustc-patches/00*.patch
 
 cp <this-repo>/llvm/lib/Target/KlaussCPU/rust/rustc-patches/bootstrap.toml .
-#   → edit [target.*] llvm-config to point at YOUR fork build/bin/llvm-config
+#   → edit [target.<host triple>] (x86_64-apple-darwin, x86_64-unknown-linux-gnu,
+#     ...) and its llvm-config to point at YOUR fork build/bin/llvm-config
 
 LIBRARY_PATH=/usr/local/lib ./x.py build --stage 1 library
 #   LIBRARY_PATH: homebrew zstd for the rustc_driver link (Apple Silicon:
-#   /opt/homebrew/lib). ~25 min on 8 cores. Result:
+#   /opt/homebrew/lib; not needed on Linux). ~25 min on 8 cores, 5 min on
+#   24 (Linux, the LLVM fork already built). Result:
 #   build/<host>/stage1/bin/rustc   (1.98.0-dev)
 ```
 
@@ -124,7 +124,53 @@ LLEXT extension → `cd hello-ext && ./build-llext.sh` (→ `hello_rs.llext`); t
 script self-verifies the loader invariants and now also does the section-merge
 (see the gotcha below).
 
-## 4. Gotchas (each cost real debugging time)
+## 4. Atomics
+
+The target spec has `max-atomic-width` 64 and `atomic-cas` true, so
+`core::sync::atomic` has every type up to `AtomicU64`/`AtomicUsize` with the
+full API, and `alloc::sync::Arc` exists.  The ISA has no atomic
+instructions; the backend's "forced atomics" model (`../CLAUDE.md`, row
+"Atomics") makes an aligned atomic load or store a plain access, a fence a
+compiler barrier, and every read-modify-write and compare-exchange a call to
+`__sync_*_N` (1/2/4/8 bytes).  Those run with `INT_MASK` saved, zeroed and
+restored: **atomic against this core's interrupt handlers, not against the
+second (AMP) core**.  Who provides them:
+
+- a bare-metal Rust program: `klauss-rt` (default feature `sync-libcalls`,
+  `crates/klauss-rt/src/sync.rs`, the twin of the C runtime's `atomic.c`);
+  turn the feature off when the program also links `atomic.c`;
+- a Rust staticlib in a C program: the C runtime's `src/atomic.c`;
+- an LLEXT extension: nothing yet — the Zephyr kernel has `atomic.c` but
+  `ssh/llext_exports.c` does not export `__sync_*`, so `klauss-build llext`
+  rejects an extension that uses an atomic read-modify-write (plain atomic
+  loads and stores are fine).
+
+The spec no longer sets `singlethread`: it only reaches LLVM's thread model,
+which no KlaussCPU code reads, and it would claim that nothing interrupts
+the program.  `llvm/test/CodeGen/KlaussCPU/rust-target-spec.test` checks that
+the spec's widths are exactly what the backend lowers without `__atomic_*`
+calls.
+
+## 5. Checking the ABI
+
+```sh
+KLAUSSCPU_RUSTC=<stage1 rustc> KLAUSSCPU_LLVM_BIN=<repo>/build/bin \
+  abi-test/run_rust_abi_test.sh 1 20 80      # seeds 1-20, 80 functions each
+```
+
+For each seed `gen_rust_abi_test.py` writes a caller and a callee in C and in
+Rust (integers of every width, `bool`, pointers, `f32`/`f64`, `i128`,
+`#[repr(C)]` structs and unions of 1–24 bytes, variadic functions); host gcc
+gives the expected output, and C→Rust, Rust→C and Rust→Rust are run on the
+klausscc emulator at every mix of C -O0/-O1/-O2/-Os and Rust opt-level
+0/1/2/s (48 runs per seed).  It needs the runtime checkout (crt0, picolibc;
+`KLAUSSCPU_RUNTIME`) and builds `core` once with cargo `-Zbuild-std`.
+`crates/examples/ffi-check` is the hand-written counterpart for the board
+(`./klauss-build elf ffi-check`, then load `ffi_check.elf`): structs both
+ways, `u32` arguments and results, atomics of every width shared with C; it
+prints `Result: PASS` and halts.
+
+## 6. Gotchas (each cost real debugging time)
 
 - **JSON targets are double-gated**: `-Zunstable-options` in `rustflags`
   (rustc side) *and* `json-target-spec = true` under `[unstable]` (cargo
@@ -159,7 +205,7 @@ script self-verifies the loader invariants and now also does the section-merge
 - **Extension panics park the SSH connection thread** (no `llext_exit`
   kernel export yet — RUST_PLAN.md §6.5).
 
-## 5. Rebasing the pins
+## 7. Rebasing the pins
 
 The fork tracks LLVM trunk; rustc master moves its LLVM API expectations.
 When bumping either side, re-audit `compiler/rustc_llvm/llvm-wrapper/` —

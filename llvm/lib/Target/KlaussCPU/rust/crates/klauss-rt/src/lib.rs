@@ -12,8 +12,15 @@
 //! With the default `panic-handler` feature this crate also supplies the
 //! program's `#[panic_handler]` (sets LEDs = `0xAAAA` and parks). Disable the
 //! feature to provide your own.
+//!
+//! With the default `sync-libcalls` feature it also defines the `__sync_*_N`
+//! functions that atomic read-modify-write and `compare_exchange` call (the
+//! ISA has no atomic instructions; see [`sync`](crate::sync)).
 
 #![no_std]
+
+#[cfg(feature = "sync-libcalls")]
+pub mod sync;
 
 extern "C" {
     static mut __bss_start: u8;

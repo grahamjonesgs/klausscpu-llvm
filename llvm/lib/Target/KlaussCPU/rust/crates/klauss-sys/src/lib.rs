@@ -20,7 +20,8 @@ use core::ffi::{c_char, c_int, c_void};
 extern "C" {
     // ---- bare-metal UART shim (uart_shim.c) ----
     /// Transmit one byte over the UART (the shim expands `\n` to CR+LF).
-    pub fn uart_putc(c: u8);
+    /// The C parameter is a plain `char` (signed: the ABI sign-extends it).
+    pub fn uart_putc(c: c_char);
 
     // ---- Zephyr LLEXT kernel exports (ssh/llext_exports.c) ----
     pub fn putchar(c: c_int) -> c_int;

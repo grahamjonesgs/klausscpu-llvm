@@ -1,0 +1,220 @@
+From 73ddabbfd5c98b89a43a898a017ee492a62fd3b5 Mon Sep 17 00:00:00 2001
+From: Graham Jones <grahamjonesgs@gmail.com>
+Date: Wed, 28 Oct 2026 10:20:48 +0200
+Subject: [PATCH] KlaussCPU: C ABI version 2 in the callconv module, va_arg
+
+The klausscpu-llvm fork's C ABI changed to version 2 (ABI.md there): an
+i32 argument or result is sign-extended also when unsigned, and an
+aggregate of up to 16 bytes goes in one or two GPRs (cast to an integer of
+its size, i128 if 16-byte aligned, else [2 x i64]); larger ones by
+reference / sret.  The module classified the version-0 way (aggregates
+always indirect, u32 zero-extended), so Rust and C disagreed on u32 and on
+structs by value.  Mirror clang's KlaussCPUABIInfo instead, and extend
+integers the same way in the Rust ABI (as riscv.rs does).
+
+c-variadic definitions: va_arg is the void-pointer walk of 8-byte slots
+clang uses (emitVoidPtrVAArg, no realignment, over 16 bytes by reference)
+instead of the bug!() for Arch::Other.
+
+Tested with the fork's rust/abi-test (generated Rust<->C caller/callee
+pairs against host gcc, every opt-level mix, on the klausscc emulator).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ compiler/rustc_codegen_llvm/src/va_arg.rs     |  14 +++
+ .../rustc_target/src/callconv/klausscpu.rs    | 119 ++++++++++++++----
+ compiler/rustc_target/src/callconv/mod.rs     |   1 +
+ 3 files changed, 108 insertions(+), 26 deletions(-)
+
+diff --git a/compiler/rustc_codegen_llvm/src/va_arg.rs b/compiler/rustc_codegen_llvm/src/va_arg.rs
+index b8d1cd35..8721b617 100644
+--- a/compiler/rustc_codegen_llvm/src/va_arg.rs
++++ b/compiler/rustc_codegen_llvm/src/va_arg.rs
+@@ -1224,6 +1224,20 @@ pub(super) fn emit_va_arg<'ll, 'tcx>(
+             bx.va_arg(addr.immediate(), bx.cx.layout_of(target_ty).llvm_type(bx.cx))
+         }
+ 
++        // KlaussCPU (JSON target spec): `va_list` is a `void *` walking 8-byte
++        // slots, never realigned; a value over 16 bytes is a slot holding its
++        // address (clang's `emitVoidPtrVAArg` with AllowHigherAlign=false; see
++        // ABI.md in the klausscpu-llvm fork).
++        Arch::Other(ref arch) if arch == "klausscpu" => emit_ptr_va_arg(
++            bx,
++            addr,
++            target_ty,
++            if target_ty_size > 2 * 8 { PassMode::Indirect } else { PassMode::Direct },
++            SlotSize::Bytes8,
++            AllowHigherAlign::No,
++            ForceRightAdjust::No,
++        ),
++
+         Arch::Other(ref arch) => {
+             std::assert_matches!(stability, CVariadicStatus::Unstable { .. });
+ 
+diff --git a/compiler/rustc_target/src/callconv/klausscpu.rs b/compiler/rustc_target/src/callconv/klausscpu.rs
+index 2f647ca0..5b6df00e 100644
+--- a/compiler/rustc_target/src/callconv/klausscpu.rs
++++ b/compiler/rustc_target/src/callconv/klausscpu.rs
+@@ -1,54 +1,121 @@
+-// KlaussCPU calling convention.
++// KlaussCPU calling convention: C ABI version 2.
+ //
+-// Mirrors clang's DefaultABIInfo for the klausscpu-unknown-elf target (the
+-// LLVM fork's clang has no custom TargetCodeGenInfo), so Rust and C agree at
+-// FFI boundaries:
+-//   - scalar arguments/returns are passed direct, with sub-word integers
+-//     extended to the 64-bit GPR width (the backend's CC_KlaussCPU promotes
+-//     i8/i16/i32 to i64 via CCPromoteToType);
+-//   - aggregates are passed and returned indirectly (byval pointer / sret);
+-//   - i128 stays direct: the LLVM type legalizer splits it into two i64s
+-//     (returned in R12+R11 per RetCC_KlaussCPU).
+-
+-use rustc_abi::TyAbiInterface;
+-
+-use crate::callconv::{ArgAbi, FnAbi};
+-
+-fn classify_ret<Ty>(ret: &mut ArgAbi<'_, Ty>) {
+-    if ret.layout.is_aggregate() {
+-        ret.make_indirect();
+-    } else {
+-        ret.extend_integer_width_to(64);
++// Reference: llvm/lib/Target/KlaussCPU/ABI.md in the klausscpu-llvm fork, and
++// clang's `KlaussCPUABIInfo` (clang/lib/CodeGen/Targets/KlaussCPU.cpp), which
++// this module mirrors so that Rust and C agree at FFI boundaries.  The model
++// is integer-only RISC-V LP64 (`riscv.rs` with XLEN = 64 and no FPRs):
++//   - an integer narrower than 64 bits is extended to 64 by the producer:
++//     every 32-bit integer is sign-extended, also `u32` (as on RV64), the
++//     narrower ones by their signedness (`bool` zero-extended);
++//   - an aggregate (struct, union, enum with data, SIMD vector) of up to 16
++//     bytes is passed and returned directly, cast to an integer of its size
++//     (up to 8 bytes), to `i128` if it is 16-byte aligned, or else to
++//     `[2 x i64]`: one or two GPRs or stack slots, returned in R12 and R11;
++//   - a larger aggregate is passed by reference to a copy the caller makes,
++//     and returned through a hidden `sret` pointer;
++//   - floats (soft float) and pointers are passed as they are; `i128` goes in
++//     two GPRs (the LLVM type legaliser splits it).
++// Arguments and the return value use the same rules, and the classification
++// depends neither on how many registers are left nor on whether an argument
++// is variadic: the backend puts what does not fit in R0-R3 on the stack and
++// reserves the varargs home area itself.  A zero-sized argument is ignored
++// (GNU C `struct {}` takes no register either).
++
++use rustc_abi::{BackendRepr, HasDataLayout, Primitive, Reg, RegKind, Size, TyAbiInterface};
++
++use crate::callconv::{ArgAbi, ArgExtension, FnAbi, PassMode, Uniform};
++
++/// The width of a GPR and of a stack slot.
++const GPR_BITS: u64 = 64;
++
++/// The largest aggregate passed in registers (`KlaussCPUABI::MaxDirectAggregateSize`).
++const MAX_DIRECT_AGGREGATE_BITS: u64 = 2 * GPR_BITS;
++
++fn is_aggregate<Ty>(arg: &ArgAbi<'_, Ty>) -> bool {
++    // clang treats GNU vectors like aggregates.
++    match arg.layout.backend_repr {
++        BackendRepr::SimdVector { .. } | BackendRepr::SimdScalableVector { .. } => true,
++        _ => arg.layout.is_aggregate(),
+     }
+ }
+ 
+-fn classify_arg<'a, Ty, C>(cx: &C, arg: &mut ArgAbi<'a, Ty>)
++/// Extends an integer narrower than a GPR: an `i32`/`u32` sign-extended, the
++/// narrower ones by their signedness.  Leaves everything else alone.
++fn extend_integer_width<Ty>(arg: &mut ArgAbi<'_, Ty>) {
++    if let BackendRepr::Scalar(scalar) = arg.layout.backend_repr
++        && let Primitive::Int(i, _) = scalar.primitive()
++        && i.size().bits() == 32
++        && let PassMode::Direct(ref mut attrs) = arg.mode
++    {
++        attrs.ext(ArgExtension::Sext);
++        return;
++    }
++    arg.extend_integer_width_to(GPR_BITS);
++}
++
++/// Classifies an argument or the return value (the rules are the same).
++fn classify<'a, Ty, C>(cx: &C, arg: &mut ArgAbi<'a, Ty>, is_ret: bool)
+ where
+     Ty: TyAbiInterface<'a, C> + Copy,
+ {
+-    if arg.layout.pass_indirectly_in_non_rustic_abis(cx) {
++    if !arg.layout.is_sized() {
++        return;
++    }
++    if !is_ret && arg.layout.pass_indirectly_in_non_rustic_abis(cx) {
+         arg.make_indirect();
+         return;
+     }
+-    if arg.layout.is_aggregate() {
++    if !is_aggregate(arg) {
++        extend_integer_width(arg);
++        return;
++    }
++
++    let size = arg.layout.size;
++    if size.bits() > MAX_DIRECT_AGGREGATE_BITS {
++        // By reference to a caller-made copy (not `byval`), or `sret`.
+         arg.make_indirect();
++    } else if size.bits() <= GPR_BITS {
++        // An integer of the aggregate's size, as clang does (`i24` for 3 bytes).
++        arg.cast_to(Reg { kind: RegKind::Integer, size });
++    } else if arg.layout.align.abi.bits() == MAX_DIRECT_AGGREGATE_BITS {
++        arg.cast_to(Reg::i128());
+     } else {
+-        arg.extend_integer_width_to(64);
++        arg.cast_to(Uniform::new(Reg::i64(), Size::from_bits(MAX_DIRECT_AGGREGATE_BITS)));
+     }
+ }
+ 
+ pub(crate) fn compute_abi_info<'a, Ty, C>(cx: &C, fn_abi: &mut FnAbi<'a, Ty>)
+ where
+     Ty: TyAbiInterface<'a, C> + Copy,
++    C: HasDataLayout,
+ {
+     if !fn_abi.ret.is_ignore() {
+-        classify_ret(&mut fn_abi.ret);
++        classify(cx, &mut fn_abi.ret, true);
++    }
++    for arg in fn_abi.args.iter_mut() {
++        if arg.is_ignore() {
++            continue;
++        }
++        classify(cx, arg, false);
+     }
++}
+ 
++/// The Rust ABI keeps rustc's generic aggregate handling but extends integers
++/// like the C ABI (`riscv.rs` does the same for its arguments): the W
++/// instructions produce a sign-extended `i32`, and a callee then need not
++/// re-extend an argument, nor a caller a result.
++pub(crate) fn compute_rust_abi_info<'a, Ty, C>(_cx: &C, fn_abi: &mut FnAbi<'a, Ty>)
++where
++    Ty: TyAbiInterface<'a, C> + Copy,
++    C: HasDataLayout,
++{
++    if !fn_abi.ret.is_ignore() {
++        extend_integer_width(&mut fn_abi.ret);
++    }
+     for arg in fn_abi.args.iter_mut() {
+         if arg.is_ignore() {
+             continue;
+         }
+-        classify_arg(cx, arg);
++        extend_integer_width(arg);
+     }
+ }
+diff --git a/compiler/rustc_target/src/callconv/mod.rs b/compiler/rustc_target/src/callconv/mod.rs
+index 907e8327..6ab3dba0 100644
+--- a/compiler/rustc_target/src/callconv/mod.rs
++++ b/compiler/rustc_target/src/callconv/mod.rs
+@@ -739,6 +739,7 @@ pub fn adjust_for_rust_abi<C>(&mut self, cx: &C)
+             Arch::LoongArch32 | Arch::LoongArch64 => loongarch::compute_rust_abi_info(cx, self),
+             Arch::AArch64 => aarch64::compute_rust_abi_info(cx, self),
+             Arch::Bpf => bpf::compute_rust_abi_info(self),
++            Arch::Other(name) if name == "klausscpu" => klausscpu::compute_rust_abi_info(cx, self),
+             _ => {}
+         };
+ 
+-- 
+2.53.0
+
