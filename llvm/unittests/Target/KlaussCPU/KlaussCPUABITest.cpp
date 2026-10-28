@@ -16,7 +16,13 @@
 #include "KlaussCPURegisterInfo.h"
 #include "KlaussCPUTargetMachine.h"
 #include "MCTargetDesc/KlaussCPUInstPrinter.h"
+#include "llvm/CodeGen/CallingConvLower.h"
+#include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineOperand.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCContext.h"
@@ -44,6 +50,10 @@ using namespace llvm;
 #define GET_CC_REGISTER_LISTS
 #include "KlaussCPUGenCallingConv.inc"
 #undef GET_CC_REGISTER_LISTS
+
+// The calling convention itself (CC_KlaussCPU, RetCC_KlaussCPU), which
+// assigns the registers in order.
+#include "KlaussCPUGenCallingConv.inc"
 
 namespace {
 
@@ -142,6 +152,72 @@ TEST_F(KlaussCPUABITest, CallingConvention) {
   for (const MCPhysReg *R = TRI.getCalleeSavedRegs(nullptr); *R; ++R)
     CSRs.push_back(*R);
   EXPECT_EQ(numbers(CSRs), Sorted(KlaussCPUABI::CalleeSavedGPRs));
+}
+
+// The register lists above are sorted, but their order matters too: lldb
+// reads ArgGPRs[I] as argument I + 1 and RetGPRs[0]/[1] as the low and high
+// halves of an i128.  Run the calling convention and check the order it
+// assigns, and the stack slots after the registers.
+TEST_F(KlaussCPUABITest, CallingConventionOrder) {
+  ASSERT_TRUE(TM);
+  LLVMContext Ctx;
+  Module M("cc", Ctx);
+  M.setDataLayout(TM->createDataLayout());
+  Function *F = Function::Create(FunctionType::get(Type::getVoidTy(Ctx), false),
+                                 GlobalValue::ExternalLinkage, "f", M);
+  MachineModuleInfo MMI(TM.get());
+  MachineFunction MF(*F, *TM, *TM->getSubtargetImpl(*F), MMI.getContext(), 0);
+
+  auto RegNo = [&](const CCValAssign &VA) {
+    return MRI().getEncodingValue(VA.getLocReg());
+  };
+
+  // Arguments: one i64 per argument register, in order, then stack slots.
+  // A byte allocated first shows the slots' alignment.
+  {
+    SmallVector<CCValAssign> Locs;
+    CCState State(CallingConv::C, /*IsVarArg=*/false, MF, Locs, Ctx);
+    unsigned NumArgs = KlaussCPUABI::NumArgGPRs + 2;
+    for (unsigned I = 0; I != NumArgs; ++I) {
+      if (I == KlaussCPUABI::NumArgGPRs)
+        State.AllocateStack(1, Align(1));
+      // The last one is an i32, which takes a full slot like an i64.
+      MVT VT = I + 1 == NumArgs ? MVT::i32 : MVT::i64;
+      ASSERT_FALSE(CC_KlaussCPU(I, VT, VT, CCValAssign::Full,
+                                ISD::ArgFlagsTy(), nullptr, State));
+    }
+    ASSERT_EQ(Locs.size(), NumArgs);
+    for (unsigned I = 0; I != KlaussCPUABI::NumArgGPRs; ++I) {
+      ASSERT_TRUE(Locs[I].isRegLoc());
+      EXPECT_EQ(RegNo(Locs[I]), KlaussCPUABI::ArgGPRs[I]) << "argument " << I;
+    }
+    const CCValAssign &S0 = Locs[KlaussCPUABI::NumArgGPRs];
+    const CCValAssign &S1 = Locs[KlaussCPUABI::NumArgGPRs + 1];
+    ASSERT_TRUE(S0.isMemLoc());
+    ASSERT_TRUE(S1.isMemLoc());
+    EXPECT_EQ(S0.getLocMemOffset(), int64_t(KlaussCPUABI::StackAlign));
+    EXPECT_EQ(S1.getLocMemOffset(),
+              int64_t(KlaussCPUABI::StackAlign + KlaussCPUABI::SlotSize));
+    EXPECT_EQ(S1.getLocVT(), MVT::i64);
+    EXPECT_EQ(State.getStackSize(),
+              uint64_t(KlaussCPUABI::StackAlign + 2 * KlaussCPUABI::SlotSize));
+  }
+
+  // Return values: an i128 is two i64s, low half first.
+  {
+    SmallVector<CCValAssign> Locs;
+    CCState State(CallingConv::C, /*IsVarArg=*/false, MF, Locs, Ctx);
+    for (unsigned I = 0; I != std::size(KlaussCPUABI::RetGPRs); ++I)
+      ASSERT_FALSE(RetCC_KlaussCPU(I, MVT::i64, MVT::i64, CCValAssign::Full,
+                                   ISD::ArgFlagsTy(), nullptr, State));
+    for (unsigned I = 0; I != std::size(KlaussCPUABI::RetGPRs); ++I) {
+      ASSERT_TRUE(Locs[I].isRegLoc());
+      EXPECT_EQ(RegNo(Locs[I]), KlaussCPUABI::RetGPRs[I]) << "return " << I;
+    }
+    // No more return registers: a third i64 is returned in memory.
+    EXPECT_TRUE(RetCC_KlaussCPU(2, MVT::i64, MVT::i64, CCValAssign::Full,
+                                ISD::ArgFlagsTy(), nullptr, State));
+  }
 }
 
 TEST_F(KlaussCPUABITest, Frame) {

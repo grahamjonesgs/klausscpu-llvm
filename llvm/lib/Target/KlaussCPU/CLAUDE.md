@@ -525,10 +525,13 @@ NOP / HALT / TRAP / JMPREL words and lld's fill word (`InvalidWord`, a
 reserved encoding that traps as an invalid opcode), the 32-bit address
 space.  The backend's code generation follows the .td files, so a change to
 the registers, the calling convention or an encoding must update
-`KlaussCPUABI.h` too: `llvm/unittests/Target/KlaussCPU` fails until it does.
+`KlaussCPUABI.h` too: `llvm/unittests/Target/KlaussCPU` fails until it does
+(it runs `CC_KlaussCPU` / `RetCC_KlaussCPU`, so the order of the argument and
+return registers and the stack slots' size and alignment are checked too).
 The backend's frame code, clang, lld and lldb read the header.  Copies outside
 this repository (the runtime's loaders and Zephyr LLEXT relocator, the lldb
-RTOS plugin, klausscc's gdbserver and ISA table) are compared with these
+RTOS plugin, the FreeRTOS and Zephyr stack alignment, klausscc's gdbserver
+and ISA table) are compared with these
 sources by klausscpu-runtime's `check-toolchain-constants.py`.
 
 ---
