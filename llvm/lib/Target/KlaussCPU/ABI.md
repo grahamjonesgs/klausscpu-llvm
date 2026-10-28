@@ -150,7 +150,9 @@ compiler builds frames, which the unwinders depend on.
   after the entry and tear it down before the return, so code on a path
   that needs no frame runs frameless.
 - A sibling call whose arguments are all in registers (to a function that
-  is not variadic, without byval or sret arguments) can be a tail call: the
+  is not variadic, without byval or sret arguments, none of them the
+  address of the caller's own stack object such as the copy of an aggregate
+  over 16 bytes) can be a tail call: the
   caller tears its frame down (`LEAVE`) and jumps; the callee is entered
   with the caller's return address at `[SP]` and returns to the caller's
   caller.  So a callee must not assume that `[SP]` at entry points into its

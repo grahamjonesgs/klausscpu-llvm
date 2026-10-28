@@ -239,7 +239,12 @@ ABI version 2 (`KlaussCPUABI::ABIVersion`; RISC-V LP64, integer only):
   are `isAsmParserOnly` (the disassembler shows `jmprel`).  The callee finds the caller's return
   address at `[SP]` and returns to the caller's caller.  Not for a variadic
   callee (its home area belongs to a variadic call), stack, byval or sret
-  arguments, or `"disable-tail-calls"`; a `musttail` call that cannot be one
+  arguments, an argument that is the address of the caller's own stack
+  object (a frame index, plus a constant: clang's `byval-temp` copy of an
+  aggregate over 16 bytes, which `LEAVE` frees; IR `musttail` does not
+  promise it away as `tail` does; a pointer to an alloca that reaches the
+  call through memory or another block is not seen),
+  or `"disable-tail-calls"`; a `musttail` call that cannot be one
   is an error diagnostic at the call (`DiagnosticInfoUnsupported`; it is then
   lowered as an ordinary call so that every such call is reported,
   `tail-call-musttail.ll`, clang `klausscpu-musttail-error.c`).  Any calling

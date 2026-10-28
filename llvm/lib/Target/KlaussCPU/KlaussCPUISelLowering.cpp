@@ -1433,11 +1433,39 @@ SDValue KlaussCPUTargetLowering::LowerReturn(
 //    return address, which only a variadic call reserves (ABI.md);
 //  - no byval argument: its copy is in the caller's frame;
 //  - no sret on either side (as RISC-V);
+//  - no argument that is the address of one of the caller's own stack
+//    objects: clang passes an aggregate larger than 16 bytes as a pointer to
+//    a copy in the caller's frame (`byval-temp`), which LEAVE frees before
+//    the callee reads it.  IR `tail` promises that the callee does not use
+//    the caller's allocas, but `musttail` does not (clang emits one for
+//    `[[clang::musttail]]` whatever the arguments), so this is checked for
+//    the address computations the DAG shows directly (a static alloca, or
+//    one plus a constant offset); a pointer to an alloca that reached the
+//    call through memory or another block is not seen;
 //  - the callee preserves at least the registers the caller must (every
 //    calling convention is lowered as the C one, CC_KlaussCPU, so this holds
 //    also for the fastcc that GlobalOpt gives internal functions).
 // IR `tail` already promises that the callee does not use the caller's
 // allocas.
+
+// Whether V is the address of (or into) one of the function's own stack
+// objects: a frame index that is not a fixed object (the incoming stack
+// arguments belong to the caller's caller and outlive a tail call), possibly
+// plus a constant offset.
+static bool isLocalFrameAddress(SDValue V, const MachineFrameInfo &MFI) {
+  for (;;) {
+    if (auto *FI = dyn_cast<FrameIndexSDNode>(V))
+      return !MFI.isFixedObjectIndex(FI->getIndex());
+    unsigned Opc = V.getOpcode();
+    if ((Opc == ISD::ADD || Opc == ISD::PTRADD || Opc == ISD::OR) &&
+        isa<ConstantSDNode>(V.getOperand(1))) {
+      V = V.getOperand(0);
+      continue;
+    }
+    return false;
+  }
+}
+
 bool KlaussCPUTargetLowering::isEligibleForTailCallOptimization(
     const CCState &CCInfo, const TargetLowering::CallLoweringInfo &CLI,
     const MachineFunction &MF) const {
@@ -1447,6 +1475,10 @@ bool KlaussCPUTargetLowering::isEligibleForTailCallOptimization(
     return false;
   for (const ISD::OutputArg &Out : CLI.Outs)
     if (Out.Flags.isByVal() || Out.Flags.isSRet())
+      return false;
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  for (SDValue V : CLI.OutVals)
+    if (isLocalFrameAddress(V, MFI))
       return false;
   const TargetRegisterInfo *TRI = Subtarget.getRegisterInfo();
   const uint32_t *CallerPreserved =
@@ -1498,7 +1530,9 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
     DAG.getContext()->diagnose(DiagnosticInfoUnsupported(
         MF.getFunction(),
         "musttail call cannot be a tail call on KlaussCPU: it has stack, "
-        "byval or sret arguments, is variadic, or tail calls are disabled",
+        "byval or sret arguments, passes the address of a local (such as "
+        "an aggregate over 16 bytes), is variadic, or tail calls are "
+        "disabled",
         CLI.CB->getDebugLoc()));
   CLI.IsTailCall = IsTailCall;
 
