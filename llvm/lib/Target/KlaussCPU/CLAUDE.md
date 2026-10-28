@@ -345,7 +345,13 @@ callee-saved rules are only added after the post-RA scheduler
 (`KlaussCPUCalleeSavedCFI`, the last pre-emit pass).  -g and -g0 give the
 same code (`csr-cfi-sched.ll`), except with `-klausscpu-enter-leave=false`
 in a function without locals (no ADDSP, so the CFI behind `GETSP R15` is
-an extra boundary).
+an extra boundary).  Hand-written interrupt handlers (the runtime's FreeRTOS
+`vPortTickISR`, Zephyr `z_klausscpu_timer_isr`) use `.cfi_signal_frame`:
+MC gives such an FDE a `.debug_frame` CIE of its own with the augmentation
+"S", as GNU as does (upstream MC dropped it outside `.eh_frame`), so lldb
+treats the handler as a trap handler and shows the interrupted frame at its
+exact PC (`MC/KlaussCPU/cfi-signal-frame.s`; lldb's CIE parser reads no
+augmentation data length without a 'z', `TestDWARFCallFrameInfo.cpp`).
 
 ### Inline asm
 
@@ -636,9 +642,15 @@ harness in klausscpu-runtime's
   instruction counts and `.text` sizes, a few ABI-conformance and Csmith
   seeds.
 - `validate.sh full`: adds 300 Csmith + 150 `--float` seeds, 30 ABI seeds,
-  these lit suites (plus any KlaussCPU lldb tests) and an output-byte
-  oracle (`ORACLE_BASE=<previous snapshot>` diffs it; a refactor must leave
-  it identical).
+  these lit suites (plus the KlaussCPU lldb tests, `lldb/test/Shell/**/KlaussCPU`,
+  when the build has `LLDB_INCLUDE_TESTS=ON`), lldb end to end on the
+  emulator and an output-byte oracle (`ORACLE_BASE=<previous snapshot>`
+  diffs it; a refactor must leave it identical).
+- `validate.sh lldb` / `lldb-board`: lldb against klausscc's gdbserver on
+  the emulator / the board, scripted with `lldb -b -s`: breakpoints,
+  stepping, backtraces through frameless, shrink-wrapped and tail-calling
+  functions and through interrupt handlers, outer frames' callee-saved
+  registers, expressions, the Zephyr and FreeRTOS thread lists.
 - `validate.sh csmith N FIRST`: more Csmith seeds.
 - `validate.sh board`: board cycles (Dhrystone, also `-fno-builtin`,
   perf_baseline, perf_haz, CoreMark, Embench) against `baselines/perf.tsv`.

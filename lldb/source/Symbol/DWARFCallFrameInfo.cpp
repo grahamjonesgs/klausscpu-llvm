@@ -362,67 +362,64 @@ DWARFCallFrameInfo::ParseCIE(const dw_offset_t cie_offset) {
             ? static_cast<uint32_t>(m_cfi_data.GetULEB128(&offset))
             : m_cfi_data.GetU8(&offset);
 
-    if (cie_sp->augmentation[0]) {
+    // A 'z' may be present as the first character of the string. If present,
+    // the Augmentation Data field shall be present. The contents of the
+    // Augmentation Data shall be interpreted according to other characters in
+    // the Augmentation String.  Without the 'z' there is no Augmentation Data
+    // length: GNU as writes "S" (a signal frame, see below) alone in
+    // .debug_frame, and the initial instructions follow directly.
+    if (cie_sp->augmentation[0] == 'z') {
       // Get the length of the eh_frame augmentation data which starts with a
       // ULEB128 length in bytes
       const size_t aug_data_len = (size_t)m_cfi_data.GetULEB128(&offset);
       const size_t aug_data_end = offset + aug_data_len;
       const size_t aug_str_len = strlen(cie_sp->augmentation);
-      // A 'z' may be present as the first character of the string.
-      // If present, the Augmentation Data field shall be present. The contents
-      // of the Augmentation Data shall be interpreted according to other
-      // characters in the Augmentation String.
-      if (cie_sp->augmentation[0] == 'z') {
-        // Extract the Augmentation Data
-        size_t aug_str_idx = 0;
-        for (aug_str_idx = 1; aug_str_idx < aug_str_len; aug_str_idx++) {
-          char aug = cie_sp->augmentation[aug_str_idx];
-          switch (aug) {
-          case 'L':
-            // Indicates the presence of one argument in the Augmentation Data
-            // of the CIE, and a corresponding argument in the Augmentation
-            // Data of the FDE. The argument in the Augmentation Data of the
-            // CIE is 1-byte and represents the pointer encoding used for the
-            // argument in the Augmentation Data of the FDE, which is the
-            // address of a language-specific data area (LSDA). The size of the
-            // LSDA pointer is specified by the pointer encoding used.
-            cie_sp->lsda_addr_encoding = m_cfi_data.GetU8(&offset);
-            break;
+      // Extract the Augmentation Data
+      size_t aug_str_idx = 0;
+      for (aug_str_idx = 1; aug_str_idx < aug_str_len; aug_str_idx++) {
+        char aug = cie_sp->augmentation[aug_str_idx];
+        switch (aug) {
+        case 'L':
+          // Indicates the presence of one argument in the Augmentation Data
+          // of the CIE, and a corresponding argument in the Augmentation
+          // Data of the FDE. The argument in the Augmentation Data of the
+          // CIE is 1-byte and represents the pointer encoding used for the
+          // argument in the Augmentation Data of the FDE, which is the
+          // address of a language-specific data area (LSDA). The size of the
+          // LSDA pointer is specified by the pointer encoding used.
+          cie_sp->lsda_addr_encoding = m_cfi_data.GetU8(&offset);
+          break;
 
-          case 'P':
-            // Indicates the presence of two arguments in the Augmentation Data
-            // of the CIE. The first argument is 1-byte and represents the
-            // pointer encoding used for the second argument, which is the
-            // address of a personality routine handler. The size of the
-            // personality routine pointer is specified by the pointer encoding
-            // used.
-            //
-            // The address of the personality function will be stored at this
-            // location.  Pre-execution, it will be all zero's so don't read it
-            // until we're trying to do an unwind & the reloc has been
-            // resolved.
-            {
-              uint8_t arg_ptr_encoding = m_cfi_data.GetU8(&offset);
-              const lldb::addr_t pc_rel_addr = m_section_sp->GetFileAddress();
-              cie_sp->personality_loc = GetGNUEHPointer(
-                  m_cfi_data, &offset, arg_ptr_encoding, pc_rel_addr,
-                  LLDB_INVALID_ADDRESS, LLDB_INVALID_ADDRESS);
-            }
-            break;
-
-          case 'R':
-            // A 'R' may be present at any position after the
-            // first character of the string. The Augmentation Data shall
-            // include a 1 byte argument that represents the pointer encoding
-            // for the address pointers used in the FDE. Example: 0x1B ==
-            // DW_EH_PE_pcrel | DW_EH_PE_sdata4
-            cie_sp->ptr_encoding = m_cfi_data.GetU8(&offset);
-            break;
+        case 'P':
+          // Indicates the presence of two arguments in the Augmentation Data
+          // of the CIE. The first argument is 1-byte and represents the
+          // pointer encoding used for the second argument, which is the
+          // address of a personality routine handler. The size of the
+          // personality routine pointer is specified by the pointer encoding
+          // used.
+          //
+          // The address of the personality function will be stored at this
+          // location.  Pre-execution, it will be all zero's so don't read it
+          // until we're trying to do an unwind & the reloc has been
+          // resolved.
+          {
+            uint8_t arg_ptr_encoding = m_cfi_data.GetU8(&offset);
+            const lldb::addr_t pc_rel_addr = m_section_sp->GetFileAddress();
+            cie_sp->personality_loc = GetGNUEHPointer(
+                m_cfi_data, &offset, arg_ptr_encoding, pc_rel_addr,
+                LLDB_INVALID_ADDRESS, LLDB_INVALID_ADDRESS);
           }
+          break;
+
+        case 'R':
+          // A 'R' may be present at any position after the
+          // first character of the string. The Augmentation Data shall
+          // include a 1 byte argument that represents the pointer encoding
+          // for the address pointers used in the FDE. Example: 0x1B ==
+          // DW_EH_PE_pcrel | DW_EH_PE_sdata4
+          cie_sp->ptr_encoding = m_cfi_data.GetU8(&offset);
+          break;
         }
-      } else if (strcmp(cie_sp->augmentation, "eh") == 0) {
-        // If the Augmentation string has the value "eh", then the EH Data
-        // field shall be present
       }
 
       // Set the offset to be the end of the augmentation data just in case we

@@ -1705,6 +1705,12 @@ const MCSymbol &FrameEmitterImpl::EmitCIE(const MCDwarfFrameInfo &Frame) {
     if (Frame.IsMTETaggedFrame)
       Augmentation += "G";
     Streamer.emitBytes(Augmentation);
+  } else if (Frame.IsSignalFrame) {
+    // .debug_frame has no augmentation data, but GNU as still marks a
+    // .cfi_signal_frame CIE with "S" there, and debuggers (lldb, gdb) use it
+    // to unwind through a trap or interrupt handler: the frame it returns to
+    // was interrupted, not called, so its PC is not a return address.
+    Streamer.emitBytes("S");
   }
   Streamer.emitInt8(0);
 
@@ -1978,8 +1984,11 @@ void MCDwarfFrameEmitter::emit(MCObjectStreamer &Streamer, bool IsEH) {
       // section, do not emit anything.
       continue;
 
+    // .debug_frame shares one CIE between all FDEs, except that a signal
+    // frame needs one of its own (its augmentation is "S").
     CIEKey Key(Frame);
-    if (!LastCIEStart || (IsEH && Key != LastKey)) {
+    if (!LastCIEStart ||
+        (IsEH ? Key != LastKey : Key.IsSignalFrame != LastKey.IsSignalFrame)) {
       LastKey = Key;
       LastCIEStart = &Emitter.EmitCIE(Frame);
     }

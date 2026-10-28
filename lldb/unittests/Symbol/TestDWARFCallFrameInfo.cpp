@@ -381,6 +381,104 @@ TEST_F(DWARFCallFrameInfoTest, ValOffset_dwarf3) {
   TestValOffset(DWARFCallFrameInfo::DWARF, "debug_frame3");
 }
 
+// A .cfi_signal_frame in .debug_frame: GNU as (and MC) write the augmentation
+// "S" without a 'z', so no augmentation data length follows the return
+// address column and the initial instructions start right after it.  The
+// plan must be marked as a signal trap (the frame it returns to was
+// interrupted, so its PC is not a return address).
+TEST_F(DWARFCallFrameInfoTest, SignalFrame_dwarf) {
+  auto ExpectedFile = TestFile::fromYaml(R"(
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_REL
+  Machine:         EM_X86_64
+  SectionHeaderStringTable: .strtab
+Sections:
+  - Name:            .text
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC, SHF_EXECINSTR ]
+    AddressAlign:    0x4
+    Content:         9090C3
+  - Name:            .debug_frame
+    Type:            SHT_PROGBITS
+    AddressAlign:    0x8
+#00000000 00000014 ffffffff CIE
+#  Format:                DWARF32
+#  Version:               1
+#  Augmentation:          "S"
+#  Code alignment factor: 1
+#  Data alignment factor: -8
+#  Return address column: 16
+#
+#  DW_CFA_def_cfa: RSP +8
+#  DW_CFA_offset: RIP -8
+#  DW_CFA_def_cfa_offset: +16
+#  DW_CFA_nop:
+#  DW_CFA_nop:
+#  DW_CFA_nop:
+#
+#00000018 00000014 00000000 FDE cie=00000000 pc=00000000...00000003
+#
+#  0x0: CFA=RSP+16: RIP=[CFA-8]
+    Content:         14000000FFFFFFFF0153000178100C070890010E10000000140000000000000000000000000000000300000000000000
+  - Name:            .rela.debug_frame
+    Type:            SHT_RELA
+    Flags:           [ SHF_INFO_LINK ]
+    Link:            .symtab
+    AddressAlign:    0x8
+    Info:            .debug_frame
+    Relocations:
+      - Offset:          0x1C
+        Symbol:          .debug_frame
+        Type:            R_X86_64_32
+      - Offset:          0x20
+        Symbol:          .text
+        Type:            R_X86_64_64
+  - Type:            SectionHeaderTable
+    Sections:
+      - Name:            .strtab
+      - Name:            .text
+      - Name:            .debug_frame
+      - Name:            .rela.debug_frame
+      - Name:            .symtab
+Symbols:
+  - Name:            .text
+    Type:            STT_SECTION
+    Section:         .text
+  - Name:            signal_frame
+    Section:         .text
+  - Name:            .debug_frame
+    Type:            STT_SECTION
+    Section:         .debug_frame
+...
+)");
+  ASSERT_THAT_EXPECTED(ExpectedFile, llvm::Succeeded());
+
+  auto module_sp = std::make_shared<Module>(ExpectedFile->moduleSpec());
+  SectionList *list = module_sp->GetSectionList();
+  ASSERT_NE(nullptr, list);
+  auto section_sp = list->FindSectionByType(eSectionTypeDWARFDebugFrame, false);
+  ASSERT_NE(nullptr, section_sp);
+
+  DWARFCallFrameInfo cfi(*module_sp->GetObjectFile(), section_sp,
+                         DWARFCallFrameInfo::DWARF);
+  const Symbol *sym = module_sp->FindFirstSymbolWithNameAndType(
+      ConstString("signal_frame"), eSymbolTypeAny);
+  ASSERT_NE(nullptr, sym);
+
+  std::unique_ptr<UnwindPlan> plan_up = cfi.GetUnwindPlan(sym->GetAddress());
+  ASSERT_TRUE(plan_up);
+  EXPECT_EQ(eLazyBoolYes, plan_up->GetUnwindPlanForSignalTrap());
+  ASSERT_EQ(1, plan_up->GetRowCount());
+  UnwindPlan::Row row;
+  row.SetOffset(0);
+  row.GetCFAValue().SetIsRegisterPlusOffset(dwarf_rsp_x86_64, 16);
+  row.SetRegisterLocationToAtCFAPlusOffset(dwarf_rip_x86_64, -8, false);
+  EXPECT_THAT(plan_up->GetRowAtIndex(0), testing::Pointee(row));
+}
+
 // Test that we correctly handle invalid FDE entries that have CIE ID values
 TEST_F(DWARFCallFrameInfoTest, InvalidFDEWithCIEID_dwarf32) {
   // Create an FDE with cie_offset of 0xFFFFFFFF (DW_CIE_ID) which is invalid

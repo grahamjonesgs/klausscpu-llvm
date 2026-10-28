@@ -62,6 +62,11 @@ build/bin/llvm-lit -q llvm/test/CodeGen/KlaussCPU llvm/test/MC/KlaussCPU \
   llvm/test/Transforms/LoopUnroll/KlaussCPU lld/test/ELF/klausscpu-*.s
 ```
 
+The lldb tests (`lldb/test/Shell/SymbolFile/DWARF/KlaussCPU`) need a build
+configured with `-DLLDB_INCLUDE_TESTS=ON` and `ninja lldb-test`; the
+runtime's `tools/validate/validate.sh lldb` runs lldb end to end against
+the emulator.
+
 ## Other documents in this directory
 
 | File | What it is |
