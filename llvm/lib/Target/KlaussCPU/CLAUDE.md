@@ -593,6 +593,28 @@ build/bin/llvm-lit -q llvm/test/CodeGen/KlaussCPU llvm/test/MC/KlaussCPU \
 `ninja KlaussCPUTests && build/unittests/Target/KlaussCPU/KlaussCPUTests`
 checks `KlaussCPUABI.h` against the .td files (see "Shared constants").
 
+Beyond lit, a change that alters generated code is validated with the
+harness in klausscpu-runtime's
+[`tools/validate/`](https://github.com/grahamjonesgs/klausscpu-runtime/tree/main/tools/validate)
+(`KLAUSSCPU_LLVM_BIN` set to this `build/bin`):
+
+- `validate.sh quick`: the bare-metal corpus at -O1 and -O2 on the klausscc
+  emulator against committed UART baselines, with instruction counts and
+  `.text` sizes, a few ABI-conformance and Csmith seeds.
+- `validate.sh full`: adds 300 Csmith + 150 `--float` seeds, 30 ABI seeds,
+  these lit suites and an output-byte oracle (`ORACLE_BASE=<previous
+  snapshot>` diffs it; a refactor must leave it identical).
+- `validate.sh csmith N FIRST`: more Csmith seeds.
+- `validate.sh board`: board cycles (Dhrystone, also `-fno-builtin`,
+  perf_baseline, perf_haz, CoreMark, Embench) against `baselines/perf.tsv`.
+- `validate.sh csmith-board N`: Csmith with the same ELF on the board and
+  the emulator.
+- `validate.sh zephyr`: the Zephyr apps.
+
+Board modes take `BOARD_LOCK`.  After an intended change of output or
+performance, `validate.sh baseline <run dirs>` rewrites the baselines; commit
+them with the change.
+
 Every CodeGen test that compiles to output runs with `-verify-machineinstrs`
 (the `not llc` diagnostic tests and the post-`patchable-function` MIR test
 are the only exceptions) — keep it there.  The
