@@ -148,3 +148,46 @@ void c_halt(long rc) {
     __asm__ volatile("halt" : : "r"(r));
     for (;;) { }
 }
+
+/* ---- the timer interrupt for main.rs's race() ----
+ * As klausscpu-runtime's test_atomic T5: the vector target saves the
+ * caller-saved registers (ABI.md), runs the handler, and IRET restores PC,
+ * flags and INT_MASK.  The handler bumps the counters through Rust. */
+#define INTC_BASE      0xF00F0000u
+#define REG_INT_MASK   (*(volatile uint32_t *)(INTC_BASE + 0x0000u))
+#define REG_INT_VEC(n) (*(volatile uint32_t *)(INTC_BASE + 0x0010u + 8u * (n)))
+#define REG_TIMER_PER  (*(volatile uint32_t *)(INTC_BASE + 0x0030u))
+#define INT_SRC_TIMER  0u
+
+void rs_bump_all(void);
+static volatile uint32_t ticks;
+
+void ffi_timer_isr_c(void) {
+    rs_bump_all();
+    ticks++;
+}
+
+__asm__(
+    "  .text\n  .p2align 3\n  .globl ffi_timer_isr\n"
+    "ffi_timer_isr:\n"
+    "  push r0\n  push r1\n  push r2\n  push r3\n  push r8\n  push r9\n"
+    "  push r10\n  push r11\n  push r12\n  push r13\n  push r14\n"
+    "  call ffi_timer_isr_c\n"
+    "  pop r14\n  pop r13\n  pop r12\n  pop r11\n  pop r10\n  pop r9\n"
+    "  pop r8\n  pop r3\n  pop r2\n  pop r1\n  pop r0\n"
+    "  iret\n");
+void ffi_timer_isr(void);
+
+void c_timer_on(uint32_t period) {
+    REG_INT_MASK = 0;
+    REG_INT_VEC(INT_SRC_TIMER) = (uint32_t)(uintptr_t)ffi_timer_isr;
+    REG_TIMER_PER = period;
+    REG_INT_MASK = 1u << INT_SRC_TIMER;
+}
+
+void c_timer_off(void) {
+    REG_INT_MASK = 0;
+    REG_INT_VEC(INT_SRC_TIMER) = 0;
+}
+
+uint32_t c_ticks(void) { return ticks; }

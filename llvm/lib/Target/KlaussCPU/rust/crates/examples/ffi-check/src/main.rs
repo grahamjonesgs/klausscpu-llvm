@@ -10,6 +10,10 @@
 //!   read-modify-write and compare-exchange calls a `__sync_*_N` function
 //!   (klauss-rt's `sync` module); C's `__atomic_*` builtins on the same
 //!   variables go through the same functions.
+//! * Interrupts: every `__sync_*` call leaves a non-zero `INT_MASK` as it
+//!   found it, and counters of every width bumped by both the main loop and
+//!   a timer interrupt (as klausscpu-runtime's `test_atomic` T5) end exact
+//!   while a plain counter loses updates.
 //!
 //! Prints `PASS <check>` / `FAIL <check> ...` lines and `Result: PASS` or
 //! `Result: FAIL`, then halts with the number of failed checks in R12.
@@ -18,9 +22,11 @@
 #![no_main]
 
 use core::hint::black_box;
+use core::ptr::{read_volatile, write_volatile};
 use core::sync::atomic::{
     AtomicBool, AtomicI16, AtomicI32, AtomicI64, AtomicI8, AtomicPtr, AtomicU16, AtomicU32,
-    AtomicU64, AtomicU8, AtomicUsize, Ordering::SeqCst,
+    AtomicU64, AtomicU8, AtomicUsize,
+    Ordering::{Relaxed, SeqCst},
 };
 use klauss_io::println;
 
@@ -83,6 +89,9 @@ extern "C" {
     fn c_cas64(p: *mut u64, expected: *mut u64, desired: u64) -> bool;
     fn c_xchg8(p: *mut u8, v: u8) -> u8;
     fn c_fetch_max16(p: *mut i16, v: i16) -> i16;
+    fn c_timer_on(period: u32);
+    fn c_timer_off();
+    fn c_ticks() -> u32;
     fn c_halt(rc: i64) -> !;
 }
 
@@ -267,6 +276,10 @@ static FLAG: AtomicBool = AtomicBool::new(false);
 static SZ: AtomicUsize = AtomicUsize::new(0);
 static mut TARGETS: [u32; 2] = [11, 22];
 static PTR: AtomicPtr<u32> = AtomicPtr::new(core::ptr::null_mut());
+static N8: AtomicI8 = AtomicI8::new(-1);
+static N16: AtomicI16 = AtomicI16::new(-300);
+static N32: AtomicI32 = AtomicI32::new(-5);
+static N64: AtomicI64 = AtomicI64::new(-7);
 
 fn atomics() {
     // 8 bits: wrap-around, zero-extended results.
@@ -406,18 +419,163 @@ fn atomics() {
         Ok(t0),
     );
     check("ptr load", unsafe { *PTR.load(SeqCst) }, 22);
+
+    // Negative values: the expected value of a compare-exchange is compared
+    // with the loaded one at its own width, whatever the upper bits.
+    check(
+        "i8 compare_exchange negative",
+        N8.compare_exchange(black_box(-1), -128, SeqCst, SeqCst),
+        Ok(-1),
+    );
+    check(
+        "i8 compare_exchange negative fails",
+        N8.compare_exchange(black_box(-1), 5, SeqCst, SeqCst),
+        Err(-128),
+    );
+    check(
+        "i8 fetch_add wraps",
+        N8.fetch_add(black_box(-1), SeqCst),
+        -128,
+    );
+    check("i8 after wrap", N8.load(SeqCst), 127);
+    check(
+        "i16 compare_exchange negative",
+        N16.compare_exchange(black_box(-300), i16::MIN, SeqCst, SeqCst),
+        Ok(-300),
+    );
+    check(
+        "i16 compare_exchange negative fails",
+        N16.compare_exchange(black_box(-300), 1, SeqCst, SeqCst),
+        Err(i16::MIN),
+    );
+    check(
+        "i32 compare_exchange negative",
+        N32.compare_exchange(black_box(-5), i32::MIN, SeqCst, SeqCst),
+        Ok(-5),
+    );
+    check("i32 fetch_sub wraps", N32.fetch_sub(1, SeqCst), i32::MIN);
+    check(
+        "i32 swap result, widened",
+        N32.swap(black_box(-9), SeqCst) as i64,
+        i32::MAX as i64,
+    );
+    check(
+        "i64 compare_exchange negative",
+        N64.compare_exchange(black_box(-7), i64::MIN, SeqCst, SeqCst),
+        Ok(-7),
+    );
+    check("i64 fetch_nand", N64.fetch_nand(-1, SeqCst), i64::MIN);
+    check("i64 after fetch_nand", N64.load(SeqCst), i64::MAX);
 }
 
+// ---- interrupts ----
+
+const INT_MASK: usize = 0xF00F_0000;
+
 fn int_mask() -> u32 {
-    unsafe { core::ptr::read_volatile(0xF00F_0000 as *const u32) }
+    unsafe { read_volatile(INT_MASK as *const u32) }
+}
+
+fn set_int_mask(m: u32) {
+    unsafe { write_volatile(INT_MASK as *mut u32, m) }
+}
+
+/// Each `__sync_*` function saves INT_MASK, clears it and puts the saved
+/// value back (klausscpu-runtime test_atomic T4).
+fn mask_restored() {
+    static V32: AtomicU32 = AtomicU32::new(0);
+    static V8: AtomicU8 = AtomicU8::new(0);
+    static V64: AtomicU64 = AtomicU64::new(0);
+    // The vectors are 0, so no source fires whatever the mask says.
+    for m in [5u32, 10, 15] {
+        set_int_mask(m);
+        V32.fetch_add(1, SeqCst);
+        let a = int_mask();
+        let _ = V8.compare_exchange(0, 1, SeqCst, SeqCst);
+        let b = int_mask();
+        V64.swap(u64::from(m), SeqCst);
+        let c = int_mask();
+        set_int_mask(0);
+        check("INT_MASK restored", (a, b, c), (m, m, m));
+    }
+}
+
+static S8: AtomicU8 = AtomicU8::new(0);
+static S16: AtomicU16 = AtomicU16::new(0);
+static S32: AtomicU32 = AtomicU32::new(0);
+static S64: AtomicU64 = AtomicU64::new(0);
+static SCAS: AtomicU64 = AtomicU64::new(0);
+static SCAS8: AtomicU8 = AtomicU8::new(0);
+static mut PLAIN: u64 = 0;
+
+/// Bumps every counter once; the main loop and the timer interrupt (ffi.c)
+/// both call it.  PLAIN is a plain read-modify-write around the atomics, so
+/// an interrupt between its load and store loses an update.
+#[no_mangle]
+pub extern "C" fn rs_bump_all() {
+    let plain = unsafe { read_volatile(&raw const PLAIN) };
+    S8.fetch_add(1, SeqCst);
+    S16.fetch_add(1, SeqCst);
+    S32.fetch_add(1, SeqCst);
+    S64.fetch_add(1, SeqCst);
+    let mut o = SCAS.load(Relaxed);
+    while let Err(v) = SCAS.compare_exchange_weak(o, o + 1, SeqCst, Relaxed) {
+        o = v;
+    }
+    let mut o = SCAS8.load(Relaxed);
+    while let Err(v) = SCAS8.compare_exchange(o, o.wrapping_add(1), SeqCst, Relaxed) {
+        o = v;
+    }
+    unsafe { write_volatile(&raw mut PLAIN, plain + 1) };
+}
+
+/// The main loop and a timer interrupt race on the counters (klausscpu-runtime
+/// test_atomic T5).
+fn race() {
+    const ITERS: u64 = 20000;
+    // The period, in cycles, must leave the main loop time between two
+    // interrupts: at opt-level 0 one rs_bump_all() is roughly 2,000
+    // instructions (several thousand cycles on the board), and test_atomic's
+    // 3,000 cycles starve the loop.
+    unsafe { c_timer_on(20000) };
+    for _ in 0..ITERS {
+        rs_bump_all();
+    }
+    unsafe { c_timer_off() };
+    let ticks = u64::from(unsafe { c_ticks() });
+    let total = ITERS + ticks;
+    let plain = unsafe { read_volatile(&raw const PLAIN) };
+    println!(
+        "race: {} main + {} interrupt increments; the plain counter lost {}",
+        ITERS,
+        ticks,
+        total - plain
+    );
+    check("race: the interrupt ran often", ticks >= 100, true);
+    check("race: the plain counter lost updates", plain < total, true);
+    check("race: 8-bit total", S8.load(SeqCst), total as u8);
+    check("race: 16-bit total", S16.load(SeqCst), total as u16);
+    check("race: 32-bit total", S32.load(SeqCst), total as u32);
+    check("race: 64-bit total", S64.load(SeqCst), total);
+    check(
+        "race: 64-bit compare_exchange total",
+        SCAS.load(SeqCst),
+        total,
+    );
+    check(
+        "race: 8-bit compare_exchange total",
+        SCAS8.load(SeqCst),
+        total as u8,
+    );
+    check("race: INT_MASK cleared", int_mask(), 0);
 }
 
 fn main() -> ! {
     println!("ffi-check: Rust atomics and Rust <-> C calls");
-    let mask = int_mask();
     calls();
     atomics();
-    check("INT_MASK restored", int_mask(), mask);
+    mask_restored();
+    race();
     let (checks, fails) = unsafe { (CHECKS, FAILS) };
     println!("ffi-check: {} checks, {} failed", checks, fails);
     println!("Result: {}", if fails == 0 { "PASS" } else { "FAIL" });

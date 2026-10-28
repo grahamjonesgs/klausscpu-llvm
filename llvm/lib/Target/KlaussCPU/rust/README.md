@@ -149,7 +149,11 @@ The spec no longer sets `singlethread`: it only reaches LLVM's thread model,
 which no KlaussCPU code reads, and it would claim that nothing interrupts
 the program.  `llvm/test/CodeGen/KlaussCPU/rust-target-spec.test` checks that
 the spec's widths are exactly what the backend lowers without `__atomic_*`
-calls.
+calls.  `crates/examples/ffi-check` checks that each `__sync_*` call puts a
+non-zero `INT_MASK` back as it found it, and races the main loop against a
+timer interrupt on counters of every width (as the C runtime's
+`test_atomic`): the atomic counters come out exact while a plain one loses
+updates.
 
 ## 5. Checking the ABI
 
