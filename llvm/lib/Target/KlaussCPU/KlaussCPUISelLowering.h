@@ -105,6 +105,16 @@ public:
                                       unsigned *Fast) const override;
   bool shouldConvertConstantLoadToIntImm(const APInt &Imm,
                                          Type *Ty) const override;
+
+  // The two 32-bit halves of an under-aligned i64 load (zero-extending
+  // loads of [p] and [p + 4], marked KlaussCPU::MOSplitHalf) and their
+  // joined chain.  joinHalves gives the i64 value: (Hi << 32) | Lo.
+  struct SplitLoad64 {
+    SDValue Lo, Hi, Chain;
+  };
+  static SplitLoad64 splitUnalignedLoad64(LoadSDNode *LD, SelectionDAG &DAG);
+  static SDValue joinHalves(const SplitLoad64 &S, const SDLoc &DL,
+                            SelectionDAG &DAG);
   bool shouldAlignPointerArgs(CallInst *CI, unsigned &MinSize,
                               Align &PrefAlign) const override;
 
@@ -165,6 +175,7 @@ private:
   SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerJumpTable(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBR_JT(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSTACKSAVE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSTACKRESTORE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) const;

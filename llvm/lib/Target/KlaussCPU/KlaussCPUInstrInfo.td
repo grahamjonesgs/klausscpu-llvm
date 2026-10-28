@@ -924,8 +924,9 @@ def MEMGET32 : RR1<0x5A000000, (outs GPR:$rd), (ins GPR:$rs),
 // because allowsMisalignedMemoryAccesses() allows no misaligned store, so
 // the legalizer expands every under-aligned i16/i32 store to byte ops (MEMSET8/
 // STIDX8) and never selects a masking store on an unaligned address.  It
-// allows only an under-aligned 32-bit *load*, which isel makes a MEMGET32
-// (unaligned-tolerant); keep any future permission to the load path too.
+// allows only under-aligned 32/64-bit *loads*, which isel makes MEMGET32
+// (unaligned-tolerant; an i64 one two of them, LowerLOAD); keep any
+// future permission to the load path too.
 // (Same invariant as the force-aligned LDIDX64/STIDX64 note above.)
 def MEMSET8  : RRst<0x5C000000, "memset8\t$rs_data, $rs_addr">;
 def MEMSET16 : RRst<0x5D000000, "memset16\t$rs_data, $rs_addr">;
@@ -1158,12 +1159,14 @@ def CMPRVU_I : RV_cmp<0x8C000000, "cmprvu\t$rs, $imm", uimm32>;
 // IMPORTANT: ldidx64/stidx64 (0x9B300000/0x9F300000) are the *force-aligned*
 // hardware variants (A=1, ISA map LDIDX64A/STIDX64A) — the RTL computes
 // (rs1 + imm) & ~7 before the bus access.  The non-aligned forms are
-// ldidx64u/stidx64u (A=0).  Using the force-aligned form is only safe because
-// LLVM never emits a misaligned i64 access: allowsMisalignedMemoryAccesses()
-// is false for i64, so under-aligned i64 loads/stores are expanded by the
-// legalizer (loads to two 32-bit MEMGET32 halves, stores to byte ops).  If misaligned i64 access is ever
-// enabled, switch these to the A=0 forms first (and confirm the HW handles a
-// 64-bit read spanning two cache lines).
+// ldidx64u/stidx64u (A=0), which pass the EA to the memory system unmodified
+// but must still be given an aligned one (CPU_ARCHITECTURE.md 8.3): no 64-bit
+// access reads or writes an unaligned doubleword.  So LLVM never emits a
+// misaligned i64 access: the i64 load patterns take only 8-aligned loads
+// (load_a8), LowerLOAD / PreprocessISelDAG split an under-aligned i64 load
+// into two 32-bit loads (MEMGET32 below 4-byte alignment), and the legalizer
+// splits an under-aligned i64 store (allowsMisalignedMemoryAccesses allows
+// no misaligned store).
 //===----------------------------------------------------------------------===//
 
 def LDIDX64 : RRV_ld<0x9B300000, "ldidx64\t$rd, $base, $offset">;
@@ -1430,12 +1433,21 @@ def : Pat<(add GPR:$rs, -1), (DECR GPR:$rs)>;
 // Rotate-by-1 lowers through ROLV/RORV, byte-identical to ROLR1/RORR1 (Z and
 // C).  SHLR1/SHRR1 remain as assembler-only mnemonics.
 
+// 64-bit loads take only 8-aligned ones: no 64-bit load reads an unaligned
+// doubleword (A=1 aligns the EA down, A=0 must be given an aligned one).
+// LowerLOAD (at legalization) and KlaussCPUDAGToDAGISel::PreprocessISelDAG
+// (after the last combine) split every under-aligned i64 load into two 32-bit
+// loads first, so one reaching these patterns would be a "cannot select"
+// error, not a load of the aligned-down doubleword.
+let IsLoad = 1, MinAlignment = 8 in
+def load_a8 : PatFrag<(ops node:$ptr), (load node:$ptr)>;
+
 // 64-bit load from a GPR base with no offset.
-def : Pat<(i64 (load (i64 GPR:$base))),
+def : Pat<(i64 (load_a8 (i64 GPR:$base))),
           (LDIDX64 GPR:$base, 0)>;
 
 // 64-bit load from GPR base + signed-32 immediate offset.
-def : Pat<(i64 (load (add (i64 GPR:$base), simm32_imm:$off))),
+def : Pat<(i64 (load_a8 (add (i64 GPR:$base), simm32_imm:$off))),
           (LDIDX64 GPR:$base, simm32_imm:$off)>;
 
 // 64-bit store to a GPR base with no offset.
@@ -1511,7 +1523,7 @@ multiclass FrameStorePat<PatFrag st, Instruction Inst> {
             (Inst GPR:$val, GPR:$base, simm32_imm:$off)>;
 }
 let AddedComplexity = 10 in {
-defm : FrameLoadPat<load,        LDIDX64>;
+defm : FrameLoadPat<load_a8,     LDIDX64>;
 defm : FrameLoadPat<zextloadi32_a4, LDIDX32>;
 defm : FrameLoadPat<extloadi32_a4,  LDIDX32>;
 defm : FrameLoadPat<sextloadi32_a4, LDIDX32_S>;
@@ -1766,7 +1778,7 @@ multiclass AbsStorePat<PatFrags st, ImmLeaf addr, Instruction Inst> {
             (Inst GPR:$val, (AbsAddrXForm imm:$a))>;
 }
 let AddedComplexity = 10 in {
-defm : AbsLoadPat<load,        AbsAddr64, MEMREADR>;
+defm : AbsLoadPat<load_a8,     AbsAddr64, MEMREADR>;
 defm : AbsLoadPat<zextloadi32, AbsAddr32, LDABS32>;
 defm : AbsLoadPat<extloadi32,  AbsAddr32, LDABS32>;
 defm : AbsLoadPat<sextloadi32, AbsAddr32, LDABS32_S>;
@@ -2329,9 +2341,8 @@ def : Pat<(and GPR:$rs, SingleZeroBitImm:$b),
 // 64-bit load/store at (base + index register) → 1-word LDIDX64R/STIDX64R
 // instead of ADDR + 2-word LDIDX64/STIDX64 (e.g. `p[i]` after the index
 // shift).  EA is not force-aligned (A=0), which is fine: LLVM never emits an
-// under-aligned i64 access (allowsMisalignedMemoryAccesses() is false for
-// i64).
-def : Pat<(i64 (load (add (i64 GPR:$base), (i64 GPR:$idx)))),
+// under-aligned i64 access (load_a8; stores are split by the legalizer).
+def : Pat<(i64 (load_a8 (add (i64 GPR:$base), (i64 GPR:$idx)))),
           (LDIDX64R GPR:$base, GPR:$idx)>;
 def : Pat<(store (i64 GPR:$val), (add (i64 GPR:$base), (i64 GPR:$idx))),
           (STIDX64R GPR:$val, GPR:$base, GPR:$idx)>;
@@ -2340,8 +2351,9 @@ def : Pat<(store (i64 GPR:$val), (add (i64 GPR:$base), (i64 GPR:$idx))),
 // jump-table entry load): 1-word LDIDX{8,16,32}[_S]R / STIDX{8,16,32}R
 // instead of ADDR + MEMGETn / MEMSETn.  The 16/32-bit forms force-align
 // their EA, as LDIDX16/32 and STIDX16/32 do, so they take only naturally
-// aligned accesses (allowsMisalignedMemoryAccesses allows none but an
-// under-aligned 32-bit load, which the _a4 fragments exclude).
+// aligned accesses (allowsMisalignedMemoryAccesses allows none but
+// under-aligned 32/64-bit loads, which arrive here as 32-bit loads that the
+// _a4 fragments exclude).
 multiclass RegRegLoadPat<PatFrag ld, Instruction Inst> {
   def : Pat<(i64 (ld (add (i64 GPR:$base), (i64 GPR:$idx)))),
             (Inst GPR:$base, GPR:$idx)>;

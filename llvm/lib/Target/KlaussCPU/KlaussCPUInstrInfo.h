@@ -8,6 +8,7 @@
 #define LLVM_LIB_TARGET_KLAUSSCPU_KLAUSSCPUINSTRINFO_H
 
 #include "llvm/CodeGen/ISDOpcodes.h"
+#include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 
 // GET_INSTRINFO_ENUM must appear before GET_INSTRINFO_HEADER so that the
@@ -23,6 +24,12 @@ namespace KlaussCPU {
 // ISA v3 D2: set in a SELECT_CC_RR/RI pseudo's $jmp immediate (above any
 // opcode number) to make the custom inserter emit CMPRRW/CMPRVW.
 constexpr unsigned SelectCCW32Flag = 1u << 31;
+
+// On the two 32-bit halves of a split under-aligned i64 load: they are not
+// joined into an i64 load again (KlaussCPUTargetLowering::
+// allowsMisalignedMemoryAccesses), or splitting and joining would not end.
+constexpr MachineMemOperand::Flags MOSplitHalf =
+    MachineMemOperand::MOTargetFlag1;
 } // namespace KlaussCPU
 
 class KlaussCPURegisterInfo;
@@ -98,6 +105,9 @@ public:
   ScheduleHazardRecognizer *
   CreateTargetPostRAHazardRecognizer(const InstrItineraryData *II,
                                      const ScheduleDAG *DAG) const override;
+
+  ArrayRef<std::pair<MachineMemOperand::Flags, const char *>>
+  getSerializableMachineMemOperandTargetFlags() const override;
 };
 
 } // namespace llvm

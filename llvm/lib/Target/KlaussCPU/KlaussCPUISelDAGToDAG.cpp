@@ -219,6 +219,7 @@ public:
     return SelectionDAGISel::runOnMachineFunction(MF);
   }
 
+  void PreprocessISelDAG() override;
   void Select(SDNode *N) override;
 
   bool SelectAddrFI(SDValue Addr, SDValue &Base, SDValue &Offset) {
@@ -270,6 +271,36 @@ char KlaussCPUDAGToDAGISelLegacy::ID = 0;
 
 INITIALIZE_PASS(KlaussCPUDAGToDAGISelLegacy, DEBUG_TYPE, PASS_NAME,
                 /*CFGOnly=*/false, /*isAnalysis=*/false)
+
+// No 64-bit load reads an unaligned doubleword: the A=1 forms (LDIDX64,
+// MEMGET64) align the EA down to 8 and the A=0 ones (LDIDX64R, MEMREADR) must
+// be given an aligned one (CPU_ARCHITECTURE.md 8.3), so the i64 load patterns
+// take only 8-aligned loads (load_a8).  LowerLOAD splits an under-aligned i64
+// load at legalization (allowsMisalignedMemoryAccesses lets the combiner form
+// one); one that a combine forms after that is split here, after the last
+// combine, into the same two 32-bit loads (MEMGET32 below 4-byte alignment,
+// LDIDX32 at 4) + SHLV + ORR.
+void KlaussCPUDAGToDAGISel::PreprocessISelDAG() {
+  SmallVector<LoadSDNode *, 8> Loads;
+  for (SDNode &N : CurDAG->allnodes())
+    if (auto *LD = dyn_cast<LoadSDNode>(&N);
+        LD && LD->getValueType(0) == MVT::i64 && ISD::isNormalLoad(LD) &&
+        LD->getAlign() < Align(8))
+      Loads.push_back(LD);
+  if (Loads.empty())
+    return;
+  // The replacements are new nodes, so no user of a load is merged with an
+  // existing node (and deleted) when its operand changes.
+  for (LoadSDNode *LD : Loads) {
+    auto S = KlaussCPUTargetLowering::splitUnalignedLoad64(LD, *CurDAG);
+    SDValue Val = KlaussCPUTargetLowering::joinHalves(S, SDLoc(LD), *CurDAG);
+    LLVM_DEBUG(dbgs() << "Splitting under-aligned i64 load: ";
+               LD->dump(CurDAG));
+    CurDAG->ReplaceAllUsesOfValueWith(SDValue(LD, 0), Val);
+    CurDAG->ReplaceAllUsesOfValueWith(SDValue(LD, 1), S.Chain);
+  }
+  CurDAG->RemoveDeadNodes();
+}
 
 void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
   // Already selected — leave it alone.

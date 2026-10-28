@@ -103,6 +103,13 @@ static cl::opt<bool> UnalignedLoad32(
     cl::desc("Load an under-aligned 32-bit value with one MEMGET32 (also "
              "the halves of an under-aligned 64-bit load)"));
 
+// allowsMisalignedMemoryAccesses: the combiner may form an under-aligned i64
+// load, which LowerLOAD / PreprocessISelDAG split into two 32-bit loads.
+static cl::opt<bool> UnalignedLoad64(
+    "klausscpu-unaligned-load64", cl::Hidden, cl::init(true),
+    cl::desc("Let the DAG combiner form an under-aligned i64 load (e.g. from "
+             "8 byte loads), which is then split into two 32-bit loads"));
+
 // Generated calling convention functions.  Must be included inside namespace
 // llvm because the generated code uses unqualified names (MVT, CCState, etc.).
 namespace llvm {
@@ -142,6 +149,12 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   //   CMPRV 0 + JMPE (saves 3 words and an ALU op per select).
   setOperationAction(ISD::SELECT,    MVT::i64, Custom);
   setOperationAction(ISD::SELECT_CC, MVT::i64, Custom);
+
+  // An under-aligned i64 load is split by LowerLOAD, as the legalizer would
+  // split one it does not allow; allowsMisalignedMemoryAccesses allows it
+  // only so that the combiner can form one.
+  if (UnalignedLoad64)
+    setOperationAction(ISD::LOAD, MVT::i64, Custom);
 
   // ---- Sub-word loads / stores ----
   // Hardware has LDIDX8/16/32 (zero-extending, base+offset) and
@@ -259,7 +272,7 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setBooleanContents(ZeroOrOneBooleanContent);
   // (and (freeze (extload)), lowmask) → (freeze (zextload)); see
   // PerformDAGCombine.
-  setTargetDAGCombine(ISD::AND);
+  setTargetDAGCombine({ISD::AND, ISD::STORE});
 
   // Hardware 64-bit rotate (ROLR/RORR, ROLV/RORV).  There is no 32-bit
   // rotate, but a 64-bit rotate of a value whose two halves are equal is a
@@ -361,6 +374,7 @@ SDValue KlaussCPUTargetLowering::LowerOperation(SDValue Op,
   case ISD::BlockAddress:   return LowerBlockAddress(Op, DAG);
   case ISD::JumpTable:      return LowerJumpTable(Op, DAG);
   case ISD::BR_JT:          return LowerBR_JT(Op, DAG);
+  case ISD::LOAD:           return LowerLOAD(Op, DAG);
   case ISD::SELECT:         return LowerSELECT(Op, DAG);
   case ISD::SELECT_CC:      return LowerSELECT_CC(Op, DAG);
   case ISD::STACKSAVE:           return LowerSTACKSAVE(Op, DAG);
@@ -529,8 +543,10 @@ bool KlaussCPUTargetLowering::isMulAddWithConstProfitable(
 // The generic choice looks at the destination only, so a copy into a stack
 // object, which getMemcpyLoadsAndStores realigns to the chosen width, from
 // a 4-aligned source took i64 loads that were each split into two LDIDX32 +
-// SHLV + ORR.  A constant source is stored as immediates (no loads), so
-// only the destination matters there.
+// SHLV + ORR.  (Store merging may still join two such 32-bit copies into an
+// 8-aligned destination; on the board that is no slower, see the STORE
+// combine.)  A constant source is stored as immediates (no loads), so only
+// the destination matters there.
 EVT KlaussCPUTargetLowering::getOptimalMemOpType(
     LLVMContext &Context, const MemOp &Op,
     const AttributeList &FuncAttributes) const {
@@ -557,19 +573,83 @@ EVT KlaussCPUTargetLowering::getOptimalMemOpType(
 // span / second read, :1351-1366 lanes; klausscc load_align_mask).  Every
 // other 16/32-bit load and every store force-aligns its EA, so only a
 // non-volatile 32-bit load qualifies; the isel patterns for those other
-// 32-bit loads take only naturally aligned ones (KlaussCPUInstrInfo.td).  An
-// under-aligned i64 load is split into two such 32-bit loads.  Volatile
-// loads keep byte accesses (an MMIO register is never under-aligned).
+// 32-bit loads take only naturally aligned ones (KlaussCPUInstrInfo.td).
+// Volatile loads keep byte accesses (an MMIO register is never
+// under-aligned).
+//
+// No 64-bit load reads an unaligned doubleword (A=1 aligns the EA down, A=0
+// must be given an aligned one), so an under-aligned i64 load is two 32-bit
+// loads + SHLV + ORR: MEMGET32 below 4-byte alignment, LDIDX32 at 4.  It is
+// allowed here all the same, so that the DAG combiner can form one (8 byte
+// loads ORed together, MatchLoadCombine, with BSWAP for a big-endian one: 6
+// instructions instead of 14-16).  Wherever one comes from, it is split
+// before it is selected: by LowerLOAD at legalization, as the legalizer
+// splits a load it does not allow, so the later combines see the halves; by
+// PreprocessISelDAG if a combine made one after that; and some copies of one
+// by the STORE combine (PerformDAGCombine).  The halves carry MOSplitHalf,
+// so no combine joins them again.
 bool KlaussCPUTargetLowering::allowsMisalignedMemoryAccesses(
     EVT VT, unsigned AddrSpace, Align Alignment, MachineMemOperand::Flags Flags,
     unsigned *Fast) const {
-  if (!UnalignedLoad32 || VT != MVT::i32 ||
-      !(Flags & MachineMemOperand::MOLoad) ||
+  if (!UnalignedLoad32 || !(Flags & MachineMemOperand::MOLoad) ||
       (Flags & (MachineMemOperand::MOStore | MachineMemOperand::MOVolatile)))
+    return false;
+  if (VT != MVT::i32 &&
+      !(UnalignedLoad64 && VT == MVT::i64 && !(Flags & KlaussCPU::MOSplitHalf)))
     return false;
   if (Fast)
     *Fast = 1;
   return true;
+}
+
+// Ptr + 4, folded into the constant of a Ptr = Base + C (PreprocessISelDAG
+// runs after the last combine).
+static SDValue getAddrPlus4(SelectionDAG &DAG, SDValue Ptr, const SDLoc &DL) {
+  if (Ptr.getOpcode() == ISD::ADD)
+    if (auto *C = dyn_cast<ConstantSDNode>(Ptr.getOperand(1));
+        C && isInt<32>(C->getSExtValue() + 4))
+      return DAG.getNode(ISD::ADD, DL, MVT::i64, Ptr.getOperand(0),
+                         DAG.getConstant(C->getSExtValue() + 4, DL, MVT::i64));
+  return DAG.getMemBasePlusOffset(Ptr, TypeSize::getFixed(4), DL);
+}
+
+KlaussCPUTargetLowering::SplitLoad64
+KlaussCPUTargetLowering::splitUnalignedLoad64(LoadSDNode *LD,
+                                              SelectionDAG &DAG) {
+  SDLoc DL(LD);
+  SDValue Ptr = LD->getBasePtr();
+  MachineMemOperand::Flags Flags =
+      LD->getMemOperand()->getFlags() | KlaussCPU::MOSplitHalf;
+  SDValue Lo = DAG.getExtLoad(ISD::ZEXTLOAD, DL, MVT::i64, LD->getChain(), Ptr,
+                              LD->getPointerInfo(), MVT::i32,
+                              LD->getBaseAlign(), Flags, LD->getAAInfo());
+  SDValue Hi = DAG.getExtLoad(ISD::ZEXTLOAD, DL, MVT::i64, LD->getChain(),
+                              getAddrPlus4(DAG, Ptr, DL),
+                              LD->getPointerInfo().getWithOffset(4), MVT::i32,
+                              LD->getBaseAlign(), Flags, LD->getAAInfo());
+  SDValue Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other, Lo.getValue(1),
+                              Hi.getValue(1));
+  return {Lo, Hi, Chain};
+}
+
+SDValue KlaussCPUTargetLowering::joinHalves(const SplitLoad64 &S,
+                                            const SDLoc &DL,
+                                            SelectionDAG &DAG) {
+  return DAG.getNode(ISD::OR, DL, MVT::i64,
+                     DAG.getNode(ISD::SHL, DL, MVT::i64, S.Hi,
+                                 DAG.getConstant(32, DL, MVT::i64)),
+                     S.Lo);
+}
+
+// An under-aligned i64 load (allowsMisalignedMemoryAccesses).
+SDValue KlaussCPUTargetLowering::LowerLOAD(SDValue Op,
+                                           SelectionDAG &DAG) const {
+  auto *LD = cast<LoadSDNode>(Op);
+  if (LD->getAlign() >= Align(8) || !LD->isUnindexed())
+    return SDValue();
+  SplitLoad64 S = splitUnalignedLoad64(LD, DAG);
+  SDLoc DL(Op);
+  return DAG.getMergeValues({joinHalves(S, DL, DAG), S.Chain}, DL);
 }
 
 // A copy from an under-aligned source that needs more accesses than the
@@ -650,6 +730,50 @@ SDValue KlaussCPUTargetLowering::PerformDAGCombine(SDNode *N,
                                                    DAGCombinerInfo &DCI) const {
   SelectionDAG &DAG = DCI.DAG;
   switch (N->getOpcode()) {
+  case ISD::STORE: {
+    // (store (rotl (load p), 32), q) of an under-aligned i64, at least
+    // 4-aligned q: two 32-bit copies.  Store merging makes this from two
+    // 32-bit copies with the halves swapped; joined, they need SHLV + ORR +
+    // ROLV, 2 cycles more per copy on the board.  The halves carry
+    // MOSplitHalf, so they stay two copies.  A plain (store (load p), q)
+    // (memcpy(&u64, p, 8) after InstCombine, or store merging of two copies
+    // in order) stays joined, SHLV + ORR + STIDX64, except when optimising
+    // for size: one instruction more than two copies, but 0.5 cycles per 8
+    // bytes faster in a scheduled copy loop on the board (the same back to
+    // back).
+    auto *St = cast<StoreSDNode>(N);
+    SDValue V = St->getValue();
+    if (!UnalignedLoad64 || !St->isSimple() || !St->isUnindexed() ||
+        St->isTruncatingStore() || V.getValueType() != MVT::i64 ||
+        St->getAlign() < Align(4))
+      break;
+    bool Swap = false;
+    if ((V.getOpcode() == ISD::ROTL || V.getOpcode() == ISD::ROTR) &&
+        isa<ConstantSDNode>(V.getOperand(1)) &&
+        V.getConstantOperandVal(1) == 32 && V.hasOneUse()) {
+      V = V.getOperand(0);
+      Swap = true;
+    }
+    if (!Swap && !DAG.shouldOptForSize())
+      break;
+    auto *LD = dyn_cast<LoadSDNode>(V);
+    if (!LD || V.getResNo() != 0 || !ISD::isNormalLoad(LD) || !LD->isSimple() ||
+        LD->getAlign() >= Align(8) || !LD->hasNUsesOfValue(1, 0))
+      break;
+    SplitLoad64 S = splitUnalignedLoad64(LD, DAG);
+    SDLoc DL(St);
+    SDValue Q = St->getBasePtr();
+    MachineMemOperand::Flags SFlags = St->getMemOperand()->getFlags();
+    SDValue S0 = DAG.getTruncStore(St->getChain(), DL, Swap ? S.Hi : S.Lo, Q,
+                                   St->getPointerInfo(), MVT::i32,
+                                   St->getBaseAlign(), SFlags, St->getAAInfo());
+    SDValue S1 = DAG.getTruncStore(
+        St->getChain(), DL, Swap ? S.Lo : S.Hi, getAddrPlus4(DAG, Q, DL),
+        St->getPointerInfo().getWithOffset(4), MVT::i32, St->getBaseAlign(),
+        SFlags, St->getAAInfo());
+    DAG.ReplaceAllUsesOfValueWith(SDValue(LD, 1), S.Chain);
+    return DAG.getNode(ISD::TokenFactor, DL, MVT::Other, S0, S1);
+  }
   case ISD::AND: {
     // (and (freeze (extload x)), lowmask) -> (freeze (zextload x))
     //

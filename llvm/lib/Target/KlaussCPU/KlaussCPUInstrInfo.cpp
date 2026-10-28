@@ -338,3 +338,10 @@ ScheduleHazardRecognizer *KlaussCPUInstrInfo::CreateTargetPostRAHazardRecognizer
     return TargetInstrInfo::CreateTargetPostRAHazardRecognizer(II, DAG);
   return new KlaussCPUPostRAHazardRecognizer();
 }
+
+ArrayRef<std::pair<MachineMemOperand::Flags, const char *>>
+KlaussCPUInstrInfo::getSerializableMachineMemOperandTargetFlags() const {
+  static const std::pair<MachineMemOperand::Flags, const char *> TargetFlags[] =
+      {{KlaussCPU::MOSplitHalf, "klausscpu-split-half"}};
+  return ArrayRef(TargetFlags);
+}

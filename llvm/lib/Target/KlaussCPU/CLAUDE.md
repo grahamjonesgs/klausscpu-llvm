@@ -27,7 +27,7 @@ the consumers and the measurements behind the design.
 | CMOV | none — `select` becomes a `SELECT_CC_RR/RI` pseudo, expanded to compare + branch; a run of selects on the same condition shares one compare/branch (one PHI each) |
 | Atomics | no instructions — "forced atomics" (as RISC-V `+forced-atomics`), **atomic within one core only**: an aligned atomic load/store of 1/2/4/8 bytes is the plain access (patterns), a fence a compiler barrier, every RMW / cmpxchg a `__sync_*_N` libcall (LibCall actions) that the runtime's `src/atomic.c` runs with `INT_MASK` saved/zeroed/restored; FP / `uinc_wrap` / `udec_wrap` / `usub_*` RMWs are cmpxchg loops (`shouldExpandAtomicRMWInIR`); wider or misaligned atomics are `__atomic_*` libcalls (not provided).  The type legaliser promotes a 1/2/4-byte RMW to i64 first, so those libcall values go in any-extended and come back zero-extended (not the C ABI's sign-extended i32; `atomic.c` takes and returns `uint64_t`).  Clang inlines atomics up to 64 bits (`MaxAtomicInlineWidth`).  Nothing makes them atomic against core 2 (AMP), whose DDR view also bypasses core 1's D-cache |
 | Sign-extending loads | i8/i16/i32: hardware (`LDIDX8_S`/`LDIDX16_S`/`LDIDX32_S`) |
-| Load/store addressing | `[r]` (`MEMGETn`/`MEMSETn`), `r + simm32` (`LDIDXn`/`STIDXn`, 1-word short form for a small scaled offset), `r + r` at every width (`LDIDXnR`/`LDIDXn_SR`/`STIDXnR`, MODE=11), an absolute imm32 at every width (`LDABSn`/`LDABSn_S`/`STABSn`, `MEMREADR`/`MEMSETR`, MODE=10, 2 words) for a naturally aligned constant address such as an MMIO register; 16/32-bit forms other than `MEMGET32` force-align the EA, so an under-aligned non-volatile 32-bit load is `MEMGET32` of the computed address (`allowsMisalignedMemoryAccesses`, loads only; an under-aligned i64 load is two of them), every other under-aligned access is split |
+| Load/store addressing | `[r]` (`MEMGETn`/`MEMSETn`), `r + simm32` (`LDIDXn`/`STIDXn`, 1-word short form for a small scaled offset), `r + r` at every width (`LDIDXnR`/`LDIDXn_SR`/`STIDXnR`, MODE=11), an absolute imm32 at every width (`LDABSn`/`LDABSn_S`/`STABSn`, `MEMREADR`/`MEMSETR`, MODE=10, 2 words) for a naturally aligned constant address such as an MMIO register; 16/32-bit forms other than `MEMGET32` force-align the EA and no 64-bit form reads an unaligned doubleword, so an under-aligned non-volatile 32-bit load is `MEMGET32` of the computed address (`allowsMisalignedMemoryAccesses`, loads only) and an under-aligned i64 load two 32-bit loads (`MEMGET32` below 4-byte alignment, `LDIDX32` at 4): `allowsMisalignedMemoryAccesses` allows it so that the combiner can build one from 8 byte loads, then `LowerLOAD` (or `PreprocessISelDAG`, for one formed after legalization) splits it, and the `STORE` combine keeps a copy two 32-bit copies when store merging swapped its halves (a ROLV) or under optsize (otherwise SHLV + ORR + `STIDX64`, measured no slower); the halves carry `KlaussCPU::MOSplitHalf`, so nothing joins them again; every other under-aligned access (stores, volatile) is split |
 | C environment | hosted by default (the driver no longer adds `-ffreestanding`): `memcpy`/`memset`/`memmove` of a constant size are intrinsics, inline up to 8 accesses (4 under optsize) at the width both sides' alignment allows (a source below 4-byte alignment still allows 4, `MEMGET32`); a constant source is stored as immediates (`shouldConvertConstantLoadToIntImm`); stack objects and module globals they touch get 8-byte alignment (`shouldAlignPointerArgs`).  `printf`/`fprintf` are not turned into `puts`/`putchar`/`fputc`/`fputs`/`fwrite` (`TargetLibraryInfo`: each would link another stdio function for UART-bound output).  Code that implements the C library (picolibc, compiler-rt, crt0's BSS loop, kernels) is built `-ffreestanding` / `no_builtin` |
 | 32-bit ops | `ADDW`/`SUBW`/`ADDIW`/`MULW`, `CMPRRW`/`CMPRVW`, boolean `CMPxxRW`/`CMPxxVW` (ISA v3 D2/D3) |
 | Immediates | each class 2/3 op exists with a sign- and a zero-extended imm32 (SGN bit); isel picks the one that holds the constant: `SETR`/`SETRU` (MOV), `ADDI`/`ADDV`/`MINUSV`, `ANDI`/`ANDV` (and OR/XOR), `CMPRV`/`CMPRVU`; boolean compares (`setcc` as a value) `CMPxxV` with a simm32; `SETR64` only for a value neither reaches.  An add of -255..-129 (a frame address too) is `MINUSV` of the negation, whose short form reaches it |
@@ -357,7 +357,10 @@ when clobbered.
 ## Codegen pipeline notes
 
 - Instruction selection is the generated `SelectCode` from the `.td`
-  patterns; `KlaussCPUISelDAGToDAG.cpp` keeps only BR_CC / `SELECT_CC`
+  patterns.  `PreprocessISelDAG` first splits an under-aligned i64 load a
+  combine formed after legalization into two 32-bit loads (the i64 load
+  patterns take only 8-aligned ones, `load_a8`; see the Load/store
+  addressing row, `unaligned-load.ll`).  `KlaussCPUISelDAGToDAG.cpp` keeps only BR_CC / `SELECT_CC`
   (glued compare) and the 32-bit W-compare choice for those and SETCC:
   `tryW32Compare` takes the W form when an operand's 32-bit extension then
   dies, i.e. it feeds nothing but compares of the same operands and
@@ -513,6 +516,7 @@ when clobbered.
 | `-klausscpu-const-addr-base-loop-call-min` | 6 | fewest absolute accesses in a loop nest that holds a call that share a base set in its preheader |
 | `-klausscpu-pref-loop-align` | 16 | loop-header alignment in bytes |
 | `-klausscpu-unaligned-load32` | on | an under-aligned non-volatile 32-bit load is one `MEMGET32` (=false: byte loads + shifts) |
+| `-klausscpu-unaligned-load64` | on | the combiner may form an under-aligned i64 load (8 bytes ORed together, with BSWAP for big-endian), which is then split into two 32-bit loads (=false: 8 byte loads stay bytes) |
 | `-klausscpu-mul-imm-shift-add` | off | multiply by a simm32 2^N±1 / 1-2^N as shift + add/sub when the schedule model rates MULV slower |
 | `-klausscpu-unroll-branch-density-gate` | on | scale the unroll budget for branchy loops |
 
@@ -670,7 +674,7 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPURegisterInfo.h/.cpp reserved regs, stack realignment, eliminateFrameIndex
 ├── KlaussCPUFrameLowering.h/.cpp prologue/epilogue, frameless leaves, shrink-wrapping, CFI, base pointer, getFrameIndexReference
 ├── KlaussCPUISelLowering.h/.cpp  calls/args/returns, tail calls, varargs, SELECT_CC, BR_JT, i32 rotates, i128 shifts, DAG combines
-├── KlaussCPUISelDAGToDAG.cpp   SelectCode() + C++ for BR_CC, SELECT_CC, W SETCC; AddrFI, shift/bit-field ComplexPatterns; inline-asm 'm'
+├── KlaussCPUISelDAGToDAG.cpp   PreprocessISelDAG (under-aligned i64 loads); SelectCode() + C++ for BR_CC, SELECT_CC, W SETCC; AddrFI, shift/bit-field ComplexPatterns; inline-asm 'm'
 ├── KlaussCPUMachineFunctionInfo.h  per-function state (vararg frame index)
 ├── KlaussCPUAsmPrinter.cpp     MachineInstr → MCInst (+ CompressPat), inline-asm operand printing
 ├── KlaussCPUEarlyIVInc.cpp     IR, after LSR: loop counter counts from Init - C so its increment can issue early
@@ -808,8 +812,9 @@ the `klausscpu-runtime` repo root; see its READMEs for build/run detail:
   `MEMGET32` (`[r]` 32-bit, `U_LOAD32`) clears the low address bits in hardware
   (`pipeline_core.sv` U_LOAD issue address / store byte enables).  That is UB in
   C (`*(uint32_t *)(buf + 1)`), and the backend only splits (or, for a
-  32-bit load, makes `MEMGET32`) accesses whose IR alignment is below
-  natural (`allowsMisalignedMemoryAccesses`).  Since
+  32/64-bit load, makes `MEMGET32`) accesses whose IR alignment is below
+  natural (`allowsMisalignedMemoryAccesses`).  The runtime's `test_unaligned`
+  checks the loads at every offset on the board.  Since
   `r + r` selects `LDIDX32R` instead of `ADDR` + `MEMGET32`, a type-punned
   `*(uint32_t *)(buf + i)` with odd `i` no longer gets away with it; `buf + 4`
   (`LDIDX32`) never did.  Use `memcpy` or a packed struct for unaligned data.
