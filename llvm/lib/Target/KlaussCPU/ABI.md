@@ -204,8 +204,10 @@ high.
   (`-b binary`, data) are not checked.  The output's `e_flags` is the version.
 - clang predefines `__klausscpu_abi__` to the version, for code that depends
   on the convention (assembly can `#if __klausscpu_abi__ != 2` / `#error`).
-- The ELF loaders (klausscc, Zephyr LLEXT, the runtime's `loader.c`) do not
-  check it.
+- The runtime's PIC program loaders (bare-metal `loader.c`, FreeRTOS
+  `pic_loader.c`) refuse a program of another version (`klausscpu_elf.h`
+  `KLAUSSCPU_ABI_VERSION`, compared with `ABIVersion` by
+  `check-toolchain-constants.py`).  klausscc and Zephyr LLEXT do not check it.
 
 ## Consumers
 
