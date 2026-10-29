@@ -17,7 +17,10 @@ squash fixes (a taken fused branch or an EX squash resets the divider and
 gates the LCD strobe) are assumed everywhere, with no option to turn that
 off: older bitstreams are not supported, and code this backend builds may
 give wrong divide results or stray LCD bytes on them.  The CPU and all the
-code that runs on it are rebuilt together.
+code that runs on it are rebuilt together.  To check which core a board
+runs, send klausscc's `tests/fixtures/hw_div_fbr.kla` with `-s -T`: an older
+core prints `0000008E` where 9ad6614 prints `00000021` (`hw_div_smc.kla`
+checks the third fix the same way; `HARDWARE_PROPOSALS.md` §3).
 
 ---
 

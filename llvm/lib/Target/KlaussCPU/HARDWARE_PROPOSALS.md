@@ -18,6 +18,11 @@ The ranked list is in §1.  Each proposal gives its evidence, the estimated gain
 (count × measured cycles per event), its ISA/encoding impact and the compiler
 work it would need.
 
+Status (2026-10-29): klaussCPU `9ad6614` did §3 items 1 and 5, and fixed a
+third squash bug (§3 item 6).  The toolchain now requires `9ad6614` or later.
+The measurements below are from `db0f315`; `9ad6614` did not change the
+timing of normal code.
+
 ## 0. Board ≠ emulator divergences: none
 
 The harness step ran Csmith on the board and on the emulator with the same
@@ -74,8 +79,8 @@ Items 7 and 8 do not show in these benchmarks; their gains are per event
 Recommended order (gain per unit of work):
 
 1. **1b** and **1c**: the memory hit path is the largest single cost, see §1.1.
-2. The **§3 correctness fixes**: cheap, and they unblock compiler
-   simplifications.
+2. The remaining **§3 correctness items** (3 and 4; 1, 5 and 6 are done in
+   klaussCPU `9ad6614`).
 3. **4** and **6**: contained datapath and decode work.
 4. **2a** and **1a**: the large redesigns that remove most of the remaining
    cycles.
@@ -555,20 +560,31 @@ relaxation for LEAPC.
 ## 3. Correctness items (do these first; they are cheap)
 
 1. **The LCD strobe and the divider start are not squashed after a taken
-   FBR or an `sq_ex` squash.**  Fixed in klaussCPU `9ad6614` (both squashes
-   reset `div_ph`; `lcd_dv` is gated with `!mem_busy && !fbr_taken &&
-   !sq_ex`).  The compiler dropped its workaround below with no subtarget
-   feature: it supports only `9ad6614` and later (`CLAUDE.md`).  As
-   reported:
-   - `pipeline_core.sv:1392`: `assign lcd_dv = ex_is_lcd && lcd_ready;`.
-   - `:1582`: `MD_IDLE: if (ex_is_div && ex_b != 64'd0)`.
-   - Gate both with `!fbr_taken && !sq_ex`, or reset `div_ph` in the squash.
-   - The compiler worked around the FBR case: FuseCmpBr refused to fuse in
-     front of a divide or LCD write (`ActsInEXShadow`), and the assembler
-     warned.  It could not work around the SMC / I-cache-invalidate squash,
-     which repeats an LCD byte.
-   - Once fixed, the compiler can drop the restriction.  (It has, for every
-     core: old bitstreams are no longer supported.)
+   FBR or an `sq_ex` squash.**  **Fixed in klaussCPU `9ad6614`.**
+   - As reported (`db0f315`): `pipeline_core.sv:1392` was `assign lcd_dv =
+     ex_is_lcd && lcd_ready;`, and `:1582` started the divider (`MD_IDLE: if
+     (ex_is_div && ex_b != 64'd0)`) on the edge a taken FBR or an `sq_ex`
+     squash killed the op.  A squashed LCD write still sent its byte.  A
+     squashed DIV/MOD left the divider running on its dead operands, and the
+     next divide within about 64 cycles got that quotient (board-tested).
+   - The fix: `lcd_dv = ex_is_lcd && lcd_ready && !mem_busy && !fbr_taken &&
+     !sq_ex` (`:1396`), gated like LCDRST.  `!mem_busy` also fixes a double
+     strobe that was not reported: an LCD write held in EX behind a busy
+     memory op sent its byte twice.  Both squashes now reset `div_ph` to
+     `MD_IDLE` (`:2052`, `:2092`), as they reset `dly_on`.  The LCD part is
+     reasoned from the RTL (not observable from software).  The divider part
+     is board-tested by klausscc's `tests/fixtures/hw_div_fbr.kla`: `0x8E`
+     (the squashed 1000 / 7) on every pass before, `0x21` (100 / 3) now.
+   - The compiler: until klausscpu-llvm `e65c3d2fb8e7`, FuseCmpBr refused to
+     fuse a compare and branch in front of a divide or LCD write
+     (`ActsInEXShadow`), and the assembler warned about that shape.  It could
+     not work around the SMC / I-cache-invalidate squash, which could repeat
+     an LCD byte.  Both are gone: a branch fuses whatever follows it, and
+     the toolchain supports only `9ad6614` and later, with no subtarget
+     feature or option for older bitstreams (`CLAUDE.md`).  Everything that
+     runs on the board is rebuilt.  The runtime's `test_divshadow` checks,
+     on the board, a fused branch directly in front of DIVR, DIVUR, MODR and
+     MODUR, taken and not taken, with another divide at the target.
 2. **Keep CALL, RET and JMP flag-free.**  The MachineOutliner (on at -Oz)
    relies on it (`fmask = 0` for `U_CALL`/`U_RET`/`U_JMP` today).  No change
    requested.
@@ -579,14 +595,25 @@ relaxation for LEAPC.
    Dumping [R15], [R15+8] and the next one or two records would give a
    backtrace without a debugger.  Today the caller-of-caller comes only from
    the fetch trace (phase-4 milestone, item 4).
-5. **Docs.**
-   - `ISA_ENCODING_V2_MAP.md` §4 note 7 says the field-driven forms are not
-     implemented; that contradicts §5, the RTL and the backend.  The
-     corrected paragraph is in `ISA_ENCODING_V2_MAP-note7.patch`, next to
-     this file; it applies to klaussCPU `db0f315` (`git apply --check`
-     clean).
-   - Note 8 is stale too ("CMP does not drive Z"; since the flag unification
-     CMP is SUB without writeback and E = Z).  It is not patched here.
+5. **Docs.**  **Applied in klaussCPU `9ad6614`.**
+   - `ISA_ENCODING_V2_MAP.md` §4 note 7 said the field-driven forms were not
+     implemented, which contradicted §5, the RTL and the backend.  It now
+     says they are (the corrected paragraph this session supplied).
+   - Note 8, §2 and the §3 compare rows said CMP writes E/L/U and leaves Z
+     alone.  Since the flag unification CMP is SUB without writeback (it
+     writes Z/S/C/V, and E = Z); they now say so.
+6. **An SMC squash dropped a busy multicycle op in EX.**  Not reported from
+   here; found and **fixed in klaussCPU `9ad6614`**, recorded for
+   completeness.  A store that hit the code of the instruction in ID (the
+   SMC squash, `!sq_ex`) cleared EX and refetched from `id_pc`.  Normally
+   the EX op had just advanced into MEM, but a busy DIV/MUL, DELAY or LCD
+   wait had not, so it was dropped and never executed.  EX is now cleared
+   only when it is squashed itself or has advanced (`if (sq_ex || !ex_busy)
+   ex_valid <= 0`), and `dly_on`/`div_ph` are reset only for an EX squash.
+   Compiled code keeps `.text` and `.data` apart and never hit it, so no
+   compiler change follows.  Board test:
+   klausscc's `tests/fixtures/hw_div_smc.kla` (`0x55`, the DIV's result
+   never written, before; `0x8E` now).
 
 ## 4. Free encoding space (from `f_decode_raw`, klaussCPU `db0f315`)
 
