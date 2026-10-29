@@ -35,32 +35,13 @@
 //    constant register (outer loops first), so that the scheduler's
 //    anti-dependency renaming sees the register as taken. It skips a
 //    function with a non-empty inline asm (see the range rule below); a
-//    compare it converted that then fails the range or the shadow check
-//    (below; block placement runs between the two instances) stays the
-//    1-word CMPRR instead of the 2-word CMPRV;
+//    compare it converted that then fails the range check (below; block
+//    placement runs between the two instances) stays the 1-word CMPRR
+//    instead of the 2-word CMPRV;
 //  * the condition maps onto a class-3 predicate: EQ/NE (incl. Z/NZ),
 //    signed LT/GE/LE/GT, unsigned LT/GE/LE/GT (incl. C/NC);
 //  * the flags are dead after the branch (no later reader in the block, not
 //    live into any successor) — the fused form does not write them;
-//  * the instruction that follows the branch in the final layout (its
-//    "EX shadow") does not act in EX before the squash takes effect: a
-//    divide (DIVR/DIVUR/MODR/MODUR/DIVV/MODV), an LCD write (LCDCMDV/
-//    LCDDATAV/LCDDATAR), or a non-empty inline asm, which may start with
-//    either. A taken FBR redirects from MEM and squashes the instruction in
-//    EX, but two EX side effects are not gated by the squash:
-//    - the RTL divider latches the divide's operands and keeps running: the
-//      MD_IDLE start (pipeline_core.sv:1581) has no squash gate, and the FBR
-//      squash (:2040-2048) clears ex_valid but not div_ph (only reset does,
-//      :1408). The next divide to reach EX while that one runs latches
-//      nothing and completes (md_done, :918) with the wrong-path quotient
-//      or remainder;
-//    - the LCD data strobe is combinational from EX (lcd_dv = ex_is_lcd &&
-//      lcd_ready, :1392, ex_is_lcd :922; U_LCD decode :702-709), so the
-//      wrong-path byte reaches the LCD in the cycle the FBR redirects.
-//      LCDRST (`lcd`, U_LCDRST) is gated by !fbr_taken (:1633) and is safe.
-//    Such a branch stays CMP + JMPcc (resolved in EX, which squashes only
-//    ID, where neither has started). The emulator has no pipeline, so only
-//    the board shows this;
 //  * the target is in simm13 word range (+-16 KB) at worst case: every
 //    instruction at its long (.td) size (a tail call's PseudoTAIL as the
 //    2-word TAILREL, PseudoTAILIndirect as JMPR), every aligned block after its
@@ -69,13 +50,17 @@
 //    asm statement has no bounded size (directives, macros) unless it is
 //    empty, so no branch whose range spans a non-empty one fuses.
 //
+// The instruction after the branch does not matter: a taken FBR squashes it
+// in EX, and since klaussCPU 9ad6614 (the oldest core supported, CLAUDE.md)
+// that squash also resets the divider and gates the LCD strobe, so a divide
+// or an LCD write there has no effect.
+//
 // -mllvm -klausscpu-fuse-cmp-br=false disables it.
 //
 //===----------------------------------------------------------------------===//
 
 #include "KlaussCPUInstrInfo.h"
 #include "KlaussCPUSubtarget.h"
-#include "MCTargetDesc/KlaussCPUMCTargetDesc.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -248,44 +233,6 @@ MachineInstr *findFusableCompare(MachineInstr &Br,
   return Cmp;
 }
 
-// True for an instruction whose effect a squash in EX does not undo (see the
-// header): one that starts the RTL divider (pipeline_core.sv class A decode,
-// :663-668: U_DIV / U_MOD) or strobes the LCD (:702-709: U_LCD).  The
-// ActsInEXShadow flag of KlaussCPUInstrInfo.td.
-bool actsInShadow(const MachineInstr &MI) {
-  return KlaussCPUII::actsInEXShadow(MI.getDesc());
-}
-
-// True if the instruction emitted right after Br, which a taken fused branch
-// squashes in EX, cannot act there (actsInShadow, see the header). That is
-// the next instruction in Br's block, or, when Br ends it, the first one
-// emitted in the blocks that follow in layout. Instructions that emit nothing
-// are skipped (alignment padding is neither); past the function's end the
-// next instruction is unknown. Fusing never puts such an instruction next:
-// it only erases compares, and nothing between an erased compare and its
-// branch writes FLAGS, as a divide does, or has side effects, as an LCD
-// write does (findFusableCompare).
-bool shadowIsSafe(const MachineInstr &Br, const TargetInstrInfo &TII) {
-  const MachineBasicBlock *MBB = Br.getParent();
-  MachineBasicBlock::const_iterator I = std::next(Br.getIterator());
-  while (true) {
-    for (; I != MBB->end(); ++I) {
-      if (I->isMetaInstruction())
-        continue;
-      if (I->isInlineAsm()) {
-        if (worstCaseSize(*I, TII) == 0)
-          continue;
-        return false;
-      }
-      return !actsInShadow(*I);
-    }
-    MBB = MBB->getNextNode();
-    if (!MBB)
-      return false;
-    I = MBB->begin();
-  }
-}
-
 } // namespace
 
 char KlaussCPUFuseCmpBr::ID = 0;
@@ -384,8 +331,8 @@ Register KlaussCPUFuseCmpBr::loopConstReg(MachineInstr &Cmp,
 // compare.  The post-RA scheduler renames registers to break
 // anti-dependencies and may take every free register in a loop (an unrolled
 // body); with the constant already live through the loop, it leaves rC
-// alone.  The range and the shadow are checked when fusing: a compare left
-// unfused is the 1-word CMPRR_I instead of the 2-word CMPRV_I.
+// alone.  The range is checked when fusing: a compare left unfused is the
+// 1-word CMPRR_I instead of the 2-word CMPRV_I.
 bool KlaussCPUFuseCmpBr::setUpLoopConsts(MachineFunction &Fn) {
   // A non-empty inline asm blocks the branches that span it; leave such a
   // function to the pre-emit instance, which checks each branch's range.
@@ -485,7 +432,7 @@ bool KlaussCPUFuseCmpBr::runOnMachineFunction(MachineFunction &Fn) {
                      int64_t(ThisOffset);
       if (Disp < -Limit || Disp > Limit)
         continue;
-      if (!KlaussCPUInstrInfo::flagsDeadAfter(Br) || !shadowIsSafe(Br, *TII))
+      if (!KlaussCPUInstrInfo::flagsDeadAfter(Br))
         continue;
       MachineInstr *Cmp = findFusableCompare(Br, TRI);
       if (!Cmp)

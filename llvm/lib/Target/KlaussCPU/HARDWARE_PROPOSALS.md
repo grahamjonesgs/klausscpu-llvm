@@ -28,8 +28,9 @@ ELF (`tools/validate/csmith_board.sh`, scratch `p5/board-csmith/`):
   run;
 - no board ≠ emulator case, so nothing to reduce.
 
-Csmith code uses no LCD, MMIO or interrupts, and never puts a divide behind
-an FBR, so it cannot reach the open RTL bug in §3.1.
+Csmith code uses no LCD, MMIO or interrupts, and the compiler then never put
+a divide behind an FBR, so it could not reach the RTL bug in §3.1 (fixed
+since, in klaussCPU `9ad6614`).
 
 One tooling trap turned up while tracing.  It is a stale binary, not an RTL
 or emulator bug:
@@ -554,16 +555,20 @@ relaxation for LEAPC.
 ## 3. Correctness items (do these first; they are cheap)
 
 1. **The LCD strobe and the divider start are not squashed after a taken
-   FBR or an `sq_ex` squash.**  This is open from phase 4.
+   FBR or an `sq_ex` squash.**  Fixed in klaussCPU `9ad6614` (both squashes
+   reset `div_ph`; `lcd_dv` is gated with `!mem_busy && !fbr_taken &&
+   !sq_ex`).  The compiler dropped its workaround below with no subtarget
+   feature: it supports only `9ad6614` and later (`CLAUDE.md`).  As
+   reported:
    - `pipeline_core.sv:1392`: `assign lcd_dv = ex_is_lcd && lcd_ready;`.
    - `:1582`: `MD_IDLE: if (ex_is_div && ex_b != 64'd0)`.
    - Gate both with `!fbr_taken && !sq_ex`, or reset `div_ph` in the squash.
-   - The compiler works around the FBR case today: FuseCmpBr refuses to fuse
-     in front of a divide or LCD write (`ActsInEXShadow`), and the assembler
-     warns.  It cannot work around the SMC / I-cache-invalidate squash,
+   - The compiler worked around the FBR case: FuseCmpBr refused to fuse in
+     front of a divide or LCD write (`ActsInEXShadow`), and the assembler
+     warned.  It could not work around the SMC / I-cache-invalidate squash,
      which repeats an LCD byte.
-   - Once fixed, the compiler can drop the restriction.  It would key that
-     off a subtarget feature, since old bitstreams keep the bug.
+   - Once fixed, the compiler can drop the restriction.  (It has, for every
+     core: old bitstreams are no longer supported.)
 2. **Keep CALL, RET and JMP flag-free.**  The MachineOutliner (on at -Oz)
    relies on it (`fmask = 0` for `U_CALL`/`U_RET`/`U_JMP` today).  No change
    requested.

@@ -12,6 +12,13 @@ describe earlier states of the backend and are superseded by this file.
 [`ABI.md`](ABI.md) is the C ABI (calling convention version 2): the rules,
 the consumers and the measurements behind the design.
 
+**Minimum hardware: klaussCPU `9ad6614`** (the core the board runs).  Its
+squash fixes (a taken fused branch or an EX squash resets the divider and
+gates the LCD strobe) are assumed everywhere, with no option to turn that
+off: older bitstreams are not supported, and code this backend builds may
+give wrong divide results or stray LCD bytes on them.  The CPU and all the
+code that runs on it are rebuilt together.
+
 ---
 
 ## Architecture facts
@@ -162,20 +169,16 @@ liveness:
   that constant in the loop reuse it.  That loop-constant setup runs as a
   second instance of the pass before the post-RA scheduler (`addPreSched2`,
   the compare becomes `CMPRR` with the constant register), so the
-  scheduler's register renaming cannot take the free register.  A branch
-  whose next instruction in layout is a divide (`DIVR`/`DIVUR`/`MODR`/
-  `MODUR`/`DIVV`/`MODV`), an LCD write (`LCDCMDV`/`LCDDATAV`/`LCDDATAR`) or
-  a non-empty inline asm never fuses: a taken FBR redirects from MEM and
-  squashes that instruction in EX, but the squash does not undo either
-  effect.  The RTL divider has already started on the divide and is not
-  reset, so the next real divide would complete with the wrong-path result;
-  the LCD strobe fires from EX in that same cycle, so the wrong-path byte
-  reaches the LCD (board-only bugs: the emulator has no pipeline;
-  `fuse-cmp-br-div-shadow.ll`/`.mir`).  Those instructions carry the
-  `ActsInEXShadow` flag (`TSFlags`, `KlaussCPUII::actsInEXShadow`), which the
-  assembler also reads: it warns when assembly puts one directly behind an
-  `fbr`/`fbri` (labels between them do not count, a directive does;
-  `MC/KlaussCPU/fbr-shadow-warning.s`).
+  scheduler's register renaming cannot take the free register.  The
+  instruction behind the branch (which a taken FBR squashes in EX) does not
+  matter: the oldest supported core (klaussCPU `9ad6614`, see the top of
+  this file) resets the divider and gates the LCD strobe in that squash, so
+  a branch fuses in front of a divide or an LCD write too
+  (`fuse-cmp-br-div-shadow.ll`/`.mir`), and the assembler accepts either
+  directly behind an `fbr`/`fbri` without a warning
+  (`MC/KlaussCPU/fbr-shadow.s`).  Older bitstreams ran the squashed divide
+  on and handed its result to the next one, and sent the LCD byte; code
+  built since then must not run on them.
 - Both rewrite only when FLAGS is dead after the branch
   (`KlaussCPUInstrInfo::flagsDeadAfter`): no later reader in the block and
   no successor with FLAGS live-in (MachineCSE can leave a successor reading

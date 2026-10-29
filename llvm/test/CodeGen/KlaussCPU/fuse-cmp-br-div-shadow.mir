@@ -1,13 +1,12 @@
-# KlaussCPUFuseCmpBr does not fuse a branch whose next instruction in layout
-# (the one a taken FBR squashes in EX) is a divide or an LCD write. The RTL
-# divider latches that wrong-path divide's operands and keeps running after
-# the squash, and the next real divide then completes with its result; the
-# LCD strobe fires from EX before the squash. The next instruction
-# is the one after the branch in its block, else the first instruction
-# emitted in the following blocks: instructions that emit nothing are
-# skipped, an empty block is passed over, and a non-empty inline asm counts
-# as a divide. A divide at the branch target, or later in the fall-through
-# block, is not in the shadow.
+# KlaussCPUFuseCmpBr fuses a branch whatever its next instruction in layout
+# (the one a taken FBR squashes in EX): since klaussCPU 9ad6614, the oldest
+# core the backend supports, the squash resets the divider and gates the LCD
+# strobe, so a divide or an LCD write there has no effect.  Before, the
+# divider kept running on the wrong-path divide and handed its result to the
+# next real one, and the LCD strobe fired, so such a branch stayed CMP +
+# JMPcc.  Each case below is one that rule used to refuse: every divide
+# form and LCD write, behind meta instructions or an empty block, and a
+# non-empty inline asm, which only the range rule still considers.
 #
 # RUN: llc -march=klausscpu -run-pass=klausscpu-cmp-br-fuse -verify-machineinstrs \
 # RUN:   %s -o - | FileCheck %s
@@ -16,32 +15,26 @@
   define void @divides() { ret void }
   define void @meta_and_empty_block() { ret void }
   define void @inline_asm() { ret void }
-  define void @not_in_shadow() { ret void }
   define void @lcd_writes() { ret void }
+  define void @inline_asm_after_loop() { ret void }
 ...
 ---
 # Every divide form: DIVR, DIVUR, MODR, MODUR, DIVV, MODV.
 # CHECK-LABEL: name: divides
-# CHECK-NOT:   FBR_
-# CHECK:       CMPRV_I $r1, 0, implicit-def $flags
-# CHECK-NEXT:  JMPE %bb.7
+# CHECK-NOT:   CMPR
+# CHECK:       FBR_RI $r1, 0, 0, %bb.7
 # CHECK:       $r12 = DIVR
-# CHECK:       CMPRV_I $r1, 1, implicit-def $flags
-# CHECK-NEXT:  JMPE %bb.7
+# CHECK-NEXT:  FBR_RI $r1, 1, 0, %bb.7
 # CHECK:       $r12 = DIVUR
-# CHECK:       CMPRV_I $r1, 2, implicit-def $flags
-# CHECK-NEXT:  JMPE %bb.7
+# CHECK-NEXT:  FBR_RI $r1, 2, 0, %bb.7
 # CHECK:       $r12 = MODR
-# CHECK:       CMPRV_I $r1, 3, implicit-def $flags
-# CHECK-NEXT:  JMPE %bb.7
+# CHECK-NEXT:  FBR_RI $r1, 3, 0, %bb.7
 # CHECK:       $r12 = MODUR
-# CHECK:       CMPRR_I $r1, $r2, implicit-def $flags
-# CHECK-NEXT:  JMPLT %bb.7
+# CHECK-NEXT:  FBR_RR $r1, $r2, 1, %bb.7
 # CHECK:       $r12 = DIVV
-# CHECK:       CMPRR_I $r1, $r2, implicit-def $flags
-# CHECK-NEXT:  JMPULT %bb.7
+# CHECK-NEXT:  FBR_RR $r1, $r2, 3, %bb.7
 # CHECK:       $r12 = MODV
-# CHECK-NOT:   FBR_
+# CHECK-NOT:   CMPR
 name:            divides
 tracksRegLiveness: true
 body:             |
@@ -99,16 +92,14 @@ body:             |
 # Instructions that emit nothing before the divide, and an empty block
 # between the branch and the divide.
 # CHECK-LABEL: name: meta_and_empty_block
-# CHECK-NOT:   FBR_
-# CHECK:       CMPRV_I $r1, 0, implicit-def $flags
-# CHECK-NEXT:  JMPE %bb.4
+# CHECK-NOT:   CMPR
+# CHECK:       FBR_RI $r1, 0, 0, %bb.4
 # CHECK:       $r12 = DIVR
-# CHECK:       CMPRV_I $r1, 1, implicit-def $flags
-# CHECK-NEXT:  JMPE %bb.4
+# CHECK-NEXT:  FBR_RI $r1, 1, 0, %bb.4
 # CHECK:       bb.2:
 # CHECK:       bb.3:
 # CHECK:       $r12 = DIVUR
-# CHECK-NOT:   FBR_
+# CHECK-NOT:   CMPR
 name:            meta_and_empty_block
 tracksRegLiveness: true
 body:             |
@@ -142,17 +133,17 @@ body:             |
     LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit killed $r12
 ...
 ---
-# A non-empty inline asm may start with a divide; an empty one emits nothing
-# and the instruction after it decides.
+# A non-empty inline asm (a divide here) after the branch.  Only the first
+# branch stays unfused: it spans that inline asm, whose size is unbounded
+# (the range rule).  The other two span only inline asm that emits nothing.
 # CHECK-LABEL: name: inline_asm
 # CHECK:       CMPRV_I $r1, 0, implicit-def $flags
 # CHECK-NEXT:  JMPE %bb.4
 # CHECK:       INLINEASM &"divr r12, r0, r1"
-# CHECK:       FBR_RI $r1, 1, 0, %bb.4
+# CHECK-NEXT:  FBR_RI $r1, 1, 0, %bb.4
 # CHECK:       INLINEASM &" "
 # CHECK-NEXT:  $r12 = SETR 1
-# CHECK:       CMPRV_I $r1, 2, implicit-def $flags
-# CHECK-NEXT:  JMPE %bb.4
+# CHECK-NEXT:  FBR_RI $r1, 2, 0, %bb.4
 # CHECK:       INLINEASM &""
 # CHECK-NEXT:  $r12 = MODR
 name:            inline_asm
@@ -190,61 +181,18 @@ body:             |
     LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit killed $r12
 ...
 ---
-# Fused: a divide at the branch target, a divide behind another instruction
-# in the fall-through block, and a divide behind a JMP that follows the
-# branch in its block.
-# CHECK-LABEL: name: not_in_shadow
-# CHECK:       FBR_RI $r1, 0, 0, %bb.3
-# CHECK:       bb.1:
-# CHECK:       $r13 = SETR 1
-# CHECK-NEXT:  $r12 = DIVR
-# CHECK-NEXT:  FBR_RI $r1, 1, 0, %bb.3
-# CHECK-NEXT:  JMP %bb.2
-# CHECK-NOT:   CMPRV_I
-name:            not_in_shadow
-tracksRegLiveness: true
-body:             |
-  bb.0:
-    successors: %bb.1, %bb.3
-    liveins: $r0, $r1
-    CMPRV_I $r1, 0, implicit-def $flags
-    JMPE %bb.3, implicit killed $flags
-
-  bb.1:
-    successors: %bb.3, %bb.2
-    liveins: $r0, $r1
-    $r13 = SETR 1
-    $r12 = DIVR $r0, $r1, implicit-def dead $flags
-    CMPRV_I $r1, 1, implicit-def $flags
-    JMPE %bb.3, implicit killed $flags
-    JMP %bb.2
-
-  bb.2:
-    liveins: $r0, $r1
-    $r12 = DIVR $r0, $r1, implicit-def dead $flags
-    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit killed $r12
-
-  bb.3:
-    liveins: $r0, $r1
-    $r12 = MODUR $r0, $r1, implicit-def dead $flags
-    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit killed $r12
-...
----
-# The LCD writes LCDCMDV, LCDDATAV and LCDDATAR strobe the LCD from EX
-# (U_LCD), so they block the fusion; LCDRST (`lcd`, U_LCDRST) is gated by
-# the squash and does not.
+# The LCD writes LCDCMDV, LCDDATAV and LCDDATAR, and the LCD reset.
 # CHECK-LABEL: name: lcd_writes
-# CHECK:       CMPRV_I $r1, 0, implicit-def $flags
-# CHECK-NEXT:  JMPE %bb.5
+# CHECK-NOT:   CMPR
+# CHECK:       FBR_RI $r1, 0, 0, %bb.5
 # CHECK:       LCDCMDV 1
-# CHECK:       CMPRV_I $r1, 1, implicit-def $flags
-# CHECK-NEXT:  JMPE %bb.5
+# CHECK-NEXT:  FBR_RI $r1, 1, 0, %bb.5
 # CHECK:       LCDDATAV 2
-# CHECK:       CMPRV_I $r1, 2, implicit-def $flags
-# CHECK-NEXT:  JMPE %bb.5
+# CHECK-NEXT:  FBR_RI $r1, 2, 0, %bb.5
 # CHECK:       LCDDATAR $r0
-# CHECK:       FBR_RI $r1, 3, 0, %bb.5
+# CHECK-NEXT:  FBR_RI $r1, 3, 0, %bb.5
 # CHECK:       LCD 1
+# CHECK-NOT:   CMPR
 name:            lcd_writes
 tracksRegLiveness: true
 body:             |
@@ -283,4 +231,29 @@ body:             |
   bb.5:
     $r12 = SETR 0
     LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit killed $r12
+...
+---
+# A backward branch whose fall-through starts with a non-empty inline asm
+# (an LCD write here): the range rule does not stop it either.
+# CHECK-LABEL: name: inline_asm_after_loop
+# CHECK:       FBR_RI $r1, 0, 8, %bb.1
+# CHECK:       bb.2:
+# CHECK-NEXT:  INLINEASM &"lcddatav 65"
+name:            inline_asm_after_loop
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1
+    liveins: $r1
+
+  bb.1:
+    successors: %bb.1, %bb.2
+    liveins: $r1
+    $r1 = DECR killed $r1, implicit-def dead $flags
+    CMPRV_I $r1, 0, implicit-def $flags
+    JMPNE %bb.1, implicit killed $flags
+
+  bb.2:
+    INLINEASM &"lcddatav 65", 1 /* sideeffect attdialect */
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15
 ...
