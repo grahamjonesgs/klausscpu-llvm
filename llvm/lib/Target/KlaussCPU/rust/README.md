@@ -185,8 +185,14 @@ halts.
   side). Both are in the checked-in `.cargo/config.toml`s.
 - **Backend changes need a rustc relink**: stage1 rustc links LLVM
   statically. After touching the KlaussCPU backend: `ninja -C build llc` to
-  test, then re-run the `x.py` command (≈1–15 min, mostly cached) before
-  Rust builds see the change.
+  test, rebuild the LLVM that bootstrap.toml's `llvm-config` names, then
+  re-run the `x.py` command (≈1–15 min, mostly cached) before Rust builds
+  see the change.  Neither step notices the change on its own: x.py does
+  not track an external LLVM's archives (`touch compiler/rustc_llvm/build.rs`
+  first, so it rebuilds `rustc_llvm` and relinks `rustc_driver`), and cargo
+  keys its cache on `rustc -vV`, which a relink leaves the same (delete the
+  crate's `target/` before rebuilding an extension, or it is not compiled
+  again).
 - **LLEXT size control lives in three places** (`hello-ext` is the
   reference): per-package `codegen-units = 256` for `compiler_builtins`
   (cargo's "did not match any packages" warning is wrong — it works);
