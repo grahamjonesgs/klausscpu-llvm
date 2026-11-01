@@ -144,15 +144,16 @@ def PCRel32AsmOperand : PCRelAsmOperand<32, 1>;
 def PCRel20AsmOperand : PCRelAsmOperand<20, 4>;
 def PCRel15AsmOperand : PCRelAsmOperand<15, 4>;
 
-// The fused-branch condition is PRED | INV << 3 with PRED 0..4; the CPU
-// traps on PRED 5..7 (pipeline_core.sv), so those are rejected too.
+// The fused-branch condition is PRED | INV << 3: PRED 0..4 as class 3 (EQ,
+// LT, LE, ULT, ULE) and 5..7 the 32-bit EQW, LTW, ULTW (ISA_ENCODING_V2_MAP
+// §8.1), so every 4-bit value is a condition.
 def FBRCondAsmOperand : AsmOperandClass {
   let Name             = "FBRCond";
   let PredicateMethod  = "isFBRCond";
   let RenderMethod     = "addImmOperands";
   let DiagnosticType   = "InvalidFBRCond";
   let DiagnosticString = "fused-branch condition must be an integer in the "
-                         "range [0, 4] or [8, 12]";
+                         "range [0, 15]";
 }
 
 def SImm4AsmOperand : SImmAsmOperand<4>;
@@ -263,11 +264,34 @@ def PCRelCallTarget32 : Operand<i64> {
   }];
 }
 
+// MCOperandPredicate: as PCRelTarget32 (the LEAPC a LEAPC.S expands into).
 def pcrel_simm32 : Operand<i64> {
   let EncoderMethod    = "getPCRel32OpValue";
   let DecoderMethod    = "decodeSImmOperand<32>";
   let ParserMatchClass = PCRel32AsmOperand;
   let OperandType      = "OPERAND_PCREL";
+  let MCOperandPredicate = [{
+    int64_t Imm;
+    if (MCOp.evaluateAsConstantImm(Imm))
+      return isInt<32>(Imm);
+    return MCOp.isExpr();
+  }];
+}
+
+// LEAPC.S offset (ISA_ENCODING_V2_MAP §8.3): a simm16 byte displacement
+// from the instruction, split over word0[19:12] (high byte) and [7:0]
+// (FK_KlaussCPU_PCREL16).  A literal compresses when it fits; a symbol
+// always does, and the asm backend relaxes it back to LEAPC when the target
+// is out of range or not resolved in the same section.
+def pcrel_simm16 : Operand<i64>, ImmLeaf<i64, [{return isInt<16>(Imm);}]> {
+  let EncoderMethod    = "getPCRel16OpValue";
+  let DecoderMethod    = "decodeSImmOperand<16>";
+  let OperandType      = "OPERAND_PCREL";
+  let MCOperandPredicate = [{
+    if (MCOp.isImm())
+      return isInt<16>(MCOp.getImm());
+    return MCOp.isExpr();
+  }];
 }
 
 // ISA v3 short branch target: byte displacement, encoded as a simm18 word
@@ -307,9 +331,8 @@ def PCRelTarget13 : Operand<OtherVT> {
 }
 
 // Fused-branch condition (PRED | INV << 3) and register-immediate operand.
-// The CPU traps on PRED 5..7, so those neither assemble nor decode.
 def fbr_cc : Operand<i64> {
-  let DecoderMethod    = "decodeFBRCondOperand";
+  let DecoderMethod    = "decodeUImmOperand<4>";
   let ParserMatchClass = FBRCondAsmOperand;
 }
 
@@ -1140,6 +1163,11 @@ def SHRAV   : ShiftImmN<0x50A04000, "shrav">;
 // MULR/DIVR (pipeline_core.sv class A decode: U_MUL/U_DIV/U_MOD for LEN=10).
 let SchedRW = [WriteMul, WriteMulFlags] in
 def MULV    : RV_imm<0xA8800000, "mulv">;
+// The unsigned multiply by a zero-extended imm32 (SGN [23] = 0; ISA map
+// "MULUV"): the same low half as MULV for a value both extensions give,
+// another V.  Assembler only; the twin of the unsigned MULV.S.
+let SchedRW = [WriteMul, WriteMulFlags], hasSideEffects = 0 in
+def MULUV   : RV_imm<0xA8000000, "muluv", uimm32>;
 let SchedRW = [WriteDiv, WriteDivFlags] in {
 def DIVV    : RV_imm<0xA9800000, "divv">;
 def MODV    : RV_imm<0xAA800000, "modv">;
@@ -1663,6 +1691,19 @@ def TRAP_I  : I0<0x6C040000, (outs), (ins), "trap">;
 let hasSideEffects = 1 in
 def WAIT_I  : I0<0x6C020000, (outs), (ins), "wait">;
 
+// DI / EI (hw-proposals 7a, ISA_ENCODING_V2_MAP §8.2): the core's interrupt
+// enable bit, separate from INT_MASK.  `di rd` sets rd = the old enable bit
+// (0/1) and disables; `ei rs` sets enable = rs[0], so `di r ; ... ; ei r`
+// restores the previous state.  An IRQ is never taken between a retired DI
+// and its EI; WAIT still wakes (without entering the handler).  The bit is
+// saved in the IRQ context word [43] (1 = disabled) and restored by IRET.
+// Not atomic against core 2.  No flags.  hasSideEffects keeps memory
+// accesses from moving across them.
+let hasSideEffects = 1 in {
+def DI_I : R_out<0x6C060000, (outs GPR:$reg), "di\t$reg">;
+def EI_I : R_in<0x6C070000, (ins GPR:$reg), "ei\t$reg">;
+}
+
 //===----------------------------------------------------------------------===//
 // Assembler-only opcodes
 //
@@ -2019,8 +2060,11 @@ def simm8_lsl # shift
 // the matcher picks): AsmVariantName names no parser variant.  They exist
 // only with FeatureShortForms: the disassembler does not decode one without
 // it, and the MC predicate verifier rejects one reaching the encoder.
-class ShortForm<KCInst64 long, dag outs, dag ins, string asmstr>
-    : KCInst32<{0b01, long.Word0{29-0}}, outs, ins, asmstr> {
+// Most short forms' template is the long twin's word 0 with LEN=01; the
+// hw-proposals ones (ISA_ENCODING_V2_MAP §8.3) give their own (`word0`).
+class ShortForm<KCInst64 long, dag outs, dag ins, string asmstr,
+                bits<32> word0 = {0b01, long.Word0{29-0}}>
+    : KCInst32<word0, outs, ins, asmstr> {
   let AsmVariantName = "NoMatch";
   let Predicates = [HasShortForms];
 }
@@ -2035,8 +2079,10 @@ class ShortRdImm<KCInst64 long, string asmstr, Operand immop = simm8_lsl0>
 }
 
 // rd = rs op imm8
-class ShortRdRsImm<KCInst64 long, string asmstr, Operand immop = simm8_lsl0>
-    : ShortForm<long, (outs GPR:$rd), (ins GPR:$rs, immop:$imm), asmstr> {
+class ShortRdRsImm<KCInst64 long, string asmstr, Operand immop = simm8_lsl0,
+                   bits<32> word0 = {0b01, long.Word0{29-0}}>
+    : ShortForm<long, (outs GPR:$rd), (ins GPR:$rs, immop:$imm), asmstr,
+                word0> {
   bits<4> rd;
   bits<4> rs;
   bits<8> imm;
@@ -2046,8 +2092,9 @@ class ShortRdRsImm<KCInst64 long, string asmstr, Operand immop = simm8_lsl0>
 }
 
 // Compare rs with imm8 (flags only)
-class ShortRsImm<KCInst64 long, string asmstr>
-    : ShortForm<long, (outs), (ins GPR:$rs, simm8_lsl0:$imm), asmstr> {
+class ShortRsImm<KCInst64 long, string asmstr,
+                 bits<32> word0 = {0b01, long.Word0{29-0}}>
+    : ShortForm<long, (outs), (ins GPR:$rs, simm8_lsl0:$imm), asmstr, word0> {
   bits<4> rs;
   bits<8> imm;
   let Inst{19-12} = imm;
@@ -2115,6 +2162,28 @@ def ADDV_SH    : ShortRdRsImm<ADDV, "addv\t$rd, $rs, $imm", uimm8>;
 def MINUSV_SH  : ShortRdRsImm<MINUSV, "minusv\t$rd, $rs, $imm", uimm8>;
 def ADDI_SH    : ShortRdRsImm<ADDI, "addi\t$rd, $rs, $imm">;
 def CMPRV_SH   : ShortRsImm<CMPRV_I, "cmprv\t$rs, $imm">;
+// hw-proposals 9 (ISA_ENCODING_V2_MAP §8.3).  CMPRVW.S is the short CMP
+// with INV=1 [22] (the W bit [19] is the immediate's): the 32-bit compare.
+def CMPRVW_SH  : ShortRsImm<CMPRVW_I, "cmprvw\t$rs, $imm", 0x4C500000>;
+}
+// MULV.S: class A OP=3 [25:24], the imm8 extended by SGN [23] like the 2-word
+// MULV / MULUV's imm32; the low half, flags as MUL (Z, S, V).
+let Defs = [FLAGS], SchedRW = [WriteMul, WriteMulFlags] in {
+def MULV_SH    : ShortRdRsImm<MULV, "mulv\t$rd, $rs, $imm", simm8_lsl0,
+                              0x6B800000>;
+def MULUV_SH   : ShortRdRsImm<MULUV, "muluv\t$rd, $rs, $imm", uimm8,
+                              0x6B000000>;
+}
+// LEAPC.S: class 2 OP=14 with [21] set and SGN [20] clear; rd = PC +
+// sext(simm16), the offset split over [19:12] and [7:0].
+let isReMaterializable = 1 in
+def LEAPC_SH : ShortForm<LEAPC, (outs GPR:$rd), (ins pcrel_simm16:$imm),
+                         "leapc\t$rd, $imm", 0x4BA00000> {
+  bits<4>  rd;
+  bits<16> imm;
+  let Inst{19-12} = imm{15-8};
+  let Inst{11-8}  = rd;
+  let Inst{7-0}   = imm{7-0};
 }
 let mayLoad = 1 in {
 def LDIDX8_SH    : ShortLoad<LDIDX8, 0, "ldidx8\t$rd, $base, $offset">;
@@ -2187,6 +2256,15 @@ def : CompressPat<(!cast<KCInst64>(op) GPR:$rd, GPR:$rs, simm8_lsl0:$imm),
                                                simm8_lsl0:$imm)>;
 def : CompressPat<(CMPRV_I GPR:$rs, simm8_lsl0:$imm),
                   (CMPRV_SH GPR:$rs, simm8_lsl0:$imm)>;
+def : CompressPat<(CMPRVW_I GPR:$rs, simm8_lsl0:$imm),
+                  (CMPRVW_SH GPR:$rs, simm8_lsl0:$imm)>;
+// MULV sign-extends its immediate, MULUV zero-extends it: each short form
+// takes the values its own extension gives, and only its own long twin (a
+// signed and an unsigned multiply differ in V).
+def : CompressPat<(MULV GPR:$rd, GPR:$rs, simm8_lsl0:$imm),
+                  (MULV_SH GPR:$rd, GPR:$rs, simm8_lsl0:$imm)>;
+def : CompressPat<(MULUV GPR:$rd, GPR:$rs, uimm8:$imm),
+                  (MULUV_SH GPR:$rd, GPR:$rs, uimm8:$imm)>;
 foreach op = ["ADDV", "MINUSV", "ANDV", "ORV", "XORV"] in
 def : CompressPat<(!cast<KCInst64>(op) GPR:$rd, GPR:$rs, uimm8:$imm),
                   (!cast<KCInst32>(op # "_SH") GPR:$rd, GPR:$rs, uimm8:$imm)>;
@@ -2217,6 +2295,14 @@ foreach st = [["STIDX8", "0"], ["STIDX16", "1"], ["STIDX32", "2"],
 }
 }
 
+// LEAPC.S: a literal offset that fits simm16, or a symbol.  Not compress-
+// only: relaxing a LEAPC.S whose target is out of range or not resolved in
+// its section is this pattern's expansion back to LEAPC (KlaussCPU::
+// uncompress), as for the short branches.
+let Predicates = [HasShortForms] in
+def : CompressPat<(LEAPC GPR:$rd, pcrel_simm16:$imm),
+                  (LEAPC_SH GPR:$rd, pcrel_simm16:$imm)>;
+
 let Predicates = [HasShortBranches] in
 foreach c = ["", "Z", "NZ", "C", "NC", "O", "NO", "S", "NS", "LT", "GE", "LE",
              "GT", "ULT", "UGE", "ULE", "UGT", "E", "NE"] in {
@@ -2241,16 +2327,21 @@ def : CompressPat<(TAILREL CallTarget18:$target),
                   (TAIL_SH CallTarget18:$target)>;
 }
 
-// ISA v3 B: fused compare-and-branch (class 0xD, 1 word, flags untouched).
-// $cc = PRED (0 EQ, 1 LT, 2 LE, 3 ULT, 4 ULE) | INV<<3; simm13 word
-// displacement via FK_KlaussCPU_PCREL13. Built only by KlaussCPUFuseCmpBr.
+// ISA v3 B: fused compare-and-branch (class 0xD, flags untouched).
+// $cc = PRED | INV<<3, PRED 0 EQ, 1 LT, 2 LE, 3 ULT, 4 ULE (64-bit) and
+// 5 EQW, 6 LTW, 7 ULTW (the low 32 bits, as CMPRRW; ISA_ENCODING_V2_MAP
+// §8.1); simm13 word displacement via FK_KlaussCPU_PCREL13, from the
+// branch's own address. FBR_RR / FBR_RI are built only by
+// KlaussCPUFuseCmpBr (64-bit predicates so far); FBR_RV is assembler-only.
 // Word 0: PRED [25:23], INV [22], IMM [21], disp13 [20:8], rs1 [7:4],
-// rs2 or simm4 [3:0].
-class FusedBranch<bits<32> word0, dag ins, string asmstr>
-    : KCInst32<word0, (outs), ins, asmstr> {
+// rs2 or simm4 [3:0] (0 in the 2-word form, whose rhs is word 1).
+class FusedBranchFields {
   bits<4>  rs1;
   bits<4>  cc;
   bits<15> target;
+}
+class FusedBranch<bits<32> word0, dag ins, string asmstr>
+    : KCInst32<word0, (outs), ins, asmstr>, FusedBranchFields {
   let Inst{25-23} = cc{2-0};
   let Inst{22}    = cc{3};
   let Inst{20-8}  = target{14-2};
@@ -2271,6 +2362,19 @@ def FBR_RI : FusedBranch<0x74200000,
                          "fbri\t$rs1, $imm, $cc, $target"> {
   bits<4> imm;
   let Inst{3-0} = imm;
+}
+// The 2-word form (hw-proposals 6, LEN=10 IMM=1): rhs = sext(imm32) in
+// word 1, any PRED; taken: PC + 4*simm13, not taken: PC + 8.
+def FBR_RV : KCInst64<0xB4200000, (outs),
+                      (ins GPR:$rs1, simm32:$imm, fbr_cc:$cc,
+                           PCRelTarget13:$target),
+                      "fbrv\t$rs1, $imm, $cc, $target">, FusedBranchFields {
+  bits<32> imm;
+  let Inst{63-32} = imm;
+  let Inst{25-23} = cc{2-0};
+  let Inst{22}    = cc{3};
+  let Inst{20-8}  = target{14-2};
+  let Inst{7-4}   = rs1;
 }
 }
 

@@ -12,15 +12,19 @@ describe earlier states of the backend and are superseded by this file.
 [`ABI.md`](ABI.md) is the C ABI (calling convention version 2): the rules,
 the consumers and the measurements behind the design.
 
-**Minimum hardware: klaussCPU `9ad6614`** (the core the board runs).  Its
-squash fixes (a taken fused branch or an EX squash resets the divider and
-gates the LCD strobe) are assumed everywhere, with no option to turn that
-off: older bitstreams are not supported, and code this backend builds may
-give wrong divide results or stray LCD bytes on them.  The CPU and all the
+**Minimum hardware: klaussCPU `3508f87`** (master with the hw-proposals
+merge; the board's QSPI holds its `0de5b21` bitstream since 2026-11-01).
+The assembler and the AsmPrinter use its 1-word `CMPRVW`, `MULV`/`MULUV`
+and `LEAPC` forms (ISA map §8.3) wherever they fit, which older cores trap
+on, and the toolchain knows its other additions (§8: W and imm32 fused
+branches, `di`/`ei`, the misaligned-access trap).  The squash fixes of
+`9ad6614` (a taken fused branch or an EX squash resets the divider and
+gates the LCD strobe) are assumed too.  There is no option to target an
+older core: older bitstreams are not supported, and the CPU and all the
 code that runs on it are rebuilt together.  To check which core a board
-runs, send klausscc's `tests/fixtures/hw_div_fbr.kla` with `-s -T`: an older
-core prints `0000008E` where 9ad6614 prints `00000021` (`hw_div_smc.kla`
-checks the third fix the same way; `HARDWARE_PROPOSALS.md` §3).
+runs, send klausscc's `tests/fixtures/hw_proposals.kla` with `-s -T`: an
+older core stops at the first new instruction (`hw_div_fbr.kla` /
+`hw_div_smc.kla` check the 9ad6614 fixes; `HARDWARE_PROPOSALS.md` §3).
 
 ---
 
@@ -37,9 +41,9 @@ checks the third fix the same way; `HARDWARE_PROPOSALS.md` §3).
 | CMOV | none — `select` becomes a `SELECT_CC_RR/RI` pseudo, expanded to compare + branch; a run of selects on the same condition shares one compare/branch (one PHI each) |
 | Atomics | no instructions — "forced atomics" (as RISC-V `+forced-atomics`), **atomic within one core only**: an aligned atomic load/store of 1/2/4/8 bytes is the plain access (patterns), a fence a compiler barrier, every RMW / cmpxchg a `__sync_*_N` libcall (LibCall actions) that the runtime's `src/atomic.c` runs with `INT_MASK` saved/zeroed/restored; FP / `uinc_wrap` / `udec_wrap` / `usub_*` RMWs are cmpxchg loops (`shouldExpandAtomicRMWInIR`); wider or misaligned atomics are `__atomic_*` libcalls (not provided).  The type legaliser promotes a 1/2/4-byte RMW to i64 first, so those libcall values go in any-extended and come back zero-extended (not the C ABI's sign-extended i32; `atomic.c` takes and returns `uint64_t`).  Clang inlines atomics up to 64 bits (`MaxAtomicInlineWidth`), and the Rust target spec has `max-atomic-width` 64 with `atomic-cas` (`rust-target-spec.test` checks that the backend lowers exactly those widths without `__atomic_*`; Rust bare-metal programs get `__sync_*` from `klauss-rt`, LLEXT extensions, C or Rust, from the export table in the runtime's `ssh/llext_exports.c`, which every Zephyr app built with `CONFIG_LLEXT` links — today `ssh_shell` and `llext_demo`).  Nothing makes them atomic against core 2 (AMP), whose DDR view also bypasses core 1's D-cache |
 | Sign-extending loads | i8/i16/i32: hardware (`LDIDX8_S`/`LDIDX16_S`/`LDIDX32_S`) |
-| Load/store addressing | `[r]` (`MEMGETn`/`MEMSETn`), `r + simm32` (`LDIDXn`/`STIDXn`, 1-word short form for a small scaled offset), `r + r` at every width (`LDIDXnR`/`LDIDXn_SR`/`STIDXnR`, MODE=11), an absolute imm32 at every width (`LDABSn`/`LDABSn_S`/`STABSn`, `MEMREADR`/`MEMSETR`, MODE=10, 2 words) for a naturally aligned constant address such as an MMIO register; 16/32-bit forms other than `MEMGET32` force-align the EA and no 64-bit form reads an unaligned doubleword, so an under-aligned non-volatile 32-bit load is `MEMGET32` of the computed address (`allowsMisalignedMemoryAccesses`, loads only) and an under-aligned i64 load two 32-bit loads (`MEMGET32` below 4-byte alignment, `LDIDX32` at 4): `allowsMisalignedMemoryAccesses` allows it so that the combiner can build one from 8 byte loads, then `LowerLOAD` splits it at legalization (the post-legalize combiner legalizes what it creates; `PreprocessISelDAG` is a backstop for one that still reaches isel, `unaligned-load-backstop.ll`), and the `STORE` combine keeps a copy two 32-bit copies when store merging swapped its halves (a ROLV) or under optsize (otherwise SHLV + ORR + `STIDX64`: one instruction more than two copies, 0.3-0.5 cycles per 8 bytes faster on the board); the halves carry `KlaussCPU::MOSplitHalf`, so nothing joins them again; every other under-aligned access (stores, volatile) is split |
+| Load/store addressing | `[r]` (`MEMGETn`/`MEMSETn`), `r + simm32` (`LDIDXn`/`STIDXn`, 1-word short form for a small scaled offset), `r + r` at every width (`LDIDXnR`/`LDIDXn_SR`/`STIDXnR`, MODE=11), an absolute imm32 at every width (`LDABSn`/`LDABSn_S`/`STABSn`, `MEMREADR`/`MEMSETR`, MODE=10, 2 words) for a naturally aligned constant address such as an MMIO register; 16/32-bit forms other than `MEMGET32` trap on a misaligned EA (crash dump `ERR=0A`, klausscc `stop = Misaligned`) and no 64-bit form reads an unaligned doubleword, so an under-aligned non-volatile 32-bit load is `MEMGET32` of the computed address (`allowsMisalignedMemoryAccesses`, loads only) and an under-aligned i64 load two 32-bit loads (`MEMGET32` below 4-byte alignment, `LDIDX32` at 4): `allowsMisalignedMemoryAccesses` allows it so that the combiner can build one from 8 byte loads, then `LowerLOAD` splits it at legalization (the post-legalize combiner legalizes what it creates; `PreprocessISelDAG` is a backstop for one that still reaches isel, `unaligned-load-backstop.ll`), and the `STORE` combine keeps a copy two 32-bit copies when store merging swapped its halves (a ROLV) or under optsize (otherwise SHLV + ORR + `STIDX64`: one instruction more than two copies, 0.3-0.5 cycles per 8 bytes faster on the board); the halves carry `KlaussCPU::MOSplitHalf`, so nothing joins them again; every other under-aligned access (stores, volatile) is split |
 | C environment | hosted by default (the driver no longer adds `-ffreestanding`): `memcpy`/`memset`/`memmove` of a constant size are intrinsics, inline up to 8 accesses (4 under optsize) at the width both sides' alignment allows (a source below 4-byte alignment still allows 4, `MEMGET32`); a constant source is stored as immediates (`shouldConvertConstantLoadToIntImm`); stack objects and module globals they touch get 8-byte alignment (`shouldAlignPointerArgs`).  `printf`/`fprintf` are not turned into `puts`/`putchar`/`fputc`/`fputs`/`fwrite` (`TargetLibraryInfo`: each would link another stdio function for UART-bound output).  Code that implements the C library (picolibc, compiler-rt, crt0's BSS loop, kernels) is built `-ffreestanding` / `no_builtin` |
-| 32-bit ops | `ADDW`/`SUBW`/`ADDIW`/`MULW`, `CMPRRW`/`CMPRVW`, boolean `CMPxxRW`/`CMPxxVW` (ISA v3 D2/D3) |
+| 32-bit ops | `ADDW`/`SUBW`/`ADDIW`/`MULW`, `CMPRRW`/`CMPRVW`, boolean `CMPxxRW`/`CMPxxVW` (ISA v3 D2/D3); the fused branch's W predicates (`fbr`/`fbri`/`fbrv` cc 5-7, 13-15) are assembler-only so far |
 | Immediates | each class 2/3 op exists with a sign- and a zero-extended imm32 (SGN bit); isel picks the one that holds the constant: `SETR`/`SETRU` (MOV), `ADDI`/`ADDV`/`MINUSV`, `ANDI`/`ANDV` (and OR/XOR), `CMPRV`/`CMPRVU`; boolean compares (`setcc` as a value) `CMPxxV` with a simm32; `SETR64` only for a value neither reaches.  An add of -255..-129 (a frame address too) is `MINUSV` of the negation, whose short form reaches it |
 | Multiply by a constant | `MULV` (simm32; EX-serialised, `WriteMul`); a constant 2^N+1, 2^N-1 or 1-2^N that is not a simm32 becomes `SHLV` + `ADDR`/`SUBR` (`decomposeMulByConstant`); for a simm32 one only with `-klausscpu-mul-imm-shift-add` (one more instruction than `MULV`, fewer cycles) |
 | Addresses | 32-bit, zero-extended in a register: `SETRU sym` (static), `LEAPC` (PIC); `sym+off` is folded only for `off` in [0, 2^31), other offsets are a separate add so a negative S + off stays negative; `R_KLAUSSCPU_ABS64` data is the exact 64-bit S + A (lld) |
@@ -91,11 +95,39 @@ printer and disassembler show `setru` there; likewise `addi`/`andi`/`ori`/
 The disassembler is `-gen-disassembler` with one table per width
 (`--specialize-decoders-per-bitwidth`: 32/64/96 bits); `getInstruction` picks
 the table from LEN.  Each operand type names its `DecoderMethod`: the CPU's
-SGN rule decides signed vs unsigned imm32, PC-relative operands decode to the
-byte displacement, and the fused-branch condition rejects PRED 5..7 (which
-the CPU traps on).  LEN=00 words (retired v1 opcodes, lld's fill word, data)
-do not decode.  The ISA v1 LED / 7-segment / RGB opcodes are not defined:
-those peripherals, like the UART, are memory-mapped.
+SGN rule decides signed vs unsigned imm32 and PC-relative operands decode to
+the byte displacement.  LEN=00 words (retired v1 opcodes, lld's fill word,
+data) do not decode.  The ISA v1 LED / 7-segment / RGB opcodes are not
+defined: those peripherals, like the UART, are memory-mapped.
+
+The hw-proposals instructions (klaussCPU 3508f87, ISA map §8), as the
+assembler spells them:
+
+- `fbr rs1, rs2, cc, target` / `fbri rs1, simm4, cc, target` take every
+  `cc` = PRED | INV << 3 in 0..15: PRED 0 EQ, 1 LT, 2 LE, 3 ULT, 4 ULE (64
+  bits), 5 EQW, 6 LTW, 7 ULTW (the low 32 bits, as `cmprrw`); INV (8) gives
+  NE, GE, GT, UGE, UGT, NEW, GEW, UGEW.  `fbrv rs1, simm32, cc, target`
+  (`FBR_RV`, 2 words, `LEN=10 IMM=1`) compares with sext(imm32) from word 1,
+  any `cc`, the simm13 target still from the branch's own address.  klausscc
+  names them `BEQ`…`BUGTI`, `BEQW`…`BUGEWI` and `BEQV`…`BUGEWV`, and takes
+  `FBR`/`FBRI`/`FBRV` as here.
+- `di rd` (rd = the old interrupt-enable bit, then disable) and `ei rs`
+  (enable = rs[0]): `DI_I`/`EI_I`, `hasSideEffects`, no flags.  The bit is
+  separate from `INT_MASK`, saved in the IRQ frame's bit 43 (1 = disabled)
+  and restored by `iret`; `wait` still wakes while disabled.  Not atomic
+  against core 2.
+- The 1-word `CMPRVW_SH` (`cmprvw rs, simm8`), `MULV_SH` (`mulv rd, rs,
+  simm8`) and `MULUV_SH` (`muluv rd, rs, uimm8`) are CompressPats of
+  `CMPRVW_I`, `MULV` and the new 2-word `MULUV` (`muluv rd, rs, uimm32`,
+  0xA8000000: the unsigned multiply, assembler-only); each takes only the
+  values its own extension gives (a signed and an unsigned multiply set V
+  differently).  `LEAPC_SH` (`leapc rd, simm16`, ±32 KiB, the offset split
+  over word0[19:12] and [7:0]) compresses a literal that fits and every
+  symbol: `FK_KlaussCPU_PCREL16`, relaxed back to the 2-word `LEAPC` (and its
+  `R_KLAUSSCPU_PCREL32`) when the target is out of range or not resolved in
+  the same section, like the short branches.  Almost every `LEAPC` the
+  compiler emits names data in another section, so few compress (21 of
+  9447 in the -O1 corpus); the rest would need lld relaxation.
 
 ### Adding an instruction
 
@@ -157,8 +189,9 @@ liveness:
   INC/DEC, the shifts, NEG/NOT/ABS/extensions/POPCNT, BEXTR, MUL; not
   DIV/MOD, whose zero divisor writes only V).
 - `KlaussCPUFuseCmpBr` (pre-emit, default on): fuses a compare and its
-  conditional branch into the 1-word ISA v3 `FBR_RR`/`FBR_RI` (64-bit only:
-  FBR has no width bit, so `CMPRRW`/`CMPRVW` never fuse).  It scans back
+  conditional branch into the 1-word ISA v3 `FBR_RR`/`FBR_RI` (64-bit
+  compares only: it does not use the W predicates or `FBR_RV` yet, so
+  `CMPRRW`/`CMPRVW` never fuse).  It scans back
   from the branch to the nearest FLAGS writer, so PHI copies, constants and
   spills between the pair do not stop it; it gives up at a FLAGS reader, a
   redefined compare operand, a call or inline asm.  Range is checked per
@@ -174,7 +207,7 @@ liveness:
   the compare becomes `CMPRR` with the constant register), so the
   scheduler's register renaming cannot take the free register.  The
   instruction behind the branch (which a taken FBR squashes in EX) does not
-  matter: the oldest supported core (klaussCPU `9ad6614`, see the top of
+  matter: every supported core (klaussCPU `9ad6614` and later, see the top of
   this file) resets the divider and gates the LCD strobe in that squash, so
   a branch fuses in front of a divide or an LCD write too
   (`fuse-cmp-br-div-shadow.ll`/`.mir`), and the assembler accepts either
@@ -825,8 +858,8 @@ llvm/lib/Target/KlaussCPU/
 │   ├── KlaussCPUMCAsmInfo.h/.cpp  MCAsmInfoELF subclass
 │   ├── KlaussCPUInstPrinter.h/.cpp printInst / printOperand; uses GenAsmWriter.inc
 │   ├── KlaussCPUMCCodeEmitter.cpp  generated getBinaryCodeForInstr (encodings = .td Inst fields) + fixup operand hooks
-│   ├── KlaussCPUFixupKinds.h   ABS32, PCREL32, PCREL18 (short branch), PCREL13 (FBR), CALL18 (short call, tail jump)
-│   ├── KlaussCPUAsmBackend.cpp fixups, ELF relocations, short-branch / short-call relaxation, NOP fill
+│   ├── KlaussCPUFixupKinds.h   ABS32, PCREL32, PCREL18 (short branch), PCREL13 (FBR), CALL18 (short call, tail jump), PCREL16 (LEAPC.S)
+│   ├── KlaussCPUAsmBackend.cpp fixups, ELF relocations, short-branch / short-call / LEAPC.S relaxation, NOP fill
 │   └── KlaussCPUMCTargetDesc.h/.cpp  LLVMInitializeKlaussCPUTargetMC; MCInstrAnalysis; generated CompressPat compress/uncompress; ELF target streamer (ABI version in e_flags)
 ├── TargetInfo/
 │   ├── KlaussCPUTargetInfo.h   declares getTheKlaussCPUTarget()
@@ -941,17 +974,19 @@ the `klausscpu-runtime` repo root; see its READMEs for build/run detail:
 
 ## Known issues
 
-- **A misaligned access through a pointer that claims natural alignment reads
-  or writes the aligned-down address.**  Every 16/32-bit load and store except
-  `MEMGET32` (`[r]` 32-bit, `U_LOAD32`) clears the low address bits in hardware
-  (`pipeline_core.sv` U_LOAD issue address / store byte enables).  That is UB in
-  C (`*(uint32_t *)(buf + 1)`), and the backend only splits (or, for a
-  32/64-bit load, makes `MEMGET32`) accesses whose IR alignment is below
-  natural (`allowsMisalignedMemoryAccesses`).  The runtime's `test_unaligned`
-  checks the loads at every offset on the board.  Since
-  `r + r` selects `LDIDX32R` instead of `ADDR` + `MEMGET32`, a type-punned
-  `*(uint32_t *)(buf + i)` with odd `i` no longer gets away with it; `buf + 4`
-  (`LDIDX32`) never did.  Use `memcpy` or a packed struct for unaligned data.
+- **A misaligned access through a pointer that claims natural alignment
+  traps.**  Every 16-bit load or store at an odd address and 32-bit one not
+  at a multiple of 4, except `MEMGET32` (`[r]` 32-bit, `U_LOAD32`), stops the
+  CPU before it happens (klaussCPU 3508f87 `ex_misal`: park kind 5, crash
+  dump `ERR=0A` with the call chain; klausscc's emulator stops with
+  `Misaligned(EA)`, gdbserver reports SIGBUS).  Older cores used the
+  aligned-down address silently.  That is UB in C (`*(uint32_t *)(buf + 1)`),
+  and the backend only splits (or, for a 32/64-bit load, makes `MEMGET32`)
+  accesses whose IR alignment is below natural
+  (`allowsMisalignedMemoryAccesses`, unchanged: the hardware does not do
+  misaligned accesses, it traps them).  The runtime's `test_unaligned` checks
+  the loads at every offset on the board.  Use `memcpy` or a packed struct
+  for unaligned data.
 - **`ldidx64`/`stidx64` mean a different encoding in klausscc.**  LLVM's
   `ldidx64`/`stidx64` (A=1, address `& ~7`) are klausscc's
   `LDIDX64A`/`STIDX64A`; klausscc's `LDIDX64`/`STIDX64` are LLVM's
@@ -963,9 +998,12 @@ the `klausscpu-runtime` repo root; see its READMEs for build/run detail:
   operand for operand over the bare-metal corpus, including a separate
   `rs1` on the in-place forms (`addv r1, r2, 5` is `ADDV B C 5`).  Other
   spellings differ without changing meaning: `ldidx8s` is `LDIDX8_S`
-  (`LDIDX8S` also accepted), `fbr`/`fbri` are `BEQ`…`BUGTI`, `lcd` is
-  `LCDRST`, and klausscc names the 1-word forms LLVM picks by value with a
-  `.S` suffix (`jmpzrel` near is `JMPZ.S`, the short `callrel` `CALL.S`).
+  (`LDIDX8S` also accepted), `fbr`/`fbri`/`fbrv` are `BEQ`…`BUGEWV`, `lcd`
+  is `LCDRST`, and klausscc names the 1-word forms LLVM picks by value with
+  a `.S` suffix (`jmpzrel` near is `JMPZ.S`, the short `callrel` `CALL.S`,
+  `cmprvw`/`mulv`/`muluv`/`leapc` `CMPRVW.S`/`MULV.S`/`MULUV.S`/`LEAPC.S`).
+  klausscc's 2-word `LEAPC` lists the raw displacement, its `LEAPC.S` the
+  target as `PC±n`.
 - **A data initializer `sym + A` with `A` outside int32 does not assemble.**
   `uintptr_t q = (uintptr_t)&arr + 0x80000000UL;` at file scope emits
   `.quad arr+2147483648`, which MC rejects with `relocation addend out of

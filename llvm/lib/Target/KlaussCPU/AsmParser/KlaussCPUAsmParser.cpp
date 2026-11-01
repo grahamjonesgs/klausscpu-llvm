@@ -124,10 +124,10 @@ public:
     return Val >= Lo && Val <= Hi && Val % Scale == 0;
   }
 
-  // Fused-branch condition PRED | INV << 3; PRED 5..7 trap on the CPU.
+  // Fused-branch condition PRED | INV << 3 (PRED 5..7 are the W compares).
   bool isFBRCond() const {
     int64_t Val;
-    return isConstantImm(Val) && isUInt<4>(Val) && (Val & 7) <= 4;
+    return isConstantImm(Val) && isUInt<4>(Val);
   }
 
   MCRegister getReg() const override {

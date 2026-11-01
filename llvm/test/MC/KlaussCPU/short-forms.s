@@ -24,10 +24,14 @@
 # RELAXALL:      0: 00 51 d0 4b setr r1, 5
 # RELAXALL-NEXT: 4: 20 81 2c 48 addv r1, r2, 200
 # RELAXALL-NEXT: 8: 20 01 28 59 ldidx16 r1, r2, -256
-# RELAXALL-NEXT: c: 00 00 08 a1 18 00 00 00 jmpzrel 0x24 <foo>
-# RELAXALL-NEXT: 14: 00 00 00 a1 10 00 00 00 jmprel 0x24 <foo>
-# RELAXALL-NEXT: 1c: 00 00 18 a0 00 00 00 00 jmpo
-# RELAXALL-NEXT: R_KLAUSSCPU_ABS32 .text+0x24
+# RELAXALL-NEXT: c: 10 d0 5f 4c cmprvw r1, -3
+# RELAXALL-NEXT: 10: 10 a2 8f 6b mulv r2, r1, -6
+# RELAXALL-NEXT: 14: 10 a2 0f 6b muluv r2, r1, 250
+# RELAXALL-NEXT: 18: 34 21 a1 4b leapc r1, 0x124c
+# RELAXALL-NEXT: 1c: 00 00 08 a1 18 00 00 00 jmpzrel 0x34 <foo>
+# RELAXALL-NEXT: 24: 00 00 00 a1 10 00 00 00 jmprel 0x34 <foo>
+# RELAXALL-NEXT: 2c: 00 00 18 a0 00 00 00 00 jmpo
+# RELAXALL-NEXT: R_KLAUSSCPU_ABS32 .text+0x34
 
 .ifndef RELAX
 # SHIMM:   setr r1, 5 # encoding: [0x00,0x51,0xd0,0x4b]
@@ -39,6 +43,19 @@ addv r1, r2, 200
 # SHIMM:   ldidx16 r1, r2, -256 # encoding: [0x20,0x01,0x28,0x59]
 # LONGIMM: ldidx16 r1, r2, -256 # encoding: [0x20,0x01,0x20,0x99,0x00,0xff,0xff,0xff]
 ldidx16 r1, r2, -256
+# The hw-proposals 9 short forms (klaussCPU ISA_ENCODING_V2_MAP §8.3).
+# SHIMM:   cmprvw r1, -3 # encoding: [0x10,0xd0,0x5f,0x4c]
+# LONGIMM: cmprvw r1, -3 # encoding: [0x10,0x00,0x18,0x8c,0xfd,0xff,0xff,0xff]
+cmprvw r1, -3
+# SHIMM:   mulv r2, r1, -6 # encoding: [0x10,0xa2,0x8f,0x6b]
+# LONGIMM: mulv r2, r1, -6 # encoding: [0x10,0x02,0x80,0xa8,0xfa,0xff,0xff,0xff]
+mulv r2, r1, -6
+# SHIMM:   muluv r2, r1, 250 # encoding: [0x10,0xa2,0x0f,0x6b]
+# LONGIMM: muluv r2, r1, 250 # encoding: [0x10,0x02,0x00,0xa8,0xfa,0x00,0x00,0x00]
+muluv r2, r1, 250
+# SHIMM:   leapc r1, 4660 # encoding: [0x34,0x21,0xa1,0x4b]
+# LONGIMM: leapc r1, 4660 # encoding: [0x00,0x01,0x80,0x8b,0x34,0x12,0x00,0x00]
+leapc r1, 4660
 
 # A branch to a symbol starts short: the absolute and the PC-relative
 # spelling alike.  JMPO has no PC-relative 2-word form and prints as jmpo.

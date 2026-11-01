@@ -54,14 +54,14 @@
 
 ; One row per state: frameless up to the ENTER, framed after it to the end
 ; (the arm after the first LEAVERET is entered framed).
-; FRAME:      FDE cie=00000000 pc=00000000...0000005c
+; FRAME:      FDE cie=00000000 pc=00000000...00000058
 ; FRAME:      0x0: CFA=SP+8: RA=[CFA-8]
-; FRAME-NEXT: 0x18: CFA=R15+16: R15=[CFA-16], RA=[CFA-8]
-; FRAME-NEXT: 0x1c: CFA=R15+16: R4=[CFA-24], R15=[CFA-16], RA=[CFA-8]
+; FRAME-NEXT: 0x14: CFA=R15+16: R15=[CFA-16], RA=[CFA-8]
+; FRAME-NEXT: 0x18: CFA=R15+16: R4=[CFA-24], R15=[CFA-16], RA=[CFA-8]
 ; FRAME-EMPTY:
-; FRAME-NEXT: FDE cie=00000000 pc=0000005c...00000098
-; FRAME:      0x5c: CFA=SP+8: RA=[CFA-8]
-; FRAME-NEXT: 0x74: CFA=R15+16: R15=[CFA-16], RA=[CFA-8]
+; FRAME-NEXT: FDE cie=00000000 pc=00000058...0000008c
+; FRAME:      0x58: CFA=SP+8: RA=[CFA-8]
+; FRAME-NEXT: 0x6c: CFA=R15+16: R15=[CFA-16], RA=[CFA-8]
 ; FRAME-EMPTY:
 
 ; PUSH-LABEL: nocsr:

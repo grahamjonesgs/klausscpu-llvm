@@ -9,6 +9,8 @@
 // FK_KlaussCPU_PCREL18 / FK_KlaussCPU_CALL18 — simm18 word displacement in
 //                         word0[17:0] of a short branch / call.
 // FK_KlaussCPU_PCREL13 — simm13 word displacement in word0[20:8] (FBR).
+// FK_KlaussCPU_PCREL16 — simm16 byte displacement in word0[19:12] (high
+//                         byte) and word0[7:0] (low byte) of a LEAPC.S.
 //
 //===----------------------------------------------------------------------===//
 
@@ -38,7 +40,12 @@ enum Fixups {
   // global or weak callee in the same section too, R_KLAUSSCPU_CALL18,
   // which lld resolves, through a thunk when the callee is out of range.
   FK_KlaussCPU_CALL18,
-  NumTargetFixupKinds = FK_KlaussCPU_CALL18 + 1 - FirstTargetFixupKind,
+  // hw-proposals 9 LEAPC.S: simm16 byte displacement, high byte in
+  // word0[19:12], low byte in word0[7:0], target = PC + disp.  Resolved at
+  // assembly time only, like PCREL18: a LEAPC.S whose target is out of range
+  // or not in its section is relaxed to the 2-word LEAPC (PCREL32).
+  FK_KlaussCPU_PCREL16,
+  NumTargetFixupKinds = FK_KlaussCPU_PCREL16 + 1 - FirstTargetFixupKind,
 };
 
 } // namespace KlaussCPU

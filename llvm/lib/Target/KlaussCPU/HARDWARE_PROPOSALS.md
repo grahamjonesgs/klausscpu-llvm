@@ -19,9 +19,16 @@ The ranked list is in §1.  Each proposal gives its evidence, the estimated gain
 work it would need.
 
 Status (2026-10-29): klaussCPU `9ad6614` did §3 items 1 and 5, and fixed a
-third squash bug (§3 item 6).  The toolchain now requires `9ad6614` or later.
-The measurements below are from `db0f315`; `9ad6614` did not change the
-timing of normal code.
+third squash bug (§3 item 6).  The measurements below are from `db0f315`;
+`9ad6614` did not change the timing of normal code.
+
+Status (2026-11-01): klaussCPU `3508f87` (the hw-proposals merge, answered
+in its `HARDWARE_PROPOSALS_RESPONSE.md`) did proposals 1c, 3, 6, 7a, 8 (as a
+trap) and 9 and §3.3/§3.4.  The toolchain now requires `3508f87` or later:
+the assembler and klausscc know every new encoding, and the 1-word CMPRVW /
+MULV / LEAPC forms are used wherever they fit (LEAPC.S only for a target in
+the same section, OPEN_ITEMS.md item 23).  Fusing W and imm32 compares, DI/EI
+in the runtime and the posted-store schedule are the next steps.
 
 ## 0. Board ≠ emulator divergences: none
 

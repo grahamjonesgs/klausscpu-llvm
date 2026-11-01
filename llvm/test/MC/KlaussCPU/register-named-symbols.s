@@ -26,8 +26,8 @@
 # CHECK: setr r12, flags            # encoding: [0x00,0x0c,0xd0,0x8b,A,A,A,A]
 # CHECK-NEXT:                       #   fixup A - offset: 4, value: flags, kind: FK_KlaussCPU_ABS32
         setr    r12, flags
-# CHECK: leapc r9, K                # encoding: [0x00,0x09,0x80,0x8b,A,A,A,A]
-# CHECK-NEXT:                       #   fixup A - offset: 4, value: K, kind: FK_KlaussCPU_PCREL32
+# CHECK: leapc r9, K                # encoding: [A,0x09'A',0b1010AAAA,0x4b]
+# CHECK-NEXT:                       #   fixup A - offset: 0, value: K, kind: FK_KlaussCPU_PCREL16
         leapc   r9, K
 # A register name that starts a longer expression is the symbol.
 # CHECK: setr r1, ra+8              # encoding: [0x00,0x01,0xd0,0x8b,A,A,A,A]

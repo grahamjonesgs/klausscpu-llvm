@@ -46,40 +46,42 @@ func:
 # CHECK-NEXT:  48: callrel 0x48
 # CHECK-NEXT:        0000004c: R_KLAUSSCPU_PCREL32 ext
         callrel ext
-## Resolved in-section: no relocation, field = target - instruction address.
-# CHECK-NEXT:  50: leapc r2, 0x60
-# CHECK-NEXT:  58: callrel 0x60 <loc>
+## Resolved in-section: no relocation, field = target - instruction address
+## (a LEAPC that reaches it is the 1-word LEAPC.S, whose simm16 is split
+## over word0[19:12] and [7:0]).
+# CHECK-NEXT:  50: leapc r2, 0x5c
+# CHECK-NEXT:  54: callrel 0x5c <loc>
 # CHECK-EMPTY:
 # CHECK-NEXT:  <loc>:
-# CHECK-NEXT:  60: leapc r3, 0x0
-# CHECK-NEXT:  68: ret
+# CHECK-NEXT:  5c: leapc r3, 0x0
+# CHECK-NEXT:  60: ret
         leapc   r2, loc
         callrel loc
 loc:
         leapc   r3, func
         ret
 ## Any spelling that names the symbol is a target, not only a leading name.
-# CHECK-NEXT:  6c: callrel 0x6c
-# CHECK-NEXT:        00000070: R_KLAUSSCPU_PCREL32 *ABS*+0x1000
+# CHECK-NEXT:  64: callrel 0x64
+# CHECK-NEXT:        00000068: R_KLAUSSCPU_PCREL32 *ABS*+0x1000
         callrel (BEFORE)
-# CHECK-NEXT:  74: callrel 0x74
-# CHECK-NEXT:        00000078: R_KLAUSSCPU_PCREL32 *ABS*+0x1004
+# CHECK-NEXT:  6c: callrel 0x6c
+# CHECK-NEXT:        00000070: R_KLAUSSCPU_PCREL32 *ABS*+0x1004
         callrel 4+BEFORE
-# CHECK-NEXT:  7c: leapc r4, 0x7c
-# CHECK-NEXT:        00000080: R_KLAUSSCPU_PCREL32 *ABS*-0x1000
+# CHECK-NEXT:  74: leapc r4, 0x74
+# CHECK-NEXT:        00000078: R_KLAUSSCPU_PCREL32 *ABS*-0x1000
         leapc   r4, -BEFORE
 ## A redefined symbol keeps its value at each use.
         .set REDEF, 0x3000
-# CHECK-NEXT:  84: callrel 0x84
-# CHECK-NEXT:        00000088: R_KLAUSSCPU_PCREL32 *ABS*+0x3000
+# CHECK-NEXT:  7c: callrel 0x7c
+# CHECK-NEXT:        00000080: R_KLAUSSCPU_PCREL32 *ABS*+0x3000
         callrel REDEF
         .set REDEF, 0x4000
-# CHECK-NEXT:  8c: callrel 0x8c
-# CHECK-NEXT:        00000090: R_KLAUSSCPU_PCREL32 *ABS*+0x4000
+# CHECK-NEXT:  84: callrel 0x84
+# CHECK-NEXT:        00000088: R_KLAUSSCPU_PCREL32 *ABS*+0x4000
         callrel REDEF
 ## A bare number is the displacement.
-# CHECK-NEXT:  94: callrel 0xb4
-# CHECK-NEXT:  9c: leapc r5, 0x9c
+# CHECK-NEXT:  8c: callrel 0xac
+# CHECK-NEXT:  94: leapc r5, 0x94
         callrel 0x20
         leapc   r5, 0
 # CHECK-NOT: {{.}}
@@ -88,6 +90,6 @@ loc:
 
 # BYTES:      0: 00 01 80 8b 00 00 00 00
 # BYTES:      8: 00 00 00 a3 00 00 00 00
-# BYTES:     50: 00 02 80 8b 10 00 00 00
-# BYTES-NEXT: 58: 00 00 00 a3 08 00 00 00
-# BYTES:      60: 00 03 80 8b a0 ff ff ff
+# BYTES:     50: 0c 02 a0 4b
+# BYTES-NEXT: 54: 00 00 00 a3 08 00 00 00
+# BYTES:      5c: a4 f3 af 4b

@@ -6,8 +6,8 @@
 # Every operand kind whose EncoderMethod emits a fixup for a symbolic value
 # (KlaussCPUInstrInfo.td operand types, KlaussCPUMCCodeEmitter): the field is
 # zero and the fixup has the right kind and byte offset.  ABS32/PCREL32 cover
-# word 1 (offset 4); the short-branch PCREL18, short-call CALL18 and
-# fused-branch PCREL13 fields are in word 0 (offset 0).  A symbol keeps setr
+# word 1 (offset 4); the short-branch PCREL18, short-call CALL18,
+# fused-branch PCREL13 and LEAPC.S PCREL16 fields are in word 0 (offset 0).  A symbol keeps setr
 # and the absolute loads/stores long.
 
 ## simm32_abs (SETR), uimm32_abs (MEMREADR, MEMSETR, LDABSn, STABSn) ->
@@ -49,9 +49,14 @@
 ## PCRelCallTarget32 / pcrel_simm32 -> FK_KlaussCPU_PCREL32 at 4
 # CHECK:      callrel 16 # encoding: [0x00,0x00,0x00,0xa3,0x10,0x00,0x00,0x00]
         callrel  16
-# CHECK:      leapc r4, sym # encoding: [0x00,0x04,0x80,0x8b,A,A,A,A]
-# CHECK-NEXT: fixup A - offset: 4, value: sym, kind: FK_KlaussCPU_PCREL32
+# LONG:       leapc r4, sym # encoding: [0x00,0x04,0x80,0x8b,A,A,A,A]
+# LONG-NEXT:  fixup A - offset: 4, value: sym, kind: FK_KlaussCPU_PCREL32
         leapc    r4, sym
+
+## pcrel_simm16 -> FK_KlaussCPU_PCREL16 at 0: a LEAPC to a symbol starts as
+## LEAPC.S (word0[19:12] and [7:0]; the asm backend relaxes it to LEAPC).
+# SHORT:      leapc r4, sym # encoding: [A,0x04'A',0b1010AAAA,0x4b]
+# SHORT-NEXT: fixup A - offset: 0, value: sym, kind: FK_KlaussCPU_PCREL16
 
 ## Branches to a symbol start as the short form (PCRelTarget18,
 ## FK_KlaussCPU_PCREL18 at 0); without short forms they keep BrTarget32
@@ -84,3 +89,6 @@
 # CHECK:      fbri r3, -2, 4, sym # encoding: [0x3e,A,0b001AAAAA,0x76]
 # CHECK-NEXT: fixup A - offset: 0, value: sym, kind: FK_KlaussCPU_PCREL13
         fbri     r3, -2, 4, sym
+# CHECK:      fbrv r3, -100000, 13, sym # encoding: [0x30,A,0b111AAAAA,0xb6,0x60,0x79,0xfe,0xff]
+# CHECK-NEXT: fixup A - offset: 0, value: sym, kind: FK_KlaussCPU_PCREL13
+        fbrv     r3, -100000, 13, sym

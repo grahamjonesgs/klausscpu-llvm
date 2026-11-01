@@ -8,7 +8,7 @@
 // opcodes, data) does not decode.
 //
 // PC-relative branch operands (short A1 branches, fused compare-and-branch,
-// the 2-word *REL forms, LEAPC) decode to the byte displacement from the
+// the 2-word *REL forms, LEAPC and LEAPC.S) decode to the byte displacement from the
 // instruction's address, which is what the encoder takes for an immediate
 // operand; KlaussCPUInstPrinter / KlaussCPUMCInstrAnalysis add the address
 // back when printing or following a branch.
@@ -91,18 +91,6 @@ static DecodeStatus decodeSImmOperand(MCInst &Inst, uint64_t Imm,
                                       const MCDisassembler *Decoder) {
   assert(isUInt<N>(Imm) && "Invalid immediate");
   Inst.addOperand(MCOperand::createImm(SignExtend64<N>(Imm)));
-  return MCDisassembler::Success;
-}
-
-// Fused-branch condition PRED | INV << 3: the CPU implements PRED 0..4
-// (EQ, LT, LE, ULT, ULE) and traps on 5..7.
-static DecodeStatus decodeFBRCondOperand(MCInst &Inst, uint64_t Imm,
-                                         int64_t Address,
-                                         const MCDisassembler *Decoder) {
-  assert(isUInt<4>(Imm) && "Invalid immediate");
-  if ((Imm & 7) > 4)
-    return MCDisassembler::Fail;
-  Inst.addOperand(MCOperand::createImm(Imm));
   return MCDisassembler::Success;
 }
 

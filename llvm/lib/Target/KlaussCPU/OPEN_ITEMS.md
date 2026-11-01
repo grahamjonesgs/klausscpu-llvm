@@ -1,8 +1,9 @@
 # KlaussCPU toolchain: open items
 
-Status as of 2026-10-29: klausscpu-llvm `main` 1691420aeb82, klausscpu-runtime
-`main` 7873d57, klausscc `master` 4c9c464, and the board on klaussCPU
-`b383104` (the 9ad6614 squash fixes and the rebuilt netboot ROM).
+Status as of 2026-11-01: klausscpu-llvm `main` 51941e3ae9fc plus the phase 8
+encodings step, klausscpu-runtime `main` 7873d57, klausscc `master` 4c9c464,
+and the board on klaussCPU `3508f87` (master with the hw-proposals and VGA
+merges; the `0de5b21` bitstream, in QSPI since 2026-11-01).
 
 Nothing here is a known miscompile.  The list comes from two sources:
 
@@ -79,14 +80,15 @@ The remainders are listed below with their item numbers.
 | 17 | picolibc has no `machine/setjmp.h` for KlaussCPU; the packed-struct Csmith run (with the target alignment screen) is not automated in `tools/validate` | small | The cloud campaign ran it by hand with a wrapper clang; no failures. |
 | 18 | Zephyr's `z_interrupt_stacks` (CONFIG_ISR_STACK_SIZE=2048) is allocated but unused | small | The timer ISR runs on its own `_kernel_stack`, so the thread analyzer reports a false "ISR0 100%" and 2 KiB is wasted. Switch the ISR to `z_interrupt_stacks`, or shrink the option. |
 | 19 | The assembler has no RESET or LCDCMDR; SETR64's high half prints signed in llvm-objdump and unsigned in `llvm-mc -show-encoding`; the optional `shouldReduceLoadWidth` re-measure (items 17, 40) | trivial | Cosmetic, plus full coverage of the ISA map. |
+| 23 | `LEAPC.S` reaches only targets in the instruction's own section | medium | The assembler resolves (and keeps short) only a same-section target; almost every `leapc` the compiler emits names `.rodata`/`.data`, so 21 of 9447 compress in the -O1 corpus, where HARDWARE_PROPOSALS.md §2.9 counted 4447 within ±32 KiB after linking.  Getting those needs an `R_KLAUSSCPU_PCREL16` and lld relaxation (shrinking `.text`, as RISC-V's linker relaxation does), or a PIC model that keeps `.rodata` next to the code. |
 
 ## For the hardware (klaussCPU) session
 
 | # | Item | Complexity | Notes |
 |---|---|---|---|
-| 20 | CPU_ARCHITECTURE.md drift (items 34, 37) | trivial | §5 gives the class-A SGN as bit [20], but the RTL uses op[23]. The §11 pointer row says 4 bytes / MEMGET32, but pointers are 8 bytes / LDIDX64A. Add a §14 row for the ~4-cycle blocking D-cache hit. The intro promises a calling convention: point to klausscpu-llvm ABI.md. ISA_ENCODING_V2_MAP.md's branch table leaves a gap where JMPOREL/JMPNOREL are. |
-| 21 | VGA RTL merge | the RTL session's call | The runtime merged the VGA software (runtime 7873d57). It detects the controller and switches itself off on a bitstream without VGA. The controller exists only on klaussCPU's `vga-output` branch. Once it is merged and loaded, test_vga, test_vga_scan, VGA doom and the zero-copy path need a board run with the current toolchain. |
-| 22 | Performance proposals | the user's call | The ranked list is in HARDWARE_PROPOSALS.md §1: pipelined D-cache hit about −25% CoreMark, fetch-stage branch prediction about −16%, load hit 4→3 cycles, store buffer, and more. |
+| 20 | CPU_ARCHITECTURE.md drift (items 34, 37) | trivial | Still open at 3508f87, which updated only §13.1's interrupt sources. §5 gives the class-A SGN as bit [20], but the RTL uses op[23]. The §11 pointer row says 4 bytes / MEMGET32, but pointers are 8 bytes / LDIDX64A. Add a §14 row for the ~4-cycle blocking D-cache hit. The intro promises a calling convention: point to klausscpu-llvm ABI.md. ISA_ENCODING_V2_MAP.md's branch table leaves a gap where JMPOREL/JMPNOREL are. New with 3508f87: §8.3 still says a misaligned access "never faults" and uses the aligned slot (it traps, ERR=0A), §13.1 says IRET is the only interrupt opcode and gives the frame without bit 43 (DI/EI), and ISA_ENCODING_V2_MAP §8.3 gives LEAPC.S as `[20]`=0 while the RTL also decodes `[20]`=1 with `[3:0]`=0 (its generic short path; harmless, nothing emits it). |
+| 21 | VGA board run | small | The VGA controller is in klaussCPU master since 3508f87 (merged in 8e9a477) and in the QSPI bitstream. Left: test_vga, test_vga_scan, VGA doom and the zero-copy path need a board run with the current toolchain; with source 3 (vsync) live, item 3 matters for Zephyr. |
+| 22 | Performance proposals | the user's call | 3508f87 did HARDWARE_PROPOSALS.md items 1c (posted stores), 3 (no line-crossing bubble), 6 (FBR W / imm32), 7a (DI/EI), 8 (as a trap) and 9 (short CMPRVW/MULV/LEAPC); 2b (EQ/NE FBR in EX) is built but off (no timing closure). The toolchain knows all their encodings; FuseCmpBr does not use FBR W / imm32 yet, the runtime's atomics and RTOS locks still use INT_MASK rather than DI/EI, and the schedule model does not know posted stores. Not done: 1a pipelined D-cache hit (about −25% CoreMark), 1b load hit 4→3, 2a branch prediction (start with a return-address stack, HARDWARE_PROPOSALS_RESPONSE.md §5.2), 4 non-blocking MUL (§5.1 suggests MUL stop writing flags), 5 EX→EX forwarding. |
 
 ## Housekeeping
 

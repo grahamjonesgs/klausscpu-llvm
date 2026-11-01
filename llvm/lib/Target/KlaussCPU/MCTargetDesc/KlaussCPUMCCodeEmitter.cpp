@@ -88,6 +88,12 @@ public:
     getImmOrFixup(MI, OpNo, Op, Fixups, 0, KlaussCPU::FK_KlaussCPU_PCREL13,
                   /*PCRel=*/true);
   }
+  void getPCRel16OpValue(const MCInst &MI, unsigned OpNo, APInt &Op,
+                         SmallVectorImpl<MCFixup> &Fixups,
+                         const MCSubtargetInfo &STI) const {
+    getImmOrFixup(MI, OpNo, Op, Fixups, 0, KlaussCPU::FK_KlaussCPU_PCREL16,
+                  /*PCRel=*/true);
+  }
 
 private:
   // Offset is the byte offset of the fixup within the instruction: 4 for a
