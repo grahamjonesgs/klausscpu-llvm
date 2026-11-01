@@ -76,6 +76,10 @@ STATISTIC(NumNops, "NOPs inserted to avoid a fetch-line crossing");
 
 namespace {
 
+// At most this many NOPs per function: KlaussCPUFuseCmpBr checks a fused
+// branch's range before this pass runs and leaves 384 bytes of margin for it.
+constexpr unsigned MaxFetchLayoutNops = 96;
+
 class KlaussCPUFetchLayout : public MachineFunctionPass {
 public:
   static char ID;
@@ -100,6 +104,8 @@ private:
   const KlaussCPUInstrInfo *TII = nullptr;
   const TargetRegisterInfo *TRI = nullptr;
   bool AllowNop = false;
+  // NOPs this function may still get (see MaxFetchLayoutNops).
+  unsigned NopsLeft = 0;
 
   // One loop being laid out: the layout range from its first block to its
   // last, with the blocks whose cost counts (the loop's own, not an inner
@@ -431,7 +437,7 @@ bool KlaussCPUFetchLayout::processLoop(MachineLoop *L, MachineLoopInfo &MLI,
               BestA = A;
             }
           }
-        if (AllowNop && TII->getInstSizeInBytes(*X) >= 8) {
+        if (AllowNop && NopsLeft && TII->getInstSizeInBytes(*X) >= 8) {
           Action A{X, 0, 0};
           MachineBasicBlock::iterator Orig;
           applyMove(A, Orig, TII, Indep);
@@ -454,8 +460,10 @@ bool KlaussCPUFetchLayout::processLoop(MachineLoop *L, MachineLoopInfo &MLI,
                       << *BestA.X << "  cost " << Base << " -> " << Best << "\n");
     if (BestA.Dir)
       ++NumMoves;
-    else
+    else {
       ++NumNops;
+      --NopsLeft;
+    }
     Changed = true;
   }
   return Changed;
@@ -467,6 +475,7 @@ bool KlaussCPUFetchLayout::runOnMachineFunction(MachineFunction &MF) {
   TII = static_cast<const KlaussCPUInstrInfo *>(MF.getSubtarget().getInstrInfo());
   TRI = MF.getSubtarget().getRegisterInfo();
   AllowNop = FetchLayoutLevel >= 2 && !MF.getFunction().hasOptSize();
+  NopsLeft = MaxFetchLayoutNops;
   auto &MLI = getAnalysis<MachineLoopInfoWrapperPass>().getLI();
   auto &MBFI = getAnalysis<MachineBlockFrequencyInfoWrapperPass>().getMBFI();
   bool Changed = false;
