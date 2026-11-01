@@ -27,9 +27,9 @@
 //     (it costs a cycle per iteration, so it has to save more than one).
 //
 // A change is made only if the model's cost strictly drops.  The pass never
-// moves a terminator, a CFI or debug instruction; debug instructions keep
-// their places (a move that would change the value one of them describes is
-// refused), so -g changes nothing.
+// moves a terminator, a CFI or debug instruction; debug instructions never
+// influence a decision (so -g changes nothing); a debug instruction that
+// reads a register the moved instruction writes is moved with it.
 //
 //===----------------------------------------------------------------------===//
 
@@ -272,20 +272,26 @@ struct Action {
 };
 } // namespace
 
-// Does a debug instruction in [A, B) read a register MI writes?
-static bool debugReadsDefOf(MachineBasicBlock::iterator A,
-                            MachineBasicBlock::iterator B,
-                            const MachineInstr &MI) {
+// Debug instructions in [A, B) that read a register MI writes.  They must stay
+// on the same side of MI as before, so they move with it (after the final
+// move only: scoring ignores debug instructions, which keeps -g from changing
+// any decision).
+static void collectDebugReadingDefOf(MachineBasicBlock::iterator A,
+                                     MachineBasicBlock::iterator B,
+                                     const MachineInstr &MI,
+                                     SmallVectorImpl<MachineInstr *> &Out) {
   for (auto I = A; I != B; ++I) {
     if (!I->isDebugInstr())
       continue;
+    bool Hit = false;
     for (const MachineOperand &DO : I->operands())
       if (DO.isReg() && DO.getReg())
         for (const MachineOperand &MO : MI.operands())
           if (MO.isReg() && MO.isDef() && MO.getReg() == DO.getReg())
-            return true;
+            Hit = true;
+    if (Hit)
+      Out.push_back(&*I);
   }
-  return false;
 }
 
 // Apply an action (the instruction is not moved when it cannot: false).
@@ -294,7 +300,8 @@ static bool applyMove(const Action &A, MachineBasicBlock::iterator &Orig,
                       const KlaussCPUInstrInfo *TII,
                       function_ref<bool(const MachineInstr &,
                                         const MachineInstr &)>
-                          Indep) {
+                          Indep,
+                      bool FixDebug = false) {
   MachineInstr &X = *A.X;
   MachineBasicBlock &MBB = *X.getParent();
   Orig = std::next(X.getIterator());
@@ -315,9 +322,14 @@ static bool applyMove(const Action &A, MachineBasicBlock::iterator &Orig,
       ++Crossed;
       Target = std::next(J);
     }
-    if (Crossed != A.Steps || debugReadsDefOf(std::next(It), Target, X))
+    if (Crossed != A.Steps)
       return false;
+    SmallVector<MachineInstr *, 2> Dbg;
+    if (FixDebug)
+      collectDebugReadingDefOf(std::next(It), Target, X, Dbg);
     MBB.splice(Target, &MBB, It);
+    for (MachineInstr *D : Dbg) // they followed X: keep it so
+      MBB.splice(Target, &MBB, D);
   } else {
     for (auto J = It; J != MBB.begin() && Crossed < A.Steps;) {
       --J;
@@ -328,9 +340,14 @@ static bool applyMove(const Action &A, MachineBasicBlock::iterator &Orig,
       ++Crossed;
       Target = J;
     }
-    if (Crossed != A.Steps || debugReadsDefOf(Target, It, X))
+    if (Crossed != A.Steps)
       return false;
+    SmallVector<MachineInstr *, 2> Dbg;
+    if (FixDebug)
+      collectDebugReadingDefOf(Target, It, X, Dbg);
     MBB.splice(Target, &MBB, It);
+    for (MachineInstr *D : Dbg) // they preceded X: keep it so
+      MBB.splice(It, &MBB, D);
   }
   return true;
 }
@@ -430,7 +447,7 @@ bool KlaussCPUFetchLayout::processLoop(MachineLoop *L, MachineLoopInfo &MLI,
     if (!BestA.X)
       break;
     MachineBasicBlock::iterator Orig;
-    bool Ok = applyMove(BestA, Orig, TII, Indep);
+    bool Ok = applyMove(BestA, Orig, TII, Indep, /*FixDebug=*/true);
     (void)Ok;
     assert(Ok && "a move that scored must apply");
     LLVM_DEBUG(dbgs() << "fetch-layout: " << (BestA.Dir ? "move " : "nop before ")

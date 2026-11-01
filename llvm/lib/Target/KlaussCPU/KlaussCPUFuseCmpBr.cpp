@@ -103,8 +103,9 @@ static cl::opt<bool> EnableFuseLoopConst(
 namespace {
 
 // simm13 words: the fused branch reaches PC-16384 .. PC+16380. The worst-case
-// layout below is an upper bound already; the margin is for anything added
-// after this pass.
+// layout below is an upper bound already; the margin (384 bytes) is for anything
+// added after this pass: KlaussCPUFetchLayout adds at most 12 four-byte NOPs per
+// loop, so a branch could only fail if it spanned eight or more such loops.
 constexpr int64_t MaxFusedDisp = 16000;
 // Size of an instruction whose length is unknown: no branch across it fuses.
 constexpr uint64_t UnboundedSize = uint64_t(1) << 20;
