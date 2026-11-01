@@ -177,6 +177,11 @@ static bool rewriteLoop(Loop &L) {
     return false;
   if (hasLongRecurrence(L, IV))
     return false;
+  // The nsw/nuw flag makes a wrapping add poison, so comparing the add's
+  // result is no less defined than comparing the old counter was.  This is
+  // the assumption: hand-written IR whose flagged add wraps on the exit
+  // iteration with the result otherwise unused would differ; InstCombine
+  // only produces the old form from a compare of the updated counter.
   bool Signed = Cmp->isSigned();
   if (!(Signed ? Inc->hasNoSignedWrap() : Inc->hasNoUnsignedWrap()))
     return false;

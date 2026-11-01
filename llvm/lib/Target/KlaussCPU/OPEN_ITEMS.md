@@ -51,6 +51,7 @@ The remainders are listed below with their item numbers.
 
 | # | Item | Complexity | Notes |
 |---|---|---|---|
+| 24 (residual) | Alignment NOPs for short fall-through loops | small | Only run-once loops lose their NOPs.  A 2-trip fall-through loop (Dhrystone's copy loop: 7.4M of 156.6M instructions at -O1) still pays them.  A threshold of 2 has not been run on the board (4 measured break-even), and padding that the fall-through path does not execute is not built. |
 
 ## Optional code-quality and size work (low priority)
 
