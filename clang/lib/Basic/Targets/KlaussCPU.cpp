@@ -7,15 +7,30 @@
 #include "KlaussCPU.h"
 #include "clang/Basic/Builtins.h"
 #include "clang/Basic/MacroBuilder.h"
+#include "clang/Basic/TargetBuiltins.h"
 #include "llvm/TargetParser/KlaussCPUABI.h"
 
 using namespace clang;
 using namespace clang::targets;
 
+static constexpr int NumBuiltins =
+    clang::KlaussCPU::LastTSBuiltin - Builtin::FirstTSBuiltin;
+
+#define GET_BUILTIN_STR_TABLE
+#include "clang/Basic/BuiltinsKlaussCPU.inc"
+#undef GET_BUILTIN_STR_TABLE
+
+static constexpr Builtin::Info BuiltinInfos[] = {
+#define GET_BUILTIN_INFOS
+#include "clang/Basic/BuiltinsKlaussCPU.inc"
+#undef GET_BUILTIN_INFOS
+};
+static_assert(std::size(BuiltinInfos) == NumBuiltins);
+
+// UART is memory-mapped (MMIO); the only target builtins are DI / EI.
 llvm::SmallVector<Builtin::InfosShard>
 KlaussCPUTargetInfo::getTargetBuiltins() const {
-  // UART is memory-mapped (MMIO); KlaussCPU defines no target builtins.
-  return {};
+  return {{&BuiltinStrings, BuiltinInfos}};
 }
 
 // R0–R15 (16 GPRs).

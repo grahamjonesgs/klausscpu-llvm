@@ -133,9 +133,14 @@ full API, and `alloc::sync::Arc` exists.  The ISA has no atomic
 instructions; the backend's "forced atomics" model (`../CLAUDE.md`, row
 "Atomics") makes an aligned atomic load or store a plain access, a fence a
 compiler barrier, and every read-modify-write and compare-exchange a call to
-`__sync_*_N` (1/2/4/8 bytes).  Those run with `INT_MASK` saved, zeroed and
-restored: **atomic against this core's interrupt handlers, not against the
-second (AMP) core**.  Who provides them:
+`__sync_*_N` (1/2/4/8 bytes).  Those run between a `DI` (which returns the old
+interrupt-enable bit) and an `EI` that puts it back, about 3 cycles
+(`INT_MASK`, the per-source mask, is not touched): **atomic against this
+core's interrupt handlers, not against the second (AMP) core**.  rustc has no
+`asm!` for this target, so `klauss-rt` calls the backend's
+`llvm.klausscpu.di` / `.ei` intrinsics through `link_llvm_intrinsics`; a
+rustc whose private LLVM predates them (before the relink in the part above)
+cannot build `klauss-rt`'s `sync-libcalls` feature.  Who provides them:
 
 - a bare-metal Rust program: `klauss-rt` (default feature `sync-libcalls`,
   `crates/klauss-rt/src/sync.rs`, the twin of the C runtime's `atomic.c`);
@@ -152,7 +157,7 @@ which no KlaussCPU code reads, and it would claim that nothing interrupts
 the program.  `llvm/test/CodeGen/KlaussCPU/rust-target-spec.test` checks that
 the spec's widths are exactly what the backend lowers without `__atomic_*`
 calls.  `crates/examples/ffi-check` checks that each `__sync_*` call puts a
-non-zero `INT_MASK` back as it found it, and races the main loop against a
+non-zero `INT_MASK` and the interrupt-enable bit back as it found them, and races the main loop against a
 timer interrupt on counters of every width (as the C runtime's
 `test_atomic`): the atomic counters come out exact while a plain one loses
 updates.

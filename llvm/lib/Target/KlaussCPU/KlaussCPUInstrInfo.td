@@ -1704,6 +1704,16 @@ def DI_I : R_out<0x6C060000, (outs GPR:$reg), "di\t$reg">;
 def EI_I : R_in<0x6C070000, (ins GPR:$reg), "ei\t$reg">;
 }
 
+// llvm.klausscpu.di / .ei (clang's __builtin_klausscpu_di / _ei): the
+// intrinsics are chained and read/write memory, so the DAG keeps every access
+// on its side of the critical section's edges; the instructions are
+// hasSideEffects, which does the same in the machine schedulers.
+def : Pat<(i64 (int_klausscpu_di)), (DI_I)>;
+def : Pat<(int_klausscpu_ei GPR:$rs), (EI_I GPR:$rs)>;
+// EI reads bit 0 only: the zero-extension clang puts around the builtin's
+// unsigned int key (a trunc of DI's result) is not needed.
+def : Pat<(int_klausscpu_ei (and GPR:$rs, 0xFFFFFFFF)), (EI_I GPR:$rs)>;
+
 //===----------------------------------------------------------------------===//
 // Assembler-only opcodes
 //

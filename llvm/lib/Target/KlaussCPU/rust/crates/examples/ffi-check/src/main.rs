@@ -10,8 +10,8 @@
 //!   read-modify-write and compare-exchange calls a `__sync_*_N` function
 //!   (klauss-rt's `sync` module); C's `__atomic_*` builtins on the same
 //!   variables go through the same functions.
-//! * Interrupts: every `__sync_*` call leaves a non-zero `INT_MASK` as it
-//!   found it, and counters of every width bumped by both the main loop and
+//! * Interrupts: every `__sync_*` call leaves a non-zero `INT_MASK` and the
+//!   interrupt-enable bit (DI/EI) as it found them, and counters of every width bumped by both the main loop and
 //!   a timer interrupt (as klausscpu-runtime's `test_atomic` T5) end exact
 //!   while a plain counter loses updates.
 //!
@@ -89,6 +89,8 @@ extern "C" {
     fn c_cas64(p: *mut u64, expected: *mut u64, desired: u64) -> bool;
     fn c_xchg8(p: *mut u8, v: u8) -> u8;
     fn c_fetch_max16(p: *mut i16, v: i16) -> i16;
+    fn c_irq_disable() -> u32;
+    fn c_irq_restore(key: u32);
     fn c_timer_on(period: u32);
     fn c_timer_off();
     fn c_ticks() -> u32;
@@ -480,8 +482,9 @@ fn set_int_mask(m: u32) {
     unsafe { write_volatile(INT_MASK as *mut u32, m) }
 }
 
-/// Each `__sync_*` function saves INT_MASK, clears it and puts the saved
-/// value back (klausscpu-runtime test_atomic T4).
+/// A `__sync_*` function is a DI ... EI(old bit) section: it leaves
+/// INT_MASK alone and the interrupt-enable bit as it found it, off inside
+/// another section and on outside one (klausscpu-runtime test_atomic T4).
 fn mask_restored() {
     static V32: AtomicU32 = AtomicU32::new(0);
     static V8: AtomicU8 = AtomicU8::new(0);
@@ -497,6 +500,20 @@ fn mask_restored() {
         let c = int_mask();
         set_int_mask(0);
         check("INT_MASK restored", (a, b, c), (m, m, m));
+    }
+    // The enable bit: DI returns the bit it found, so it probes the state.
+    unsafe {
+        let outer = c_irq_disable(); // off from here
+        V32.fetch_add(1, SeqCst);
+        V64.swap(0, SeqCst);
+        let off = c_irq_disable(); // 0: still off after the sections
+        c_irq_restore(1); // on
+        V32.fetch_add(1, SeqCst);
+        V64.swap(0, SeqCst);
+        let on = c_irq_disable(); // 1: still on
+        c_irq_restore(outer);
+        check("interrupts stay off in a section", off, 0);
+        check("interrupts stay on outside one", on, 1);
     }
 }
 

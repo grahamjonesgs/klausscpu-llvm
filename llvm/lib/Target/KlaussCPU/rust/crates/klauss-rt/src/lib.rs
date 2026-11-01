@@ -18,6 +18,11 @@
 //! ISA has no atomic instructions; see [`sync`](crate::sync)).
 
 #![no_std]
+// sync.rs calls the backend's llvm.klausscpu.di / .ei intrinsics directly
+// (rustc has no `asm!` for KlaussCPU).  Needs a rustc with RUSTC_BOOTSTRAP=1,
+// which klauss-build sets.
+#![cfg_attr(feature = "sync-libcalls", feature(link_llvm_intrinsics))]
+#![cfg_attr(feature = "sync-libcalls", allow(internal_features))]
 
 #[cfg(feature = "sync-libcalls")]
 pub mod sync;

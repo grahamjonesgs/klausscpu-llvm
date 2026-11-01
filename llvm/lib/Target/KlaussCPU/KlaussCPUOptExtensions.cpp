@@ -550,7 +550,7 @@ static bool makeWOp(Register Src, MachineRegisterInfo &MRI,
   // An ADDI of a frame index stays: eliminateFrameIndex folds the slot offset
   // into an ADDI but would compute an ADDIW's base in a scratch register
   // first, which costs more than the SEXTW.
-  if (!MI->getOperand(1).isReg())
+  if (MI->getNumOperands() < 2 || !MI->getOperand(1).isReg())
     return false;
   unsigned WOpc;
   bool HasImm = false;

@@ -98,6 +98,8 @@ static Value *EmitTargetArchBuiltinExpr(CodeGenFunction *CGF,
     return CGF->EmitBPFBuiltinExpr(BuiltinID, E);
   case llvm::Triple::dxil:
     return CGF->EmitDirectXBuiltinExpr(BuiltinID, E);
+  case llvm::Triple::klausscpu:
+    return CGF->EmitKlaussCPUBuiltinExpr(BuiltinID, E);
   case llvm::Triple::x86:
   case llvm::Triple::x86_64:
     return CGF->EmitX86BuiltinExpr(BuiltinID, E);

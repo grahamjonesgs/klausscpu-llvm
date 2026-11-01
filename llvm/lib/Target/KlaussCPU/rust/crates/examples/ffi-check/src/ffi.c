@@ -178,6 +178,10 @@ __asm__(
     "  iret\n");
 void ffi_timer_isr(void);
 
+/* DI / EI through clang's builtins (rustc has no asm! for this target). */
+uint32_t c_irq_disable(void) { return __builtin_klausscpu_di(); }
+void c_irq_restore(uint32_t key) { __builtin_klausscpu_ei(key); }
+
 void c_timer_on(uint32_t period) {
     REG_INT_MASK = 0;
     REG_INT_VEC(INT_SRC_TIMER) = (uint32_t)(uintptr_t)ffi_timer_isr;

@@ -426,6 +426,6 @@ objects, +44 bytes at -Os, +40 at -Oz).
   ELFs of seed 3 on the board, identical.  The
   `rust/crates/examples/ffi-check` self-check (structs of 3–24 bytes, a
   16-byte-aligned one and a union by value both ways, `u32` arguments and
-  results, atomics of every width shared with C, `INT_MASK` restored, a
+  results, atomics of every width shared with C, `INT_MASK` and the interrupt-enable bit restored, a
   timer-interrupt race) passes on the emulator at opt-level 0/1/2/3/s/z with
   C at -O0..-Os, and on the board.

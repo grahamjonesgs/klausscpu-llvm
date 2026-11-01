@@ -6,8 +6,10 @@
 //! atomics" model: an aligned atomic load or store of 1/2/4/8 bytes is a plain
 //! access, a fence a compiler barrier, and every RMW and `compare_exchange` a
 //! call to one of these functions (the target spec's `max-atomic-width` 64 and
-//! `atomic-cas` rely on them).  Each one is a critical section: save
-//! `INT_MASK`, write 0, do the plain operation, restore the saved mask.
+//! `atomic-cas` rely on them).  Each one is a critical section: `DI` (disable
+//! interrupts, returning the old enable bit), the plain operation, `EI` with
+//! that bit (ISA_ENCODING_V2_MAP.md §8.2; about 3 cycles, and the section
+//! nests).  `INT_MASK`, the per-source mask, is not touched.
 //! **Atomic within one core only** — against the core's own interrupt
 //! handlers, not against the second (AMP) core.
 //!
@@ -22,23 +24,27 @@
 //! crate's `sync-libcalls` feature (duplicate symbols otherwise).
 
 use core::ptr::{read_volatile, write_volatile};
-use core::sync::atomic::{compiler_fence, Ordering};
 
-/// The interrupt controller's mask register (`REG_INT_MASK` in `mmio.h`).
-const INT_MASK: *mut u32 = 0xF00F_0000 as *mut u32;
-
-#[inline(always)]
-unsafe fn irq_save() -> u32 {
-    let mask = read_volatile(INT_MASK);
-    write_volatile(INT_MASK, 0);
-    compiler_fence(Ordering::SeqCst);
-    mask
+// rustc has no `asm!` for this target, so DI/EI are the backend's LLVM
+// intrinsics (IntrinsicsKlaussCPU.td; clang's __builtin_klausscpu_di / _ei).
+// They are i64 -> i64 / i64 -> void, read and write memory as far as LLVM is
+// concerned (so every access stays on its side of the section's edges) and
+// are never merged or deleted.
+extern "C" {
+    #[link_name = "llvm.klausscpu.di"]
+    fn llvm_di() -> u64;
+    #[link_name = "llvm.klausscpu.ei"]
+    fn llvm_ei(key: u64);
 }
 
 #[inline(always)]
-unsafe fn irq_restore(mask: u32) {
-    compiler_fence(Ordering::SeqCst);
-    write_volatile(INT_MASK, mask);
+unsafe fn irq_save() -> u64 {
+    llvm_di()
+}
+
+#[inline(always)]
+unsafe fn irq_restore(key: u64) {
+    llvm_ei(key)
 }
 
 macro_rules! fetch_and {
@@ -47,10 +53,10 @@ macro_rules! fetch_and {
             #[export_name = concat!($name, "_", $n)]
             unsafe extern "C" fn f(ptr: *mut $t, arg: u64) -> u64 {
                 let $val = arg as $t;
-                let mask = irq_save();
+                let key = irq_save();
                 let $old = read_volatile(ptr);
                 write_volatile(ptr, $new);
-                irq_restore(mask);
+                irq_restore(key);
                 $old as u64
             }
         };
@@ -77,12 +83,12 @@ macro_rules! sync_all {
         const _: () = {
             #[export_name = concat!("__sync_val_compare_and_swap_", $n)]
             unsafe extern "C" fn f(ptr: *mut $t, expected: u64, desired: u64) -> u64 {
-                let mask = irq_save();
+                let key = irq_save();
                 let old = read_volatile(ptr);
                 if old == expected as $t {
                     write_volatile(ptr, desired as $t);
                 }
-                irq_restore(mask);
+                irq_restore(key);
                 old as u64
             }
         };
