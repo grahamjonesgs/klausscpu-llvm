@@ -29,9 +29,28 @@ the assembler and klausscc know every new encoding, and the 1-word CMPRVW /
 MULV / LEAPC forms are used wherever they fit (LEAPC.S only for a target in
 the same section, OPEN_ITEMS.md item 23).  KlaussCPUFuseCmpBr fuses W
 compares (PRED 5-7) and imm32 compares (the 2-word FBR) too: emulator
-instructions -2.7% (-O1) / -2.4% (-O2) over the bare-metal corpus, board
-cycles not yet measured.  DI/EI in the runtime and the posted-store schedule
-are the next steps.
+instructions -2.7% (-O1) / -2.4% (-O2) over the bare-metal corpus.
+
+Measured on the board with the final phase 8 toolchain (every figure run
+twice, identical to a few cycles; `tools/validate/validate.sh board`, all
+code rebuilt):
+
+| | CoreMark -O2 | CoreMark -Os | Dhrystone / -fno-builtin | Embench speed -O2 / -Os |
+|---|---:|---:|---:|---:|
+| old compiler, old bitstream (phase 7) | 101.09 (1.011/MHz) | 89.07 (0.891) | 220 / 1470 | 0.554 / 0.501 |
+| old compiler, `3508f87` (hardware session) | 105.0 | | 211 / | 0.579 / |
+| new compiler, `3508f87` | **106.36 (1.064)** | **93.57 (0.936)** | **211 / 1327** | **0.588 / 0.530** |
+
+Of CoreMark's +5.2% over phase 7, about +3.9% is the bitstream (proposals 1c
+and 3) and +1.3% the compiler (FuseCmpBr on W and imm32 compares, the short
+forms, the posted-store schedule, the fetch-line layout); Dhrystone's
+-fno-builtin variant went from 1470 to 1327 cycles per run (-9.7%).  Status:
+1c, 3, 6, 7a, 8 (as a trap) and 9 are done in `3508f87` and used by the
+toolchain; 7a replaced the 16.5-cycle INT_MASK save/zero/restore in every
+critical section (about 3 cycles now); 6 and 9 are in the emitted code
+(FuseCmpBr, CompressPat).  The loop-head alignment NOPs stay (§3 still
+charges 1-2 cycles per iteration at line offset 12).  Embench size geomean
+2.259 -> 2.240 (-O2), 1.597 -> 1.576 (-Os).
 
 ## 0. Board ≠ emulator divergences: none
 
