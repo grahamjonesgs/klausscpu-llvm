@@ -1,5 +1,7 @@
 # KlaussCPU RTOS Implementation Notes
 
+> **Historical document, finished work.** Kept as a record; the RTOS ports are done (runtime repo: FreeRTOS, Zephyr, klauss-rt); see CLAUDE.md, ABI.md and the runtime repo docs. Statements below describe the state at the time and may no longer hold.
+
 Work-in-progress notes for adding preemptive multithreading support.
 Parked 2026-05-05 — resume after MMIO / opcode cleanup.
 

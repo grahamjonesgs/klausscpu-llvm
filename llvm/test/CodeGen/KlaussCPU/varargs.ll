@@ -75,12 +75,13 @@ define i64 @first_stack_vararg(i64 %a, i64 %b, i64 %c, i64 %d, ...) {
   ret i64 %r
 }
 
-; Sub-i64 va_arg must read the FULL 8-byte slot (ldidx64) and truncate, never a
-; narrowed 32-bit MEMGET32.  The DAG combiner would otherwise reduce
-; (trunc (ldidx64 slot)) to a register-addressed MEMGET32, which reads the wrong
-; slot for va_arg's computed pointer on hardware (mixed-width printf "%u"
-; garbles).  shouldReduceLoadWidth() returns false to prevent this.  Here
-; the slots are the home area this function has just stored, so the values
+; Sub-i64 va_arg loads the 8-byte slot and truncates; the DAG combiner must not
+; narrow (trunc (ldidx64 slot)) into a register-addressed MEMGET32 (the
+; shouldReduceLoadWidth() == false policy).  That narrowing once garbled
+; mixed-width printf "%u", a fault of the pre-pipeline core; MEMGET32 is
+; correct on the current core (CPU_ARCHITECTURE.md 8.3), so this only pins
+; the codegen choice.  Here the slots are the home area this function has just
+; stored, so the values
 ; are forwarded from R1-R3; @va_sum in mem-helpers.ll loads its slots.
 define i64 @pick_u32(i64 %n, ...) {
 ; CHECK-LABEL: pick_u32:

@@ -1,5 +1,7 @@
 # M8 — KlaussCPU LLVM Scheduling Model + TTI re-tune (spec)
 
+> **Historical document, finished work.** Kept as a record; the scheduling model is implemented (KlaussCPUSchedule.td, KlaussCPUTargetTransformInfo.cpp); see CLAUDE.md for the current model and latencies. Statements below describe the state at the time and may no longer hold.
+
 **Status:** spec / ready to implement. Latencies are board-final (M5–M7 pipeline on
 silicon, 2026-07-13). Cross-repo: RTL is `fpga/KlaussCPU`; this is the `klausscpu-llvm`
 half. Gate behind a subtarget feature for A/B (see §7).

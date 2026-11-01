@@ -1,5 +1,7 @@
 # KlaussCPU — Fetch Decoupling & I-Cache: Design Handoff
 
+> **Historical document, finished work.** Kept as a record; the fetch decoupling and I-cache are built and on the board; the authority is the hardware repo (CPU_ARCHITECTURE.md) and CLAUDE.md here. Statements below describe the state at the time and may no longer hold.
+
 **Repo:** KlaussCPU core (Verilog/SystemVerilog, Nexys A7 / Artix-7). **Not** the
 LLVM fork — this is RTL + microarchitecture work. Toolchain touches are minimal
 and called out in §9.

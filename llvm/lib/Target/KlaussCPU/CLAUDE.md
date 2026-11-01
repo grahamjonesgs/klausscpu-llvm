@@ -534,7 +534,8 @@ when clobbered.
   recognizer reads it: as an unbuffered resource (`BufferSize = 0`) the
   pre-RA scheduler reordered around it too, and nettle-aes got 2.2% slower
   (its .text 3.4% larger) and statemate 1.2%.
-  `-mcpu=no-sched` is the A/B baseline without either scheduler (and
+  `-mcpu=no-sched` (clang, llc, or `-Xclang -target-cpu -Xclang no-sched`) is
+  the A/B baseline without either scheduler (and
   without `KlaussCPUEarlyIVInc` or the TTI unrolling, which serve them).
 - Before register allocation (-O1 and up): `KlaussCPUJumpTableHoist` moves
   a jump table's base (`SETRU`/`LEAPC`) and entry offset (`SHLV`, and a
@@ -872,8 +873,15 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPU.td                target root: subtarget features, AsmWriter/AsmParser, includes the other .td files
 ├── KlaussCPURegisterInfo.td    16 GPRs (r0–r15, alt names a–p) + SP + FLAGS; allocation order
 ├── ABI.md                      the C ABI (version 3): rules, consumers, measurements
+├── README.md                   build and test instructions
 ├── HARDWARE_PROPOSALS.md       measured, ranked RTL/ISA changes for compiled code (for the hardware session)
 ├── OPEN_ITEMS.md               open toolchain items with priority and complexity (delete an entry when it is done)
+├── HISTORY.md                  step-by-step development log (history, not documentation)
+├── ISA_ENCODING_V2.md          historical snapshot of the v2 opcode map (authority: the hardware repo's ISA_ENCODING_V2_MAP.md)
+├── ISA_V3_PROPOSAL.md, FPGA_*.md  proposals and hardware-handoff exchanges with the RTL session (records)
+├── RUST_PLAN.md                the Rust enablement plan (see rust/README.md for the state)
+├── RTOS_NOTES.md, M8_SCHED_MODEL_SPEC.md, PIPELINE_*_HANDOFF.md, PERF_LLVM_HANDOFF.md
+│                               finished handoff and plan documents, marked historical
 ├── KlaussCPUCallingConv.td     CC_KlaussCPU, RetCC_KlaussCPU, CSR_KlaussCPU, the call mask CSR_KlaussCPU_Call
 ├── KlaussCPUSchedule.td        scheduling model (RTL interlock latencies); processors `generic` and `no-sched`
 ├── KlaussCPUInstrInfo.td       encodings, operand types, isel patterns, short forms + CompressPats, aliases

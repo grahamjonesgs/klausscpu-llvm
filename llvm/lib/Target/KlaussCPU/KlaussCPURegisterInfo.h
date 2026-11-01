@@ -34,11 +34,13 @@ public:
   bool isInlineAsmReadOnlyReg(const MachineFunction &MF,
                               MCRegister PhysReg) const override;
 
-  // Enable the real register scavenger so eliminateFrameIndex receives a
-  // non-null RS for sub-word frame-slot access (MEMGET8/16, MEMSET8/16).
-  // requiresFrameIndexScavenging must remain false (the default) — returning
-  // true there switches PEI into virtual-register mode, which passes nullptr
-  // to eliminateFrameIndex instead.
+  // Keep the register scavenger so eliminateFrameIndex has a non-null RS.
+  // Isel puts a frame index only where eliminateFrameIndex folds it into a
+  // base+offset operand, so a scratch register is needed only for a frame
+  // over 1.5 GiB (or a frame index in an operand that is not a base).
+  // requiresFrameIndexScavenging must remain false (the default): true
+  // switches PEI into virtual-register mode, which passes nullptr to
+  // eliminateFrameIndex instead.
   bool requiresRegisterScavenging(const MachineFunction &MF) const override {
     return true;
   }

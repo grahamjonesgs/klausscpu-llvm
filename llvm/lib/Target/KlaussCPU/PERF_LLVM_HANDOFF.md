@@ -1,5 +1,7 @@
 # KlaussCPU LLVM performance work — handoff spec
 
+> **Historical document, finished work.** Kept as a record; its work items were carried out (see HISTORY.md) or are tracked in OPEN_ITEMS.md; CLAUDE.md describes the backend as it is now. Statements below describe the state at the time and may no longer hold.
+
 For a Claude session working **in this tree** (`klausscpu-llvm`, where you can
 build LLVM and iterate). Produced 2026-07-03 from a full CPU+ISA+LLVM
 performance review + an on-silicon baseline. The RTL-side companion doc is

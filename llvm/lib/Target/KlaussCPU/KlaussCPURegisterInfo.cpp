@@ -187,9 +187,10 @@ bool KlaussCPURegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     // slot address in a scratch register, as below.
   }
 
-  // Non-standard case: a frame index as a plain register operand.
-  // Materialise (FrameReg + BaseOffset) into a scratch register with a
-  // single ADDI, then replace the FI operand.
+  // Fallback: the frame index is not a base+offset operand, or the folded
+  // offset overflows simm32.  Materialise (FrameReg + BaseOffset) into a
+  // scratch register with a single ADDI, then replace the FI operand.  Isel
+  // does not produce either today (see the FLAGS note below).
   assert(RS && "Register scavenger required for variable-indexed stack access");
   assert(isInt<32>(BaseOffset) && "Frame offset out of ADDI simm32 range");
 

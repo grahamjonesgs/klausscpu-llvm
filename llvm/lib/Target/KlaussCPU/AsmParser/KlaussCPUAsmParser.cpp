@@ -161,6 +161,21 @@ public:
       Inst.addOperand(MCOperand::createExpr(Expr));
   }
 
+  // A raw 32-bit pattern (SETR64 halves, SETR's imm32): a constant above
+  // INT32_MAX is the same pattern as its sign-extension.  Normalise to the
+  // signed form, which is what the disassembler and the InstPrinter print,
+  // so -show-encoding and llvm-objdump agree.
+  void addImm32Operands(MCInst &Inst, unsigned N) const {
+    const MCExpr *Expr = getImmExpr();
+    assert(N == 1 && Expr && "not an immediate operand");
+    if (const auto *CE = dyn_cast<MCConstantExpr>(Expr))
+      Inst.addOperand(MCOperand::createImm(
+          isUInt<32>(CE->getValue()) ? SignExtend64<32>(CE->getValue())
+                                     : CE->getValue()));
+    else
+      Inst.addOperand(MCOperand::createExpr(Expr));
+  }
+
   // MCExpr::print() is private in LLVM 23; just note the kind for debugging.
   void print(raw_ostream &OS, const MCAsmInfo & /*MAI*/) const override {
     switch (Kind) {

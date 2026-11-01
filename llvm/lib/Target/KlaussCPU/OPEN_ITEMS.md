@@ -51,7 +51,6 @@ The remainders are listed below with their item numbers.
 
 | # | Item | Complexity | Notes |
 |---|---|---|---|
-| 4 | Documentation and comment drift in the backend | trivial (one batch) | (a) CLAUDE.md gives `-mcpu=no-sched` as a clang A/B switch, but clang rejects `-mcpu` for this target; only `llc -mcpu` and `-Xclang -target-cpu -Xclang no-sched` work. Either document that or let clang accept `-mcpu` (`isValidCPUName`/`setCPU`). (b) Three comments about when `eliminateFrameIndex` uses a scratch register contradict each other: `KlaussCPURegisterInfo.h:37-41` and `KlaussCPURegisterInfo.cpp:114-119` against `KlaussCPURegisterInfo.cpp:184-190`. (c) `test/CodeGen/KlaussCPU/varargs.ll:78-82` still calls MEMGET32 wrong on hardware; that was the pre-pipeline core. (d) The runtime's `src/fp_mode_stub.c` is still linked, but `fp_mode.h` inlines those functions now. (e) Mark the finished handoff and plan documents in this directory as historical (RTOS_NOTES.md, M8_SCHED_MODEL_SPEC.md, PIPELINE_*_HANDOFF.md, PERF_LLVM_HANDOFF.md), or move them out with rust/ (item 41). |
 
 ## Optional code-quality and size work (low priority)
 
@@ -78,7 +77,7 @@ The remainders are listed below with their item numbers.
 | 15 | `setr rX, 0x80000000..0xFFFFFFFF` silently loads the sign-extended value | small | Deliberate and documented (CLAUDE.md, the runtime's `setr r0, 0xF00F0000` idiom). An optional warning suggesting `setru` would need the MMIO idiom exempted or moved to `setru`. |
 | 16 | No harness mode runs the runtime's RELA PIC loaders (baremetal loader.c, FreeRTOS pic_loader.c) at a non-link address | medium | Needs a PIC-ELF build rule and an SD-card board mode. Their headers name a linker script, `klausscpu_pic.ld`, that is not in the repo. |
 | 17 | picolibc has no `machine/setjmp.h` for KlaussCPU; the packed-struct Csmith run (with the target alignment screen) is not automated in `tools/validate` | small | The cloud campaign ran it by hand with a wrapper clang; no failures. |
-| 19 | The assembler has no RESET or LCDCMDR; SETR64's high half prints signed in llvm-objdump and unsigned in `llvm-mc -show-encoding`; the optional `shouldReduceLoadWidth` re-measure (items 17, 40) | trivial | Cosmetic, plus full coverage of the ISA map. |
+| 19 | The assembler has no RESET or LCDCMDR; the optional `shouldReduceLoadWidth` re-measure (items 17, 40) | trivial | Cosmetic, plus full coverage of the ISA map. |
 | 23 | `LEAPC.S` reaches only targets in the instruction's own section | medium | The assembler resolves (and keeps short) only a same-section target; almost every `leapc` the compiler emits names `.rodata`/`.data`, so 21 of 9447 compress in the -O1 corpus, where HARDWARE_PROPOSALS.md §2.9 counted 4447 within ±32 KiB after linking.  Getting those needs an `R_KLAUSSCPU_PCREL16` and lld relaxation (shrinking `.text`, as RISC-V's linker relaxation does), or a PIC model that keeps `.rodata` next to the code. |
 
 ## For the hardware (klaussCPU) session

@@ -116,13 +116,17 @@ def UImm6AsmOperand  : UImmAsmOperand<6>;
 
 // A raw 32-bit word that is not extended (SETR64 / PUSHV64 halves, the
 // peripheral immediates): either spelling of the 32-bit pattern.
-def Imm32AsmOperand : KCImmAsmOperand<"Imm32", -2147483648, 4294967295>;
+def Imm32AsmOperand : KCImmAsmOperand<"Imm32", -2147483648, 4294967295> {
+  let RenderMethod = "addImm32Operands";   // 0x80000000 and up print signed
+}
 
 // SETR: the CPU sign-extends the imm32.  An unsigned 32-bit constant is also
 // accepted as its 32-bit pattern (`setr r0, 0xF00F0000` for an MMIO address
 // is sign-extended exactly like the ABS32 address of a symbol there).
 def Imm32SymAsmOperand
-    : KCImmAsmOperand<"Imm32Sym", -2147483648, 4294967295, 1, 1>;
+    : KCImmAsmOperand<"Imm32Sym", -2147483648, 4294967295, 1, 1> {
+  let RenderMethod = "addImm32Operands";
+}
 
 // Absolute address: a symbol or a 32-bit address (FK_KlaussCPU_ABS32).
 def UImm32SymAsmOperand : UImmAsmOperand<32, 1, "Sym">;

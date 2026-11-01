@@ -54,8 +54,8 @@ public:
   }
 
   // CPU names: "generic" (default, M8 scheduling model ON) and "no-sched"
-  // (NoSchedModel — the M8 A/B baseline).  Selected on the C build path with
-  // `-Xclang -target-cpu -Xclang no-sched`.  Without these overrides the base
+  // (NoSchedModel — the M8 A/B baseline).  Selected with `-mcpu=no-sched`
+  // (the driver passes it as -target-cpu).  Without these overrides the base
   // TargetInfo::setCPU returns false and cc1 rejects any -target-cpu.
   bool isValidCPUName(StringRef Name) const override {
     return Name == "generic" || Name == "no-sched";

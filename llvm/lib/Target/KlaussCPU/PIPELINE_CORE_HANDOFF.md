@@ -1,5 +1,7 @@
 # KlaussCPU — Pipelined Core: Design Handoff
 
+> **Historical document, finished work.** Kept as a record; the pipelined core is built and on the board; the authority is the hardware repo (CPU_ARCHITECTURE.md, pipeline_core.sv) and CLAUDE.md here. Statements below describe the state at the time and may no longer hold.
+
 **Repo:** KlaussCPU core (Verilog/SystemVerilog, Nexys A7 / Artix-7). RTL +
 microarchitecture, with a real toolchain (LLVM fork) coordination surface — see
 §8. This is the **Phase 4** effort referenced by
