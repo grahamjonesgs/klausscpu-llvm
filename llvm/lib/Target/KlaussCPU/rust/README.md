@@ -25,7 +25,7 @@ Pinned versions (re-verify on any change — see "Rebasing" below):
 | rust-lang/rust | commit `09a371361240e42b0d69438fd1179efcf212e576` (master, 1.98.0-dev, bundles LLVM 22.1) |
 | host cargo | any rustup nightly ≥ 1.95, or any recent stable cargo with `RUSTC_BOOTSTRAP=1` (only used to drive builds; supplies `-Zbuild-std`/`-Zjson-target-spec`; `klauss-build` falls back to the stable one by itself) |
 
-> **C ABI version 2 (`../ABI.md`, section "Rust").**  Patch `0003` makes
+> **C ABI version 3 (`../ABI.md`, section "Rust"; 3 is 2 with `i128`/`u128` 8-aligned, which rustc takes from the target spec's data layout).**  Patch `0003` makes
 > the callconv module (`callconv/klausscpu.rs`) classify like clang: `u32`
 > sign-extended, aggregates of up to 16 bytes in one or two GPRs, larger ones
 > by reference / `sret`.  A rustc built from `0001`–`0002` alone still

@@ -164,23 +164,20 @@ done:
 define i128 @cas_i128(ptr %p, i128 %e, i128 %n) nounwind {
 ; CHECK-LABEL: cas_i128:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    enter 7
-; CHECK-NEXT:    stidx64 r7, r15, -8 # 8-byte Folded Spill
-; CHECK-NEXT:    andi r7, r15, -16
+; CHECK-NEXT:    enter 4
 ; CHECK-NEXT:    copy r12, r3
 ; CHECK-NEXT:    ldidx64 r3, r15, 16
-; CHECK-NEXT:    stidx64 r2, r7, -24
+; CHECK-NEXT:    stidx64 r2, r15, -8
 ; CHECK-NEXT:    setr r13, 5
 ; CHECK-NEXT:    copy r2, r12
-; CHECK-NEXT:    stidx64 r1, r7, -32
+; CHECK-NEXT:    stidx64 r1, r15, -16
 ; CHECK-NEXT:    getsp r14
-; CHECK-NEXT:    addi r1, r7, -32
+; CHECK-NEXT:    addi r1, r15, -16
 ; CHECK-NEXT:    stidx64 r13, r14, 8
 ; CHECK-NEXT:    stidx64 r13, r14, 0
 ; CHECK-NEXT:    callrel __atomic_compare_exchange_16
-; CHECK-NEXT:    ldidx64 r12, r7, -32
-; CHECK-NEXT:    ldidx64 r11, r7, -24
-; CHECK-NEXT:    ldidx64 r7, r15, -8 # 8-byte Folded Reload
+; CHECK-NEXT:    ldidx64 r12, r15, -16
+; CHECK-NEXT:    ldidx64 r11, r15, -8
 ; CHECK-NEXT:    leaveret
   %pair = cmpxchg ptr %p, i128 %e, i128 %n seq_cst seq_cst
   %v = extractvalue { i128, i1 } %pair, 0

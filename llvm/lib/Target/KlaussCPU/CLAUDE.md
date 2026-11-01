@@ -9,7 +9,7 @@ the hardware repo (`klaussCPU/CPU_ARCHITECTURE.md`, `ISA_ENCODING_V2_MAP.md`,
 `ISA_V3_IMPL.md`; RTL ground truth `pipeline_core.sv` / `klauss_pkg.sv`).
 `HISTORY.md` is the step-by-step development log; many of its statements
 describe earlier states of the backend and are superseded by this file.
-[`ABI.md`](ABI.md) is the C ABI (calling convention version 2): the rules,
+[`ABI.md`](ABI.md) is the C ABI (version 3): the rules,
 the consumers and the measurements behind the design.
 
 **Minimum hardware: klaussCPU `3508f87`** (master with the hw-proposals
@@ -36,7 +36,7 @@ older core stops at the first new instruction (`hw_div_fbr.kla` /
 | GPRs | R0–R15, 64-bit; R15 = frame pointer (P), reserved everywhere |
 | PC / SP | 32-bit (128 MiB RAM addressable) |
 | Memory bus / register file | little-endian |
-| DataLayout | `e-m:e-p:64:64-i64:64-i128:128-n32:64` (only in `TargetDataLayout.cpp`; `rust-target-spec.test` checks the Rust spec's copy) |
+| DataLayout | `e-m:e-p:64:64-i64:64-n32:64` (`__int128` is 8-aligned: no `i128` entry) (only in `TargetDataLayout.cpp`; `rust-target-spec.test` checks the Rust spec's copy) |
 | C type model | `int`=32; `long`/`long long`/`void*`=64 |
 | Hardware FP | none — soft-float (compiler-rt builtins); `fabs`/`fneg`/`copysign` are bit operations on the integer representation (`BCLR`/`ANDV`, `BTGL`/`XORI`, a masked OR), never libcalls (`fp-sign-ops.ll`) |
 | CMOV | none — `select` becomes a `SELECT_CC_RR/RI` pseudo, expanded to compare + branch; a run of selects on the same condition shares one compare/branch (one PHI each) |
@@ -241,7 +241,7 @@ liveness:
 
 ## Calling convention (`KlaussCPUCallingConv.td`, [`ABI.md`](ABI.md))
 
-ABI version 2 (`KlaussCPUABI::ABIVersion`; RISC-V LP64, integer only):
+ABI version 3 (`KlaussCPUABI::ABIVersion`; RISC-V LP64, integer only; 3 is 2 with `__int128` 8-aligned):
 
 | Role | Register |
 |---|---|
@@ -269,7 +269,7 @@ ABI version 2 (`KlaussCPUABI::ABIVersion`; RISC-V LP64, integer only):
   call reserves a 32-byte home area for R0–R3 at `[incoming_SP+8..39]`
   (`VarArgHomeSize`), and the variadic callee stores its unnamed register
   arguments there, so they are contiguous with the stack args and `va_arg`
-  walks 8-byte slots, never realigned (nothing is aligned beyond 8; an i128
+  walks 8-byte slots, never realigned (nothing is aligned beyond 8; an __int128
   takes two).  A call to a non-variadic function reserves nothing (no call
   frame at all without stack args).  Clang emits the walk as IR (a slot of
   an aggregate over 16 bytes holds its address), so the pointer can stay in
@@ -395,7 +395,7 @@ few frames move: the register allocator often puts a value that lives across
 a call in a callee-saved register in the entry block (`fib`'s accumulator).
 
 **Stack realignment:** the ABI stack is only 8-byte aligned.  A function with
-a local aligned to A > 8 (`_Alignas(32)`, an `__int128`) reserves **R7 as a
+a local aligned to A > 8 (`_Alignas(32)`; not an `__int128`, which is 8-aligned) reserves **R7 as a
 base pointer**: the frame grows by A-8, R7 is saved with the other callee-saved
 registers (R15-relative), then `ANDI R7, R15, -A`, and the locals are
 addressed R7-relative (`DW_OP_breg7` in the debug info).  Incoming arguments
@@ -871,7 +871,7 @@ llvm/lib/Target/KlaussCPU/
 ├── CMakeLists.txt              tablegen steps + add_llvm_target
 ├── KlaussCPU.td                target root: subtarget features, AsmWriter/AsmParser, includes the other .td files
 ├── KlaussCPURegisterInfo.td    16 GPRs (r0–r15, alt names a–p) + SP + FLAGS; allocation order
-├── ABI.md                      the C ABI (version 2): rules, consumers, measurements
+├── ABI.md                      the C ABI (version 3): rules, consumers, measurements
 ├── HARDWARE_PROPOSALS.md       measured, ranked RTL/ISA changes for compiled code (for the hardware session)
 ├── OPEN_ITEMS.md               open toolchain items with priority and complexity (delete an entry when it is done)
 ├── KlaussCPUCallingConv.td     CC_KlaussCPU, RetCC_KlaussCPU, CSR_KlaussCPU, the call mask CSR_KlaussCPU_Call

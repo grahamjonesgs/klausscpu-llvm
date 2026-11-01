@@ -1,4 +1,4 @@
-# KlaussCPU C ABI (version 2)
+# KlaussCPU C ABI (version 3)
 
 This is the calling convention of KlaussCPU code built with this toolchain:
 what the backend (`KlaussCPUCallingConv.td`, `KlaussCPUISelLowering.cpp`),
@@ -9,14 +9,16 @@ assembly in klausscpu-runtime agree on.  The numbers shared by the tools
 (integer only) with KlaussCPU's register file and frame instructions.
 
 Version 2 replaced the original convention (version 0) in phase 4 of the
-backend work.  The two do not mix: every object records its version in
+backend work.  Version 3 (phase 9) keeps version 2's calling convention and
+makes `__int128` 8-aligned (see "`__int128` alignment"), which changes the
+layout of every struct holding one.  The versions do not mix: every object records its version in
 `e_flags`, and lld refuses to link code of different versions (see
 "Versioning").  Rebuild everything (picolibc, the compiler-rt builtins,
 wolfSSL/wolfSSH, Zephyr, the programs) with the new toolchain.
 
 ## Summary
 
-| | Version 2 | Version 0 (before) |
+| | Versions 2 and 3 | Version 0 (before) |
 |---|---|---|
 | Argument registers | R0–R3 | R0–R3 |
 | Return registers | R12, then R11 (second half of a 9–16 byte value) | R12, R11 (i128 only) |
@@ -87,7 +89,9 @@ or a vector type in clang):
 
 - **Up to 16 bytes**: passed directly, coerced to an integer of the
   aggregate's size (≤ 8 bytes, e.g. `i24` for a 3-byte struct), to `i128` if
-  it is 16-byte aligned, or else to `[2 x i64]`.  That is one or two GPRs; an
+  it is 16-byte aligned (only an explicit `aligned(16)`/`_Alignas(16)` gives
+  that since version 3), or else to `[2 x i64]`; a struct holding an
+  `__int128` is `[2 x i64]`.  The registers are the same either way: one or two GPRs; an
   argument of two parts can take R3 and the first stack slot.  Returned in R12
   (bytes 0–7) and R11 (bytes 8–15).  Bytes are in memory order (little
   endian), padding bytes are undefined.
@@ -217,28 +221,62 @@ non-variadic: they are where a non-variadic callee, the only kind C allows
 here, expects them, and a variadic callee would read them 32 bytes too
 high.
 
+## `__int128` alignment (version 3)
+
+`__int128`, `unsigned __int128` and LLVM `i128` are 8-aligned: the DataLayout
+(`TargetDataLayout.cpp`, `e-m:e-p:64:64-i64:64-n32:64`) has no `i128` entry,
+so LLVM takes the alignment of the largest integer entry (`i64:64`); clang
+sets `Int128Align = 64`; the Rust target spec has the same data layout and
+rustc takes the `i128`/`u128` alignment from it.  Version 2 had `i128:128`,
+which disagreed with everything else on the target (the ABI stack is 8-aligned,
+malloc guarantees 8, `__BIGGEST_ALIGNMENT__` and `max_align_t` are 8): the
+optimiser could assume a heap `__int128 *` was 16-aligned, and every function
+holding an `__int128` in memory reserved R7 and realigned its frame.  Decided
+rule by rule:
+
+- **Layout**: a struct of a `char` and an `__int128` has the latter at offset
+  8 (was 16); `struct { __int128; char; }` is 24 bytes (was 32).
+- **Argument and return registers**: unchanged.  An `__int128` was already
+  two i64 parts that may take R3 and the first stack slot, with no even-register
+  rule, so alignment never mattered.  Returned in R12 (low) and R11 (high).
+- **Aggregates up to 16 bytes**: coerced to `i128` only if the aggregate is
+  16-byte aligned, i.e. through an explicit attribute; a struct holding an
+  `__int128` is now `[2 x i64]`.  Same registers, a different IR type; clang
+  and the rustc module apply the same test, so they agree.
+- **`va_arg`**: slots are 8 bytes and never realigned, as before; an
+  `__int128` takes two slots.  An explicitly 16-aligned aggregate also takes
+  its size in slots with no padding (`AllowHigherAlign = false`).
+- **Explicit alignment** (`aligned(16)`, `_Alignas(16)`) is still honoured,
+  with the frame realignment (R7) it needs.
+- **Atomics**: 16-byte atomics are generic `__atomic_*` libcalls, which the
+  runtime does not provide (`src/atomic.c`; the link fails, with either
+  alignment).
+
 ## Versioning
 
-- `KlaussCPUABI::ABIVersion` is 2.  The assembler writes it into the low byte
+- `KlaussCPUABI::ABIVersion` is 3.  The assembler writes it into the low byte
   of every object's `e_flags` (`EFlagsABIMask`; a target streamer in
   `KlaussCPUMCTargetDesc.cpp`), for compiled C and hand-written assembly
-  alike; objects from older toolchains have 0.
+  alike; objects from older toolchains have 0 or 2.
 - lld refuses to link objects with code (an executable section) of different
-  versions: `KlaussCPU ABI version 0 cannot be linked with ABI version 2 …;
+  versions: `KlaussCPU ABI version 2 cannot be linked with ABI version 3 …;
   rebuild it with the current toolchain`.  This catches a stale object a build
   system did not rebuild after a toolchain update (make does not track the
   compiler) and a C library built for the old ABI.  Objects without code
   (`-b binary`, data) are not checked.  The output's `e_flags` is the version.
 - clang predefines `__klausscpu_abi__` to the version, for code that depends
-  on the convention (assembly can `#if __klausscpu_abi__ != 2` / `#error`).
+  on the convention (assembly can `#if __klausscpu_abi__ != 3` / `#error`).
 - The runtime's PIC program loaders (bare-metal `loader.c`, FreeRTOS
-  `pic_loader.c`) refuse a program of another version (`klausscpu_elf.h`
+  `pic_loader.c`) refuse a program of another version (an ABI 2 program too) (`klausscpu_elf.h`
   `KLAUSSCPU_ABI_VERSION`, compared with `ABIVersion` by
-  `check-toolchain-constants.py`).  klausscc and Zephyr LLEXT do not check it.
+  `check-toolchain-constants.py`).  The Zephyr LLEXT loader checks it as well
+  (`arch/klausscpu/core/elf.c`, the SD test `abi_mismatch`); klausscc does not.
+  The version is also the guard against a stale library: picolibc, the
+  builtins, wolfSSL and the rest must be rebuilt, or lld refuses the link.
 
 ## Consumers
 
-| Consumer | What depends on the ABI | Status for version 2 |
+| Consumer | What depends on the ABI | Status for version 3 |
 |---|---|---|
 | Backend | `KlaussCPUCallingConv.td`, `LowerCall`/`LowerFormalArguments`/`LowerReturn`, `shouldSignExtendTypeInLibCall`, the call register mask | updated |
 | clang | `KlaussCPUABIInfo` (classification, `va_arg`), `__klausscpu_abi__` | updated; tests `klausscpu-abi.c`, `klausscpu-varargs.c`, `Preprocessor/klausscpu-target-defines.c` |

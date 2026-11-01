@@ -15,7 +15,7 @@
 ; HDR:      Class: 32-bit
 ; HDR:      DataEncoding: LittleEndian
 ; HDR:      Machine: EM_KLAUSSCPU
-; HDR:      Flags [ (0x2)
+; HDR:      Flags [ (0x3)
 
 ;; add3 (b.o) is inlined into _start across the modules and folded; native
 ;; is tail-called.
@@ -24,7 +24,7 @@
 ; CHECK-NEXT:   jmprel {{.*}} <native>
 
 ;--- a.ll
-target datalayout = "e-m:e-p:64:64-i64:64-i128:128-n32:64"
+target datalayout = "e-m:e-p:64:64-i64:64-n32:64"
 target triple = "klausscpu-unknown-elf"
 
 declare i64 @add3(i64)
@@ -37,7 +37,7 @@ define void @_start() {
 }
 
 ;--- b.ll
-target datalayout = "e-m:e-p:64:64-i64:64-i128:128-n32:64"
+target datalayout = "e-m:e-p:64:64-i64:64-n32:64"
 target triple = "klausscpu-unknown-elf"
 
 define i64 @add3(i64 %x) {

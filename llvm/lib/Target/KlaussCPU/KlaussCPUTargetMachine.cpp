@@ -3,7 +3,7 @@
 // KlaussCPU LLVM backend — target machine implementation.
 //
 // DataLayout (Triple::computeDataLayout, TargetDataLayout.cpp):
-//   e-m:e-p:64:64-i64:64-i128:128-n32:64
+//   e-m:e-p:64:64-i64:64-n32:64
 //   e         = little-endian (memory bus and register file)
 //   m:e       = ELF name mangling
 //   p:64:64   = pointers are 64-bit (GPR-width); the hardware only uses bits

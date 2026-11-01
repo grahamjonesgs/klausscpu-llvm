@@ -86,7 +86,7 @@ KlaussCPU::KlaussCPU(Ctx &ctx) : TargetInfo(ctx) {
 }
 
 // The low byte of e_flags is the calling convention the code follows
-// (KlaussCPUABI::ABIVersion; 0 for code built before ABI version 2).  Objects
+// (KlaussCPUABI::ABIVersion; 0 or 2 for code built before ABI version 3).  Objects
 // with code must agree: an object compiled for another convention, such as one
 // a build system left behind from an older toolchain, would otherwise call and
 // be called wrongly.  Objects without code (data, -b binary) do not count.

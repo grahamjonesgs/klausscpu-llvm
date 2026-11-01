@@ -46,8 +46,8 @@ INT_TYPES = [
 ]
 VA_INT_TYPES = [('int', 4, True), ('unsigned', 4, False),
                 ('long', 8, True), ('unsigned long', 8, False)]
-# A 128-bit field makes the record 16-byte aligned (an i128 in registers when
-# it is 16 bytes, by reference beyond); _Bool fields hold 0 or 1.
+# A 128-bit field is 8-aligned (ABI version 3), so a 16-byte record holding one
+# is [2 x i64] like any other (by reference beyond 16 bytes); _Bool fields hold 0 or 1.
 FIELD_TYPES = ['signed char', 'unsigned char', 'short', 'unsigned short',
                'int', 'unsigned', 'long', 'unsigned long', 'float', 'double',
                '_Bool', '__int128', 'unsigned __int128']

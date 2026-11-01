@@ -6,10 +6,13 @@
 // extended by the producer: every i32 is sign-extended, also an unsigned one,
 // narrower ones by their signedness.  Aggregates of up to 16 bytes are passed
 // and returned in one or two GPRs, coerced to an integer of their size, i128
-// (16-byte alignment) or [2 x i64]; larger ones by reference to a copy the
-// caller makes (not byval) and returned through sret.
+// (an explicitly 16-aligned aggregate) or [2 x i64]; larger ones by reference
+// to a copy the caller makes (not byval) and returned through sret.  ABI
+// version 3: __int128 is 8-aligned, so a struct holding one is [2 x i64] like
+// any other 16-byte one.
 
 #include <stdbool.h>
+#include <stddef.h>
 
 struct E {};
 struct S1 { char a; };
@@ -18,6 +21,8 @@ struct S8 { int a, b; };
 struct S12 { int a, b, c; };
 struct S16 { long a, b; };
 struct S16A { __int128 a; };
+struct S16X { long a; } __attribute__((aligned(16)));
+struct S24A { __int128 a; char c; };
 struct S17 { long a, b; char c; };
 struct S24 { long a, b, c; };
 struct M { char c; short s; int i; };
@@ -63,8 +68,12 @@ void f_m(struct M a) {}
 void f_s12(struct S12 a) {}
 // CHECK-LABEL: define{{.*}} void @f_s16([2 x i64] %a.coerce)
 void f_s16(struct S16 a) {}
-// CHECK-LABEL: define{{.*}} void @f_s16a(i128 %a.coerce)
+// CHECK-LABEL: define{{.*}} void @f_s16a([2 x i64] %a.coerce)
 void f_s16a(struct S16A a) {}
+// CHECK-LABEL: define{{.*}} void @f_s16x(i128 %a.coerce)
+void f_s16x(struct S16X a) {}
+// CHECK-LABEL: define{{.*}} void @f_s24a(ptr noundef{{.*}} %a)
+void f_s24a(struct S24A a) {}
 // CHECK-LABEL: define{{.*}} void @f_u([2 x i64] %a.coerce)
 void f_u(union U a) {}
 // CHECK-LABEL: define{{.*}} void @f_cf(i64 noundef %a.coerce)
@@ -88,7 +97,7 @@ struct S8 r_s8(void) { struct S8 s = {0}; return s; }
 struct S12 r_s12(void) { struct S12 s = {0}; return s; }
 // CHECK-LABEL: define{{.*}} [2 x i64] @r_s16()
 struct S16 r_s16(void) { struct S16 s = {0}; return s; }
-// CHECK-LABEL: define{{.*}} i128 @r_s16a()
+// CHECK-LABEL: define{{.*}} [2 x i64] @r_s16a()
 struct S16A r_s16a(void) { struct S16A s = {0}; return s; }
 // CHECK-LABEL: define{{.*}} [2 x i64] @r_cd()
 _Complex double r_cd(void) { return 0; }
@@ -104,3 +113,14 @@ int vf(int n, ...);
 void call_vf(struct S12 s, struct S24 t, int i) {
   vf(1, s, t, i, (unsigned short)3, 2.0f);
 }
+
+// __int128 is 8-aligned (size 16), so a
+// struct of an __int128 and a char is 24 bytes (it was 32), a char then an
+// __int128 puts the latter at offset 8 (it was 16).
+_Static_assert(_Alignof(__int128) == 8, "");
+_Static_assert(_Alignof(unsigned __int128) == 8, "");
+_Static_assert(sizeof(__int128) == 16, "");
+_Static_assert(__alignof__(struct S24A) == 8 && sizeof(struct S24A) == 24, "");
+_Static_assert(__builtin_offsetof(struct { char c; __int128 v; }, v) == 8, "");
+_Static_assert(__BIGGEST_ALIGNMENT__ == 8, "");
+_Static_assert(_Alignof(max_align_t) == 8, "");

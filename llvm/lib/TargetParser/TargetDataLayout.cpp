@@ -572,8 +572,9 @@ std::string Triple::computeDataLayout(StringRef ABIName) const {
     // The only copy: KlaussCPUTargetMachine and clang's KlaussCPUTargetInfo
     // both take it from here (the Rust target spec repeats it, which
     // test/CodeGen/KlaussCPU/rust-target-spec.test checks).  n32:64
-    // advertises both i32 and i64 as native widths.
-    return "e-m:e-p:64:64-i64:64-i128:128-n32:64";
+    // advertises both i32 and i64 as native widths.  No i128 entry: an
+    // i128 is 8-aligned (ABI version 3), as the largest integer entry, i64.
+    return "e-m:e-p:64:64-i64:64-n32:64";
   case Triple::loongarch32:
   case Triple::loongarch64:
     return computeLoongArchDataLayout(*this);

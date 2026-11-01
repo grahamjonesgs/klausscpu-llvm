@@ -4,12 +4,13 @@
 // RUN: %clang_cc1 -triple klausscpu-unknown-elf -fsyntax-only -verify %s
 
 // __klausscpu_abi__ is the calling convention's version (KlaussCPUABI.h):
-// 2 since i32 values are sign-extended, aggregates of up to 16 bytes are
-// passed in registers and only variadic calls reserve a home area.
+// 3 since __int128 is 8-aligned (2: i32 values are sign-extended, aggregates
+// of up to 16 bytes are passed in registers and only variadic calls reserve a
+// home area).
 
 // CHECK: #define __KlaussCPU__ 1
 // CHECK: #define __klausscpu__ 1
-// CHECK: #define __klausscpu_abi__ 2
+// CHECK: #define __klausscpu_abi__ 3
 
 // Atomics are inline (plain loads and stores, __sync_* calls for the rest)
 // up to 64 bits, the same max-atomic-width as the Rust target spec

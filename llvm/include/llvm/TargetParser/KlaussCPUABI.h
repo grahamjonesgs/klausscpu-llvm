@@ -61,13 +61,15 @@ inline constexpr uint32_t InvalidWord = 0x00000000;
 
 //===-- ABI version -------------------------------------------------------===//
 
-/// The calling convention (ABI.md in the backend): 2 is the one with i32
-/// arguments and results sign-extended, aggregates of up to 16 bytes in
-/// registers and the vararg home area only in variadic calls.  Code built for
-/// the earlier convention has 0 here.  Every ELF object carries it in the low
+/// The calling convention and data layout (ABI.md in the backend): 3 is 2 with
+/// __int128 8-aligned (it was 16-aligned), which changes the layout of every
+/// struct holding one.  2 is the one with i32 arguments and results
+/// sign-extended, aggregates of up to 16 bytes in registers and the vararg
+/// home area only in variadic calls.  Code built for the earlier conventions
+/// has 0 or 2 here.  Every ELF object carries it in the low
 /// byte of e_flags, lld refuses to link code of different versions, and clang
 /// predefines __klausscpu_abi__ to it.
-inline constexpr unsigned ABIVersion = 2;
+inline constexpr unsigned ABIVersion = 3;
 inline constexpr unsigned EFlagsABIMask = 0xFF;
 
 //===-- Address space -----------------------------------------------------===//

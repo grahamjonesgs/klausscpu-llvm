@@ -25,6 +25,11 @@ public:
     LongWidth = LongAlign = 64;
     LongLongWidth = LongLongAlign = 64;
     PointerWidth = PointerAlign = 64;
+    // __int128 is 8-aligned (ABI version 3): nothing on the target, stack,
+    // malloc or __BIGGEST_ALIGNMENT__, is aligned beyond 8.  The DataLayout
+    // has no i128 entry, so LLVM's default (the largest integer entry,
+    // i64:64) gives the same.
+    Int128Align = 64;
     SizeType    = UnsignedLong;
     PtrDiffType = SignedLong;
     IntPtrType  = SignedLong;

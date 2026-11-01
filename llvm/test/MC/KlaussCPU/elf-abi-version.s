@@ -4,6 +4,6 @@
 ## byte of e_flags (KlaussCPUABI::ABIVersion); lld refuses to link objects of
 ## different versions (lld/test/ELF/klausscpu-abi-version.s).
 
-# CHECK: Flags [ (0x2)
+# CHECK: Flags [ (0x3)
 
   ret
