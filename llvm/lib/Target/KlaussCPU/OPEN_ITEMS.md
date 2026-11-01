@@ -68,6 +68,7 @@ The remainders are listed below with their item numbers.
 | 10 | GlobalMerge base for non-PIC code: each merged field gets its own `setru` (item 33) | small | none today, since every runtime build uses `-fPIC` |
 | 11 | MIR hygiene: `isLoadFromStackSlot`/`isStoreToStackSlot` are missing; IRET_I lacks isReturn/isTerminator/isBarrier and SP uses/defs; RET_I/LEAVERET_I lack SP uses/defs (the outliner works around it with `usesSP`); CALLcc lack clobber defs (item 13) | small | enables the generic spill and remat hooks; removes workarounds |
 | 12 | Redundant `sextw` after `divr` for int division (signext inputs), and an in-loop `copy` in strlen-like loops | small | very small |
+| 24 | Loop-head alignment pads the fall-through path too: when the loop is entered by falling into its head, the alignment NOPs run once per entry | small | perf_baseline and perf_haz each run 317,811 more emulator instructions (+1.18%) since the phase 8 encodings step, only because shorter code moved `fib()`'s loop head and one NOP now runs per call. Measure board cycles first (part B; FuseCmpBr and the schedule work move the layout again). Then consider skipping the padding, or rotating the loop so it is entered by a branch, when the preheader falls through and the loop runs few iterations per entry. Keep `-klausscpu-pref-loop-align` (3508f87 still charges 1-2 cycles/iteration at line offset 12). |
 
 ## Small correctness and robustness gaps (low priority)
 
