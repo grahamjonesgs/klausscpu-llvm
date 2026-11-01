@@ -1,9 +1,9 @@
 # KlaussCPU toolchain: open items
 
-Status as of 2026-11-01: klausscpu-llvm `main` at the phase 8 milestone,
+Status as of 2026-11-02: klausscpu-llvm `main` at the phase 9 milestone (C ABI version 3),
 klausscpu-runtime `main` and klausscc `master` likewise,
 and the board on klaussCPU `3508f87` (master with the hw-proposals and VGA
-merges; the `0de5b21` bitstream, in QSPI since 2026-11-01).
+merges; the `0de5b21` bitstream, in QSPI since 2026-11-01).  Everything that runs on the board was rebuilt for ABI 3 and validated at the milestone (the lldb-on-board end-to-end could not run; item 28).
 
 Nothing here is a known miscompile.  The list comes from two sources:
 
@@ -92,11 +92,12 @@ The remainders are listed below with their item numbers.
 ## Housekeeping
 
 - `/home/graham/Documents/src/klausscpu-llvm-p5-rust` is 1.5 GB. It holds the
-  LLVM sources the ABI-v2 rustc build expects at that path.  Keep it while
+  LLVM sources the ABI-3 rustc build expects at that path.  Keep it while
   that rustc may need relinking (rust/README.md); otherwise delete it.  Its
   tracked files (llvm/, cmake/, third-party/) were synced from `main` for the
-  phase 8 relink; do the same (`git ls-files` into rsync) before the next.
-- The SD card's macOS `.Trashes/` still holds old ELF and PIC files.  The
+  phase 9 relink (the private build in `klausscpu-p5-rust-build/llvm` and the
+  x.py run after `touch compiler/rustc_llvm/build.rs`, about 5 minutes); do the same (`git ls-files` into rsync) before the next.
+- The SD card's macOS `.Trashes/` still holds old ELF and PIC files (ABI 1 or 2; the live `.llext` set on the card was replaced with ABI 3 builds at the phase 9 milestone).  The
   board shell's `rm` cannot remove a non-empty directory.  Delete it from a
   Mac or PC.
 - The new boot ROM (klaussCPU b383104) was checked after a JTAG reset, which
