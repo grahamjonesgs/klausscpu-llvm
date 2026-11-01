@@ -40,6 +40,8 @@ FunctionPass *createKlaussCPUISelDag(KlaussCPUTargetMachine &TM);
 FunctionPass *createKlaussCPUCalleeSavedCFIPass();
 FunctionPass *createKlaussCPUConstAddrBasePass();
 FunctionPass *createKlaussCPUEarlyIVIncPass();
+FunctionPass *createKlaussCPUPostIncLoopCmpPass();
+FunctionPass *createKlaussCPULoopTripCountPass();
 FunctionPass *createKlaussCPUFetchLayoutPass();
 FunctionPass *createKlaussCPUFlagReusePass();
 FunctionPass *createKlaussCPUFuseCmpBrPass(bool LoopConstsOnly = false);
@@ -50,6 +52,8 @@ void initializeKlaussCPUCalleeSavedCFIPass(PassRegistry &);
 void initializeKlaussCPUConstAddrBasePass(PassRegistry &);
 void initializeKlaussCPUDAGToDAGISelLegacyPass(PassRegistry &);
 void initializeKlaussCPUEarlyIVIncPass(PassRegistry &);
+void initializeKlaussCPUPostIncLoopCmpPass(PassRegistry &);
+void initializeKlaussCPULoopTripCountPass(PassRegistry &);
 void initializeKlaussCPUFetchLayoutPass(PassRegistry &);
 void initializeKlaussCPUFlagReusePass(PassRegistry &);
 void initializeKlaussCPUFuseCmpBrPass(PassRegistry &);
@@ -70,6 +74,8 @@ LLVMInitializeKlaussCPUTarget() {
   initializeKlaussCPUConstAddrBasePass(PR);
   initializeKlaussCPUDAGToDAGISelLegacyPass(PR);
   initializeKlaussCPUEarlyIVIncPass(PR);
+  initializeKlaussCPUPostIncLoopCmpPass(PR);
+  initializeKlaussCPULoopTripCountPass(PR);
   initializeKlaussCPUFetchLayoutPass(PR);
   initializeKlaussCPUFlagReusePass(PR);
   initializeKlaussCPUFuseCmpBrPass(PR);
@@ -196,10 +202,16 @@ void KlaussCPUPassConfig::addIRPasses() {
   // 64 bits or misaligned become __atomic_* libcalls, the RMWs without a
   // __sync_* libcall (FP, uinc/udec_wrap, usub_cond/sat) cmpxchg loops.
   addPass(createAtomicExpandLegacyPass());
+  // Before loop strength reduction, which drops the counter update's nsw/nuw
+  // flags (KlaussCPUPostIncLoopCmp.cpp).
+  if (getOptLevel() != CodeGenOptLevel::None)
+    addPass(createKlaussCPUPostIncLoopCmpPass());
   TargetPassConfig::addIRPasses();
   // After loop strength reduction has settled each loop's counter.
-  if (getOptLevel() != CodeGenOptLevel::None)
+  if (getOptLevel() != CodeGenOptLevel::None) {
     addPass(createKlaussCPUEarlyIVIncPass());
+    addPass(createKlaussCPULoopTripCountPass());
+  }
 }
 
 bool KlaussCPUPassConfig::addPreISel() {

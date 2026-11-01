@@ -596,6 +596,18 @@ when clobbered.
   cycles without making the stalls worse (the post-RA scheduler chose the
   order for those); a NOP must lower the total.  `-klausscpu-fetch-line-layout=0`
   turns it off, `=1` allows moves only (`fetch-layout.ll`, `fetch-layout-nop.ll`).
+  It also takes back the alignment of a loop that runs about once per entry
+  (`KlaussCPULoopTripCount`'s `klausscpu.loop.est_trips` metadata, at most
+  `-klausscpu-fall-through-align-max-trips`, default 1) when the preheader
+  falls into the head: the NOPs run once per entry, and cost more than an
+  average unaligned head (0, 1, 1 or 2 cycles per iteration by its phase)
+  saves.  At two iterations per entry the two break even; Dhrystone's
+  2-iteration copy loop in `dhry_run` (7.4M of its 156.6M instructions are
+  the NOPs in front of it) measured 7% fewer instructions but +1% cycles when
+  unaligned, from the layout shift behind it, so it keeps the alignment.  A
+  loop entered by a branch keeps it (the padding is dead code there)
+  (`loop-align-fall-through.ll`).  perf_baseline `calls_fib` -2.9% (25.94M ->
+  25.18M cycles: one NOP per call).
   Board: perf_baseline `branchy` -5.5% (16.03M -> 15.16M cycles, its best
   head offset), picojpeg -0.7%, qrduino -0.7%, and with picolibc rebuilt
   nbody -2.1%, cubic -1.3%; nothing worse.
@@ -662,6 +674,28 @@ when clobbered.
   imm32 forms (ADDI/ADDV/MINUSV, branch compares CMPRV/CMPRVU; a value setcc
   above INT32_MAX still needs SETRU + CMPxxR).  So array loops share one
   byte-offset IV across their r + r accesses.
+- Before LSR (start of `addIRPasses`, -O1 and up), `KlaussCPUPostIncLoopCmp`
+  turns InstCombine's `icmp slt %i, N-K` on the counter before its update
+  (`%i.next = add nsw %i, K`; `nuw` and `ult` for unsigned) back into
+  `icmp slt %i.next, N` when `N-K+K` does not wrap.  The old form is `cmprv
+  rI, N-K; addi rT, rI, K; ...; copy rI, rT; jmpcc`, which FuseCmpBr cannot
+  fuse (the update redefines the compare operand before the branch); the new
+  one is `addi rI, rI, K; fbr rI, rN, ...`.  LSR must not see the old form:
+  it rebuilds the increment without the flags.  Only a 64-bit header PHI
+  compared with a constant in a latch that ends in the branch, and not when
+  another header PHI's recurrence passes through a MUL or DIV (`s = s * 5 +
+  i`: the compare, copy and jump fill the MUL's shadow, 13 -> 14 cycles per
+  iteration with the fused form; plain, load and store loops gain 3-9%:
+  micro-benchmark loops on the board).  Board suites: neutral (see the
+  commit); `-klausscpu-postinc-loop-cmp=false` disables it
+  (`postinc-loop-cmp.ll`, `DebugInfo/KlaussCPU/loop-tuning-dbg.ll`).
+- After LSR (end of `addIRPasses`, -O1 and up), `KlaussCPULoopTripCount`
+  records `SE.getSmallConstantMaxTripCount` of a loop (iterations per
+  entry), or 1 for a loop that still calls its own function (tail-call
+  elimination made a loop of one of two recursive calls, as in `fib`), as
+  `!{!"klausscpu.loop.est_trips", i32 N}` in its `llvm.loop` metadata, for
+  KlaussCPUFetchLayout's alignment decision (above);
+  `-klausscpu-loop-trip-count=false` disables it.
 - After LSR (end of `addIRPasses`, -O1 and up), `KlaussCPUEarlyIVInc`
   rewrites a single-block loop whose exit test `icmp eq/ne %i.next, N`
   reads the incremented counter to count from Init - C and compare with
@@ -702,6 +736,9 @@ when clobbered.
 | `-klausscpu-postra-mem-port` | on | post-RA scheduler keeps a memory op out of the 4 cycles a posted store holds the data port (=false: a store takes one slot) |
 | `-klausscpu-fetch-line-layout` | 2 | KlaussCPUFetchLayout: 0 off, 1 moves only, 2 moves and NOPs (not under optsize) |
 | `-klausscpu-early-iv-inc` | on | count a single-block loop from Init - C so its increment can issue early |
+| `-klausscpu-postinc-loop-cmp` | on | compare a loop's updated counter with the limit, not the old counter with limit - step, so the compare and the branch fuse |
+| `-klausscpu-loop-trip-count` | on | record a loop's constant trip count bound (or 1 for a self-recursive loop) in its metadata |
+| `-klausscpu-fall-through-align-max-trips` | 1 | a loop that runs at most this often per entry and is entered by fall-through gets no alignment NOPs (0 = always align) |
 | `-klausscpu-min-jump-table-entries` | 12 | jump tables from N cases (0 = none) |
 | `-klausscpu-jump-table-density` | 40 | minimum % of a jump table's entries that are cases |
 | `-klausscpu-hoist-jt-addr` | on | KlaussCPUJumpTableHoist |
@@ -893,6 +930,8 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPUMachineFunctionInfo.h  per-function state (vararg frame index)
 ├── KlaussCPUAsmPrinter.cpp     MachineInstr → MCInst (+ CompressPat), inline-asm operand printing
 ├── KlaussCPUEarlyIVInc.cpp     IR, after LSR: loop counter counts from Init - C so its increment can issue early
+├── KlaussCPUPostIncLoopCmp.cpp IR, before LSR: a loop's exit compare reads the updated counter (so compare + branch fuse)
+├── KlaussCPULoopTripCount.cpp  IR, after LSR: a loop's trip count bound in its metadata (alignment decision)
 ├── KlaussCPUFetchLayout.cpp    last pass before the AsmPrinter: loops' 2/3-word instructions kept inside one 16-byte fetch line
 ├── KlaussCPUFlagReuse.cpp      pre-emit: CMPRV Rd,0 + JMPE/NE → JMPZ/NZ (default on)
 ├── KlaussCPUJumpTableHoist.cpp pre-RA: jump-table base and entry offset into the range-check block
@@ -903,7 +942,7 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPUCalleeSavedCFI.cpp pre-emit: a callee-saved register's .cfi_offset behind its scheduled spill
 ├── KlaussCPUTargetTransformInfo.h/.cpp  TTI — M8 unroll budget gated on branch density, no peel; LSR cost order, register count
 ├── KlaussCPUSubtarget.h/.cpp   single subtarget; member init order is critical
-├── KlaussCPUTargetMachine.h/.cpp CodeGenTargetMachineImpl; pass config (AtomicExpand, EarlyIVInc, isel, ILP-opts, pre-RA, pre-sched2 and pre-emit passes); pre-RA scheduler compare/branch pairing
+├── KlaussCPUTargetMachine.h/.cpp CodeGenTargetMachineImpl; pass config (AtomicExpand, PostIncLoopCmp, EarlyIVInc, LoopTripCount, isel, ILP-opts, pre-RA, pre-sched2 and pre-emit passes); pre-RA scheduler compare/branch pairing
 ├── AsmParser/
 │   └── KlaussCPUAsmParser.cpp  -gen-asm-matcher driver; registers vs symbols, PC-relative targets
 ├── Disassembler/

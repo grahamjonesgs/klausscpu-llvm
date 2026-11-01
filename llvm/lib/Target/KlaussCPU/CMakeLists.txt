@@ -20,6 +20,8 @@ add_llvm_target(KlaussCPUCodeGen
   KlaussCPUCalleeSavedCFI.cpp
   KlaussCPUConstAddrBase.cpp
   KlaussCPUEarlyIVInc.cpp
+  KlaussCPULoopTripCount.cpp
+  KlaussCPUPostIncLoopCmp.cpp
   KlaussCPUFetchLayout.cpp
   KlaussCPUFlagReuse.cpp
   KlaussCPUFuseCmpBr.cpp
