@@ -40,3 +40,38 @@ t:
 f:
   ret i64 %z
 }
+
+; The same for a W compare (CMPRVW, which fuses into FBR_RV with EQW/NEW).
+define i64 @value_below_wcompare(i32 %a, i32 %b, i32 signext %x) nounwind {
+; CHECK-LABEL: value_below_wcompare:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    addr r14, r0, r1
+; CHECK-NEXT:    cmpultv r12, r2, 5000
+; CHECK-NEXT:    fbrv r14, 1000, 13, .LBB1_2
+; CHECK-NEXT:  # %bb.1: # %t
+; CHECK-NEXT:    addr r12, r12, r12
+; CHECK-NEXT:  .LBB1_2: # %f
+; CHECK-NEXT:    ret
+;
+; NOPAIR-LABEL: value_below_wcompare:
+; NOPAIR:       # %bb.0: # %entry
+; NOPAIR-NEXT:    addr r12, r0, r1
+; NOPAIR-NEXT:    cmprvw r12, 1000
+; NOPAIR-NEXT:    cmpultv r12, r2, 5000
+; NOPAIR-NEXT:    jmpnerel .LBB1_2
+; NOPAIR-NEXT:  # %bb.1: # %t
+; NOPAIR-NEXT:    addr r12, r12, r12
+; NOPAIR-NEXT:  .LBB1_2: # %f
+; NOPAIR-NEXT:    ret
+entry:
+  %s = add i32 %a, %b
+  %c = icmp ult i32 %x, 5000
+  %z = zext i1 %c to i64
+  %bc = icmp eq i32 %s, 1000
+  br i1 %bc, label %t, label %f
+t:
+  %q = add i64 %z, %z
+  ret i64 %q
+f:
+  ret i64 %z
+}

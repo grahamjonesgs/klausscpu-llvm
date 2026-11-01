@@ -1,16 +1,22 @@
 //===-- KlaussCPUFuseCmpBr.cpp - ISA v3 B fused compare-and-branch --------===//
 //
-// ISA v3 B (ISA_V3_PROPOSAL.md §5): rewrite
+// ISA v3 B (ISA_V3_PROPOSAL.md §5) and hw-proposals 6 (klaussCPU 3508f87,
+// ISA_ENCODING_V2_MAP.md §8.1): rewrite
 //
-//     CMPRR  a, b            |   CMPRV a, #imm   (imm in -8..7;
-//     ...                    |   ...              CMPRVU: 0..7)
-//     JMPcc  target          |   JMPcc target
+//     CMPRR  a, b     (or CMPRRW)      |   CMPRV a, #imm  (or CMPRVU, CMPRVW)
+//     ...                              |   ...
+//     JMPcc  target                    |   JMPcc target
 //
-// into one 1-word fused branch (class 0xD, FBR_RR / FBR_RI) at the branch's
-// position that compares and branches without writing the flags. The RTL
-// evaluates the compare in EX on the boolean-compare path and redirects from
-// MEM. FBR has no width bit: it always compares 64 bits, so the W compares
-// (CMPRRW/CMPRVW) never fuse.
+// into one fused branch (class 0xD) at the branch's position that compares
+// and branches without writing the flags: the 1-word FBR_RR (two registers)
+// or FBR_RI (rhs = sext(simm4)), or the 2-word FBR_RV (rhs = sext(imm32)
+// from word 1). The RTL evaluates the compare in EX on the boolean-compare
+// path and redirects from MEM. PRED 0-4 compare 64 bits; PRED 5-7 (EQW,
+// LTW, ULTW) the low 32 bits, as CMPRRW/CMPRVW do. There is no LEW/ULEW: a
+// W compare under LE/GT/ULE/UGT swaps its registers (a <= b is !(b < a)),
+// or compares with C + 1 (a <= C is a < C + 1; not for C = INT32_MAX /
+// UINT32_MAX, which stay unfused). A CMPRVU constant in [2^31, 2^32) is not
+// a sext(imm32), so it fuses only through a loop constant (below).
 //
 // Conditions, all checked here on the final (post-RA, pre-emit) stream:
 //  * the compare is the nearest FLAGS writer before the branch in its block,
@@ -21,34 +27,37 @@
 //    the same thing at the branch, and the instructions in between never
 //    observed its flags. Debug instructions are ignored (-g does not change
 //    codegen) and stay where they are;
-//  * a constant outside simm4 fuses only in a loop: when the branch is in the
-//    loop header or its only latch (it runs on every iteration), and a
-//    register is free in the whole loop, a SETR/SETRU in the preheader puts
-//    the constant there once and the branch becomes FBR_RR, as does any
-//    other compare with that constant in the loop. The register
-//    must be one nothing in the loop reads, writes or clobbers, not live into
-//    any loop block (so not live through the loop), not read by the
-//    preheader's terminators, and either caller-saved or a callee-saved
-//    register the prologue already saves. -O1 and up only. A second
-//    instance of this pass runs before the post-RA scheduler (addPreSched2)
-//    and only does this part, turning the compare into CMPRR with the
-//    constant register (outer loops first), so that the scheduler's
-//    anti-dependency renaming sees the register as taken. It skips a
-//    function with a non-empty inline asm (see the range rule below); a
-//    compare it converted that then fails the range check (below; block
-//    placement runs between the two instances) stays the 1-word CMPRR
-//    instead of the 2-word CMPRV;
+//  * a constant outside simm4 in a loop: when the branch is in the loop
+//    header or its only latch (it runs on every iteration), and a register
+//    is free in the whole loop, a SETR/SETRU in the preheader puts the
+//    constant there once and the branch becomes the 1-word FBR_RR instead of
+//    the 2-word FBR_RV, as does any other compare with that constant in the
+//    loop. The register must be one nothing in the loop reads, writes or
+//    clobbers, not live into any loop block (so not live through the loop),
+//    not read by the preheader's terminators, and either caller-saved or a
+//    callee-saved register the prologue already saves. -O1 and up only. A
+//    second instance of this pass runs before the post-RA scheduler
+//    (addPreSched2) and only does this part, turning the compare into
+//    CMPRR/CMPRRW with the constant register (outer loops first), so that
+//    the scheduler's anti-dependency renaming sees the register as taken.
+//    It skips a function with a non-empty inline asm (see the range rule
+//    below); a compare it converted that then fails the range check (below;
+//    block placement runs between the two instances) stays the 1-word
+//    CMPRR/CMPRRW instead of the 2-word CMPRV/CMPRVW. Any other constant
+//    outside simm4 is FBR_RV;
 //  * the condition maps onto a class-3 predicate: EQ/NE (incl. Z/NZ),
 //    signed LT/GE/LE/GT, unsigned LT/GE/LE/GT (incl. C/NC);
 //  * the flags are dead after the branch (no later reader in the block, not
 //    live into any successor) — the fused form does not write them;
-//  * the target is in simm13 word range (+-16 KB) at worst case: every
-//    instruction at its long (.td) size (a tail call's PseudoTAIL as the
-//    2-word TAILREL, PseudoTAILIndirect as JMPR), every aligned block after its
-//    maximum padding. Compression and fusion only shrink code, so the PCREL13
-//    fixup always resolves at assembly time (no relaxation needed). An inline
-//    asm statement has no bounded size (directives, macros) unless it is
-//    empty, so no branch whose range spans a non-empty one fuses.
+//  * the target is in simm13 word range (+-16 KB) of the branch, FBR_RV's
+//    too (its displacement counts from its own first word), at worst case:
+//    every instruction at its long (.td) size (a tail call's PseudoTAIL as
+//    the 2-word TAILREL, PseudoTAILIndirect as JMPR), every aligned block
+//    after its maximum padding. Compression and fusion only shrink code (the
+//    fused branch replaces a 2-word JMPcc, FBR_RV included), so the PCREL13
+//    fixup always resolves at assembly time (no relaxation needed). An
+//    inline asm statement has no bounded size (directives, macros) unless it
+//    is empty, so no branch whose range spans a non-empty one fuses.
 //
 // The instruction after the branch does not matter: a taken FBR squashes it
 // in EX, and since klaussCPU 9ad6614 (the oldest core supported, CLAUDE.md)
@@ -105,10 +114,12 @@ constexpr uint64_t UnboundedSize = uint64_t(1) << 20;
 constexpr unsigned MaxLoopConsts = 16;
 constexpr int64_t LoopConstBytes = 8 * MaxLoopConsts;
 
+// The fused branch's PRED field (ISA_ENCODING_V2_MAP §8.1).
+enum { EQ = 0, LT = 1, LE = 2, ULT = 3, ULE = 4, EQW = 5, LTW = 6, ULTW = 7 };
+
 // Class-3 predicate + INV for a conditional jump that follows CMP a, b.
 // Returns false for conditions with no predicate (S/NS/O/NO).
 bool branchPred(unsigned Opc, unsigned &Pred, bool &Inv) {
-  enum { EQ = 0, LT = 1, LE = 2, ULT = 3, ULE = 4 };
   switch (Opc) {
   case KlaussCPU::JMPE:   case KlaussCPU::JMPEREL:
   case KlaussCPU::JMPZ:   case KlaussCPU::JMPZREL:   Pred = EQ;  Inv = false; return true;
@@ -174,15 +185,65 @@ uint64_t worstCaseSize(const MachineInstr &MI, const TargetInstrInfo &TII) {
   return TII.get(MI.getOpcode()).getSize();
 }
 
-// True if the immediate of CMPRV / CMPRVU Cmp fits FBR_RI's simm4. CMPRVU
-// zero-extends its immediate: the same value as simm4 for 0..7.
-bool fitsSImm4(const MachineInstr &Cmp) {
-  int64_t Imm = Cmp.getOperand(1).getImm();
-  int64_t Lo = Cmp.getOpcode() == KlaussCPU::CMPRVU_I ? 0 : -8;
-  return Imm >= Lo && Imm <= 7;
+bool isRegCompare(const MachineInstr &Cmp) {
+  return Cmp.getOpcode() == KlaussCPU::CMPRR_I ||
+         Cmp.getOpcode() == KlaussCPU::CMPRRW_I;
 }
 
-// The CMPRR / CMPRV / CMPRVU whose flags the conditional branch Br reads, if
+bool isWCompare(const MachineInstr &Cmp) {
+  return Cmp.getOpcode() == KlaussCPU::CMPRRW_I ||
+         Cmp.getOpcode() == KlaussCPU::CMPRVW_I;
+}
+
+// The W predicate for EQ, LT or ULT.
+unsigned wPred(unsigned Pred) {
+  assert((Pred == EQ || Pred == LT || Pred == ULT) && "no W predicate");
+  return Pred == EQ ? EQW : Pred == LT ? LTW : ULTW;
+}
+
+// The fused branch for a W compare of two registers under (Pred, Inv): sets
+// Swap when the registers trade places (a <= b is !(b < a), a > b is b < a).
+void wRegFusion(unsigned &Pred, bool &Inv, bool &Swap) {
+  Swap = Pred == LE || Pred == ULE;
+  if (Swap) {
+    Pred = Pred == LE ? LT : ULT;
+    Inv = !Inv;
+  }
+  Pred = wPred(Pred);
+}
+
+// The predicate and the right-hand side (Imm, which the fused branch
+// sign-extends from simm4 or imm32) with which a fused branch does what the
+// immediate compare Cmp and a branch on (Pred, INV) do, or false if none
+// does (INV carries over). CMPRV's imm32 is sign-extended like the fused branch's; CMPRVU's is
+// zero-extended, which only [0, 2^31) also is. A W compare looks only at
+// the low 32 bits of rs and of the immediate, and has no LEW/ULEW: a <= C
+// becomes a < C + 1 (a > C, !(a < C + 1)), except for the largest C.
+bool immFusion(const MachineInstr &Cmp, unsigned &Pred, int64_t &Imm) {
+  Imm = Cmp.getOperand(1).getImm();
+  if (Cmp.getOpcode() != KlaussCPU::CMPRVW_I)
+    return isInt<32>(Imm);
+  uint32_t C = static_cast<uint32_t>(Imm);
+  if (Pred == LE || Pred == ULE) {
+    if (C == (Pred == LE ? uint32_t(INT32_MAX) : UINT32_MAX))
+      return false;
+    ++C;
+    Pred = Pred == LE ? LT : ULT;
+  }
+  Pred = wPred(Pred);
+  Imm = static_cast<int32_t>(C);
+  return true;
+}
+
+// True if the immediate compare Cmp, followed by a branch on Pred, fuses
+// into the 1-word FBR_RI.
+bool fitsSImm4(const MachineInstr &Cmp, unsigned Pred) {
+  int64_t Imm;
+  return immFusion(Cmp, Pred, Imm) && isInt<4>(Imm);
+}
+
+// The CMPRR / CMPRV / CMPRVU (or W CMPRRW / CMPRVW) whose flags the
+// conditional branch Br reads, if
 // Br can take over its compare: it is the nearest FLAGS writer before Br, and
 // nothing between them reads FLAGS, redefines a compare operand, or has an
 // effect on FLAGS that is not modelled (calls, inline asm, side effects).
@@ -208,11 +269,13 @@ MachineInstr *findFusableCompare(MachineInstr &Br,
 
   switch (Cmp->getOpcode()) {
   case KlaussCPU::CMPRR_I:
+  case KlaussCPU::CMPRRW_I:
     if (!Cmp->getOperand(1).isReg())
       return nullptr;
     break;
   case KlaussCPU::CMPRV_I:
   case KlaussCPU::CMPRVU_I:
+  case KlaussCPU::CMPRVW_I:
     if (!Cmp->getOperand(1).isImm())
       return nullptr;
     break;
@@ -241,8 +304,10 @@ INITIALIZE_PASS_BEGIN(KlaussCPUFuseCmpBr, DEBUG_TYPE, PASS_NAME, false, false)
 INITIALIZE_PASS_DEPENDENCY(MachineLoopInfoWrapperPass)
 INITIALIZE_PASS_END(KlaussCPUFuseCmpBr, DEBUG_TYPE, PASS_NAME, false, false)
 
-// A register holding the immediate of the CMPRV / CMPRVU Cmp throughout the
-// loop around MBB, set in the loop's preheader, or none (see the header).
+// A register holding the immediate of the CMPRV / CMPRVU / CMPRVW Cmp
+// throughout the loop around MBB, set in the loop's preheader, or none (see
+// the header). CMPRVW's (an int32) is set sign-extended, like CMPRV's: its
+// W compare reads only the low 32 bits.
 Register KlaussCPUFuseCmpBr::loopConstReg(MachineInstr &Cmp,
                                           MachineBasicBlock &MBB) {
   MachineLoop *L = MLI->getLoopFor(&MBB);
@@ -327,8 +392,8 @@ Register KlaussCPUFuseCmpBr::loopConstReg(MachineInstr &Cmp,
 
 // Before the post-RA scheduler: give each fusable loop compare with a
 // constant outside simm4 its loop constant now, as CMPRV_I r, imm ->
-// CMPRR_I r, rC, which the pre-emit instance then fuses like any register
-// compare.  The post-RA scheduler renames registers to break
+// CMPRR_I r, rC (CMPRVW_I -> CMPRRW_I), which the pre-emit instance then
+// fuses like any register compare.  The post-RA scheduler renames registers to break
 // anti-dependencies and may take every free register in a loop (an unrolled
 // body); with the constant already live through the loop, it leaves rC
 // alone.  The range is checked when fusing: a compare left unfused is the
@@ -352,7 +417,7 @@ bool KlaussCPUFuseCmpBr::setUpLoopConsts(MachineFunction &Fn) {
           !KlaussCPUInstrInfo::flagsDeadAfter(Br))
         continue;
       MachineInstr *Cmp = findFusableCompare(Br, TRI);
-      if (Cmp && Cmp->getOpcode() != KlaussCPU::CMPRR_I && !fitsSImm4(*Cmp))
+      if (Cmp && !isRegCompare(*Cmp) && !fitsSImm4(*Cmp, Pred))
         Cmps.push_back(Cmp);
     }
   }
@@ -368,7 +433,8 @@ bool KlaussCPUFuseCmpBr::setUpLoopConsts(MachineFunction &Fn) {
       continue;
     const MachineOperand &Lhs = Cmp->getOperand(0);
     BuildMI(MBB, Cmp->getIterator(), Cmp->getDebugLoc(),
-            TII->get(KlaussCPU::CMPRR_I))
+            TII->get(isWCompare(*Cmp) ? KlaussCPU::CMPRRW_I
+                                      : KlaussCPU::CMPRR_I))
         .addReg(Lhs.getReg(), getKillRegState(Lhs.isKill()) |
                                   getUndefRegState(Lhs.isUndef()))
         .addReg(ConstReg);
@@ -437,12 +503,32 @@ bool KlaussCPUFuseCmpBr::runOnMachineFunction(MachineFunction &Fn) {
       MachineInstr *Cmp = findFusableCompare(Br, TRI);
       if (!Cmp)
         continue;
-      bool RR = Cmp->getOpcode() == KlaussCPU::CMPRR_I;
+
+      // The fused branch: FBR_RR for two registers (a register compare, or
+      // a loop constant), else FBR_RI (simm4) or FBR_RV (imm32).
+      unsigned Opc = KlaussCPU::FBR_RR;
+      bool RR = isRegCompare(*Cmp);
+      bool W = isWCompare(*Cmp);
+      bool Swap = false;
+      int64_t Imm = 0;
       Register ConstReg;
-      if (!RR && !fitsSImm4(*Cmp)) {
-        if (!LoopConstsOK || !(ConstReg = loopConstReg(*Cmp, MBB)))
+      if (!RR) {
+        unsigned IPred = Pred;
+        bool ImmOK = immFusion(*Cmp, IPred, Imm);
+        if (ImmOK && isInt<4>(Imm)) {
+          Opc = KlaussCPU::FBR_RI;
+        } else if (LoopConstsOK && (ConstReg = loopConstReg(*Cmp, MBB))) {
+          Opc = KlaussCPU::FBR_RR;
+        } else if (ImmOK) {
+          Opc = KlaussCPU::FBR_RV;
+        } else {
           continue;
+        }
+        if (Opc != KlaussCPU::FBR_RR)
+          Pred = IPred;
       }
+      if (Opc == KlaussCPU::FBR_RR && W)
+        wRegFusion(Pred, Inv, Swap);
 
       // The compare operands are now read at Br: move their kill flags (from
       // the compare, or from a last use in between) onto the fused branch.
@@ -463,16 +549,20 @@ bool KlaussCPUFuseCmpBr::runOnMachineFunction(MachineFunction &Fn) {
 
       int64_t CC = Pred | (Inv ? 8 : 0);
       MachineInstrBuilder MIB =
-          BuildMI(MBB, Br.getIterator(), Br.getDebugLoc(),
-                  TII->get(RR || ConstReg ? KlaussCPU::FBR_RR
-                                          : KlaussCPU::FBR_RI))
-              .addReg(Cmp->getOperand(0).getReg(), RegFlags[0]);
-      if (RR)
-        MIB.addReg(Cmp->getOperand(1).getReg(), RegFlags[1]);
-      else if (ConstReg)
-        MIB.addReg(ConstReg);
-      else
-        MIB.addImm(Cmp->getOperand(1).getImm());
+          BuildMI(MBB, Br.getIterator(), Br.getDebugLoc(), TII->get(Opc));
+      if (Opc == KlaussCPU::FBR_RR) {
+        Register Lhs = Cmp->getOperand(0).getReg();
+        Register Rhs = RR ? Cmp->getOperand(1).getReg() : ConstReg;
+        RegState LhsFlags = RegFlags[0];
+        RegState RhsFlags = RR ? RegFlags[1] : RegState{};
+        if (Swap) {
+          std::swap(Lhs, Rhs);
+          std::swap(LhsFlags, RhsFlags);
+        }
+        MIB.addReg(Lhs, LhsFlags).addReg(Rhs, RhsFlags);
+      } else {
+        MIB.addReg(Cmp->getOperand(0).getReg(), RegFlags[0]).addImm(Imm);
+      }
       MIB.addImm(CC).addMBB(Target);
       Dead.push_back(Cmp);
       Dead.push_back(&Br);

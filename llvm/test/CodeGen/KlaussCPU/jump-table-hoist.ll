@@ -22,8 +22,7 @@ define i64 @sw(i8 %x, i64 %a) nounwind {
 ; CHECK-NEXT:    zextb r13, r0
 ; CHECK-NEXT:    setru r14, .LJTI0_0
 ; CHECK-NEXT:    shlv r12, r13, 2
-; CHECK-NEXT:    cmprv r13, 11
-; CHECK-NEXT:    jmpugtrel .LBB0_14
+; CHECK-NEXT:    fbrv r13, 11, 12, .LBB0_14
 ; CHECK-NEXT:  # %bb.1: # %entry
 ; CHECK-NEXT:    ldidx32r r12, r14, r12
 ; CHECK-NEXT:    jmpr r12
@@ -70,8 +69,7 @@ define i64 @sw(i8 %x, i64 %a) nounwind {
 ; NOHOIST-LABEL: sw:
 ; NOHOIST:       # %bb.0: # %entry
 ; NOHOIST-NEXT:    zextb r12, r0
-; NOHOIST-NEXT:    cmprv r12, 11
-; NOHOIST-NEXT:    jmpugtrel .LBB0_14
+; NOHOIST-NEXT:    fbrv r12, 11, 12, .LBB0_14
 ; NOHOIST-NEXT:  # %bb.1: # %entry
 ; NOHOIST-NEXT:    shlv r12, r12, 2
 ; NOHOIST-NEXT:    setru r14, .LJTI0_0
@@ -133,15 +131,13 @@ define i64 @sw(i8 %x, i64 %a) nounwind {
 ; OFF-NEXT:    xorv r12, r1, 17
 ; OFF-NEXT:    ret
 ; OFF-NEXT:  .LBB0_10: # %entry
-; OFF-NEXT:    cmprv r12, 8
-; OFF-NEXT:    jmpgtrel .LBB0_15
+; OFF-NEXT:    fbrv r12, 8, 10, .LBB0_15
 ; OFF-NEXT:  # %bb.11: # %entry
 ; OFF-NEXT:    fbri r12, 6, 0, .LBB0_23
 ; OFF-NEXT:  # %bb.12: # %entry
 ; OFF-NEXT:    fbri r12, 7, 0, .LBB0_24
 ; OFF-NEXT:  # %bb.13: # %entry
-; OFF-NEXT:    cmprv r12, 8
-; OFF-NEXT:    jmpnerel .LBB0_27
+; OFF-NEXT:    fbrv r12, 8, 8, .LBB0_27
 ; OFF-NEXT:  # %bb.14: # %c8
 ; OFF-NEXT:    addi r12, r1, 59
 ; OFF-NEXT:    ret
@@ -155,14 +151,11 @@ define i64 @sw(i8 %x, i64 %a) nounwind {
 ; OFF-NEXT:    andv r12, r1, 38
 ; OFF-NEXT:    ret
 ; OFF-NEXT:  .LBB0_15: # %entry
-; OFF-NEXT:    cmprv r12, 9
-; OFF-NEXT:    jmperel .LBB0_25
+; OFF-NEXT:    fbrv r12, 9, 0, .LBB0_25
 ; OFF-NEXT:  # %bb.16: # %entry
-; OFF-NEXT:    cmprv r12, 10
-; OFF-NEXT:    jmperel .LBB0_26
+; OFF-NEXT:    fbrv r12, 10, 0, .LBB0_26
 ; OFF-NEXT:  # %bb.17: # %entry
-; OFF-NEXT:    cmprv r12, 11
-; OFF-NEXT:    jmpnerel .LBB0_27
+; OFF-NEXT:    fbrv r12, 11, 8, .LBB0_27
 ; OFF-NEXT:  # %bb.18: # %c11
 ; OFF-NEXT:    mulv r12, r1, 80
 ; OFF-NEXT:    ret

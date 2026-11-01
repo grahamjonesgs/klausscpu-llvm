@@ -27,8 +27,11 @@ in its `HARDWARE_PROPOSALS_RESPONSE.md`) did proposals 1c, 3, 6, 7a, 8 (as a
 trap) and 9 and §3.3/§3.4.  The toolchain now requires `3508f87` or later:
 the assembler and klausscc know every new encoding, and the 1-word CMPRVW /
 MULV / LEAPC forms are used wherever they fit (LEAPC.S only for a target in
-the same section, OPEN_ITEMS.md item 23).  Fusing W and imm32 compares, DI/EI
-in the runtime and the posted-store schedule are the next steps.
+the same section, OPEN_ITEMS.md item 23).  KlaussCPUFuseCmpBr fuses W
+compares (PRED 5-7) and imm32 compares (the 2-word FBR) too: emulator
+instructions -2.7% (-O1) / -2.4% (-O2) over the bare-metal corpus, board
+cycles not yet measured.  DI/EI in the runtime and the posted-store schedule
+are the next steps.
 
 ## 0. Board ≠ emulator divergences: none
 

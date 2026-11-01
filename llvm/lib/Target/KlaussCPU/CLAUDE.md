@@ -16,8 +16,9 @@ the consumers and the measurements behind the design.
 merge; the board's QSPI holds its `0de5b21` bitstream since 2026-11-01).
 The assembler and the AsmPrinter use its 1-word `CMPRVW`, `MULV`/`MULUV`
 and `LEAPC` forms (ISA map §8.3) wherever they fit, which older cores trap
-on, and the toolchain knows its other additions (§8: W and imm32 fused
-branches, `di`/`ei`, the misaligned-access trap).  The squash fixes of
+on, FuseCmpBr fuses branches on W and imm32 compares into its new fused
+branches (§8.1), and the toolchain knows its other additions (`di`/`ei`,
+the misaligned-access trap).  The squash fixes of
 `9ad6614` (a taken fused branch or an EX squash resets the divider and
 gates the LCD strobe) are assumed too.  There is no option to target an
 older core: older bitstreams are not supported, and the CPU and all the
@@ -43,9 +44,9 @@ older core stops at the first new instruction (`hw_div_fbr.kla` /
 | Sign-extending loads | i8/i16/i32: hardware (`LDIDX8_S`/`LDIDX16_S`/`LDIDX32_S`) |
 | Load/store addressing | `[r]` (`MEMGETn`/`MEMSETn`), `r + simm32` (`LDIDXn`/`STIDXn`, 1-word short form for a small scaled offset), `r + r` at every width (`LDIDXnR`/`LDIDXn_SR`/`STIDXnR`, MODE=11), an absolute imm32 at every width (`LDABSn`/`LDABSn_S`/`STABSn`, `MEMREADR`/`MEMSETR`, MODE=10, 2 words) for a naturally aligned constant address such as an MMIO register; 16/32-bit forms other than `MEMGET32` trap on a misaligned EA (crash dump `ERR=0A`, klausscc `stop = Misaligned`) and no 64-bit form reads an unaligned doubleword, so an under-aligned non-volatile 32-bit load is `MEMGET32` of the computed address (`allowsMisalignedMemoryAccesses`, loads only) and an under-aligned i64 load two 32-bit loads (`MEMGET32` below 4-byte alignment, `LDIDX32` at 4): `allowsMisalignedMemoryAccesses` allows it so that the combiner can build one from 8 byte loads, then `LowerLOAD` splits it at legalization (the post-legalize combiner legalizes what it creates; `PreprocessISelDAG` is a backstop for one that still reaches isel, `unaligned-load-backstop.ll`), and the `STORE` combine keeps a copy two 32-bit copies when store merging swapped its halves (a ROLV) or under optsize (otherwise SHLV + ORR + `STIDX64`: one instruction more than two copies, 0.3-0.5 cycles per 8 bytes faster on the board); the halves carry `KlaussCPU::MOSplitHalf`, so nothing joins them again; every other under-aligned access (stores, volatile) is split |
 | C environment | hosted by default (the driver no longer adds `-ffreestanding`): `memcpy`/`memset`/`memmove` of a constant size are intrinsics, inline up to 8 accesses (4 under optsize) at the width both sides' alignment allows (a source below 4-byte alignment still allows 4, `MEMGET32`); a constant source is stored as immediates (`shouldConvertConstantLoadToIntImm`); stack objects and module globals they touch get 8-byte alignment (`shouldAlignPointerArgs`).  `printf`/`fprintf` are not turned into `puts`/`putchar`/`fputc`/`fputs`/`fwrite` (`TargetLibraryInfo`: each would link another stdio function for UART-bound output).  Code that implements the C library (picolibc, compiler-rt, crt0's BSS loop, kernels) is built `-ffreestanding` / `no_builtin` |
-| 32-bit ops | `ADDW`/`SUBW`/`ADDIW`/`MULW`, `CMPRRW`/`CMPRVW`, boolean `CMPxxRW`/`CMPxxVW` (ISA v3 D2/D3); the fused branch's W predicates (`fbr`/`fbri`/`fbrv` cc 5-7, 13-15) are assembler-only so far |
+| 32-bit ops | `ADDW`/`SUBW`/`ADDIW`/`MULW`, `CMPRRW`/`CMPRVW`, boolean `CMPxxRW`/`CMPxxVW` (ISA v3 D2/D3); a branch on `CMPRRW`/`CMPRVW` fuses into an FBR with a W predicate (`fbr`/`fbri`/`fbrv` cc 5-7, 13-15; see Flags) |
 | Immediates | each class 2/3 op exists with a sign- and a zero-extended imm32 (SGN bit); isel picks the one that holds the constant: `SETR`/`SETRU` (MOV), `ADDI`/`ADDV`/`MINUSV`, `ANDI`/`ANDV` (and OR/XOR), `CMPRV`/`CMPRVU`; boolean compares (`setcc` as a value) `CMPxxV` with a simm32; `SETR64` only for a value neither reaches.  An add of -255..-129 (a frame address too) is `MINUSV` of the negation, whose short form reaches it |
-| Multiply by a constant | `MULV` (simm32; EX-serialised, `WriteMul`); a constant 2^N+1, 2^N-1 or 1-2^N that is not a simm32 becomes `SHLV` + `ADDR`/`SUBR` (`decomposeMulByConstant`); for a simm32 one only with `-klausscpu-mul-imm-shift-add` (one more instruction than `MULV`, fewer cycles) |
+| Multiply by a constant | `MULV` (simm32, 1 word for a simm8; EX-serialised, `WriteMul`); a constant 2^N+1, 2^N-1 or 1-2^N that is not a simm32 becomes `SHLV` + `ADDR`/`SUBR` (`decomposeMulByConstant`); for a simm32 one only with `-klausscpu-mul-imm-shift-add` (one more instruction than `MULV` and a word more than the short one, fewer cycles) |
 | Addresses | 32-bit, zero-extended in a register: `SETRU sym` (static), `LEAPC` (PIC); `sym+off` is folded only for `off` in [0, 2^31), other offsets are a separate add so a negative S + off stays negative; `R_KLAUSSCPU_ABS64` data is the exact 64-bit S + A (lld) |
 | Direct call | the 1-word short `CALL` (ISA v3 A1, LINK=1: PC + 4·simm18, ±512 KiB, pushes PC+4; written `callrel`; a tail call's jump likewise, `tail`) for every call to a symbol: resolved by the assembler for a local (static) callee in its own section (relaxed to the 2-word `CALLREL` if out of reach), else (a global or weak callee too, which the link may override) an `R_KLAUSSCPU_CALL18` relocation, for which lld calls an out-of-reach callee through a `jmprel` thunk.  Code a loader without thunks relocates (Zephyr LLEXT) is built with `-mllvm -klausscpu-short-calls=false` (2-word `CALL` / `CALLREL`) |
 | Indirect branch / call | `JMPR` / `CALLR` |
@@ -189,9 +190,13 @@ liveness:
   INC/DEC, the shifts, NEG/NOT/ABS/extensions/POPCNT, BEXTR, MUL; not
   DIV/MOD, whose zero divisor writes only V).
 - `KlaussCPUFuseCmpBr` (pre-emit, default on): fuses a compare and its
-  conditional branch into the 1-word ISA v3 `FBR_RR`/`FBR_RI` (64-bit
-  compares only: it does not use the W predicates or `FBR_RV` yet, so
-  `CMPRRW`/`CMPRVW` never fuse).  It scans back
+  conditional branch into the 1-word ISA v3 `FBR_RR` (two registers) or
+  `FBR_RI` (simm4), or the 2-word `FBR_RV` (sext(imm32): a `CMPRV`, a
+  `CMPRVW`, a `CMPRVU` below 2^31).  `CMPRRW`/`CMPRVW` fuse with the W
+  predicates EQW/LTW/ULTW (klaussCPU 3508f87); there is no LEW/ULEW, so a W
+  compare under LE/GT/ULE/UGT swaps its registers or compares with C + 1
+  (not for C = INT32_MAX / UINT32_MAX, which stay unfused;
+  `fuse-cmp-br-w.mir`).  It scans back
   from the branch to the nearest FLAGS writer, so PHI copies, constants and
   spills between the pair do not stop it; it gives up at a FLAGS reader, a
   redefined compare operand, a call or inline asm.  Range is checked per
@@ -201,10 +206,13 @@ liveness:
   (unbounded size) blocks only the branches that span it.  At -O1 and up, a
   loop compare with a constant outside simm4 (in the header or the only
   latch) gets the constant in a register free throughout the loop, set by a
-  SETR/SETRU in the preheader, and becomes `FBR_RR`; other compares with
-  that constant in the loop reuse it.  That loop-constant setup runs as a
+  SETR/SETRU in the preheader, and becomes the 1-word `FBR_RR` rather than
+  the 2-word `FBR_RV`; other compares with that constant in the loop reuse
+  it.  It fetches one word less per iteration for one SETR per loop entry:
+  without it the bare-metal corpus at -O1 runs 0.15% fewer instructions
+  on the emulator but fetches 2.6% more words.  That loop-constant setup runs as a
   second instance of the pass before the post-RA scheduler (`addPreSched2`,
-  the compare becomes `CMPRR` with the constant register), so the
+  the compare becomes `CMPRR`/`CMPRRW` with the constant register), so the
   scheduler's register renaming cannot take the free register.  The
   instruction behind the branch (which a taken FBR squashes in EX) does not
   matter: every supported core (klaussCPU `9ad6614` and later, see the top of
@@ -446,11 +454,10 @@ when clobbered.
   (glued compare) and the 32-bit W-compare choice for those and SETCC:
   `tryW32Compare` takes the W form when an operand's 32-bit extension then
   dies, i.e. it feeds nothing but compares of the same operands and
-  condition; not for a branch whose sign extensions are of an add, subtract
-  or multiply, which compares 64 bits so that FuseCmpBr can make it an FBR,
-  while the extension becomes the W op (a W-op pattern, or
-  `KlaussCPUOptExtensions` rule 4): `n++ ; n < max` is `ADDIW` + `FBR`, not
-  `INCR` + `CMPRRW` + `JMPcc` (`w32-compare-branch.ll`).  An i32 is promoted
+  condition.  A branch takes it too, since FuseCmpBr fuses a W compare as
+  it does a 64-bit one: `n++ ; n < max` is `INCR` + a W `FBR`, and a
+  `SEXTW` the 64-bit compare would need is gone (`w32-compare-branch.ll`).
+  An i32 is promoted
   by sign extension wherever either extension would do (unsigned compares;
   `isSExtCheaperThanZExt`, as RV64), since arguments arrive sign-extended
   and the W ops produce sign-extended values.  This moves the 32-bit wrap
@@ -499,7 +506,7 @@ when clobbered.
   recognizer sets no issue limit for a model without itineraries) and
   renames registers to break anti-dependencies on the critical path
   (`getAntiDepBreakMode`, `ANTIDEP_CRITICAL`).  The pre-RA scheduler keeps
-  a `CMPRR`/`CMPRV`/`CMPRVU` next to the conditional branch that reads its
+  a `CMPRR`/`CMPRV`/`CMPRVU` (or W `CMPRRW`/`CMPRVW`) next to the conditional branch that reads its
   flags (a macro-fusion DAG mutation, `KlaussCPUTargetMachine::
   createMachineScheduler`): an instruction it put in between could be given
   the compare operand's register by the allocator, and that redefinition
@@ -643,10 +650,9 @@ when clobbered.
 | `-klausscpu-tail-calls` | on | sibling calls with register arguments become tail calls |
 | `-klausscpu-tail-call-dup-ret` | off | CodeGenPrepare duplicates a shared return so calls before it become tail calls |
 | `-klausscpu-fuse-cmp-br` | on | FBR fused compare-and-branch |
-| `-klausscpu-fuse-loop-const` | on | FBR for a loop compare with a non-simm4 constant, via a free register set in the preheader |
+| `-klausscpu-fuse-loop-const` | on | 1-word FBR_RR for a loop compare with a non-simm4 constant, via a free register set in the preheader (=false: the 2-word FBR_RV) |
 | `-klausscpu-arith-flag-reuse` | on | FlagReuse peephole |
 | `-klausscpu-w32-alu` / `-klausscpu-w32-compare` | on | 32-bit W ops / W compares |
-| `-klausscpu-w32-compare-branch` | off | branch on a W compare even when its sign extensions are of an add/sub/mul (=false: compare 64 bits, the extension becomes the W op, FBR fuses) |
 | `-klausscpu-sext-i32` | on | promote an i32 by sign extension where either would do (`isSExtCheaperThanZExt`) |
 | `-klausscpu-group-selects` | on | consecutive selects on one condition share a compare/branch |
 | `-klausscpu-fold-fi-offset` | on | fold frame index + constant into the access / ADDI offset |

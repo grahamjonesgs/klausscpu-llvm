@@ -502,11 +502,11 @@ bool KlaussCPUTargetLowering::isLegalICmpImmediate(int64_t Imm) const {
 // MULR, 2 instructions and 3-4 words, so the 2-word pair is smaller and
 // faster.  (In a loop MachineLICM may hoist the constant, leaving one MULR
 // against the pair: one instruction more, but still fewer cycles.)  A
-// simm32 constant is one 2-word MULV: the pair is the same size and one
-// instruction more, so it is used only on request
-// (-klausscpu-mul-imm-shift-add) and when the schedule model rates the
-// multiply slower than the dependent shift and add (5 against 2 + 2 cycles
-// in KlaussCPUSchedule.td).
+// simm32 constant is one MULV, 2 words, or 1 for a simm8 (MULV.S, klaussCPU
+// 3508f87): the pair is one instruction more and the same size, or a word
+// larger, so it is used only on request (-klausscpu-mul-imm-shift-add) and
+// when the schedule model rates the multiply slower than the dependent
+// shift and add (5 against 2 + 2 cycles in KlaussCPUSchedule.td).
 bool KlaussCPUTargetLowering::decomposeMulByConstant(LLVMContext &Context,
                                                      EVT VT, SDValue C) const {
   if (!VT.isScalarInteger() || VT.getSizeInBits() > 64)

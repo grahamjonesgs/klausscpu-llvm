@@ -21,95 +21,72 @@ define signext i32 @wrap_7fff(i32 signext %a, i32 signext %b) nounwind {
 ; SEXT-LABEL: wrap_7fff:
 ; SEXT:       # %bb.0: # %entry
 ; SEXT-NEXT:    addw r12, r0, r1
-; SEXT-NEXT:    cmprv r12, 2147483639
-; SEXT-NEXT:    jmpgtrel .LBB0_16
+; SEXT-NEXT:    fbrv r12, 2147483639, 10, .LBB0_16
 ; SEXT-NEXT:  # %bb.1: # %entry
-; SEXT-NEXT:    cmprv r12, -2147483645
-; SEXT-NEXT:    jmpgtrel .LBB0_9
+; SEXT-NEXT:    fbrv r12, -2147483645, 10, .LBB0_9
 ; SEXT-NEXT:  # %bb.2: # %entry
-; SEXT-NEXT:    cmprv r12, -2147483647
-; SEXT-NEXT:    jmpgtrel .LBB0_6
+; SEXT-NEXT:    fbrv r12, -2147483647, 10, .LBB0_6
 ; SEXT-NEXT:  # %bb.3: # %entry
-; SEXT-NEXT:    cmprv r12, -2147483648
-; SEXT-NEXT:    jmperel .LBB0_35
+; SEXT-NEXT:    fbrv r12, -2147483648, 0, .LBB0_35
 ; SEXT-NEXT:  # %bb.4: # %entry
-; SEXT-NEXT:    cmprv r12, -2147483647
-; SEXT-NEXT:    jmpnerel .LBB0_39
+; SEXT-NEXT:    fbrv r12, -2147483647, 8, .LBB0_39
 ; SEXT-NEXT:  # %bb.5: # %c9
 ; SEXT-NEXT:    setr r12, 10
 ; SEXT-NEXT:    ret
 ; SEXT-NEXT:  .LBB0_16: # %entry
-; SEXT-NEXT:    cmprv r12, 2147483643
-; SEXT-NEXT:    jmpgtrel .LBB0_24
+; SEXT-NEXT:    fbrv r12, 2147483643, 10, .LBB0_24
 ; SEXT-NEXT:  # %bb.17: # %entry
-; SEXT-NEXT:    cmprv r12, 2147483641
-; SEXT-NEXT:    jmpgtrel .LBB0_21
+; SEXT-NEXT:    fbrv r12, 2147483641, 10, .LBB0_21
 ; SEXT-NEXT:  # %bb.18: # %entry
-; SEXT-NEXT:    cmprv r12, 2147483640
-; SEXT-NEXT:    jmperel .LBB0_31
+; SEXT-NEXT:    fbrv r12, 2147483640, 0, .LBB0_31
 ; SEXT-NEXT:  # %bb.19: # %entry
-; SEXT-NEXT:    cmprv r12, 2147483641
-; SEXT-NEXT:    jmpnerel .LBB0_39
+; SEXT-NEXT:    fbrv r12, 2147483641, 8, .LBB0_39
 ; SEXT-NEXT:  # %bb.20: # %c1
 ; SEXT-NEXT:    setr r12, 2
 ; SEXT-NEXT:    ret
 ; SEXT-NEXT:  .LBB0_9: # %entry
-; SEXT-NEXT:    cmprv r12, -2147483643
-; SEXT-NEXT:    jmpgtrel .LBB0_13
+; SEXT-NEXT:    fbrv r12, -2147483643, 10, .LBB0_13
 ; SEXT-NEXT:  # %bb.10: # %entry
-; SEXT-NEXT:    cmprv r12, -2147483644
-; SEXT-NEXT:    jmperel .LBB0_37
+; SEXT-NEXT:    fbrv r12, -2147483644, 0, .LBB0_37
 ; SEXT-NEXT:  # %bb.11: # %entry
-; SEXT-NEXT:    cmprv r12, -2147483643
-; SEXT-NEXT:    jmpnerel .LBB0_39
+; SEXT-NEXT:    fbrv r12, -2147483643, 8, .LBB0_39
 ; SEXT-NEXT:  # %bb.12: # %c13
 ; SEXT-NEXT:    setr r12, 14
 ; SEXT-NEXT:    ret
 ; SEXT-NEXT:  .LBB0_24: # %entry
-; SEXT-NEXT:    cmprv r12, 2147483645
-; SEXT-NEXT:    jmpgtrel .LBB0_28
+; SEXT-NEXT:    fbrv r12, 2147483645, 10, .LBB0_28
 ; SEXT-NEXT:  # %bb.25: # %entry
-; SEXT-NEXT:    cmprv r12, 2147483644
-; SEXT-NEXT:    jmperel .LBB0_33
+; SEXT-NEXT:    fbrv r12, 2147483644, 0, .LBB0_33
 ; SEXT-NEXT:  # %bb.26: # %entry
-; SEXT-NEXT:    cmprv r12, 2147483645
-; SEXT-NEXT:    jmpnerel .LBB0_39
+; SEXT-NEXT:    fbrv r12, 2147483645, 8, .LBB0_39
 ; SEXT-NEXT:  # %bb.27: # %c5
 ; SEXT-NEXT:    setr r12, 6
 ; SEXT-NEXT:    ret
 ; SEXT-NEXT:  .LBB0_6: # %entry
-; SEXT-NEXT:    cmprv r12, -2147483646
-; SEXT-NEXT:    jmperel .LBB0_36
+; SEXT-NEXT:    fbrv r12, -2147483646, 0, .LBB0_36
 ; SEXT-NEXT:  # %bb.7: # %entry
-; SEXT-NEXT:    cmprv r12, -2147483645
-; SEXT-NEXT:    jmpnerel .LBB0_39
+; SEXT-NEXT:    fbrv r12, -2147483645, 8, .LBB0_39
 ; SEXT-NEXT:  # %bb.8: # %c11
 ; SEXT-NEXT:    setr r12, 12
 ; SEXT-NEXT:    ret
 ; SEXT-NEXT:  .LBB0_21: # %entry
-; SEXT-NEXT:    cmprv r12, 2147483642
-; SEXT-NEXT:    jmperel .LBB0_32
+; SEXT-NEXT:    fbrv r12, 2147483642, 0, .LBB0_32
 ; SEXT-NEXT:  # %bb.22: # %entry
-; SEXT-NEXT:    cmprv r12, 2147483643
-; SEXT-NEXT:    jmpnerel .LBB0_39
+; SEXT-NEXT:    fbrv r12, 2147483643, 8, .LBB0_39
 ; SEXT-NEXT:  # %bb.23: # %c3
 ; SEXT-NEXT:    setr r12, 4
 ; SEXT-NEXT:    ret
 ; SEXT-NEXT:  .LBB0_13: # %entry
-; SEXT-NEXT:    cmprv r12, -2147483642
-; SEXT-NEXT:    jmperel .LBB0_38
+; SEXT-NEXT:    fbrv r12, -2147483642, 0, .LBB0_38
 ; SEXT-NEXT:  # %bb.14: # %entry
-; SEXT-NEXT:    cmprv r12, -2147483641
-; SEXT-NEXT:    jmpnerel .LBB0_39
+; SEXT-NEXT:    fbrv r12, -2147483641, 8, .LBB0_39
 ; SEXT-NEXT:  # %bb.15: # %c15
 ; SEXT-NEXT:    setr r12, 16
 ; SEXT-NEXT:    ret
 ; SEXT-NEXT:  .LBB0_28: # %entry
-; SEXT-NEXT:    cmprv r12, 2147483646
-; SEXT-NEXT:    jmperel .LBB0_34
+; SEXT-NEXT:    fbrv r12, 2147483646, 0, .LBB0_34
 ; SEXT-NEXT:  # %bb.29: # %entry
-; SEXT-NEXT:    cmprv r12, 2147483647
-; SEXT-NEXT:    jmpnerel .LBB0_39
+; SEXT-NEXT:    fbrv r12, 2147483647, 8, .LBB0_39
 ; SEXT-NEXT:  # %bb.30: # %c7
 ; SEXT-NEXT:    setr r12, 8
 ; SEXT-NEXT:    ret
@@ -148,8 +125,7 @@ define signext i32 @wrap_7fff(i32 signext %a, i32 signext %b) nounwind {
 ; ZEXT-NEXT:    zextw r12, r12
 ; ZEXT-NEXT:    addi r13, r12, -2147483640
 ; ZEXT-NEXT:    shlv r12, r13, 2
-; ZEXT-NEXT:    cmprv r13, 15
-; ZEXT-NEXT:    jmpugtrel .LBB0_18
+; ZEXT-NEXT:    fbrv r13, 15, 12, .LBB0_18
 ; ZEXT-NEXT:  # %bb.1: # %entry
 ; ZEXT-NEXT:    ldidx32r r12, r14, r12
 ; ZEXT-NEXT:    jmpr r12
@@ -267,8 +243,7 @@ define signext i32 @wrap_ffff(i32 signext %a, i32 signext %b) nounwind {
 ; SEXT-NEXT:    setru r14, .LJTI1_0
 ; SEXT-NEXT:    addi r13, r12, 8
 ; SEXT-NEXT:    shlv r12, r13, 2
-; SEXT-NEXT:    cmprv r13, 15
-; SEXT-NEXT:    jmpugtrel .LBB1_18
+; SEXT-NEXT:    fbrv r13, 15, 12, .LBB1_18
 ; SEXT-NEXT:  # %bb.1: # %entry
 ; SEXT-NEXT:    ldidx32r r12, r14, r12
 ; SEXT-NEXT:    jmpr r12

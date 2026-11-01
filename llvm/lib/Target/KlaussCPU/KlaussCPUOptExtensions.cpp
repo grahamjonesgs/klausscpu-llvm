@@ -38,9 +38,8 @@
 //      every reader reads only its low 32 bits, this SEXTW included: that
 //      op becomes its W form (ADDW, SUBW, MULW, ADDIW), whose result is the
 //      sign extension of the same low 32 bits, and then rule 1 applies.
-//      This is what lets a branch on a 32-bit value compare all 64 bits and
-//      fuse into an FBR (KlaussCPUISelDAGToDAG tryW32Compare): a loop's
-//      `n++ ; n < max` becomes ADDIW + FBR instead of INCR + CMPRRW + JMPcc.
+//      E.g. `n + 1`, stored as 32 bits and also needed sign-extended (a
+//      signext return), becomes one ADDIW.
 //      -klausscpu-w32-alu=false turns this rule off with the W-op patterns.
 //
 // The extension's result is then replaced by its source.  Every decision is

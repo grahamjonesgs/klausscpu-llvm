@@ -129,6 +129,8 @@ static bool isCmpBrPair(const TargetInstrInfo &, const TargetSubtargetInfo &,
   case KlaussCPU::CMPRR_I:
   case KlaussCPU::CMPRV_I:
   case KlaussCPU::CMPRVU_I:
+  case KlaussCPU::CMPRRW_I:
+  case KlaussCPU::CMPRVW_I:
     return true;
   default:
     return false;

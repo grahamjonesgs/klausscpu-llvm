@@ -28,8 +28,7 @@ define float @fadd_f32(ptr %p, float %x) nounwind {
 ; CHECK-NEXT:    copy r0, r4
 ; CHECK-NEXT:    copy r1, r6
 ; CHECK-NEXT:    callrel __sync_val_compare_and_swap_4
-; CHECK-NEXT:    cmprrw r12, r6
-; CHECK-NEXT:    jmpnerel .LBB0_1
+; CHECK-NEXT:    fbr r12, r6, 13, .LBB0_1
 ; CHECK-NEXT:  # %bb.2: # %atomicrmw.end
 ; CHECK-NEXT:    ldidx64 r6, r15, -24 # 8-byte Folded Reload
 ; CHECK-NEXT:    ldidx64 r5, r15, -16 # 8-byte Folded Reload
@@ -92,9 +91,8 @@ define i32 @uinc_wrap_i32(ptr %p, i32 %x) nounwind {
 ; CHECK-NEXT:    jmperel .LBB2_4
 ; CHECK-NEXT:  .LBB2_1: # %atomicrmw.start
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
-; CHECK-NEXT:    cmprrw r6, r5
 ; CHECK-NEXT:    setr r2, 0
-; CHECK-NEXT:    jmpugerel .LBB2_3
+; CHECK-NEXT:    fbr r6, r5, 15, .LBB2_3
 ; CHECK-NEXT:  # %bb.2: # %atomicrmw.start
 ; CHECK-NEXT:    # in Loop: Header=BB2_1 Depth=1
 ; CHECK-NEXT:    incr r2, r6

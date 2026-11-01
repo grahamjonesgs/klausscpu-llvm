@@ -191,7 +191,9 @@ bool KlaussCPUInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
        ++J) {
     // ISA v3 B fused branches (pre-emit only) carry their target at
     // operand 3 and no separate compare: not modelled here.
-    if (J->getOpcode() == KlaussCPU::FBR_RR || J->getOpcode() == KlaussCPU::FBR_RI)
+    if (J->getOpcode() == KlaussCPU::FBR_RR ||
+        J->getOpcode() == KlaussCPU::FBR_RI ||
+        J->getOpcode() == KlaussCPU::FBR_RV)
       return true;
     ++NumTerminators;
     if (J->getDesc().isUnconditionalBranch() ||

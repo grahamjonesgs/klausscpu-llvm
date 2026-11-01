@@ -4,7 +4,8 @@
 # block. Only from -O1, only for a branch in the loop header or its only
 # latch (other blocks may reuse a constant already set up), never with a
 # register the loop touches or has live in, and a callee-saved register only
-# when the prologue saves it.
+# when the prologue saves it. Otherwise the compare becomes the 2-word FBR_RV
+# (rhs sext(imm32)), and a CMPRVU constant from 2^31 stays unfused.
 #
 # RUN: llc -march=klausscpu -run-pass=klausscpu-cmp-br-fuse -verify-machineinstrs \
 # RUN:   %s -o - | FileCheck %s
@@ -16,6 +17,7 @@
 --- |
   declare void @g()
   define void @latch() { ret void }
+  define void @w_const() { ret void }
   define void @unsigned_const() { ret void }
   define void @call_in_loop() { ret void }
   define void @call_in_loop_saved_csr() { ret void }
@@ -48,8 +50,7 @@
 #
 # O0-LABEL:    name: latch
 # O0-NOT:      $r12 = SETR
-# O0:          CMPRV_I $r1, 100
-# O0-NEXT:     JMPLT %bb.1
+# O0:          FBR_RV $r1, 100, 1, %bb.1
 name:            latch
 tracksRegLiveness: true
 body:             |
@@ -67,6 +68,41 @@ body:             |
     $r1 = INCR $r1, implicit-def dead $flags
     CMPRV_I $r1, 100, implicit-def $flags
     JMPLT %bb.1, implicit killed $flags
+
+  bb.2:
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15
+...
+---
+# A W compare: the constant is set sign-extended (CMPRVW reads its low 32
+# bits), and there is no LEW, so i <= 1000 is !(1000 < i), the registers
+# swapped (GEW).
+# CHECK-LABEL: name: w_const
+# CHECK:       bb.0:
+# CHECK:         $r12 = SETR 1000
+# CHECK:       bb.1:
+# CHECK:         FBR_RR $r12, $r1, 14, %bb.1
+# CHECK-NOT:     CMPRVW_I
+#
+# O0-LABEL:    name: w_const
+# O0-NOT:      $r12 = SETR
+# O0:          FBR_RV $r1, 1001, 6, %bb.1
+name:            w_const
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1
+    liveins: $r0
+
+    $r1 = SETR 0
+
+  bb.1:
+    successors: %bb.1, %bb.2
+    liveins: $r0, $r1
+
+    STIDX32 $r1, $r0, 0 :: (store (s32))
+    $r1 = INCR $r1, implicit-def dead $flags
+    CMPRVW_I $r1, 1000, implicit-def $flags
+    JMPLE %bb.1, implicit killed $flags
 
   bb.2:
     LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15
@@ -106,9 +142,9 @@ body:             |
 # The call clobbers every caller-saved register, and no callee-saved one is
 # saved by the prologue: nothing is free.
 # CHECK-LABEL: name: call_in_loop
+# CHECK-NOT:     SETR 100
 # CHECK:       bb.1:
-# CHECK:         CMPRV_I $r4, 100, implicit-def $flags
-# CHECK-NEXT:    JMPLT %bb.1
+# CHECK:         FBR_RV $r4, 100, 1, %bb.1
 name:            call_in_loop
 tracksRegLiveness: true
 body:             |
@@ -162,7 +198,7 @@ body:             |
     LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15
 ...
 ---
-# bb.2 is neither the header nor the latch: its compare with 50 stays, but
+# bb.2 is neither the header nor the latch: its compare with 50 is FBR_RV, but
 # its compare with 120 reuses the register the header's compare set up.
 # CHECK-LABEL: name: body_block
 # CHECK:       bb.0:
@@ -170,8 +206,7 @@ body:             |
 # CHECK:       bb.1:
 # CHECK:         FBR_RR $r1, $r12, 8, %bb.5
 # CHECK:       bb.2:
-# CHECK:         CMPRV_I $r1, 50, implicit-def $flags
-# CHECK-NEXT:    JMPE %bb.5
+# CHECK:         FBR_RV $r1, 50, 0, %bb.5
 # CHECK:       bb.3:
 # CHECK:         FBR_RR $r1, $r12, 0, %bb.5
 name:            body_block
@@ -219,8 +254,8 @@ body:             |
 ---
 # The loop is entered from two blocks: there is no preheader.
 # CHECK-LABEL: name: no_preheader
-# CHECK:       CMPRV_I $r1, 100, implicit-def $flags
-# CHECK-NEXT:  JMPLT %bb.2
+# CHECK-NOT:   SETR 100
+# CHECK:       FBR_RV $r1, 100, 1, %bb.2
 name:            no_preheader
 tracksRegLiveness: true
 body:             |

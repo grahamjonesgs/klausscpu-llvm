@@ -2331,8 +2331,7 @@ def : CompressPat<(TAILREL CallTarget18:$target),
 // $cc = PRED | INV<<3, PRED 0 EQ, 1 LT, 2 LE, 3 ULT, 4 ULE (64-bit) and
 // 5 EQW, 6 LTW, 7 ULTW (the low 32 bits, as CMPRRW; ISA_ENCODING_V2_MAP
 // §8.1); simm13 word displacement via FK_KlaussCPU_PCREL13, from the
-// branch's own address. FBR_RR / FBR_RI are built only by
-// KlaussCPUFuseCmpBr (64-bit predicates so far); FBR_RV is assembler-only.
+// branch's own address. Built only by KlaussCPUFuseCmpBr.
 // Word 0: PRED [25:23], INV [22], IMM [21], disp13 [20:8], rs1 [7:4],
 // rs2 or simm4 [3:0] (0 in the 2-word form, whose rhs is word 1).
 class FusedBranchFields {

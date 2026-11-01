@@ -61,10 +61,6 @@ static cl::opt<bool> EnableW32Compare(
     "klausscpu-w32-compare", cl::init(true), cl::Hidden,
     cl::desc("ISA v3 D2: select 32-bit CMPRRW/CMPRVW for compares of "
              "32-bit-extended values"));
-static cl::opt<bool> W32CompareBranch(
-    "klausscpu-w32-compare-branch", cl::init(false), cl::Hidden,
-    cl::desc("Branch on a W compare of two sign-extended values (=false: "
-             "keep the SEXTWs and compare 64 bits, which FBR can fuse)"));
 
 namespace {
 // ISA v3 D2: how a compare operand was extended from 32 bits.
@@ -112,12 +108,10 @@ static bool onlyFeedsCompare(SDNode *Ext, SDValue LHS, SDValue RHS,
 /// order, so a sext pair works for any condition; a zext pair only for
 /// EQ/NE and the unsigned conditions.  Only used when an extension
 /// instruction actually disappears: it feeds nothing but compares like this
-/// one.  A branch (ForBranch) whose sign extensions are of an add, subtract
-/// or multiply compares 64 bits instead (see below).  Otherwise a branch on
-/// the 64-bit compare would be SEXTW + FBR, no shorter than CMPRRW + JMPcc,
-/// and the W form keeps the unextended value's register.
-static bool tryW32Compare(ISD::CondCode CC, SDValue &LHS, SDValue &RHS,
-                          bool ForBranch = false) {
+/// one.  A branch on a W compare fuses into an FBR as a 64-bit one does
+/// (the W predicates, KlaussCPUFuseCmpBr), so branches take it too: the
+/// operand needs no SEXTW, nor its add, subtract or multiply the W form.
+static bool tryW32Compare(ISD::CondCode CC, SDValue &LHS, SDValue &RHS) {
   if (!EnableW32Compare)
     return false;
   Ext32 L = classifyExt32(LHS), R = classifyExt32(RHS);
@@ -137,22 +131,6 @@ static bool tryW32Compare(ISD::CondCode CC, SDValue &LHS, SDValue &RHS,
   bool Saves = (L.Stripped && onlyFeedsCompare(L.Node, LHS, RHS, CC)) ||
                (!RC && R.Stripped && onlyFeedsCompare(R.Node, LHS, RHS, CC));
   if (K == Ext32::None || !Saves)
-    return false;
-  // A branch on the 64-bit compare fuses into an FBR, a W compare's does
-  // not (FBR has no width bit).  When each sign extension the W compare
-  // would drop is of an add, subtract or multiply, compare 64 bits instead:
-  // the extension becomes the W op (an ADDW/SUBW/MULW/ADDIW pattern, or
-  // KlaussCPUOptExtensions rule 4 when the op has other readers), so the
-  // branch is that op + FBR instead of the op + CMPRRW + JMPcc and its
-  // FLAGS stall.  Other extensions (of a PHI, a load) keep the W compare:
-  // SEXTW + FBR would be no shorter, and the larger block can miss tail
-  // duplication.
-  auto BecomesWOp = [](const Ext32 &E) {
-    unsigned Opc = E.Inner.getOpcode();
-    return !E.Stripped || Opc == ISD::ADD || Opc == ISD::SUB || Opc == ISD::MUL;
-  };
-  if (ForBranch && K == Ext32::S && !W32CompareBranch && BecomesWOp(L) &&
-      (RC || BecomesWOp(R)))
     return false;
   LHS = L.Inner;
   if (!RC)
@@ -371,7 +349,7 @@ void KlaussCPUDAGToDAGISel::Select(SDNode *N) {
     SDNode *CmpNode;
 
     // ISA v3 D2: 32-bit compare when both operands are 32-bit extended.
-    if (tryW32Compare(CC, LHS, RHS, /*ForBranch=*/true)) {
+    if (tryW32Compare(CC, LHS, RHS)) {
       if (auto *C = dyn_cast<ConstantSDNode>(RHS)) {
         SDValue Imm = CurDAG->getTargetConstant(
             static_cast<int32_t>(C->getZExtValue()), DL, MVT::i64);

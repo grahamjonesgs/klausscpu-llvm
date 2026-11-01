@@ -1,7 +1,7 @@
 # KlaussCPUFuseCmpBr scans back from each conditional branch to the nearest
 # FLAGS writer. PHI elimination and the schedulers put copies, constants and
 # spills between a compare and its branch; the pair still fuses when that
-# writer is a CMPRR / CMPRV (simm4) / CMPRVU (0..7) and nothing in between
+# writer is a compare (fuse-cmp-br-w.mir has the forms) and nothing in between
 # reads FLAGS, redefines a compare operand, or is a call or inline asm. The
 # FBR goes where the branch was and the instructions in between stay.
 #
@@ -201,17 +201,16 @@ body:             |
     LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15, implicit killed $r12
 ...
 ---
-# Immediates: CMPRV takes -8..7, CMPRVU (zero-extended) 0..7, and the 32-bit
-# CMPRVW never fuses (FBR always compares 64 bits).
+# Immediates: FBR_RI takes CMPRV's -8..7 and CMPRVU's (zero-extended)
+# 0..7, other constants are the 2-word FBR_RV; the 32-bit CMPRVW fuses with
+# a W predicate (EQW = 5).
 # CHECK-LABEL: name: immediates
-# CHECK:       CMPRV_I $r0, 8, implicit-def $flags
-# CHECK-NEXT:  $r12 = SETR 0
-# CHECK-NEXT:  JMPE %bb.5
+# CHECK:       $r12 = SETR 0
+# CHECK-NEXT:  FBR_RV $r0, 8, 0, %bb.5
 # CHECK:       $r12 = SETR 1
 # CHECK-NEXT:  FBR_RI $r0, 7, 0, %bb.5
-# CHECK:       CMPRVW_I $r0, 1, implicit-def $flags
-# CHECK-NEXT:  $r12 = SETR 2
-# CHECK-NEXT:  JMPE %bb.5
+# CHECK:       $r12 = SETR 2
+# CHECK-NEXT:  FBR_RI $r0, 1, 5, %bb.5
 # CHECK:       $r12 = SETR 3
 # CHECK-NEXT:  FBR_RI killed $r0, -1, 8, %bb.5
 name:            immediates

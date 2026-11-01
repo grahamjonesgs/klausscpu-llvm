@@ -1,0 +1,304 @@
+# KlaussCPUFuseCmpBr with the klaussCPU 3508f87 fused branches
+# (ISA_ENCODING_V2_MAP.md §8.1): PRED 5/6/7 = EQW/LTW/ULTW compare the low
+# 32 bits, as CMPRRW/CMPRVW do, and the 2-word FBR_RV compares with
+# sext(imm32).
+#
+# - CMPRRW fuses into FBR_RR with a W predicate. There is no LEW/ULEW: under
+#   LE/GT/ULE/UGT the registers trade places (a <= b is !(b < a), a > b is
+#   b < a), and their kill flags with them.
+# - CMPRVW fuses into FBR_RI when the low 32 bits of its immediate are a
+#   simm4, else FBR_RV; under LE/GT/ULE/UGT with C + 1 (a <= C is a < C + 1),
+#   which wraps the unsigned 0x7FFFFFFF to 0x80000000 (-2147483648 as the
+#   sext(imm32)), but never for C = INT32_MAX (LE) or UINT32_MAX (ULE).
+# - A 64-bit CMPRV outside simm4 fuses into FBR_RV, as does CMPRVU below
+#   2^31 (zero- and sign-extension agree there); CMPRVU from 2^31 does not
+#   (outside a loop: fuse-cmp-br-loop-const.mir).
+#
+# RUN: llc -march=klausscpu -run-pass=klausscpu-cmp-br-fuse -verify-machineinstrs \
+# RUN:   %s -o - | FileCheck %s
+
+--- |
+  define void @w_regs() { ret void }
+  define void @w_imm() { ret void }
+  define void @imm32() { ret void }
+...
+---
+# CHECK-LABEL: name: w_regs
+# CHECK:       bb.0:
+# CHECK:         FBR_RR $r0, $r1, 5, %bb.12
+# CHECK:       bb.1:
+# CHECK:         FBR_RR $r0, $r1, 13, %bb.12
+# CHECK:       bb.2:
+# CHECK:         FBR_RR $r0, $r1, 6, %bb.12
+# CHECK:       bb.3:
+# CHECK:         FBR_RR $r0, $r1, 14, %bb.12
+# CHECK:       bb.4:
+# CHECK:         FBR_RR $r1, $r0, 14, %bb.12
+# CHECK:       bb.5:
+# CHECK:         FBR_RR $r1, $r0, 6, %bb.12
+# CHECK:       bb.6:
+# CHECK:         FBR_RR $r0, $r1, 7, %bb.12
+# CHECK:       bb.7:
+# CHECK:         FBR_RR $r0, $r1, 15, %bb.12
+# CHECK:       bb.8:
+# CHECK:         FBR_RR $r1, $r0, 15, %bb.12
+# CHECK:       bb.9:
+# CHECK:         FBR_RR $r1, $r0, 7, %bb.12
+# CHECK:       bb.10:
+# CHECK:         FBR_RR $r0, $r1, 7, %bb.12
+# CHECK:       bb.11:
+# CHECK:         $r12 = COPY_R $r1
+# CHECK-NEXT:    FBR_RR $r1, killed $r0, 6, %bb.12
+# CHECK-NOT:   CMPRRW_I
+# CHECK-NOT:   JMP
+name:            w_regs
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.12
+    liveins: $r0, $r1
+    CMPRRW_I $r0, $r1, implicit-def $flags
+    JMPE %bb.12, implicit killed $flags
+
+  bb.1:
+    successors: %bb.2, %bb.12
+    liveins: $r0, $r1
+    CMPRRW_I $r0, $r1, implicit-def $flags
+    JMPNE %bb.12, implicit killed $flags
+
+  bb.2:
+    successors: %bb.3, %bb.12
+    liveins: $r0, $r1
+    CMPRRW_I $r0, $r1, implicit-def $flags
+    JMPLT %bb.12, implicit killed $flags
+
+  bb.3:
+    successors: %bb.4, %bb.12
+    liveins: $r0, $r1
+    CMPRRW_I $r0, $r1, implicit-def $flags
+    JMPGE %bb.12, implicit killed $flags
+
+  bb.4:
+    successors: %bb.5, %bb.12
+    liveins: $r0, $r1
+    CMPRRW_I $r0, $r1, implicit-def $flags
+    JMPLE %bb.12, implicit killed $flags
+
+  bb.5:
+    successors: %bb.6, %bb.12
+    liveins: $r0, $r1
+    CMPRRW_I $r0, $r1, implicit-def $flags
+    JMPGT %bb.12, implicit killed $flags
+
+  bb.6:
+    successors: %bb.7, %bb.12
+    liveins: $r0, $r1
+    CMPRRW_I $r0, $r1, implicit-def $flags
+    JMPULT %bb.12, implicit killed $flags
+
+  bb.7:
+    successors: %bb.8, %bb.12
+    liveins: $r0, $r1
+    CMPRRW_I $r0, $r1, implicit-def $flags
+    JMPUGE %bb.12, implicit killed $flags
+
+  bb.8:
+    successors: %bb.9, %bb.12
+    liveins: $r0, $r1
+    CMPRRW_I $r0, $r1, implicit-def $flags
+    JMPULE %bb.12, implicit killed $flags
+
+  bb.9:
+    successors: %bb.10, %bb.12
+    liveins: $r0, $r1
+    CMPRRW_I $r0, $r1, implicit-def $flags
+    JMPUGT %bb.12, implicit killed $flags
+
+  bb.10:
+    successors: %bb.11, %bb.12
+    liveins: $r0, $r1
+    CMPRRW_I $r0, $r1, implicit-def $flags
+    JMPC %bb.12, implicit killed $flags
+
+  bb.11:
+    successors: %bb.12
+    liveins: $r0, $r1
+    CMPRRW_I killed $r0, $r1, implicit-def $flags
+    $r12 = COPY_R $r1
+    JMPGT %bb.12, implicit killed $flags
+
+  bb.12:
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15
+...
+---
+# CHECK-LABEL: name: w_imm
+# CHECK:       bb.0:
+# CHECK:         FBR_RI $r0, -8, 5, %bb.12
+# CHECK:       bb.1:
+# CHECK:         FBR_RV $r0, 8, 6, %bb.12
+# CHECK:       bb.2:
+# CHECK:         FBR_RI $r0, 7, 6, %bb.12
+# CHECK:       bb.3:
+# CHECK:         FBR_RI $r0, -8, 14, %bb.12
+# CHECK:       bb.4:
+# CHECK:         FBR_RV $r0, 100000, 13, %bb.12
+# CHECK:       bb.5:
+# CHECK:         CMPRVW_I $r0, 2147483647, implicit-def $flags
+# CHECK-NEXT:    JMPLE %bb.12
+# CHECK:       bb.6:
+# CHECK:         CMPRVW_I $r0, -1, implicit-def $flags
+# CHECK-NEXT:    JMPULE %bb.12
+# CHECK:       bb.7:
+# CHECK:         CMPRVW_I $r0, -1, implicit-def $flags
+# CHECK-NEXT:    JMPUGT %bb.12
+# CHECK:       bb.8:
+# CHECK:         FBR_RI $r0, -1, 7, %bb.12
+# CHECK:       bb.9:
+# CHECK:         FBR_RV $r0, -2147483648, 7, %bb.12
+# CHECK:       bb.10:
+# CHECK:         FBR_RV $r0, -2147483648, 6, %bb.12
+# CHECK:       bb.11:
+# CHECK:         FBR_RV killed $r0, 2147483647, 14, %bb.12
+name:            w_imm
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.12
+    liveins: $r0
+    CMPRVW_I $r0, -8, implicit-def $flags
+    JMPE %bb.12, implicit killed $flags
+
+  ; a <= 7 is a < 8: no longer a simm4.
+  bb.1:
+    successors: %bb.2, %bb.12
+    liveins: $r0
+    CMPRVW_I $r0, 7, implicit-def $flags
+    JMPLE %bb.12, implicit killed $flags
+
+  bb.2:
+    successors: %bb.3, %bb.12
+    liveins: $r0
+    CMPRVW_I $r0, 6, implicit-def $flags
+    JMPLE %bb.12, implicit killed $flags
+
+  ; a > -9 is !(a < -8).
+  bb.3:
+    successors: %bb.4, %bb.12
+    liveins: $r0
+    CMPRVW_I $r0, -9, implicit-def $flags
+    JMPGT %bb.12, implicit killed $flags
+
+  bb.4:
+    successors: %bb.5, %bb.12
+    liveins: $r0
+    CMPRVW_I $r0, 100000, implicit-def $flags
+    JMPNE %bb.12, implicit killed $flags
+
+  ; a <= INT32_MAX is always true: left alone.
+  bb.5:
+    successors: %bb.6, %bb.12
+    liveins: $r0
+    CMPRVW_I $r0, 2147483647, implicit-def $flags
+    JMPLE %bb.12, implicit killed $flags
+
+  ; Unsigned a <= 0xFFFFFFFF, a > 0xFFFFFFFF: left alone.
+  bb.6:
+    successors: %bb.7, %bb.12
+    liveins: $r0
+    CMPRVW_I $r0, -1, implicit-def $flags
+    JMPULE %bb.12, implicit killed $flags
+
+  bb.7:
+    successors: %bb.8, %bb.12
+    liveins: $r0
+    CMPRVW_I $r0, -1, implicit-def $flags
+    JMPUGT %bb.12, implicit killed $flags
+
+  ; Unsigned a <= 0xFFFFFFFE is a < 0xFFFFFFFF, whose low 32 bits are the
+  ; simm4 -1's.
+  bb.8:
+    successors: %bb.9, %bb.12
+    liveins: $r0
+    CMPRVW_I $r0, -2, implicit-def $flags
+    JMPULE %bb.12, implicit killed $flags
+
+  ; Unsigned a <= 0x7FFFFFFF is a < 0x80000000.
+  bb.9:
+    successors: %bb.10, %bb.12
+    liveins: $r0
+    CMPRVW_I $r0, 2147483647, implicit-def $flags
+    JMPULE %bb.12, implicit killed $flags
+
+  bb.10:
+    successors: %bb.11, %bb.12
+    liveins: $r0
+    CMPRVW_I $r0, -2147483648, implicit-def $flags
+    JMPLT %bb.12, implicit killed $flags
+
+  ; a > 2147483646 is !(a < 2147483647).
+  bb.11:
+    successors: %bb.12
+    liveins: $r0
+    CMPRVW_I killed $r0, 2147483646, implicit-def $flags
+    JMPGT %bb.12, implicit killed $flags
+
+  bb.12:
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15
+...
+---
+# CHECK-LABEL: name: imm32
+# CHECK:       bb.0:
+# CHECK:         FBR_RV $r0, 8, 0, %bb.6
+# CHECK:       bb.1:
+# CHECK:         FBR_RV $r0, -2147483648, 2, %bb.6
+# CHECK:       bb.2:
+# CHECK:         FBR_RV $r0, -9, 12, %bb.6
+# CHECK:       bb.3:
+# CHECK:         FBR_RI $r0, 7, 12, %bb.6
+# CHECK:       bb.4:
+# CHECK:         FBR_RV $r0, 2147483647, 3, %bb.6
+# CHECK:       bb.5:
+# CHECK:         CMPRVU_I killed $r0, 2147483648, implicit-def $flags
+# CHECK-NEXT:    JMPULT %bb.6
+name:            imm32
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1, %bb.6
+    liveins: $r0
+    CMPRV_I $r0, 8, implicit-def $flags
+    JMPE %bb.6, implicit killed $flags
+
+  bb.1:
+    successors: %bb.2, %bb.6
+    liveins: $r0
+    CMPRV_I $r0, -2147483648, implicit-def $flags
+    JMPLE %bb.6, implicit killed $flags
+
+  bb.2:
+    successors: %bb.3, %bb.6
+    liveins: $r0
+    CMPRV_I $r0, -9, implicit-def $flags
+    JMPUGT %bb.6, implicit killed $flags
+
+  bb.3:
+    successors: %bb.4, %bb.6
+    liveins: $r0
+    CMPRVU_I $r0, 7, implicit-def $flags
+    JMPUGT %bb.6, implicit killed $flags
+
+  bb.4:
+    successors: %bb.5, %bb.6
+    liveins: $r0
+    CMPRVU_I $r0, 2147483647, implicit-def $flags
+    JMPULT %bb.6, implicit killed $flags
+
+  bb.5:
+    successors: %bb.6
+    liveins: $r0
+    CMPRVU_I killed $r0, 2147483648, implicit-def $flags
+    JMPULT %bb.6, implicit killed $flags
+
+  bb.6:
+    LEAVERET_I implicit-def $sp, implicit-def $r15, implicit $r15
+...

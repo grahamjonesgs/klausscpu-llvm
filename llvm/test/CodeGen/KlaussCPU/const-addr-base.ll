@@ -230,9 +230,8 @@ define void @loop_call_run(i32 %n) nounwind {
 ; CHECK-NEXT:    stabs32 r5, 4026531840
 ; CHECK-NEXT:    incr r5, r5
 ; CHECK-NEXT:    ldabs32 r12, 4026531848
-; CHECK-NEXT:    cmprrw r4, r5
 ; CHECK-NEXT:    stabs32 r12, 4026531856
-; CHECK-NEXT:    jmpnerel .LBB5_1
+; CHECK-NEXT:    fbr r4, r5, 13, .LBB5_1
 ; CHECK-NEXT:  # %bb.2: # %exit
 ; CHECK-NEXT:    ldidx64 r5, r15, -16 # 8-byte Folded Reload
 ; CHECK-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
@@ -252,9 +251,8 @@ define void @loop_call_run(i32 %n) nounwind {
 ; OFF-NEXT:    stabs32 r5, 4026531840
 ; OFF-NEXT:    incr r5, r5
 ; OFF-NEXT:    ldabs32 r12, 4026531848
-; OFF-NEXT:    cmprrw r4, r5
 ; OFF-NEXT:    stabs32 r12, 4026531856
-; OFF-NEXT:    jmpnerel .LBB5_1
+; OFF-NEXT:    fbr r4, r5, 13, .LBB5_1
 ; OFF-NEXT:  # %bb.2: # %exit
 ; OFF-NEXT:    ldidx64 r5, r15, -16 # 8-byte Folded Reload
 ; OFF-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
@@ -299,9 +297,8 @@ define void @loop_with_calls(i32 %n) nounwind {
 ; CHECK-NEXT:    stidx32 r6, r5, 0
 ; CHECK-NEXT:    incr r6, r6
 ; CHECK-NEXT:    ldidx32 r12, r5, 8
-; CHECK-NEXT:    cmprrw r4, r6
 ; CHECK-NEXT:    stidx32 r12, r5, 16
-; CHECK-NEXT:    jmpnerel .LBB6_1
+; CHECK-NEXT:    fbr r4, r6, 13, .LBB6_1
 ; CHECK-NEXT:  # %bb.2: # %exit
 ; CHECK-NEXT:    stidx32 r4, r5, 0
 ; CHECK-NEXT:    ldidx32 r12, r5, 8
@@ -329,9 +326,8 @@ define void @loop_with_calls(i32 %n) nounwind {
 ; OFF-NEXT:    stabs32 r5, 4026531840
 ; OFF-NEXT:    incr r5, r5
 ; OFF-NEXT:    ldabs32 r12, 4026531848
-; OFF-NEXT:    cmprrw r4, r5
 ; OFF-NEXT:    stabs32 r12, 4026531856
-; OFF-NEXT:    jmpnerel .LBB6_1
+; OFF-NEXT:    fbr r4, r5, 13, .LBB6_1
 ; OFF-NEXT:  # %bb.2: # %exit
 ; OFF-NEXT:    stabs32 r4, 4026531840
 ; OFF-NEXT:    ldabs32 r12, 4026531848

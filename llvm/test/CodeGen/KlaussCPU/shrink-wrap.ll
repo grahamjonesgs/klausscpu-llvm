@@ -65,8 +65,7 @@ define i32 @ack(i32 signext %m, i32 signext %n) nounwind {
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r12, r1
 ; CHECK-NEXT:    copy r4, r0
-; CHECK-NEXT:    cmprvw r4, 0
-; CHECK-NEXT:    jmpnerel .LBB1_2
+; CHECK-NEXT:    fbri r4, 0, 13, .LBB1_2
 ; CHECK-NEXT:    jmprel .LBB1_6
 ; CHECK-NEXT:    .p2align 4
 ; CHECK-NEXT:  .LBB1_5: # %if.end3
@@ -75,17 +74,14 @@ define i32 @ack(i32 signext %m, i32 signext %n) nounwind {
 ; CHECK-NEXT:    addiw r1, r12, -1
 ; CHECK-NEXT:    callrel ack
 ; CHECK-NEXT:    decr r4, r4
-; CHECK-NEXT:    cmprvw r4, 0
-; CHECK-NEXT:    jmperel .LBB1_6
+; CHECK-NEXT:    fbri r4, 0, 5, .LBB1_6
 ; CHECK-NEXT:  .LBB1_2: # %if.end
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
-; CHECK-NEXT:    cmprvw r12, 0
-; CHECK-NEXT:    jmpnerel .LBB1_5
+; CHECK-NEXT:    fbri r12, 0, 13, .LBB1_5
 ; CHECK-NEXT:  # %bb.3: # in Loop: Header=BB1_2 Depth=1
 ; CHECK-NEXT:    setr r12, 1
 ; CHECK-NEXT:    decr r4, r4
-; CHECK-NEXT:    cmprvw r4, 0
-; CHECK-NEXT:    jmpnerel .LBB1_2
+; CHECK-NEXT:    fbri r4, 0, 13, .LBB1_2
 ; CHECK-NEXT:  .LBB1_6: # %if.then
 ; CHECK-NEXT:    incr r12, r12
 ; CHECK-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
@@ -97,8 +93,7 @@ define i32 @ack(i32 signext %m, i32 signext %n) nounwind {
 ; NOSW-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; NOSW-NEXT:    copy r12, r1
 ; NOSW-NEXT:    copy r4, r0
-; NOSW-NEXT:    cmprvw r4, 0
-; NOSW-NEXT:    jmpnerel .LBB1_2
+; NOSW-NEXT:    fbri r4, 0, 13, .LBB1_2
 ; NOSW-NEXT:    jmprel .LBB1_6
 ; NOSW-NEXT:    .p2align 4
 ; NOSW-NEXT:  .LBB1_5: # %if.end3
@@ -107,17 +102,14 @@ define i32 @ack(i32 signext %m, i32 signext %n) nounwind {
 ; NOSW-NEXT:    addiw r1, r12, -1
 ; NOSW-NEXT:    callrel ack
 ; NOSW-NEXT:    decr r4, r4
-; NOSW-NEXT:    cmprvw r4, 0
-; NOSW-NEXT:    jmperel .LBB1_6
+; NOSW-NEXT:    fbri r4, 0, 5, .LBB1_6
 ; NOSW-NEXT:  .LBB1_2: # %if.end
 ; NOSW-NEXT:    # =>This Inner Loop Header: Depth=1
-; NOSW-NEXT:    cmprvw r12, 0
-; NOSW-NEXT:    jmpnerel .LBB1_5
+; NOSW-NEXT:    fbri r12, 0, 13, .LBB1_5
 ; NOSW-NEXT:  # %bb.3: # in Loop: Header=BB1_2 Depth=1
 ; NOSW-NEXT:    setr r12, 1
 ; NOSW-NEXT:    decr r4, r4
-; NOSW-NEXT:    cmprvw r4, 0
-; NOSW-NEXT:    jmpnerel .LBB1_2
+; NOSW-NEXT:    fbri r4, 0, 13, .LBB1_2
 ; NOSW-NEXT:  .LBB1_6: # %if.then
 ; NOSW-NEXT:    incr r12, r12
 ; NOSW-NEXT:    ldidx64 r4, r15, -8 # 8-byte Folded Reload
