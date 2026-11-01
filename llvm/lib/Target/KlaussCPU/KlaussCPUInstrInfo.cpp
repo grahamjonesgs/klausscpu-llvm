@@ -41,6 +41,13 @@ static cl::opt<bool> PostRAExBusy(
              "multi-cycle op's ReleaseAtCycles (MUL 4, DIV 20), as the RTL's "
              "EX hold does.  =false: every op takes one slot (A/B)."));
 
+static cl::opt<bool> PostRAMemPort(
+    "klausscpu-postra-mem-port", cl::Hidden, cl::init(true),
+    cl::desc("Post-RA list scheduler keeps a memory op out of the 4 cycles a "
+             "posted store holds the data port (klaussCPU 3508f87), so two "
+             "non-memory instructions follow each store when there are "
+             "some.  =false: stores take one slot, the port is free (A/B)."));
+
 KlaussCPUInstrInfo::KlaussCPUInstrInfo(const KlaussCPUSubtarget &STI_,
                                         const KlaussCPURegisterInfo &RI)
     : KlaussCPUGenInstrInfo(STI_, RI,
@@ -351,25 +358,47 @@ namespace {
 // instruction keeps its resource beyond the first (its largest
 // ReleaseAtCycle - 1).  (KCUnit is a buffered resource, so the pre-RA
 // scheduler counts these cycles as pressure, not as a hazard.)
+//
+// A posted store (klaussCPU 3508f87) takes two issue cycles, its own and one
+// bubble, and holds the data port until 4 cycles after it issues; the next
+// load, store, PUSH/POP, CALL/RET waits for that.  The two cycles in between
+// are free for ALU, MUL and branch work (measured: `st ; 2 ALU ; ld` costs
+// the same as `st ; ld`), so a memory op is a hazard while the port is busy
+// and the list scheduler fills the gap with whatever else is ready.  The
+// port entry (KCMem) is kept out of the issue-slot count above.
 class KlaussCPUPostRAHazardRecognizer : public ScheduleHazardRecognizer {
   const ScheduleDAGInstrs &DAG;
   bool Issued = false;
   unsigned BusyCycles = 0; // cycles left in which nothing may issue
+  unsigned PortBusy = 0;   // cycles left before the data port is free
 
-  unsigned occupancy(SUnit *SU) const {
-    if (!PostRAExBusy || !SU || !SU->getInstr())
-      return 1;
+  bool isPortResource(unsigned Idx) const {
+    return StringRef(DAG.getSchedModel()->getProcResource(Idx)->Name) ==
+           "KCMem";
+  }
+
+  // The cycles SU keeps the issue slot (first element) and the data port
+  // (second; 0 when it does not use it).
+  std::pair<unsigned, unsigned> occupancy(SUnit *SU) const {
+    if (!SU || !SU->getInstr())
+      return {1, 0};
     const TargetSchedModel *SM = DAG.getSchedModel();
     if (!SM->hasInstrSchedModel())
-      return 1;
-    unsigned Cycles = 1;
+      return {1, 0};
+    unsigned Cycles = 1, Port = 0;
     const MCSchedClassDesc *SC = DAG.getSchedClass(SU);
     if (!SC || !SC->isValid())
-      return 1;
+      return {1, 0};
     for (const MCWriteProcResEntry &PRE :
-         make_range(SM->getWriteProcResBegin(SC), SM->getWriteProcResEnd(SC)))
-      Cycles = std::max<unsigned>(Cycles, PRE.ReleaseAtCycle);
-    return Cycles;
+         make_range(SM->getWriteProcResBegin(SC), SM->getWriteProcResEnd(SC))) {
+      if (isPortResource(PRE.ProcResourceIdx))
+        Port = std::max<unsigned>(Port, PRE.ReleaseAtCycle);
+      else if (PostRAExBusy)
+        Cycles = std::max<unsigned>(Cycles, PRE.ReleaseAtCycle);
+    }
+    if (!PostRAMemPort)
+      return {Port ? 1 : Cycles, 0};
+    return {Cycles, Port};
   }
 
 public:
@@ -377,23 +406,34 @@ public:
       : DAG(DAG) {
     MaxLookAhead = 1;
   }
-  HazardType getHazardType(SUnit *, int) override {
-    return BusyCycles ? Hazard : NoHazard;
+  HazardType getHazardType(SUnit *SU, int) override {
+    if (BusyCycles)
+      return Hazard;
+    if (PostRAMemPort && PortBusy && occupancy(SU).second)
+      return Hazard;
+    return NoHazard;
   }
   bool atIssueLimit() const override { return Issued || BusyCycles; }
   void EmitInstruction(SUnit *SU) override {
     Issued = true;
-    BusyCycles = occupancy(SU) - 1;
+    auto [Slots, Port] = occupancy(SU);
+    BusyCycles = Slots - 1;
+    // Only a store holds the port beyond the cycle it issues in.
+    if (Port > 1)
+      PortBusy = Port;
   }
   void AdvanceCycle() override {
     if (Issued)
       Issued = false;
     else if (BusyCycles)
       --BusyCycles;
+    if (PortBusy)
+      --PortBusy;
   }
   void Reset() override {
     Issued = false;
     BusyCycles = 0;
+    PortBusy = 0;
   }
 };
 } // end anonymous namespace

@@ -101,10 +101,10 @@ define i64 @wide_reader(i32 %a, i32 signext %b, ptr %p) nounwind {
 ; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    addi r0, r0, 7
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
-; CHECK-NEXT:    stidx64 r6, r15, -24 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r2
+; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r5, r1
+; CHECK-NEXT:    stidx64 r6, r15, -24 # 8-byte Folded Spill
 ; CHECK-NEXT:    sextw r6, r0
 ; CHECK-NEXT:    callrel use
 ; CHECK-NEXT:    fbr r6, r5, 9, .LBB3_2

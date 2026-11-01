@@ -13,8 +13,8 @@ define float @fadd_f32(ptr %p, float %x) nounwind {
 ; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    memget32 r12, r0
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r0
+; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r5, r1
 ; CHECK-NEXT:    stidx64 r6, r15, -24 # 8-byte Folded Spill
 ; CHECK-NEXT:    .p2align 4
@@ -44,8 +44,8 @@ define double @fmax_f64(ptr %p, double %x) nounwind {
 ; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    ldidx64 r12, r0, 0
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r0
+; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r5, r1
 ; CHECK-NEXT:    stidx64 r6, r15, -24 # 8-byte Folded Spill
 ; CHECK-NEXT:    .p2align 4
@@ -76,8 +76,8 @@ define i32 @uinc_wrap_i32(ptr %p, i32 %x) nounwind {
 ; CHECK-NEXT:    stidx64 r6, r15, -24 # 8-byte Folded Spill
 ; CHECK-NEXT:    memget32 r6, r0
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r0
+; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r5, r1
 ; CHECK-NEXT:    jmprel .LBB2_1
 ; CHECK-NEXT:    .p2align 4
@@ -112,10 +112,10 @@ define i16 @udec_wrap_i16(ptr %p, i16 %x) nounwind {
 ; CHECK-NEXT:    enter 4
 ; CHECK-NEXT:    memget16 r12, r0
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
-; CHECK-NEXT:    stidx64 r6, r15, -24 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r0
+; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r5, r1
+; CHECK-NEXT:    stidx64 r6, r15, -24 # 8-byte Folded Spill
 ; CHECK-NEXT:    zexth r6, r1
 ; CHECK-NEXT:    stidx64 r7, r15, -32 # 8-byte Folded Spill
 ; CHECK-NEXT:    jmprel .LBB3_1
@@ -158,10 +158,10 @@ define i8 @usub_cond_i8(ptr %p, i8 %x) nounwind {
 ; CHECK-NEXT:    enter 4
 ; CHECK-NEXT:    memget8 r12, r0
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
-; CHECK-NEXT:    stidx64 r6, r15, -24 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r0
+; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r5, r1
+; CHECK-NEXT:    stidx64 r6, r15, -24 # 8-byte Folded Spill
 ; CHECK-NEXT:    zextb r6, r1
 ; CHECK-NEXT:    stidx64 r7, r15, -32 # 8-byte Folded Spill
 ; CHECK-NEXT:    jmprel .LBB4_1
@@ -198,8 +198,8 @@ define i64 @usub_sat_i64(ptr %p, i64 %x) nounwind {
 ; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    ldidx64 r12, r0, 0
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r0
+; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r5, r1
 ; CHECK-NEXT:    stidx64 r6, r15, -24 # 8-byte Folded Spill
 ; CHECK-NEXT:    .p2align 4
@@ -238,12 +238,12 @@ define i32 @add_i32_misaligned(ptr %p, i32 %x) nounwind {
 ; CHECK-NEXT:    enter 8
 ; CHECK-NEXT:    memget32 r12, r0
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
-; CHECK-NEXT:    stidx64 r6, r15, -24 # 8-byte Folded Spill
-; CHECK-NEXT:    stidx64 r7, r15, -32 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r0
+; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
 ; CHECK-NEXT:    setr r5, 5
+; CHECK-NEXT:    stidx64 r6, r15, -24 # 8-byte Folded Spill
 ; CHECK-NEXT:    addi r6, r15, -36
+; CHECK-NEXT:    stidx64 r7, r15, -32 # 8-byte Folded Spill
 ; CHECK-NEXT:    addi r7, r15, -40
 ; CHECK-NEXT:    stidx64 r1, r15, -48 # 8-byte Folded Spill
 ; CHECK-NEXT:    .p2align 4
@@ -251,11 +251,11 @@ define i32 @add_i32_misaligned(ptr %p, i32 %x) nounwind {
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
 ; CHECK-NEXT:    ldidx64 r14, r15, -48 # 8-byte Folded Reload
 ; CHECK-NEXT:    stidx32 r12, r15, -36
-; CHECK-NEXT:    setr r0, 4
 ; CHECK-NEXT:    addr r14, r12, r14
-; CHECK-NEXT:    copy r1, r4
+; CHECK-NEXT:    setr r0, 4
 ; CHECK-NEXT:    stidx32 r14, r15, -40
 ; CHECK-NEXT:    getsp r12
+; CHECK-NEXT:    copy r1, r4
 ; CHECK-NEXT:    copy r2, r6
 ; CHECK-NEXT:    copy r3, r7
 ; CHECK-NEXT:    stidx64 r5, r12, 8

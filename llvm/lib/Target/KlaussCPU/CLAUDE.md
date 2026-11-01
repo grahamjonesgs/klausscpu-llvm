@@ -524,7 +524,16 @@ when clobbered.
   (`MaxGluedStoresPerMemcpy`), so no store directly follows its load.
   The post-RA recognizer also keeps the issue slot busy behind a MUL or DIV
   for its `ReleaseAtCycles` (the RTL's EX hold), which the list scheduler
-  does not read on its own (`sched-ex-busy.ll`).
+  does not read on its own (`sched-ex-busy.ll`).  It also models the
+  posted store of the 3508f87 core: a store takes two issue slots and holds
+  the data port (`KCMem`, `WriteStore` ReleaseAtCycles `[2, 4]`) until 4
+  cycles after it issues, so a load, store or other memory op is a hazard in
+  the cycles in between and the list scheduler fills them with ALU/MUL
+  work (`sched-mem-port.mir`; board: calls_fib -1.9%, statemate -1.4%,
+  nettle-sha256 -1.3%, picojpeg -0.9%, none worse).  Only the post-RA
+  recognizer reads it: as an unbuffered resource (`BufferSize = 0`) the
+  pre-RA scheduler reordered around it too, and nettle-aes got 2.2% slower
+  (its .text 3.4% larger) and statemate 1.2%.
   `-mcpu=no-sched` is the A/B baseline without either scheduler (and
   without `KlaussCPUEarlyIVInc` or the TTI unrolling, which serve them).
 - Before register allocation (-O1 and up): `KlaussCPUJumpTableHoist` moves
@@ -669,6 +678,7 @@ when clobbered.
 | `-klausscpu-break-anti-deps` | on | post-RA scheduler renames registers to break critical-path anti-dependencies |
 | `-klausscpu-postra-single-issue` | on | post-RA scheduler issues one instruction per cycle (=false: LLVM's unlimited default) |
 | `-klausscpu-postra-ex-busy` | on | post-RA scheduler issues nothing behind a MUL/DIV until its EX hold ends (=false: every op takes one slot) |
+| `-klausscpu-postra-mem-port` | on | post-RA scheduler keeps a memory op out of the 4 cycles a posted store holds the data port (=false: a store takes one slot) |
 | `-klausscpu-early-iv-inc` | on | count a single-block loop from Init - C so its increment can issue early |
 | `-klausscpu-min-jump-table-entries` | 12 | jump tables from N cases (0 = none) |
 | `-klausscpu-jump-table-density` | 40 | minimum % of a jump table's entries that are cases |

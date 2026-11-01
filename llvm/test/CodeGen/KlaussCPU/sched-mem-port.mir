@@ -1,0 +1,34 @@
+# RUN: llc -march=klausscpu -run-pass=post-RA-sched -o - %s | FileCheck %s
+# RUN: llc -march=klausscpu -run-pass=post-RA-sched \
+# RUN:   -klausscpu-postra-mem-port=false -o - %s | FileCheck %s --check-prefix=NOPORT
+#
+# A posted store (klaussCPU 3508f87) issues for 2 cycles and holds the data
+# port for 4; the next load or store waits for that, but two ALU ops in
+# between cost nothing (board: `st ; 2 ALU ; ld` takes as long as `st ; ld`).
+# The post-RA hazard recognizer keeps a memory op out of the port's busy
+# cycles (KCMem in KlaussCPUSchedule.td), so the two independent adds go
+# between the stores instead of behind them.  Without the port model the
+# second store, ready first, follows the first directly.
+---
+name:            two_stores
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $r0, $r1, $r2, $r3, $r12, $r14
+
+    ; CHECK-LABEL: name: two_stores
+    ; CHECK:      STIDX64 killed $r1, $r0, 0
+    ; CHECK-NEXT: $r12 = INCR
+    ; CHECK-NEXT: $r14 = INCR
+    ; CHECK-NEXT: STIDX64 killed $r2, killed $r0, 8
+    ; CHECK-NEXT: RET_I
+    ;
+    ; NOPORT-LABEL: name: two_stores
+    ; NOPORT:      STIDX64 killed $r1, $r0, 0
+    ; NOPORT-NEXT: STIDX64 killed $r2, killed $r0, 8
+    STIDX64 $r1, $r0, 0 :: (store (s64))
+    STIDX64 $r2, $r0, 8 :: (store (s64))
+    $r12 = INCR killed $r12, implicit-def dead $flags
+    $r14 = INCR killed $r14, implicit-def dead $flags
+    RET_I
+...

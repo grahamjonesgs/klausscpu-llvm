@@ -52,7 +52,7 @@ define i64 @csrs(i64 %a, i64 %b) uwtable {
 ; CHECK-LABEL: csrs:
 ; CHECK:         stidx64 r4, r15, -8
 ; CHECK-NEXT:    .cfi_offset r4, -24
-; CHECK-NEXT:    stidx64 r5, r15, -16
+; CHECK:         stidx64 r5, r15, -16
 ; CHECK-NEXT:    .cfi_offset r5, -32
 ; CHECK:         ldidx64 r5, r15, -16
 ; CHECK:         ldidx64 r4, r15, -8

@@ -37,7 +37,8 @@
 //                             frame setup and inline asm, which do not move;
 //                             not modelled.
 //
-// The D-cache is not modelled either: every load and store hit holds MEM
+// The D-cache is not modelled either (apart from the posted store's port, KCMem
+// below, which only the post-RA scheduler reads): every load and store hit holds MEM
 // for ~4 (load) / ~3 (store) cycles and freezes the pipeline behind it
 // (mem_busy, pipeline_core.sv:1235-1237, 1881).  That cost is the same in
 // any order, and the load-use distance stays 3 under it (L;I1;I2;C needs no
@@ -91,10 +92,23 @@ def WriteSP       : SchedWrite;  // stack push/pop/addsp (SP-serialized)
 
 let SchedModel = KlaussCPUSchedModel in {
   def KCUnit : ProcResource<1>;                 // the single EX / issue slot
+  // The data port (klaussCPU 3508f87, posted stores): a DRAM store leaves MEM
+  // 2 cycles after it issues, but the port stays busy until 4 cycles after,
+  // and any later memory op waits for that.  The post-RA list scheduler's
+  // hazard recognizer reads these entries (KlaussCPUInstrInfo.cpp) and fills
+  // the two cycles in between with non-memory work.  The resource is kept
+  // buffered on purpose: as an unbuffered one (BufferSize = 0) the pre-RA
+  // GenericScheduler also reordered around it, which on the board cost
+  // nettle-aes +2.2% (and its .text +3.4%) and statemate +1.2%.
+  def KCMem  : ProcResource<1>;
 
   def : WriteRes<WriteALU,    [KCUnit]> { let Latency = 2; }
-  def : WriteRes<WriteLoad,   [KCUnit]> { let Latency = 3; }
-  def : WriteRes<WriteStore,  [KCUnit]> { let Latency = 1; }
+  // A load freezes the pipeline for its 5 cycles in any order, so it takes
+  // the port for one cycle only: it waits for a store's drain but holds nothing.
+  def : WriteRes<WriteLoad,   [KCUnit, KCMem]> { let Latency = 3; }
+  // A store issues for 2 cycles (its slot plus one bubble) and holds the port 4.
+  def : WriteRes<WriteStore,  [KCUnit, KCMem]> { let Latency = 1;
+                                                 let ReleaseAtCycles = [2, 4]; }
   def : WriteRes<WriteBranch, [KCUnit]> { let Latency = 1; }
   def : WriteRes<WriteSP,     [KCUnit]> { let Latency = 2; }
   // EX-serializing multi-cycle ops: hold the unit so nothing issues behind
