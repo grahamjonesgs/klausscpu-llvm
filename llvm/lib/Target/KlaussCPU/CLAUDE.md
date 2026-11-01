@@ -578,6 +578,26 @@ when clobbered.
   extension in its DIExpression (`DW_OP_LLVM_convert`), and one of another
   register whose high bits change is set undef unless its variable fits in
   the low bits (`DebugInfo/KlaussCPU/opt-extensions-dbg.ll`).
+- Last before the AsmPrinter (`addPreEmitPass2`, -O1 and up):
+  `KlaussCPUFetchLayout` keeps 2- and 3-word instructions of loops from
+  crossing a 16-byte fetch line (a straddle costs a fetch cycle, two for a
+  2-word store; a 2-word instruction in the first line after the loop head
+  costs one; picolibc's `sqrt` lost 7.2% to two straddles).  Offsets are only
+  known from a 16-byte aligned point, so it handles loops whose first block
+  carries the loop-head alignment.  It scores the layout with a small
+  in-order timing model of the board measurements (issue slots by size, fetch
+  penalties, load-use/ALU/MUL/posted-store stalls), weighted by block
+  frequency, and applies the best of: moving one instruction up to
+  `-klausscpu-fetch-layout-max-move` (4) places inside its block past
+  independent ones (registers, FLAGS, memory order, SP, side effects; never a
+  terminator, call, CFI or debug instruction), or, when not optimising for
+  size, one NOP in front of a wide instruction.  A move must save fetch
+  cycles without making the stalls worse (the post-RA scheduler chose the
+  order for those); a NOP must lower the total.  `-klausscpu-fetch-line-layout=0`
+  turns it off, `=1` allows moves only (`fetch-layout.ll`, `fetch-layout-nop.ll`).
+  Board: perf_baseline `branchy` -5.5% (16.03M -> 15.16M cycles, its best
+  head offset), picojpeg -0.7%, qrduino -0.7%, and with picolibc rebuilt
+  nbody -2.1%, cubic -1.3%; nothing worse.
 - Before the post-RA scheduler: FuseCmpBr's loop constants; pre-emit passes:
   LeaveRet (see Frame layout, -O1 and up), FlagReuse, then FuseCmpBr (see
   Flags), then CalleeSavedCFI (see CFI).
@@ -679,6 +699,7 @@ when clobbered.
 | `-klausscpu-postra-single-issue` | on | post-RA scheduler issues one instruction per cycle (=false: LLVM's unlimited default) |
 | `-klausscpu-postra-ex-busy` | on | post-RA scheduler issues nothing behind a MUL/DIV until its EX hold ends (=false: every op takes one slot) |
 | `-klausscpu-postra-mem-port` | on | post-RA scheduler keeps a memory op out of the 4 cycles a posted store holds the data port (=false: a store takes one slot) |
+| `-klausscpu-fetch-line-layout` | 2 | KlaussCPUFetchLayout: 0 off, 1 moves only, 2 moves and NOPs (not under optsize) |
 | `-klausscpu-early-iv-inc` | on | count a single-block loop from Init - C so its increment can issue early |
 | `-klausscpu-min-jump-table-entries` | 12 | jump tables from N cases (0 = none) |
 | `-klausscpu-jump-table-density` | 40 | minimum % of a jump table's entries that are cases |
@@ -864,6 +885,7 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPUMachineFunctionInfo.h  per-function state (vararg frame index)
 ├── KlaussCPUAsmPrinter.cpp     MachineInstr → MCInst (+ CompressPat), inline-asm operand printing
 ├── KlaussCPUEarlyIVInc.cpp     IR, after LSR: loop counter counts from Init - C so its increment can issue early
+├── KlaussCPUFetchLayout.cpp    last pass before the AsmPrinter: loops' 2/3-word instructions kept inside one 16-byte fetch line
 ├── KlaussCPUFlagReuse.cpp      pre-emit: CMPRV Rd,0 + JMPE/NE → JMPZ/NZ (default on)
 ├── KlaussCPUJumpTableHoist.cpp pre-RA: jump-table base and entry offset into the range-check block
 ├── KlaussCPULeaveRet.cpp       pre-emit: a shrink-wrapped epilogue's LEAVE ... RET → LEAVERET

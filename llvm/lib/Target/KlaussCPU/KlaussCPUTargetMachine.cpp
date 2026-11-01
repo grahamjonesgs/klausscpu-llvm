@@ -40,6 +40,7 @@ FunctionPass *createKlaussCPUISelDag(KlaussCPUTargetMachine &TM);
 FunctionPass *createKlaussCPUCalleeSavedCFIPass();
 FunctionPass *createKlaussCPUConstAddrBasePass();
 FunctionPass *createKlaussCPUEarlyIVIncPass();
+FunctionPass *createKlaussCPUFetchLayoutPass();
 FunctionPass *createKlaussCPUFlagReusePass();
 FunctionPass *createKlaussCPUFuseCmpBrPass(bool LoopConstsOnly = false);
 FunctionPass *createKlaussCPUJumpTableHoistPass();
@@ -49,6 +50,7 @@ void initializeKlaussCPUCalleeSavedCFIPass(PassRegistry &);
 void initializeKlaussCPUConstAddrBasePass(PassRegistry &);
 void initializeKlaussCPUDAGToDAGISelLegacyPass(PassRegistry &);
 void initializeKlaussCPUEarlyIVIncPass(PassRegistry &);
+void initializeKlaussCPUFetchLayoutPass(PassRegistry &);
 void initializeKlaussCPUFlagReusePass(PassRegistry &);
 void initializeKlaussCPUFuseCmpBrPass(PassRegistry &);
 void initializeKlaussCPUJumpTableHoistPass(PassRegistry &);
@@ -68,6 +70,7 @@ LLVMInitializeKlaussCPUTarget() {
   initializeKlaussCPUConstAddrBasePass(PR);
   initializeKlaussCPUDAGToDAGISelLegacyPass(PR);
   initializeKlaussCPUEarlyIVIncPass(PR);
+  initializeKlaussCPUFetchLayoutPass(PR);
   initializeKlaussCPUFlagReusePass(PR);
   initializeKlaussCPUFuseCmpBrPass(PR);
   initializeKlaussCPUJumpTableHoistPass(PR);
@@ -171,6 +174,7 @@ public:
   void addPreRegAlloc() override;
   void addPreSched2() override;
   void addPreEmitPass() override;
+  void addPreEmitPass2() override;
 };
 } // namespace
 
@@ -255,6 +259,13 @@ void KlaussCPUPassConfig::addPreEmitPass() {
   // or unwind tables only; before CFIFixup, which copies them into the
   // state it restores).
   addPass(createKlaussCPUCalleeSavedCFIPass());
+}
+
+void KlaussCPUPassConfig::addPreEmitPass2() {
+  // Last before the AsmPrinter, when every size is final: loops against the
+  // 16-byte fetch lines (KlaussCPUFetchLayout.cpp).
+  if (getOptLevel() != CodeGenOptLevel::None)
+    addPass(createKlaussCPUFetchLayoutPass());
 }
 
 TargetTransformInfo
