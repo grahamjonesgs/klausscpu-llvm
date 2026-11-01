@@ -23,6 +23,6 @@ let TargetPrefix = "klausscpu" in {  // All intrinsics start with "llvm.klausscp
   // any memory", so the optimizers neither move a memory access across the
   // critical section's edges nor combine two sections, and IntrHasSideEffects
   // keeps them from being deleted or reordered with each other.
-  def int_klausscpu_di : Intrinsic<[llvm_i64_ty], [], [IntrHasSideEffects]>;
-  def int_klausscpu_ei : Intrinsic<[], [llvm_i64_ty], [IntrHasSideEffects]>;
+  def int_klausscpu_di : Intrinsic<[llvm_i64_ty], [], [IntrHasSideEffects, IntrWillReturn]>;
+  def int_klausscpu_ei : Intrinsic<[], [llvm_i64_ty], [IntrHasSideEffects, IntrWillReturn]>;
 }
