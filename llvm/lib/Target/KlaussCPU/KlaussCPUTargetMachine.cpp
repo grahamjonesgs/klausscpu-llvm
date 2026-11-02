@@ -220,7 +220,7 @@ bool KlaussCPUPassConfig::addPreISel() {
       EnableGlobalMerge == cl::BOU_TRUE)
     addPass(createGlobalMergePass(TM, /*MaxOffset=*/1016,
                                   /*OnlyOptimizeForSize=*/false,
-                                  /*MergeExternalByDefault=*/false));
+                                  /*MergeExternalByDefault=*/true));
   return false;
 }
 

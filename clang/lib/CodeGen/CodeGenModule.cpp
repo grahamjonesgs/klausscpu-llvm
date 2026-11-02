@@ -1996,10 +1996,14 @@ static bool shouldAssumeDSOLocal(const CodeGenModule &CGM,
   if (!TT.isOSBinFormatELF())
     return false;
 
-  // If this is not an executable, don't assume anything is local.
+  // If this is not an executable, don't assume anything is local.  KlaussCPU
+  // has no shared objects (its -fPIC code is loaded as a whole program or as
+  // a Zephyr LLEXT module, which nothing can preempt), so -fPIC means -fPIE
+  // here.
   llvm::Reloc::Model RM = CGOpts.RelocationModel;
   const auto &LOpts = CGM.getLangOpts();
-  if (RM != llvm::Reloc::Static && !LOpts.PIE) {
+  if (RM != llvm::Reloc::Static && !LOpts.PIE &&
+      TT.getArch() != llvm::Triple::klausscpu) {
     // On ELF, if -fno-semantic-interposition is specified and the target
     // supports local aliases, there will be neither CC1
     // -fsemantic-interposition nor -fhalf-no-semantic-interposition. Set

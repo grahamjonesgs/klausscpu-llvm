@@ -579,10 +579,21 @@ when clobbered.
   SETRU) and saves N-2 words.  Over the bare-metal corpus the pass saves
   0.4-0.5% of `.text` at -O1/-O2, with no measurable change in the
   emulator's instruction count.
-- Before instruction selection (-O1 and up): GlobalMerge merges the internal
-  (static) globals of a module, up to 1016 bytes (the reach of a 64-bit
-  short-form access), so neighbouring statics share one `LEAPC`/`SETRU`
-  base; external globals are not merged (`global-merge.ll`).
+- Before instruction selection (-O1 and up): GlobalMerge merges the globals
+  of a module that are used together, up to 1016 bytes (the reach of a
+  64-bit short-form access), so they share one `LEAPC`/`SETRU` base and
+  each access is a 1-word base + offset instead of a 2-word `LEAPC` and
+  the access.  External globals are merged too (`MergeExternalByDefault`;
+  each keeps its symbol as an alias into the block) when they are
+  dso_local, which clang makes every KlaussCPU definition, also under
+  `-fPIC`: there are no shared objects, so nothing can preempt one
+  (`clang/lib/CodeGen/CodeGenModule.cpp` `shouldAssumeDSOLocal`,
+  `klausscpu-pic-dso-local.c`).  Weak, `used` and thread-local globals are
+  not merged (`global-merge.ll`).  Board (klaussCPU 0cccefa): statemate,
+  whose 105 external globals each took a `LEAPC`, runs 38% fewer
+  instructions and 26% fewer cycles at -O2 (-20% at -Os), Embench -1.0%
+  cycles at -O2 and -0.6% at -Os, size -2.9%; the other movers ran the same
+  instructions (layout).
 - After the generic machine SSA optimisations (-O1 and up):
   `KlaussCPUOptExtensions` deletes a `ZEXTB/H/W` or `SEXTB/H/W` whose
   source is already extended (extending loads, W ops, compares, constants,
@@ -738,7 +749,7 @@ when clobbered.
 | Option | Default | Effect |
 |---|---|---|
 | `-klausscpu-short-forms` / `-klausscpu-short-branches` / `-klausscpu-short-calls` | on | ISA v3 1-word forms, branches, calls (override `-mattr`) |
-| `-klausscpu-enable-global-merge` | on at -O1+ | GlobalMerge of internal globals |
+| `-klausscpu-enable-global-merge` | on at -O1+ | GlobalMerge of a module's globals, external (dso_local) ones too (also LLVM's `-global-merge-on-external`) |
 | `-klausscpu-opt-extensions` | on | KlaussCPUOptExtensions |
 | `-klausscpu-enter-leave` / `-klausscpu-leaveret` | on | ENTER/LEAVE frames, LEAVE+RET → LEAVERET |
 | `-klausscpu-frameless-leaf` | on | a leaf without stack objects has no frame |
