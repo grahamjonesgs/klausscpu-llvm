@@ -17,8 +17,9 @@ merge).  The cost models are tuned for `b26385d` (master with fetch-2a: taken
 branches predicted in fetch, 2 cycles for a predicted-taken FBR; on
 dcache-1a stage 2 and mem-early `8e6b8e5`: ID-stage branch prediction, a
 4-entry return stack, a D-cache load hit that leaves MEM after 2 cycles;
-no AMP core 2), whose bitstream the board's QSPI holds since 2026-11-02;
-none of them changed an instruction.
+no AMP core 2); the board's QSPI holds master `646f44e` (timing headroom
+and exclusive stall counters on it, cycle-identical) since 2026-11-02.
+None of them changed an instruction.
 The assembler and the AsmPrinter use its 1-word `CMPRVW`, `MULV`/`MULUV`
 and `LEAPC` forms (ISA map §8.3) wherever they fit, which older cores trap
 on, FuseCmpBr fuses branches on W and imm32 compares into its new fused
