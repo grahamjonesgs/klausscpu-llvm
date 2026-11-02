@@ -542,14 +542,11 @@ when clobbered.
   -O2 and -Os and 0.1-0.7% of Embench (`-Os` matmult-int 3.8%, statemate
   2.8%), and is gone.  Load latency 4 (the
   issue distance on 2a) measured no faster: post-RA only it was neutral,
-  in the model it cost nettle-aes 5%.  One order still matters on stage 3: a load
-  in the 32-byte D-cache line a store issued 1 or 2 cycles before takes the
-  slow path (about 2 cycles more), so the recognizer keeps it out of those
-  cycles; the same base register within 32 bytes counts as the same line
-  (`-klausscpu-postra-store-load-line`, `sched-store-load-line.mir`; board:
-  Embench -0.08% at -O2 and -Os, statemate -0.7%, nothing slower).  With
-  one-slot stores (st-1slot) the hazard lasts a cycle longer, but a window
-  of 3 measured the same as 2 (-0.05..-0.07%), so it stays 2.  The
+  in the model it cost nettle-aes 5%.  A load just behind a store to the
+  same address takes the store's data (klaussCPU callret: store-to-load
+  forwarding); the rule that kept a load 2 cycles behind a store to its
+  32-byte line on dcache-s3 (Embench -0.08% there) measured 0.08% slower on
+  callret and is gone.  The
   data port (KCMem) is now only pre-RA resource pressure; as an unbuffered resource (`BufferSize = 0`)
   the pre-RA scheduler reordered around it too, and nettle-aes got 2.2%
   slower (its .text 3.4% larger) and statemate 1.2%.
@@ -774,7 +771,6 @@ when clobbered.
 | `-klausscpu-break-anti-deps` | on | post-RA scheduler renames registers to break critical-path anti-dependencies |
 | `-klausscpu-postra-single-issue` | on | post-RA scheduler issues one instruction per cycle (=false: LLVM's unlimited default) |
 | `-klausscpu-postra-ex-busy` | on | post-RA scheduler issues nothing behind a MUL/DIV until its EX hold ends (=false: every op takes one slot) |
-| `-klausscpu-postra-store-load-line` / `-cycles` | on / 2 | post-RA scheduler keeps a load out of the cycles behind a store to (probably) the same 32-byte D-cache line |
 | `-klausscpu-fetch-line-layout` | 2 | KlaussCPUFetchLayout: 0 off, 1 moves only, 2 moves and NOPs (not under optsize) |
 | `-klausscpu-early-iv-inc` | on | count a single-block loop from Init - C so its increment can issue early |
 | `-klausscpu-postinc-loop-cmp` | on | compare a loop's updated counter with the limit, not the old counter with limit - step, so the compare and the branch fuse |

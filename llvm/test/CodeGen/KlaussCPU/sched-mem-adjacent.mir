@@ -5,8 +5,7 @@
 # independent ALU op put between them costs its own cycle (board perf_kern:
 # `ld ; alu ; ld` 6.93 cycles, `ld ; ld` 5.93), so the port model that moved
 # ALU work into that gap (8e6b8e5) is gone and the memory ops, ready first,
-# issue back to back.  (A load in a store's 32-byte line is kept apart:
-# sched-store-load-line.mir.)
+# issue back to back.
 ---
 name:            two_stores
 tracksRegLiveness: true
