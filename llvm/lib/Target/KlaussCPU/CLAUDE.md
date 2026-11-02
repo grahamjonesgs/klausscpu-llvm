@@ -55,7 +55,7 @@ older core stops at the first new instruction (`hw_div_fbr.kla` /
 | C environment | hosted by default (the driver no longer adds `-ffreestanding`): `memcpy`/`memset`/`memmove` of a constant size are intrinsics, inline up to 8 accesses (4 under optsize) at the width both sides' alignment allows (a source below 4-byte alignment still allows 4, `MEMGET32`); a constant source is stored as immediates (`shouldConvertConstantLoadToIntImm`); stack objects and module globals they touch get 8-byte alignment (`shouldAlignPointerArgs`).  `printf`/`fprintf` are not turned into `puts`/`putchar`/`fputc`/`fputs`/`fwrite` (`TargetLibraryInfo`: each would link another stdio function for UART-bound output).  Code that implements the C library (picolibc, compiler-rt, crt0's BSS loop, kernels) is built `-ffreestanding` / `no_builtin` |
 | 32-bit ops | `ADDW`/`SUBW`/`ADDIW`/`MULW`, `CMPRRW`/`CMPRVW`, boolean `CMPxxRW`/`CMPxxVW` (ISA v3 D2/D3); a branch on `CMPRRW`/`CMPRVW` fuses into an FBR with a W predicate (`fbr`/`fbri`/`fbrv` cc 5-7, 13-15; see Flags) |
 | Immediates | each class 2/3 op exists with a sign- and a zero-extended imm32 (SGN bit); isel picks the one that holds the constant: `SETR`/`SETRU` (MOV), `ADDI`/`ADDV`/`MINUSV`, `ANDI`/`ANDV` (and OR/XOR), `CMPRV`/`CMPRVU`; boolean compares (`setcc` as a value) `CMPxxV` with a simm32; `SETR64` only for a value neither reaches.  An add of -255..-129 (a frame address too) is `MINUSV` of the negation, whose short form reaches it |
-| Multiply by a constant | `MULV` (simm32, 1 word for a simm8; EX-serialised, `WriteMul`); a constant 2^N+1, 2^N-1 or 1-2^N that is not a simm32 becomes `SHLV` + `ADDR`/`SUBR` (`decomposeMulByConstant`); for a simm32 one only with `-klausscpu-mul-imm-shift-add` (one more instruction than `MULV` and a word more than the short one, fewer cycles) |
+| Multiply by a constant | `MULV` (simm32, 1 word for a simm8; EX-serialised, `WriteMul`); a constant 2^N+1, 2^N-1 or 1-2^N that is not a simm32 becomes `SHLV` + `ADDR`/`SUBR` (`decomposeMulByConstant`); a simm32 one stays one `MULV` (klaussCPU mul2: its product is ready 4 cycles after issue, as fast as the dependent pair) |
 | Addresses | 32-bit, zero-extended in a register: `SETRU sym` (static), `LEAPC` (PIC); `sym+off` is folded only for `off` in [0, 2^31), other offsets are a separate add so a negative S + off stays negative; `R_KLAUSSCPU_ABS64` data is the exact 64-bit S + A (lld) |
 | Direct call | the 1-word short `CALL` (ISA v3 A1, LINK=1: PC + 4·simm18, ±512 KiB, pushes PC+4; written `callrel`; a tail call's jump likewise, `tail`) for every call to a symbol: resolved by the assembler for a local (static) callee in its own section (relaxed to the 2-word `CALLREL` if out of reach), else (a global or weak callee too, which the link may override) an `R_KLAUSSCPU_CALL18` relocation, for which lld calls an out-of-reach callee through a `jmprel` thunk.  Code a loader without thunks relocates (Zephyr LLEXT) is built with `-mllvm -klausscpu-short-calls=false` (2-word `CALL` / `CALLREL`) |
 | Indirect branch / call | `JMPR` / `CALLR` |
@@ -515,7 +515,7 @@ when clobbered.
 - Scheduling: the model in `KlaussCPUSchedule.td` (CPU `generic`, the
   default) is the RTL's interlocks as issue distances: ALU result 2, load 3,
   FLAGS 2 (`WriteFlags`, the second write of an ALU op with a destination),
-  MUL 5 (EX busy 4), DIV 20; the D-cache hit freeze and SP are not modelled
+  MUL 4 (EX busy 2, klaussCPU mul2), DIV 20; the D-cache hit freeze and SP are not modelled
   (order-independent / not movable).  It drives the pre-RA machine scheduler
   (GenericScheduler, in-order: an unready node waits in the pending queue)
   and the post-RA list scheduler, which runs from **-O1** up
@@ -786,7 +786,6 @@ when clobbered.
 | `-klausscpu-unaligned-load32` | on | an under-aligned non-volatile 32-bit load is one `MEMGET32` (=false: byte loads + shifts) |
 | `-klausscpu-unaligned-load64` | on | the combiner may form an under-aligned i64 load (8 bytes ORed together, with BSWAP for big-endian), which is then split into two 32-bit loads (=false: no i64 load is formed; 8 ORed bytes stay one `MEMGET32` + 4 byte loads + shifts) |
 | `-klausscpu-split-load64-at-legalize` | on | testing only: =false leaves an under-aligned non-volatile i64 load to the `PreprocessISelDAG` backstop |
-| `-klausscpu-mul-imm-shift-add` | off | multiply by a simm32 2^N±1 / 1-2^N as shift + add/sub when the schedule model rates MULV slower |
 | `-klausscpu-unroll-branch-density-gate` | on | scale the unroll budget for branchy loops |
 | `-klausscpu-runtime-unroll-max-count` | 2 | most copies of a loop without a constant trip count (0 = the general cap, 4) |
 | `-enable-machine-outliner` (generic; clang `-moutline` / `-mno-outline`) | minsize functions | the MachineOutliner everywhere (`=always`, also the bare flag) or nowhere (`=never`) |

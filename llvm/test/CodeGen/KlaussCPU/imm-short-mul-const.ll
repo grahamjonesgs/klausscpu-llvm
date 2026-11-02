@@ -1,10 +1,5 @@
 ; RUN: llc -mtriple=klausscpu -verify-machineinstrs -O1 -show-mc-encoding < %s \
 ; RUN:   | FileCheck %s --check-prefixes=CHECK,MULV
-; RUN: llc -mtriple=klausscpu -verify-machineinstrs -O1 -show-mc-encoding \
-; RUN:   -klausscpu-mul-imm-shift-add < %s | FileCheck %s --check-prefixes=CHECK,SHADD
-; RUN: llc -mtriple=klausscpu -verify-machineinstrs -O1 -show-mc-encoding \
-; RUN:   -klausscpu-mul-imm-shift-add -mcpu=no-sched < %s \
-; RUN:   | FileCheck %s --check-prefixes=CHECK,MULV
 ;
 ; Immediates the 1-word short forms reach (imm8 [19:12]; the CPU sign- or
 ; zero-extends it per SGN): an add of 128..255 is the zero-extending short
@@ -13,9 +8,8 @@
 ;
 ; Multiply by a constant: MULV takes a simm32.  A constant 2^N + 1, 2^N - 1
 ; or 1 - 2^N that is not a simm32 (SETRU/SETR64 + MULR) becomes a shift and
-; an add/sub.  For a simm32 one that trades one 2-word MULV for two 1-word
-; ALU ops, only with -klausscpu-mul-imm-shift-add and a schedule model that
-; rates the multiply slower (not -mcpu=no-sched).
+; an add/sub; a simm32 one stays one MULV (klaussCPU mul2: as fast as the
+; dependent shift and add, and one instruction).
 
 define i64 @add_200(i64 %x) nounwind {
 ; CHECK-LABEL: add_200:
@@ -87,8 +81,6 @@ define void @frame_addr() nounwind {
 define i64 @mul_7(i64 %x) nounwind {
 ; CHECK-LABEL: mul_7:
 ; MULV:        mulv r12, r0, 7
-; SHADD:       shlv r12, r0, 3
-; SHADD-NEXT:  subr r12, r12, r0
   %r = mul i64 %x, 7
   ret i64 %r
 }
@@ -96,8 +88,6 @@ define i64 @mul_7(i64 %x) nounwind {
 define i64 @mul_9(i64 %x) nounwind {
 ; CHECK-LABEL: mul_9:
 ; MULV:        mulv r12, r0, 9
-; SHADD:       shlv r12, r0, 3
-; SHADD-NEXT:  addr r12, r12, r0
   %r = mul i64 %x, 9
   ret i64 %r
 }
@@ -105,8 +95,6 @@ define i64 @mul_9(i64 %x) nounwind {
 define i64 @mul_m7(i64 %x) nounwind {
 ; CHECK-LABEL: mul_m7:
 ; MULV:        mulv r12, r0, -7
-; SHADD:       shlv r12, r0, 3
-; SHADD-NEXT:  subr r12, r0, r12
   %r = mul i64 %x, -7
   ret i64 %r
 }
@@ -114,8 +102,6 @@ define i64 @mul_m7(i64 %x) nounwind {
 define i32 @mul_i32_5(i32 %x) nounwind {
 ; CHECK-LABEL: mul_i32_5:
 ; MULV:        mulv r12, r0, 5
-; SHADD:       shlv r12, r0, 2
-; SHADD-NEXT:  addr r12, r12, r0
   %r = mul i32 %x, 5
   ret i32 %r
 }

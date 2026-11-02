@@ -87,15 +87,6 @@ static cl::opt<bool> GroupSelects(
     cl::desc("Share one compare and branch between consecutive selects on "
              "the same condition"));
 
-// decomposeMulByConstant: also trade a MULV for a shift and an add/sub when
-// the schedule model makes the pair faster (one more instruction, the same
-// size).
-static cl::opt<bool> MulImmShiftAdd(
-    "klausscpu-mul-imm-shift-add", cl::Hidden, cl::init(false),
-    cl::desc("Expand a multiply by a simm32 constant 2^N+1, 2^N-1 or 1-2^N "
-             "into a shift and an add/sub when the schedule model rates "
-             "MULV slower"));
-
 // allowsMisalignedMemoryAccesses: an under-aligned 32-bit load is one
 // MEMGET32 instead of byte loads + SHLV + ORR.
 static cl::opt<bool> UnalignedLoad32(
@@ -504,9 +495,10 @@ bool KlaussCPUTargetLowering::isLegalICmpImmediate(int64_t Imm) const {
 // against the pair: one instruction more, but still fewer cycles.)  A
 // simm32 constant is one MULV, 2 words, or 1 for a simm8 (MULV.S, klaussCPU
 // 3508f87): the pair is one instruction more and the same size, or a word
-// larger, so it is used only on request (-klausscpu-mul-imm-shift-add) and
-// when the schedule model rates the multiply slower than the dependent
-// shift and add (5 against 2 + 2 cycles in KlaussCPUSchedule.td).
+// larger, and on klaussCPU mul2 no faster (a MULV's product is ready 4 cycles
+// after it issues, as the dependent shift and add's), so it stays a MULV.
+// (`-klausscpu-mul-imm-shift-add`, for the 5-cycle multiply before mul2,
+// never fired on the 4-cycle one and was removed.)
 bool KlaussCPUTargetLowering::decomposeMulByConstant(LLVMContext &Context,
                                                      EVT VT, SDValue C) const {
   if (!VT.isScalarInteger() || VT.getSizeInBits() > 64)
@@ -520,19 +512,7 @@ bool KlaussCPUTargetLowering::decomposeMulByConstant(LLVMContext &Context,
   bool SubForm = (MulC + 1).isPowerOf2();
   if (Imm.isNegative() ? AddForm || !SubForm : !AddForm && !SubForm)
     return false;
-  if (!Imm.isSignedIntN(32))
-    return true;
-  if (!MulImmShiftAdd)
-    return false;
-  const MCSchedModel &SM = Subtarget.getSchedModel();
-  if (!SM.hasInstrSchedModel())
-    return false;
-  const KlaussCPUInstrInfo &TII = *Subtarget.getInstrInfo();
-  auto Latency = [&](unsigned Opc) {
-    return SM.computeInstrLatency(Subtarget, TII.get(Opc).getSchedClass());
-  };
-  return Latency(KlaussCPU::MULV) >
-         Latency(KlaussCPU::SHLV) + Latency(KlaussCPU::ADDR);
+  return !Imm.isSignedIntN(32);
 }
 
 // An add of C is one instruction while C is an imm32 that ADDI, ADDV or

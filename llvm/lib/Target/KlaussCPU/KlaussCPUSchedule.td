@@ -27,8 +27,9 @@
 //                             after scheduling) reads its registers at the
 //                             branch, which is never earlier than the
 //                             compare it replaces.
-//   MUL                    5  EX busy for 4 cycles (mul_cnt 0..3, md_done,
-//                             pipeline_core.sv:918), then forwards from MEM.
+//   MUL                    4  EX busy for 2 cycles, then the product travels
+//                             through MEM to WB from the DSP's last stage
+//                             (klaussCPU mul2); a flag reader also waits 4.
 //   DIV/MOD               20  Iterative (dv.counter to 64 after a CLZ skip);
 //                             one conservative value.
 //   SP                        A writer (CALL, RET, PUSH, POP, ENTER, LEAVE,
@@ -114,13 +115,13 @@ let SchedModel = KlaussCPUSchedModel in {
   def : WriteRes<WriteBranch, [KCUnit]> { let Latency = 1; }
   def : WriteRes<WriteSP,     [KCUnit]> { let Latency = 2; }
   // EX-serializing multi-cycle ops: hold the unit so nothing issues behind
-  // them (the RTL's ex_busy hold).  A multiply occupies EX 4 cycles and its
-  // result forwards one cycle later.
-  def : WriteRes<WriteMul,    [KCUnit]> { let Latency = 5;  let ReleaseAtCycles = [4];  }
+  // them (the RTL's ex_busy hold).  A multiply occupies EX 2 cycles and its
+  // product reaches a consumer 4 cycles after it issues (klaussCPU mul2).
+  def : WriteRes<WriteMul,    [KCUnit]> { let Latency = 4;  let ReleaseAtCycles = [2];  }
   def : WriteRes<WriteDiv,    [KCUnit]> { let Latency = 20; let ReleaseAtCycles = [20]; }
   // The FLAGS half of an instruction already counted above: no issue slot.
   def : WriteRes<WriteFlags,    []> { let Latency = 2;  let NumMicroOps = 0; }
-  def : WriteRes<WriteMulFlags, []> { let Latency = 5;  let NumMicroOps = 0; }
+  def : WriteRes<WriteMulFlags, []> { let Latency = 4;  let NumMicroOps = 0; }
   def : WriteRes<WriteDivFlags, []> { let Latency = 20; let NumMicroOps = 0; }
 
   // The target-independent COPY pseudo survives to the scheduler as a register
