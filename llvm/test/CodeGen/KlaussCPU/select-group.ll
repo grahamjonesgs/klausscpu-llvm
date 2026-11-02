@@ -407,8 +407,8 @@ define i64 @wbool_between(i32 %a, i32 %b, i32 %c, i32 %d, i64 %x, i64 %y) nounwi
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 0
 ; CHECK-NEXT:    ldidx64 r13, r15, 24
-; CHECK-NEXT:    cmpultrw r14, r2, r3
 ; CHECK-NEXT:    ldidx64 r12, r15, 16
+; CHECK-NEXT:    cmpultrw r14, r2, r3
 ; CHECK-NEXT:    fbr r0, r1, 14, .LBB9_2
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    copy r11, r12

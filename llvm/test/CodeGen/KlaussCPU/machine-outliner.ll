@@ -268,9 +268,9 @@ define i64 @epi3(i64 %a, i64 %b) minsize {
 ; CHECK-NEXT:    .cfi_offset r15, -16
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    .cfi_offset r4, -24
-; CHECK-NEXT:    copy r4, r1
 ; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
 ; CHECK-NEXT:    .cfi_offset r5, -32
+; CHECK-NEXT:    copy r4, r1
 ; CHECK-NEXT:    callrel h
 ; CHECK-NEXT:    callrel OUTLINED_FUNCTION_4
 ; CHECK-NEXT:    copy r0, r5
@@ -304,9 +304,9 @@ define i64 @epi3(i64 %a, i64 %b) minsize {
 ; CHECK-NEXT:    incr r0, r0
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    .cfi_offset r4, -24
-; CHECK-NEXT:    copy r4, r1
 ; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
 ; CHECK-NEXT:    .cfi_offset r5, -32
+; CHECK-NEXT:    copy r4, r1
 ; CHECK-NEXT:    callrel h
 ; CHECK-NEXT:    callrel OUTLINED_FUNCTION_4
 ; CHECK-NEXT:    copy r0, r12
@@ -536,9 +536,9 @@ define i64 @epi3(i64 %a, i64 %b) minsize {
 ; NEVER-NEXT:    .cfi_offset r15, -16
 ; NEVER-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; NEVER-NEXT:    .cfi_offset r4, -24
-; NEVER-NEXT:    copy r4, r1
 ; NEVER-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
 ; NEVER-NEXT:    .cfi_offset r5, -32
+; NEVER-NEXT:    copy r4, r1
 ; NEVER-NEXT:    callrel h
 ; NEVER-NEXT:    copy r0, r4
 ; NEVER-NEXT:    copy r5, r12
@@ -586,9 +586,9 @@ define i64 @epi3(i64 %a, i64 %b) minsize {
 ; NEVER-NEXT:    incr r0, r0
 ; NEVER-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; NEVER-NEXT:    .cfi_offset r4, -24
-; NEVER-NEXT:    copy r4, r1
 ; NEVER-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
 ; NEVER-NEXT:    .cfi_offset r5, -32
+; NEVER-NEXT:    copy r4, r1
 ; NEVER-NEXT:    callrel h
 ; NEVER-NEXT:    copy r0, r4
 ; NEVER-NEXT:    copy r5, r12

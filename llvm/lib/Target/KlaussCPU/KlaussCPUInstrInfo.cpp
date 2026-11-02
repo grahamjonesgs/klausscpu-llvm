@@ -41,14 +41,6 @@ static cl::opt<bool> PostRAExBusy(
              "multi-cycle op's ReleaseAtCycles (MUL 4, DIV 20), as the RTL's "
              "EX hold does.  =false: every op takes one slot (A/B)."));
 
-static cl::opt<bool> PostRAMemPort(
-    "klausscpu-postra-mem-port", cl::Hidden, cl::init(true),
-    cl::desc("Post-RA list scheduler keeps a load out of the 4 cycles and a "
-             "store out of the 3 cycles a posted store holds the data port, "
-             "and a load out of the cycle behind a load, filling them with "
-             "non-memory instructions when there are some.  =false: stores "
-             "take one slot, the port is free (A/B)."));
-
 KlaussCPUInstrInfo::KlaussCPUInstrInfo(const KlaussCPUSubtarget &STI_,
                                         const KlaussCPURegisterInfo &RI)
     : KlaussCPUGenInstrInfo(STI_, RI,
@@ -360,51 +352,46 @@ namespace {
 // ReleaseAtCycle - 1).  (KCUnit is a buffered resource, so the pre-RA
 // scheduler counts these cycles as pressure, not as a hazard.)
 //
-// A posted store takes two issue cycles, its own and one bubble, and holds
-// the data port: the next load (or POP, RET, ...) waits until 4 cycles after
-// the store issues, the next store (PUSH, CALL, ...) until 3 (the store's
-// KCMem ReleaseAtCycles, less one).  A load that directly follows another
-// load loses its early issue and costs a cycle more (klaussCPU 8e6b8e5,
-// board: `ld ; ld` 3.93 cycles a load, `ld ; alu` 3.99 the pair).  The
-// cycles in between are free for ALU, MUL and branch work (`st ; 2 ALU ; ld`
-// costs the same as `st ; ld`, `st ; ALU` as `st ; st`), so a memory op is a
-// hazard while the port is busy for it and the list scheduler fills the gap
-// with whatever else is ready.  The port entry (KCMem) is kept out of the
-// issue-slot count above.
+// A load or store takes one issue slot here, whatever its schedule-model
+// entry says.  A memory op behind another waits in ID until the data port is
+// free, and an independent ALU op placed between the two costs its own cycle
+// (klaussCPU fetch-2a, board perf_kern, two addresses: `ld ; alu ; ld` 6.93
+// cycles, `ld ; ld` 5.93; `st ; alu ; st` 4.99, `st ; st` 3.99), while ALU
+// ops behind a load run in its shadow (`ld ; 2 ALU` 3.99, `ld` 3.87).  So there is no port
+// gap to fill: the list scheduler's own order, which issues a ready load
+// early, is the right one.  Keeping memory ops apart as the port model of
+// 8e6b8e5 did (`-klausscpu-postra-mem-port`, removed) made 2a 0.9% slower on
+// CoreMark (ud +1.7%, Embench geomean +0.1%).  The KCMem entries remain for
+// the pre-RA scheduler, which counts them as resource pressure.
 class KlaussCPUPostRAHazardRecognizer : public ScheduleHazardRecognizer {
   const ScheduleDAGInstrs &DAG;
   bool Issued = false;
   unsigned BusyCycles = 0; // cycles left in which nothing may issue
-  unsigned LoadPortBusy = 0;  // cycles left before a load may issue
-  unsigned StorePortBusy = 0; // cycles left before a store may issue
 
   bool isPortResource(unsigned Idx) const {
     return StringRef(DAG.getSchedModel()->getProcResource(Idx)->Name) ==
            "KCMem";
   }
 
-  // The cycles SU keeps the issue slot (first element) and the data port
-  // (second; 0 when it does not use it).
-  std::pair<unsigned, unsigned> occupancy(SUnit *SU) const {
-    if (!SU || !SU->getInstr())
-      return {1, 0};
+  // The cycles SU keeps the issue slot: one for a memory op, otherwise its
+  // largest ReleaseAtCycle (MUL, DIV).
+  unsigned occupancy(SUnit *SU) const {
+    if (!PostRAExBusy || !SU || !SU->getInstr())
+      return 1;
     const TargetSchedModel *SM = DAG.getSchedModel();
     if (!SM->hasInstrSchedModel())
-      return {1, 0};
-    unsigned Cycles = 1, Port = 0;
+      return 1;
     const MCSchedClassDesc *SC = DAG.getSchedClass(SU);
     if (!SC || !SC->isValid())
-      return {1, 0};
+      return 1;
+    unsigned Cycles = 1;
     for (const MCWriteProcResEntry &PRE :
          make_range(SM->getWriteProcResBegin(SC), SM->getWriteProcResEnd(SC))) {
       if (isPortResource(PRE.ProcResourceIdx))
-        Port = std::max<unsigned>(Port, PRE.ReleaseAtCycle);
-      else if (PostRAExBusy)
-        Cycles = std::max<unsigned>(Cycles, PRE.ReleaseAtCycle);
+        return 1;
+      Cycles = std::max<unsigned>(Cycles, PRE.ReleaseAtCycle);
     }
-    if (!PostRAMemPort)
-      return {Port ? 1 : Cycles, 0};
-    return {Cycles, Port};
+    return Cycles;
   }
 
 public:
@@ -413,43 +400,22 @@ public:
     MaxLookAhead = 1;
   }
   HazardType getHazardType(SUnit *SU, int) override {
-    if (BusyCycles)
-      return Hazard;
-    if (PostRAMemPort && (LoadPortBusy || StorePortBusy) &&
-        occupancy(SU).second &&
-        (SU->getInstr()->mayStore() ? StorePortBusy : LoadPortBusy))
-      return Hazard;
-    return NoHazard;
+    return BusyCycles ? Hazard : NoHazard;
   }
   bool atIssueLimit() const override { return Issued || BusyCycles; }
   void EmitInstruction(SUnit *SU) override {
     Issued = true;
-    auto [Slots, Port] = occupancy(SU);
-    BusyCycles = Slots - 1;
-    if (!Port)
-      return;
-    if (SU->getInstr()->mayStore()) {
-      LoadPortBusy = std::max(LoadPortBusy, Port);
-      StorePortBusy = std::max(StorePortBusy, Port - 1);
-    } else {
-      // The next cycle is not free for another load.
-      LoadPortBusy = std::max(LoadPortBusy, 2u);
-    }
+    BusyCycles = occupancy(SU) - 1;
   }
   void AdvanceCycle() override {
     if (Issued)
       Issued = false;
     else if (BusyCycles)
       --BusyCycles;
-    if (LoadPortBusy)
-      --LoadPortBusy;
-    if (StorePortBusy)
-      --StorePortBusy;
   }
   void Reset() override {
     Issued = false;
     BusyCycles = 0;
-    LoadPortBusy = StorePortBusy = 0;
   }
 };
 } // end anonymous namespace

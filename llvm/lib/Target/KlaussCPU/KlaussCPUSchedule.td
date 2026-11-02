@@ -37,14 +37,14 @@
 //                             frame setup and inline asm, which do not move;
 //                             not modelled.
 //
-// The D-cache is not modelled either (apart from the data port, KCMem below,
-// which only the post-RA scheduler reads): a load hit holds MEM for 3 cycles
-// and a store hit for 2, freezing the pipeline behind them (klaussCPU
-// 8e6b8e5, the runtime's perf_kern).  That cost is the same in any order, and
-// the load-use distance stays 3 instructions under it (the result is ready 5
-// cycles after the load issues: L;I1;I2;C needs no bubble), so it changes no
-// schedule.  The order-dependent part is the port: a load directly behind a
-// load, or within 4 cycles of a store, and a store within 3 of a store wait.
+// The D-cache is not modelled either (the data port, KCMem below, is only
+// pressure for the pre-RA scheduler).  On klaussCPU fetch-2a (the runtime's
+// perf_kern) a load hit takes two issue cycles and its result reaches a
+// consumer 4 cycles after it issues, so two independent instructions behind
+// it run for free and a third waits; a store takes two.  A memory op behind
+// another waits for the data port, and an ALU op between them costs its own
+// cycle, so no order of memory and ALU ops hides that wait; the schedulers
+// keep the latencies above (latency 4 for loads measured no faster).
 //
 // Both schedulers use this model.  The pre-RA machine scheduler is
 // GenericScheduler: with MicroOpBufferSize = 0 a node whose operands are not
@@ -95,23 +95,20 @@ def WriteSP       : SchedWrite;  // stack push/pop/addsp (SP-serialized)
 
 let SchedModel = KlaussCPUSchedModel in {
   def KCUnit : ProcResource<1>;                 // the single EX / issue slot
-  // The data port (posted stores): a store leaves MEM 2 cycles after it
-  // issues, but the next load waits until 4 cycles after it and the next
-  // store until 3; a load directly behind a load waits a cycle.  The post-RA
-  // list scheduler's hazard recognizer reads these entries
-  // (KlaussCPUInstrInfo.cpp, which adds the store and load rules) and fills
-  // the cycles in between with non-memory work.  The resource is kept
-  // buffered on purpose: as an unbuffered one (BufferSize = 0) the pre-RA
-  // GenericScheduler also reordered around it, which on the board cost
-  // nettle-aes +2.2% (and its .text +3.4%) and statemate +1.2%.
+  // The data port.  Only the pre-RA scheduler reads it, as resource pressure:
+  // the post-RA hazard recognizer gives a load or store one issue slot
+  // (KlaussCPUInstrInfo.cpp explains why).  The resource is kept buffered on
+  // purpose: as an unbuffered one (BufferSize = 0) the pre-RA GenericScheduler
+  // also reordered around it, which on the board cost nettle-aes +2.2% (and
+  // its .text +3.4%) and statemate +1.2% (klaussCPU 8e6b8e5).
   def KCMem  : ProcResource<1>;
 
   def : WriteRes<WriteALU,    [KCUnit]> { let Latency = 2; }
-  // A load freezes the pipeline for its 3 cycles in any order, so it takes
-  // the port for one cycle here: it waits for a store's drain, and the
-  // recognizer keeps the next load out of the cycle behind it.
+  // A load's result is at the consumer 4 cycles after the load issues on
+  // fetch-2a, but latency 4 was no faster on the board (pre-RA it cost
+  // nettle-aes 5%, post-RA only it was neutral); 1a stage 3 aims for 3.
   def : WriteRes<WriteLoad,   [KCUnit, KCMem]> { let Latency = 3; }
-  // A store issues for 2 cycles (its slot plus one bubble) and holds the port 4.
+  // A store issues for 2 cycles (its slot plus one bubble).
   def : WriteRes<WriteStore,  [KCUnit, KCMem]> { let Latency = 1;
                                                  let ReleaseAtCycles = [2, 4]; }
   def : WriteRes<WriteBranch, [KCUnit]> { let Latency = 1; }

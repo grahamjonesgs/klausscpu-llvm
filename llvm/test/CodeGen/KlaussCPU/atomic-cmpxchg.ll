@@ -129,9 +129,9 @@ define void @cas_loop_inc(ptr %p) nounwind {
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    enter 2
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
 ; CHECK-NEXT:    ldidx64 r5, r0, 0
+; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    .p2align 4
 ; CHECK-NEXT:  .LBB9_1: # %loop
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
@@ -168,9 +168,9 @@ define i128 @cas_i128(ptr %p, i128 %e, i128 %n) nounwind {
 ; CHECK-NEXT:    copy r12, r3
 ; CHECK-NEXT:    ldidx64 r3, r15, 16
 ; CHECK-NEXT:    stidx64 r2, r15, -8
-; CHECK-NEXT:    setr r13, 5
 ; CHECK-NEXT:    stidx64 r1, r15, -16
 ; CHECK-NEXT:    getsp r14
+; CHECK-NEXT:    setr r13, 5
 ; CHECK-NEXT:    addi r1, r15, -16
 ; CHECK-NEXT:    copy r2, r12
 ; CHECK-NEXT:    stidx64 r13, r14, 8
@@ -190,9 +190,9 @@ define i32 @cas_i32_misaligned(ptr %p, i32 %e, i32 %n) nounwind {
 ; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    copy r12, r0
 ; CHECK-NEXT:    stidx32 r1, r15, -4
-; CHECK-NEXT:    setr r13, 5
 ; CHECK-NEXT:    stidx32 r2, r15, -8
 ; CHECK-NEXT:    getsp r14
+; CHECK-NEXT:    setr r13, 5
 ; CHECK-NEXT:    addi r2, r15, -4
 ; CHECK-NEXT:    addi r3, r15, -8
 ; CHECK-NEXT:    setr r0, 4

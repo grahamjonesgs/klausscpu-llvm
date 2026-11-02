@@ -13,10 +13,12 @@ describe earlier states of the backend and are superseded by this file.
 the consumers and the measurements behind the design.
 
 **Minimum hardware: klaussCPU `3508f87`** (master with the hw-proposals
-merge).  The cost models are tuned for `67efcfd` (master with dcache-1a stage 2,
-on mem-early `8e6b8e5`: ID-stage branch prediction, a 4-entry return
-stack, a D-cache load hit that leaves MEM after 2 cycles), whose bitstream
-the board's QSPI holds since 2026-11-02; neither changed an instruction.
+merge).  The cost models are tuned for `b26385d` (master with fetch-2a: taken
+branches predicted in fetch, 2 cycles for a predicted-taken FBR; on
+dcache-1a stage 2 and mem-early `8e6b8e5`: ID-stage branch prediction, a
+4-entry return stack, a D-cache load hit that leaves MEM after 2 cycles;
+no AMP core 2), whose bitstream the board's QSPI holds since 2026-11-02;
+none of them changed an instruction.
 The assembler and the AsmPrinter use its 1-word `CMPRVW`, `MULV`/`MULUV`
 and `LEAPC` forms (ISA map §8.3) wherever they fit, which older cores trap
 on, FuseCmpBr fuses branches on W and imm32 compares into its new fused
@@ -527,26 +529,20 @@ when clobbered.
   (`MaxGluedStoresPerMemcpy`), so no store directly follows its load.
   The post-RA recognizer also keeps the issue slot busy behind a MUL or DIV
   for its `ReleaseAtCycles` (the RTL's EX hold), which the list scheduler
-  does not read on its own (`sched-ex-busy.ll`).  It also models the
-  data port (klaussCPU 8e6b8e5, the runtime's `perf_kern`): a posted store
-  takes two issue slots (`KCMem`, `WriteStore` ReleaseAtCycles `[2, 4]`),
-  the next load may issue 4 cycles after it and the next store 3, and a
-  load directly behind a load costs a cycle more, so a memory op is a
-  hazard in those cycles and the list scheduler fills them with ALU/MUL
-  work (`sched-mem-port.mir`).  Board (8e6b8e5): with the port model -O2
-  Embench runs 1.0% fewer cycles than without it (edn -2.6%, nettle-aes
-  -3.5%, ud -2.2%), the rules of 3508f87 (a store held every memory op 4
-  cycles, nothing between loads) 0.3%; at -Os single loops move by a cycle
-  an iteration with their unaligned head's phase (matmult-int +3.3%,
-  nettle-aes -4.1%; geomean -0.1%).  On 67efcfd (dcache-1a: a load hit
-  holds 2 cycles) an ALU op between two memory ops no longer hides a cycle
-  (`ld;alu;ld` 6.93, `st;alu;st` 4.99), and the port model measured neutral
-  (without it: CoreMark -0.4%, Embench +0.1%, both within layout noise); it
-  stays for the planned core change that lets a memory op issue on the edge
-  the previous access completes.  Only the post-RA
-  recognizer reads it: as an unbuffered resource (`BufferSize = 0`) the
-  pre-RA scheduler reordered around it too, and nettle-aes got 2.2% slower
-  (its .text 3.4% larger) and statemate 1.2%.
+  does not read on its own (`sched-ex-busy.ll`).  A load or store takes
+  one issue slot there: on fetch-2a a memory op behind another waits for
+  the data port and an ALU op between them costs its own cycle (`ld;alu;ld`
+  6.93 cycles, `ld;ld` 5.93), so nothing is gained by keeping memory ops
+  apart (`sched-mem-adjacent.mir`).  The data-port model that did so for
+  8e6b8e5 (a store held the next load 4 cycles, the next store 3; 1.0%
+  fewer Embench cycles there) cost 2a 0.9-1.2% of CoreMark cycles at -O1,
+  -O2 and -Os and 0.1-0.7% of Embench (`-Os` matmult-int 3.8%, statemate
+  2.8%), and is gone.  Load latency 4 (the
+  issue distance on 2a) measured no faster: post-RA only it was neutral,
+  in the model it cost nettle-aes 5%.  The data port (KCMem) is now only
+  pre-RA resource pressure; as an unbuffered resource (`BufferSize = 0`)
+  the pre-RA scheduler reordered around it too, and nettle-aes got 2.2%
+  slower (its .text 3.4% larger) and statemate 1.2%.
   `-mcpu=no-sched` (clang, llc, or `-Xclang -target-cpu -Xclang no-sched`) is
   the A/B baseline without either scheduler (and
   without `KlaussCPUEarlyIVInc` or the TTI unrolling, which serve them).
@@ -751,7 +747,6 @@ when clobbered.
 | `-klausscpu-break-anti-deps` | on | post-RA scheduler renames registers to break critical-path anti-dependencies |
 | `-klausscpu-postra-single-issue` | on | post-RA scheduler issues one instruction per cycle (=false: LLVM's unlimited default) |
 | `-klausscpu-postra-ex-busy` | on | post-RA scheduler issues nothing behind a MUL/DIV until its EX hold ends (=false: every op takes one slot) |
-| `-klausscpu-postra-mem-port` | on | post-RA scheduler keeps a load out of the 4 cycles and a store out of the 3 behind a posted store, and a load out of the cycle behind a load (=false: a store takes one slot, no port) |
 | `-klausscpu-fetch-line-layout` | 2 | KlaussCPUFetchLayout: 0 off, 1 moves only, 2 moves and NOPs (not under optsize) |
 | `-klausscpu-early-iv-inc` | on | count a single-block loop from Init - C so its increment can issue early |
 | `-klausscpu-postinc-loop-cmp` | on | compare a loop's updated counter with the limit, not the old counter with limit - step, so the compare and the branch fuse |

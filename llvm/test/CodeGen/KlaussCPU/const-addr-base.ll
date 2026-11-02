@@ -121,8 +121,8 @@ define void @call_between(i32 %v) nounwind {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 1
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    stabs32 r0, 4026531840
+; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    stabs32 r0, 4026531848
 ; CHECK-NEXT:    callrel f
 ; CHECK-NEXT:    setru r12, 4026531840
@@ -136,8 +136,8 @@ define void @call_between(i32 %v) nounwind {
 ; OFF:       # %bb.0:
 ; OFF-NEXT:    enter 1
 ; OFF-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; OFF-NEXT:    copy r4, r0
 ; OFF-NEXT:    stabs32 r0, 4026531840
+; OFF-NEXT:    copy r4, r0
 ; OFF-NEXT:    stabs32 r0, 4026531848
 ; OFF-NEXT:    callrel f
 ; OFF-NEXT:    stabs32 r4, 4026531840
@@ -161,8 +161,8 @@ define void @call_then_branch(i32 %v, i1 %c) nounwind {
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    enter 2
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
+; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    andv r5, r1, 1
 ; CHECK-NEXT:    stabs32 r0, 4026531840
 ; CHECK-NEXT:    callrel f
@@ -182,8 +182,8 @@ define void @call_then_branch(i32 %v, i1 %c) nounwind {
 ; OFF:       # %bb.0: # %entry
 ; OFF-NEXT:    enter 2
 ; OFF-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; OFF-NEXT:    copy r4, r0
 ; OFF-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
+; OFF-NEXT:    copy r4, r0
 ; OFF-NEXT:    andv r5, r1, 1
 ; OFF-NEXT:    stabs32 r0, 4026531840
 ; OFF-NEXT:    callrel f
@@ -220,8 +220,8 @@ define void @loop_call_run(i32 %n) nounwind {
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    enter 2
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
+; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    setr r5, 0
 ; CHECK-NEXT:    .p2align 4
 ; CHECK-NEXT:  .LBB5_1: # %loop
@@ -241,8 +241,8 @@ define void @loop_call_run(i32 %n) nounwind {
 ; OFF:       # %bb.0: # %entry
 ; OFF-NEXT:    enter 2
 ; OFF-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; OFF-NEXT:    copy r4, r0
 ; OFF-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
+; OFF-NEXT:    copy r4, r0
 ; OFF-NEXT:    setr r5, 0
 ; OFF-NEXT:    .p2align 4
 ; OFF-NEXT:  .LBB5_1: # %loop
@@ -281,11 +281,11 @@ define void @loop_with_calls(i32 %n) nounwind {
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
-; CHECK-NEXT:    setru r5, 4026531840
 ; CHECK-NEXT:    stidx64 r6, r15, -24 # 8-byte Folded Spill
+; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    setr r6, 0
+; CHECK-NEXT:    setru r5, 4026531840
 ; CHECK-NEXT:    .p2align 4
 ; CHECK-NEXT:  .LBB6_1: # %loop
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
@@ -312,8 +312,8 @@ define void @loop_with_calls(i32 %n) nounwind {
 ; OFF:       # %bb.0: # %entry
 ; OFF-NEXT:    enter 2
 ; OFF-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; OFF-NEXT:    copy r4, r0
 ; OFF-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
+; OFF-NEXT:    copy r4, r0
 ; OFF-NEXT:    setr r5, 0
 ; OFF-NEXT:    .p2align 4
 ; OFF-NEXT:  .LBB6_1: # %loop
@@ -396,10 +396,10 @@ define i64 @widths() nounwind {
 ; CHECK-NEXT:    ldidx64 r14, r12, -200
 ; CHECK-NEXT:    ldidx64 r13, r12, 800
 ; CHECK-NEXT:    ldidx8 r11, r12, 0
-; CHECK-NEXT:    addr r14, r14, r13
 ; CHECK-NEXT:    ldidx64 r12, r12, -192
-; CHECK-NEXT:    addr r14, r14, r11
+; CHECK-NEXT:    addr r14, r14, r13
 ; CHECK-NEXT:    ldabs8 r13, 4027384208
+; CHECK-NEXT:    addr r14, r14, r11
 ; CHECK-NEXT:    addr r12, r14, r12
 ; CHECK-NEXT:    addr r12, r12, r13
 ; CHECK-NEXT:    ret
