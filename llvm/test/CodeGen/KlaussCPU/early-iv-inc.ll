@@ -51,8 +51,8 @@ define i64 @load_use(ptr %p) nounwind {
 ; CHECK-NEXT:    .p2align 4
 ; CHECK-NEXT:  .LBB1_1: # %loop
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
-; CHECK-NEXT:    ldidx64 r13, r0, 0
 ; CHECK-NEXT:    incr r14, r14
+; CHECK-NEXT:    ldidx64 r13, r0, 0
 ; CHECK-NEXT:    addr r13, r14, r13
 ; CHECK-NEXT:    xorr r12, r13, r12
 ; CHECK-NEXT:    fbr r14, r11, 8, .LBB1_1

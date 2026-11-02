@@ -86,6 +86,8 @@ def KlaussCPUSchedModel : SchedMachineModel {
 def WriteALU      : SchedWrite;  // single-cycle integer op / shift / compare / move
 def WriteFlags    : SchedWrite;  // FLAGS of an ALU op that also writes a register
 def WriteLoad     : SchedWrite;  // memory load
+def WriteLoad32   : SchedWrite;  // MEMGET32: a load the ALU bypass does not take
+def ReadLoadByp   : SchedRead;   // an ALU/BOOL/compare operand (see ReadAdvance)
 def WriteStore    : SchedWrite;  // memory store (no GPR result)
 def WriteMul      : SchedWrite;  // 64-bit multiply
 def WriteMulFlags : SchedWrite;  // its FLAGS
@@ -109,6 +111,14 @@ let SchedModel = KlaussCPUSchedModel in {
   // fetch-2a, but latency 4 was no faster on the board (pre-RA it cost
   // nettle-aes 5%, post-RA only it was neutral); 1a stage 3 aims for 3.
   def : WriteRes<WriteLoad,   [KCUnit, KCMem]> { let Latency = 3; }
+  def : WriteRes<WriteLoad32, [KCUnit, KCMem]> { let Latency = 3; }
+  // klaussCPU ldbyp: an ALU, boolean or compare op (U_ALU, U_BOOL; the
+  // compare a fused branch is made of) takes a fast-path load's data from WB
+  // on its register operands, one cycle before the dispatch forward: load-use
+  // distance 2.  Not MEMGET32 (U_LOAD32), and not shifts, bit ops, moves,
+  // MUL/DIV, addresses or store data, which keep 3.  The consumers are listed
+  // in KlaussCPUScheduleBypass.td, which needs the instruction records.
+  def : ReadAdvance<ReadLoadByp, 1, [WriteLoad]>;
   // A store issues for 2 cycles (its slot plus one bubble).
   def : WriteRes<WriteStore,  [KCUnit, KCMem]> { let Latency = 1;
                                                  let ReleaseAtCycles = [2, 4]; }

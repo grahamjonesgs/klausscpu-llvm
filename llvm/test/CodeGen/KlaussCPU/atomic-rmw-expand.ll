@@ -251,11 +251,11 @@ define i32 @add_i32_misaligned(ptr %p, i32 %x) nounwind {
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
 ; CHECK-NEXT:    ldidx64 r14, r15, -48 # 8-byte Folded Reload
 ; CHECK-NEXT:    stidx32 r12, r15, -36
-; CHECK-NEXT:    setr r0, 4
 ; CHECK-NEXT:    addr r14, r12, r14
-; CHECK-NEXT:    copy r1, r4
+; CHECK-NEXT:    setr r0, 4
 ; CHECK-NEXT:    stidx32 r14, r15, -40
 ; CHECK-NEXT:    getsp r12
+; CHECK-NEXT:    copy r1, r4
 ; CHECK-NEXT:    copy r2, r6
 ; CHECK-NEXT:    copy r3, r7
 ; CHECK-NEXT:    stidx64 r5, r12, 8

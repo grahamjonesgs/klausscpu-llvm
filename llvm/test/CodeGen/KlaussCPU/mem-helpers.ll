@@ -92,8 +92,8 @@ define void @copy_src4(ptr align 4 %p) nounwind {
 ; CHECK-NEXT:    enter 2
 ; CHECK-NEXT:    ldidx32 r12, r0, 12
 ; CHECK-NEXT:    ldidx32 r13, r0, 4
-; CHECK-NEXT:    ldidx32 r14, r0, 8
 ; CHECK-NEXT:    memget32 r11, r0
+; CHECK-NEXT:    ldidx32 r14, r0, 8
 ; CHECK-NEXT:    shlv r12, r12, 32
 ; CHECK-NEXT:    shlv r13, r13, 32
 ; CHECK-NEXT:    orr r12, r12, r14

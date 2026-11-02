@@ -44,6 +44,7 @@ include "KlaussCPURegisterInfo.td"
 include "KlaussCPUCallingConv.td"
 include "KlaussCPUSchedule.td"     // defines WriteALU/… used by InstrInfo.td below
 include "KlaussCPUInstrInfo.td"
+include "KlaussCPUScheduleBypass.td" // load-bypass consumers (InstRW)
 
 def KlaussCPUInstrInfo : InstrInfo;
 

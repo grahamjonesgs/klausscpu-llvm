@@ -44,23 +44,23 @@ define void @update(i32 %n) {
 ; NOMERGE-NEXT:    leapc r12, count
 ; NOMERGE-NEXT:    leapc r13, total
 ; NOMERGE-NEXT:    memget32 r14, r12
-; NOMERGE-NEXT:    leapc r11, flag
-; NOMERGE-NEXT:    setr r10, 1
+; NOMERGE-NEXT:    ldidx64 r11, r13, 0
+; NOMERGE-NEXT:    zextw r10, r0
 ; NOMERGE-NEXT:    incr r14, r14
-; NOMERGE-NEXT:    ldidx64 r9, r13, 0
+; NOMERGE-NEXT:    addr r8, r11, r10
 ; NOMERGE-NEXT:    memset32 r14, r12
-; NOMERGE-NEXT:    zextw r14, r0
-; NOMERGE-NEXT:    memset8 r10, r11
-; NOMERGE-NEXT:    leapc r8, extl
-; NOMERGE-NEXT:    leapc r11, ext
-; NOMERGE-NEXT:    addr r12, r9, r14
-; NOMERGE-NEXT:    ldidx64 r10, r8, 0
-; NOMERGE-NEXT:    ldidx64 r9, r11, 0
+; NOMERGE-NEXT:    stidx64 r8, r13, 0
+; NOMERGE-NEXT:    leapc r9, extl
+; NOMERGE-NEXT:    leapc r14, flag
+; NOMERGE-NEXT:    setr r10, 1
+; NOMERGE-NEXT:    leapc r13, ext
+; NOMERGE-NEXT:    ldidx64 r11, r9, 0
+; NOMERGE-NEXT:    memset8 r10, r14
+; NOMERGE-NEXT:    ldidx64 r10, r13, 0
+; NOMERGE-NEXT:    addr r11, r11, r8
+; NOMERGE-NEXT:    addr r12, r10, r8
+; NOMERGE-NEXT:    stidx64 r11, r9, 0
 ; NOMERGE-NEXT:    stidx64 r12, r13, 0
-; NOMERGE-NEXT:    addr r13, r10, r12
-; NOMERGE-NEXT:    addr r12, r9, r12
-; NOMERGE-NEXT:    stidx64 r13, r8, 0
-; NOMERGE-NEXT:    stidx64 r12, r11, 0
 ; NOMERGE-NEXT:    ret
   %c = load i32, ptr @count, align 4
   %c1 = add i32 %c, 1

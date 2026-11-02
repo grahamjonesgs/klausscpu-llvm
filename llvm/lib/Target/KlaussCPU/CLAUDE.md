@@ -13,8 +13,10 @@ describe earlier states of the backend and are superseded by this file.
 the consumers and the measurements behind the design.
 
 **Minimum hardware: klaussCPU `3508f87`** (master with the hw-proposals
-merge).  The cost models are tuned for `9b49ac1` (master with mul2: a
-multiply holds EX 2 cycles, product at +4; on callret: SP
+merge).  The cost models are tuned for klaussCPU ldbyp `c6ba1db` (a load
+bypassed from WB to ALU/boolean/compare operands: load-use 2 for them; on
+btic64 `f8fd12c`, a 64-entry BTIC; mul2: a multiply holds EX 2 cycles,
+product at +4; on callret: SP
 and store-to-load forwarding, RET answered in MEM; on fetch-bypass: a
 2-entry next-line buffer and next-line prefetch on a BTIC redirect; on
 st-1slot: a store takes one issue slot; on 1a stage 3, dcache-s3: a D-cache load hit
@@ -514,10 +516,14 @@ when clobbered.
   -64 again at isel.  A `SELECT_CC` whose operands fold to a constant
   condition is replaced by the chosen value (`PerformDAGCombine`).
 - Scheduling: the model in `KlaussCPUSchedule.td` (CPU `generic`, the
-  default) is the RTL's interlocks as issue distances: ALU result 2, load 3,
-  FLAGS 2 (`WriteFlags`, the second write of an ALU op with a destination),
-  MUL 4 (EX busy 2, klaussCPU mul2), DIV 20; the D-cache hit freeze and SP are not modelled
-  (order-independent / not movable).  It drives the pre-RA machine scheduler
+  default) is the RTL's interlocks as issue distances: ALU result 2, load 3
+  (2 for an ALU, boolean or compare op's register operand, which takes a
+  load's data from WB on klaussCPU ldbyp: `ReadLoadByp`, a `ReadAdvance` of
+  1 on `WriteLoad`, with the consumers listed in `KlaussCPUScheduleBypass.td`;
+  not `MEMGET32`, `WriteLoad32`; board: Embench -0.27% cycles at -O2 and
+  -Os, -0.36% at -O1, nettle-aes -4..-7%), FLAGS 2 (`WriteFlags`, the
+  second write of an ALU op with a destination), MUL 4 (EX busy 2, klaussCPU
+  mul2), DIV 20; SP is not modelled (not movable).  It drives the pre-RA machine scheduler
   (GenericScheduler, in-order: an unready node waits in the pending queue)
   and the post-RA list scheduler, which runs from **-O1** up
   (`getOptLevelToEnablePostRAScheduler`), issues one instruction per cycle
@@ -960,6 +966,7 @@ llvm/lib/Target/KlaussCPU/
 │                               finished handoff and plan documents, marked historical
 ├── KlaussCPUCallingConv.td     CC_KlaussCPU, RetCC_KlaussCPU, CSR_KlaussCPU, the call mask CSR_KlaussCPU_Call
 ├── KlaussCPUSchedule.td        scheduling model (RTL interlock latencies); processors `generic` and `no-sched`
+├── KlaussCPUScheduleBypass.td  the load-bypass consumers (InstRW; included after KlaussCPUInstrInfo.td)
 ├── KlaussCPUInstrInfo.td       encodings, operand types, isel patterns, short forms + CompressPats, aliases
 ├── KlaussCPUInstrInfo.h/.cpp   branch analysis, copies, spills, flagsDeadAfter, post-RA hazard recognizer (single issue), instruction sizes, MachineOutliner hooks
 ├── KlaussCPURegisterInfo.h/.cpp reserved regs, stack realignment, eliminateFrameIndex

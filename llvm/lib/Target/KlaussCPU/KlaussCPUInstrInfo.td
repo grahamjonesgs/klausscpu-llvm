@@ -940,7 +940,10 @@ def MEMGET8  : RR1<0x58000000, (outs GPR:$rd), (ins GPR:$rs),
 def MEMGET16 : RR1<0x59000000, (outs GPR:$rd), (ins GPR:$rs),
                   "memget16\t$rd, $rs"> { let mayLoad = 1; }
 def MEMGET32 : RR1<0x5A000000, (outs GPR:$rd), (ins GPR:$rs),
-                  "memget32\t$rd, $rs"> { let mayLoad = 1; }
+                  "memget32\t$rd, $rs"> {
+  let mayLoad = 1;
+  let SchedRW = [WriteLoad32];   // U_LOAD32: no ALU bypass (KlaussCPUSchedule.td)
+}
 
 // Sub-word register-addressed stores (stores low N bits of rs_data to mem[rs_addr]).
 //
