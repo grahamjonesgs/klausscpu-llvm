@@ -74,11 +74,11 @@ define i32 @uinc_wrap_i32(ptr %p, i32 %x) nounwind {
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    enter 3
 ; CHECK-NEXT:    stidx64 r6, r15, -24 # 8-byte Folded Spill
-; CHECK-NEXT:    memget32 r6, r0
 ; CHECK-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r4, r0
 ; CHECK-NEXT:    stidx64 r5, r15, -16 # 8-byte Folded Spill
 ; CHECK-NEXT:    copy r5, r1
+; CHECK-NEXT:    memget32 r6, r0
 ; CHECK-NEXT:    jmprel .LBB2_1
 ; CHECK-NEXT:    .p2align 4
 ; CHECK-NEXT:  .LBB2_3: # %atomicrmw.start

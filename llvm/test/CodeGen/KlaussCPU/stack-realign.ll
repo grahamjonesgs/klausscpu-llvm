@@ -113,9 +113,9 @@ define void @align64_vla(i64 %n) nounwind {
 ; O1-NEXT:    addi r12, r0, 7
 ; O1-NEXT:    stidx64 r7, r15, -16 # 8-byte Folded Spill
 ; O1-NEXT:    andi r12, r12, -8
-; O1-NEXT:    andi r7, r15, -64
 ; O1-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; O1-NEXT:    getsp r14
+; O1-NEXT:    andi r7, r15, -64
 ; O1-NEXT:    subr r4, r14, r12
 ; O1-NEXT:    setsp r4
 ; O1-NEXT:    addi r0, r7, -64
@@ -152,9 +152,9 @@ define void @align64_vla(i64 %n) nounwind {
 ; PUSH-NEXT:    addi r12, r0, 7
 ; PUSH-NEXT:    stidx64 r7, r15, -16 # 8-byte Folded Spill
 ; PUSH-NEXT:    andi r12, r12, -8
-; PUSH-NEXT:    andi r7, r15, -64
 ; PUSH-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
 ; PUSH-NEXT:    getsp r14
+; PUSH-NEXT:    andi r7, r15, -64
 ; PUSH-NEXT:    subr r4, r14, r12
 ; PUSH-NEXT:    setsp r4
 ; PUSH-NEXT:    addi r0, r7, -64

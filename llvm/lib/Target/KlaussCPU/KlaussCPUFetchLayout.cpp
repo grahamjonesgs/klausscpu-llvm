@@ -1,11 +1,15 @@
 //===-- KlaussCPUFetchLayout.cpp - keep wide instructions in one fetch line ===//
 //
-// The 3508f87 core fetches 16-byte lines.  A 1-word instruction never costs
-// a bubble at a line boundary any more, but a 2- or 3-word instruction that
-// crosses one takes an extra fetch cycle (an extra two for a 2-word store),
-// and a 2-word instruction in the first line after a taken branch costs one
-// more than the same instruction later (board, posted-store-measure
-// REPORT.md section 5; picolibc's sqrt loses 7.2% to two such crossings).
+// The core (klaussCPU 8e6b8e5) fetches 16-byte lines.  A 1-word instruction
+// never costs a bubble at a line boundary, but in a loop (board, the
+// runtime's perf_kern):
+//
+//   - a 2- or 3-word instruction that crosses a line takes an extra cycle;
+//   - a 2-word load or store takes one more cycle than its 1-word form unless
+//     it starts a line, and a 2-word store that crosses a line one more.
+//
+// (On 3508f87 a 2-word instruction in the first line after a taken branch
+// also cost one more; picolibc's sqrt lost 7.2% to two crossings there.)
 //
 // This pass runs last before the AsmPrinter, when the size of every
 // instruction is known (getInstSizeInBytes agrees with the AsmPrinter's
@@ -16,7 +20,7 @@
 // from that block is the sum of the sizes in front of it, rounded up at each
 // aligned block.  For each such loop it scores the layout with a small
 // in-order timing model (issue slots by size, the fetch penalties above, the
-// load-use, ALU, MUL and posted-store port stalls of KlaussCPUSchedule.td),
+// load-use, ALU, MUL and data-port stalls of KlaussCPUSchedule.td),
 // weighted by block frequency, and keeps the cheapest of
 //
 //   - moving one instruction up or down by at most MaxMove positions inside
@@ -205,10 +209,11 @@ namespace {
 // The timing model: cycles to run one block's instructions in order, from a
 // state where everything is ready, at the given offset from an aligned
 // point.  Slot counts, latencies and penalties are the board measurements of
-// KlaussCPUSchedule.td and posted-store-measure/REPORT.md.
+// KlaussCPUSchedule.td and the runtime's perf_kern.
 struct Timer {
   unsigned Cur = 0;
-  unsigned PortFree = 0;
+  unsigned LoadFree = 0;  // first cycle a load may issue (the data port)
+  unsigned StoreFree = 0; // first cycle a store may issue
   SmallDenseMap<unsigned, unsigned, 16> Ready;
 };
 } // namespace
@@ -234,21 +239,24 @@ double KlaussCPUFetchLayout::cost(const Region &R, bool Fetch) const {
       if (MI.isCall()) {
         T.Cur += Words;
         T.Ready.clear();
-        T.PortFree = 0;
+        T.LoadFree = T.StoreFree = 0;
         Off += Size;
         continue;
       }
       // Fetch: a wide instruction costs a cycle per word, plus one more if
-      // it crosses a line (two for a store), or if it lies in the first line
-      // after the loop's entry.
-      unsigned Slots = Words;
+      // it crosses a line; a 2-word load or store one more unless it starts
+      // a line, and a 2-word store one more again if it crosses one.
+      bool Load = MI.mayLoad(), Store = !Load && MI.mayStore();
+      unsigned Slots = Words, Extra = 0;
       if (Fetch && Words > 1) {
-        if (Off < 16)
-          ++Slots;
-        else if ((Off & 15) + Size > 16)
-          Slots += MI.mayStore() ? 2 : 1;
+        bool Crosses = (Off & 15) + Size > 16;
+        if (Crosses)
+          ++Extra;
+        if ((Load || Store) && (Off & 15))
+          ++Extra;
+        if (Store && Crosses)
+          ++Extra;
       }
-      bool Mem = MI.mayLoad() || MI.mayStore();
       unsigned Earliest = T.Cur;
       for (const MachineOperand &MO : MI.operands())
         if (MO.isReg() && MO.isUse() && MO.getReg()) {
@@ -256,21 +264,27 @@ double KlaussCPUFetchLayout::cost(const Region &R, bool Fetch) const {
           if (It != T.Ready.end())
             Earliest = std::max(Earliest, It->second);
         }
-      if (Mem)
-        Earliest = std::max(Earliest, T.PortFree);
+      // A load holds the pipeline 3 cycles, one more directly behind another
+      // load, and its result is ready 5 cycles after it issues.  A store
+      // holds it 2; the next store may issue 3 cycles after it, the next
+      // load 4.
       unsigned Lat = 2, Hold = 1;
-      if (MI.mayLoad()) {
-        Hold = 5;
-        Lat = 7;
-      } else if (MI.mayStore()) {
+      if (Load) {
+        Earliest = std::max(Earliest, T.LoadFree);
+        Hold = 3;
+        Lat = 5;
+        T.LoadFree = Earliest + 4;
+      } else if (Store) {
+        Earliest = std::max(Earliest, T.StoreFree);
         Hold = 2;
-        T.PortFree = Earliest + 4;
+        T.StoreFree = Earliest + 3;
+        T.LoadFree = std::max(T.LoadFree, Earliest + 4);
       } else if (MI.getOpcode() == KlaussCPU::MULR ||
                  MI.getOpcode() == KlaussCPU::MULV) {
         Hold = 4;
         Lat = 5;
       }
-      Slots = std::max(Slots, Hold);
+      Slots = std::max(Slots, Hold) + Extra;
       for (const MachineOperand &MO : MI.operands())
         if (MO.isReg() && MO.isDef() && MO.getReg())
           T.Ready[MO.getReg()] = Earliest + Lat;

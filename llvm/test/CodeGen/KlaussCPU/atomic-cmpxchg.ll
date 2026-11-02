@@ -169,10 +169,10 @@ define i128 @cas_i128(ptr %p, i128 %e, i128 %n) nounwind {
 ; CHECK-NEXT:    ldidx64 r3, r15, 16
 ; CHECK-NEXT:    stidx64 r2, r15, -8
 ; CHECK-NEXT:    setr r13, 5
-; CHECK-NEXT:    copy r2, r12
 ; CHECK-NEXT:    stidx64 r1, r15, -16
 ; CHECK-NEXT:    getsp r14
 ; CHECK-NEXT:    addi r1, r15, -16
+; CHECK-NEXT:    copy r2, r12
 ; CHECK-NEXT:    stidx64 r13, r14, 8
 ; CHECK-NEXT:    stidx64 r13, r14, 0
 ; CHECK-NEXT:    callrel __atomic_compare_exchange_16
@@ -191,10 +191,10 @@ define i32 @cas_i32_misaligned(ptr %p, i32 %e, i32 %n) nounwind {
 ; CHECK-NEXT:    copy r12, r0
 ; CHECK-NEXT:    stidx32 r1, r15, -4
 ; CHECK-NEXT:    setr r13, 5
-; CHECK-NEXT:    addi r3, r15, -8
 ; CHECK-NEXT:    stidx32 r2, r15, -8
 ; CHECK-NEXT:    getsp r14
 ; CHECK-NEXT:    addi r2, r15, -4
+; CHECK-NEXT:    addi r3, r15, -8
 ; CHECK-NEXT:    setr r0, 4
 ; CHECK-NEXT:    copy r1, r12
 ; CHECK-NEXT:    stidx64 r13, r14, 8

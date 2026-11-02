@@ -2,13 +2,14 @@
 # RUN: llc -march=klausscpu -run-pass=post-RA-sched \
 # RUN:   -klausscpu-postra-mem-port=false -o - %s | FileCheck %s --check-prefix=NOPORT
 #
-# A posted store (klaussCPU 3508f87) issues for 2 cycles and holds the data
-# port for 4; the next load or store waits for that, but two ALU ops in
-# between cost nothing (board: `st ; 2 ALU ; ld` takes as long as `st ; ld`).
-# The post-RA hazard recognizer keeps a memory op out of the port's busy
-# cycles (KCMem in KlaussCPUSchedule.td), so the two independent adds go
-# between the stores instead of behind them.  Without the port model the
-# second store, ready first, follows the first directly.
+# The data port (klaussCPU 8e6b8e5, board perf_kern): a posted store issues
+# for 2 cycles; the next store may issue 3 cycles after it, the next load 4,
+# and a load directly behind a load costs a cycle more.  Independent ALU ops
+# in those cycles cost nothing (`st ; ALU` takes as long as `st ; st`,
+# `st ; 2 ALU ; ld` as `st ; ld`, `ld ; ALU` as `ld ; ld`), so the post-RA
+# hazard recognizer keeps a memory op out of them and the list scheduler
+# fills them.  Without the port model the memory ops, ready first, issue
+# back to back.
 ---
 name:            two_stores
 tracksRegLiveness: true
@@ -19,8 +20,8 @@ body:             |
     ; CHECK-LABEL: name: two_stores
     ; CHECK:      STIDX64 killed $r1, $r0, 0
     ; CHECK-NEXT: $r12 = INCR
-    ; CHECK-NEXT: $r14 = INCR
     ; CHECK-NEXT: STIDX64 killed $r2, killed $r0, 8
+    ; CHECK-NEXT: $r14 = INCR
     ; CHECK-NEXT: RET_I
     ;
     ; NOPORT-LABEL: name: two_stores
@@ -28,6 +29,52 @@ body:             |
     ; NOPORT-NEXT: STIDX64 killed $r2, killed $r0, 8
     STIDX64 $r1, $r0, 0 :: (store (s64))
     STIDX64 $r2, $r0, 8 :: (store (s64))
+    $r12 = INCR killed $r12, implicit-def dead $flags
+    $r14 = INCR killed $r14, implicit-def dead $flags
+    RET_I
+...
+---
+name:            store_load
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $r0, $r1, $r12, $r13, $r14
+
+    ; CHECK-LABEL: name: store_load
+    ; CHECK:      STIDX64 killed $r1, $r0, 0
+    ; CHECK-NEXT: $r12 = INCR
+    ; CHECK-NEXT: $r14 = INCR
+    ; CHECK-NEXT: $r13 = LDIDX64 killed $r0, 8
+    ; CHECK-NEXT: RET_I
+    ;
+    ; NOPORT-LABEL: name: store_load
+    ; NOPORT:      STIDX64 killed $r1, $r0, 0
+    ; NOPORT-NEXT: $r13 = LDIDX64 killed $r0, 8
+    STIDX64 $r1, $r0, 0 :: (store (s64))
+    $r13 = LDIDX64 $r0, 8 :: (load (s64))
+    $r12 = INCR killed $r12, implicit-def dead $flags
+    $r14 = INCR killed $r14, implicit-def dead $flags
+    RET_I
+...
+---
+name:            two_loads
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $r0, $r12, $r14
+
+    ; CHECK-LABEL: name: two_loads
+    ; CHECK:      $r1 = LDIDX64 $r0, 0
+    ; CHECK-NEXT: $r12 = INCR
+    ; CHECK-NEXT: $r2 = LDIDX64 killed $r0, 8
+    ; CHECK-NEXT: $r14 = INCR
+    ; CHECK-NEXT: RET_I
+    ;
+    ; NOPORT-LABEL: name: two_loads
+    ; NOPORT:      $r1 = LDIDX64 $r0, 0
+    ; NOPORT-NEXT: $r2 = LDIDX64 killed $r0, 8
+    $r1 = LDIDX64 $r0, 0 :: (load (s64))
+    $r2 = LDIDX64 $r0, 8 :: (load (s64))
     $r12 = INCR killed $r12, implicit-def dead $flags
     $r14 = INCR killed $r14, implicit-def dead $flags
     RET_I

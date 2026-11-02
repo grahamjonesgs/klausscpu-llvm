@@ -37,12 +37,14 @@
 //                             frame setup and inline asm, which do not move;
 //                             not modelled.
 //
-// The D-cache is not modelled either (apart from the posted store's port, KCMem
-// below, which only the post-RA scheduler reads): every load and store hit holds MEM
-// for ~4 (load) / ~3 (store) cycles and freezes the pipeline behind it
-// (mem_busy, pipeline_core.sv:1235-1237, 1881).  That cost is the same in
-// any order, and the load-use distance stays 3 under it (L;I1;I2;C needs no
-// bubble), so it changes no schedule.  Measured on the board: perf_haz.
+// The D-cache is not modelled either (apart from the data port, KCMem below,
+// which only the post-RA scheduler reads): a load hit holds MEM for 3 cycles
+// and a store hit for 2, freezing the pipeline behind them (klaussCPU
+// 8e6b8e5, the runtime's perf_kern).  That cost is the same in any order, and
+// the load-use distance stays 3 instructions under it (the result is ready 5
+// cycles after the load issues: L;I1;I2;C needs no bubble), so it changes no
+// schedule.  The order-dependent part is the port: a load directly behind a
+// load, or within 4 cycles of a store, and a store within 3 of a store wait.
 //
 // Both schedulers use this model.  The pre-RA machine scheduler is
 // GenericScheduler: with MicroOpBufferSize = 0 a node whose operands are not
@@ -65,7 +67,8 @@ def KlaussCPUSchedModel : SchedMachineModel {
   let IssueWidth        = 1;      // single-issue in-order
   let MicroOpBufferSize = 0;      // in-order: an operand not ready is a stall
   let LoadLatency       = 3;      // load->use (forwards from WB only)
-  let MispredictPenalty = 3;      // taken-redirect IFB refill via the I-cache (post-M7)
+  let MispredictPenalty = 7;      // a mispredicted FBR (board: ~6.9); no pass in
+                                  // this pipeline reads it (no early if-conversion)
   let CompleteModel     = 1;      // every KlaussCPU instr resolves a SchedRW: the
                                   // KCInst32/64/96 base classes default to [WriteALU]
                                   // and the memory/branch/SP/mul/div formats override,
@@ -92,19 +95,21 @@ def WriteSP       : SchedWrite;  // stack push/pop/addsp (SP-serialized)
 
 let SchedModel = KlaussCPUSchedModel in {
   def KCUnit : ProcResource<1>;                 // the single EX / issue slot
-  // The data port (klaussCPU 3508f87, posted stores): a DRAM store leaves MEM
-  // 2 cycles after it issues, but the port stays busy until 4 cycles after,
-  // and any later memory op waits for that.  The post-RA list scheduler's
-  // hazard recognizer reads these entries (KlaussCPUInstrInfo.cpp) and fills
-  // the two cycles in between with non-memory work.  The resource is kept
+  // The data port (posted stores): a store leaves MEM 2 cycles after it
+  // issues, but the next load waits until 4 cycles after it and the next
+  // store until 3; a load directly behind a load waits a cycle.  The post-RA
+  // list scheduler's hazard recognizer reads these entries
+  // (KlaussCPUInstrInfo.cpp, which adds the store and load rules) and fills
+  // the cycles in between with non-memory work.  The resource is kept
   // buffered on purpose: as an unbuffered one (BufferSize = 0) the pre-RA
   // GenericScheduler also reordered around it, which on the board cost
   // nettle-aes +2.2% (and its .text +3.4%) and statemate +1.2%.
   def KCMem  : ProcResource<1>;
 
   def : WriteRes<WriteALU,    [KCUnit]> { let Latency = 2; }
-  // A load freezes the pipeline for its 5 cycles in any order, so it takes
-  // the port for one cycle only: it waits for a store's drain but holds nothing.
+  // A load freezes the pipeline for its 3 cycles in any order, so it takes
+  // the port for one cycle here: it waits for a store's drain, and the
+  // recognizer keeps the next load out of the cycle behind it.
   def : WriteRes<WriteLoad,   [KCUnit, KCMem]> { let Latency = 3; }
   // A store issues for 2 cycles (its slot plus one bubble) and holds the port 4.
   def : WriteRes<WriteStore,  [KCUnit, KCMem]> { let Latency = 1;

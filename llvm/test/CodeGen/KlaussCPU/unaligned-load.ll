@@ -202,11 +202,11 @@ define i64 @le64(ptr %p) nounwind {
 ; NO64:       # %bb.0:
 ; NO64-NEXT:    ldidx8 r12, r0, 4
 ; NO64-NEXT:    ldidx8 r14, r0, 5
-; NO64-NEXT:    memget32 r13, r0
 ; NO64-NEXT:    shlv r12, r12, 32
+; NO64-NEXT:    memget32 r13, r0
+; NO64-NEXT:    shlv r14, r14, 40
 ; NO64-NEXT:    ldidx8 r11, r0, 6
 ; NO64-NEXT:    orr r12, r13, r12
-; NO64-NEXT:    shlv r14, r14, 40
 ; NO64-NEXT:    ldidx8 r10, r0, 7
 ; NO64-NEXT:    orr r12, r12, r14
 ; NO64-NEXT:    shlv r13, r11, 48
@@ -271,8 +271,8 @@ define i64 @be64(ptr %p) nounwind {
 ; NO64:       # %bb.0:
 ; NO64-NEXT:    memget8 r12, r0
 ; NO64-NEXT:    ldidx8 r14, r0, 1
-; NO64-NEXT:    ldidx8 r13, r0, 2
 ; NO64-NEXT:    shlv r12, r12, 56
+; NO64-NEXT:    ldidx8 r13, r0, 2
 ; NO64-NEXT:    shlv r14, r14, 48
 ; NO64-NEXT:    ldidx8 r11, r0, 3
 ; NO64-NEXT:    orr r12, r12, r14
@@ -488,22 +488,22 @@ define i64 @u64_volatile(ptr %p) nounwind {
 ; CHECK-NEXT:    memget8 r12, r0
 ; CHECK-NEXT:    ldidx8 r14, r0, 1
 ; CHECK-NEXT:    ldidx8 r13, r0, 2
-; CHECK-NEXT:    ldidx8 r11, r0, 3
-; CHECK-NEXT:    ldidx8 r10, r0, 4
-; CHECK-NEXT:    ldidx8 r9, r0, 5
 ; CHECK-NEXT:    shlv r14, r14, 8
+; CHECK-NEXT:    ldidx8 r11, r0, 3
 ; CHECK-NEXT:    shlv r13, r13, 16
-; CHECK-NEXT:    shlv r9, r9, 8
+; CHECK-NEXT:    ldidx8 r10, r0, 4
 ; CHECK-NEXT:    shlv r11, r11, 24
+; CHECK-NEXT:    ldidx8 r9, r0, 5
+; CHECK-NEXT:    orr r12, r14, r12
+; CHECK-NEXT:    orr r13, r11, r13
+; CHECK-NEXT:    shlv r9, r9, 8
+; CHECK-NEXT:    orr r12, r13, r12
 ; CHECK-NEXT:    orr r1, r9, r10
 ; CHECK-NEXT:    ldidx8 r10, r0, 6
 ; CHECK-NEXT:    ldidx8 r8, r0, 7
-; CHECK-NEXT:    orr r12, r14, r12
 ; CHECK-NEXT:    shlv r10, r10, 16
 ; CHECK-NEXT:    shlv r9, r8, 24
-; CHECK-NEXT:    orr r13, r11, r13
 ; CHECK-NEXT:    orr r10, r9, r10
-; CHECK-NEXT:    orr r12, r13, r12
 ; CHECK-NEXT:    orr r14, r10, r1
 ; CHECK-NEXT:    shlv r14, r14, 32
 ; CHECK-NEXT:    orr r12, r14, r12
@@ -514,22 +514,22 @@ define i64 @u64_volatile(ptr %p) nounwind {
 ; NO64-NEXT:    memget8 r12, r0
 ; NO64-NEXT:    ldidx8 r14, r0, 1
 ; NO64-NEXT:    ldidx8 r13, r0, 2
-; NO64-NEXT:    ldidx8 r11, r0, 3
-; NO64-NEXT:    ldidx8 r10, r0, 4
-; NO64-NEXT:    ldidx8 r9, r0, 5
 ; NO64-NEXT:    shlv r14, r14, 8
+; NO64-NEXT:    ldidx8 r11, r0, 3
 ; NO64-NEXT:    shlv r13, r13, 16
-; NO64-NEXT:    shlv r9, r9, 8
+; NO64-NEXT:    ldidx8 r10, r0, 4
 ; NO64-NEXT:    shlv r11, r11, 24
+; NO64-NEXT:    ldidx8 r9, r0, 5
+; NO64-NEXT:    orr r12, r14, r12
+; NO64-NEXT:    orr r13, r11, r13
+; NO64-NEXT:    shlv r9, r9, 8
+; NO64-NEXT:    orr r12, r13, r12
 ; NO64-NEXT:    orr r1, r9, r10
 ; NO64-NEXT:    ldidx8 r10, r0, 6
 ; NO64-NEXT:    ldidx8 r8, r0, 7
-; NO64-NEXT:    orr r12, r14, r12
 ; NO64-NEXT:    shlv r10, r10, 16
 ; NO64-NEXT:    shlv r9, r8, 24
-; NO64-NEXT:    orr r13, r11, r13
 ; NO64-NEXT:    orr r10, r9, r10
-; NO64-NEXT:    orr r12, r13, r12
 ; NO64-NEXT:    orr r14, r10, r1
 ; NO64-NEXT:    shlv r14, r14, 32
 ; NO64-NEXT:    orr r12, r14, r12

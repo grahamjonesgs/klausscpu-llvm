@@ -69,11 +69,11 @@ define void @copy_global() nounwind {
 ; CHECK-NEXT:    setru r14, gint+8
 ; CHECK-NEXT:    setru r13, gint+16
 ; CHECK-NEXT:    ldidx64 r12, r12, 0
-; CHECK-NEXT:    ldidx64 r14, r14, 0
-; CHECK-NEXT:    ldidx64 r13, r13, 0
 ; CHECK-NEXT:    addi r0, r15, -24
+; CHECK-NEXT:    ldidx64 r14, r14, 0
 ; CHECK-NEXT:    stidx64 r12, r15, -24
 ; CHECK-NEXT:    stidx64 r14, r15, -16
+; CHECK-NEXT:    ldidx64 r13, r13, 0
 ; CHECK-NEXT:    stidx64 r13, r15, -8
 ; CHECK-NEXT:    callrel use
 ; CHECK-NEXT:    leaveret
@@ -92,13 +92,13 @@ define void @copy_src4(ptr align 4 %p) nounwind {
 ; CHECK-NEXT:    enter 2
 ; CHECK-NEXT:    ldidx32 r12, r0, 12
 ; CHECK-NEXT:    ldidx32 r13, r0, 4
-; CHECK-NEXT:    ldidx32 r14, r0, 8
-; CHECK-NEXT:    memget32 r11, r0
 ; CHECK-NEXT:    shlv r12, r12, 32
+; CHECK-NEXT:    ldidx32 r14, r0, 8
 ; CHECK-NEXT:    shlv r13, r13, 32
+; CHECK-NEXT:    memget32 r11, r0
 ; CHECK-NEXT:    orr r12, r12, r14
-; CHECK-NEXT:    orr r14, r13, r11
 ; CHECK-NEXT:    addi r0, r15, -16
+; CHECK-NEXT:    orr r14, r13, r11
 ; CHECK-NEXT:    stidx64 r12, r15, -8
 ; CHECK-NEXT:    stidx64 r14, r15, -16
 ; CHECK-NEXT:    callrel use
@@ -120,13 +120,13 @@ define void @copy_src1(ptr %p) nounwind {
 ; CHECK-NEXT:    addi r14, r0, 8
 ; CHECK-NEXT:    memget32 r12, r12
 ; CHECK-NEXT:    memget32 r13, r13
-; CHECK-NEXT:    memget32 r11, r0
-; CHECK-NEXT:    memget32 r14, r14
 ; CHECK-NEXT:    shlv r12, r12, 32
+; CHECK-NEXT:    memget32 r14, r14
 ; CHECK-NEXT:    shlv r13, r13, 32
+; CHECK-NEXT:    memget32 r11, r0
 ; CHECK-NEXT:    orr r12, r12, r14
-; CHECK-NEXT:    orr r14, r13, r11
 ; CHECK-NEXT:    addi r0, r15, -16
+; CHECK-NEXT:    orr r14, r13, r11
 ; CHECK-NEXT:    stidx64 r12, r15, -8
 ; CHECK-NEXT:    stidx64 r14, r15, -16
 ; CHECK-NEXT:    callrel use
@@ -330,11 +330,11 @@ define i64 @load32_unaligned_volatile(ptr %p) nounwind {
 ; CHECK-NEXT:    memget8 r12, r0
 ; CHECK-NEXT:    ldidx8 r14, r0, 1
 ; CHECK-NEXT:    ldidx8 r13, r0, 2
-; CHECK-NEXT:    ldidx8 r11, r0, 3
 ; CHECK-NEXT:    shlv r14, r14, 8
+; CHECK-NEXT:    ldidx8 r11, r0, 3
 ; CHECK-NEXT:    shlv r13, r13, 16
-; CHECK-NEXT:    shlv r11, r11, 24
 ; CHECK-NEXT:    orr r12, r14, r12
+; CHECK-NEXT:    shlv r11, r11, 24
 ; CHECK-NEXT:    orr r13, r11, r13
 ; CHECK-NEXT:    orr r12, r13, r12
 ; CHECK-NEXT:    ret

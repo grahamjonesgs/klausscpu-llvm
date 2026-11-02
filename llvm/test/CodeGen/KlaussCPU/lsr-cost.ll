@@ -25,9 +25,9 @@ define void @add3(ptr %a, ptr %b, ptr %c, ptr %d, i64 %n) nounwind {
 ; CHECK-NEXT:  .LBB0_2: # %for.body
 ; CHECK-NEXT:    # =>This Inner Loop Header: Depth=1
 ; CHECK-NEXT:    ldidx64r r13, r1, r14
+; CHECK-NEXT:    decr r12, r12
 ; CHECK-NEXT:    ldidx64r r11, r2, r14
 ; CHECK-NEXT:    ldidx64r r10, r3, r14
-; CHECK-NEXT:    decr r12, r12
 ; CHECK-NEXT:    addr r13, r11, r13
 ; CHECK-NEXT:    addr r13, r13, r10
 ; CHECK-NEXT:    stidx64r r13, r0, r14
@@ -45,16 +45,16 @@ define void @add3(ptr %a, ptr %b, ptr %c, ptr %d, i64 %n) nounwind {
 ; REGS-NEXT:  .LBB0_1: # %for.body
 ; REGS-NEXT:    # =>This Inner Loop Header: Depth=1
 ; REGS-NEXT:    ldidx64 r14, r1, 0
-; REGS-NEXT:    ldidx64 r13, r2, 0
-; REGS-NEXT:    ldidx64 r11, r3, 0
 ; REGS-NEXT:    decr r12, r12
+; REGS-NEXT:    ldidx64 r13, r2, 0
+; REGS-NEXT:    addi r2, r2, 8
+; REGS-NEXT:    ldidx64 r11, r3, 0
 ; REGS-NEXT:    addr r14, r13, r14
 ; REGS-NEXT:    addi r3, r3, 8
 ; REGS-NEXT:    addr r14, r14, r11
-; REGS-NEXT:    addi r2, r2, 8
+; REGS-NEXT:    addi r1, r1, 8
 ; REGS-NEXT:    stidx64 r14, r0, 0
 ; REGS-NEXT:    addi r0, r0, 8
-; REGS-NEXT:    addi r1, r1, 8
 ; REGS-NEXT:    fbri r12, 0, 8, .LBB0_1
 ; REGS-NEXT:  .LBB0_2: # %for.cond.cleanup
 ; REGS-NEXT:    leaveret

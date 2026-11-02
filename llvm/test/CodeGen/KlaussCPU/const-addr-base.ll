@@ -396,10 +396,10 @@ define i64 @widths() nounwind {
 ; CHECK-NEXT:    ldidx64 r14, r12, -200
 ; CHECK-NEXT:    ldidx64 r13, r12, 800
 ; CHECK-NEXT:    ldidx8 r11, r12, 0
-; CHECK-NEXT:    ldidx64 r12, r12, -192
 ; CHECK-NEXT:    addr r14, r14, r13
-; CHECK-NEXT:    ldabs8 r13, 4027384208
+; CHECK-NEXT:    ldidx64 r12, r12, -192
 ; CHECK-NEXT:    addr r14, r14, r11
+; CHECK-NEXT:    ldabs8 r13, 4027384208
 ; CHECK-NEXT:    addr r12, r14, r12
 ; CHECK-NEXT:    addr r12, r12, r13
 ; CHECK-NEXT:    ret
