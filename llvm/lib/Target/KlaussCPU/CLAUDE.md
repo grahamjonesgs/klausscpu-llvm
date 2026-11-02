@@ -13,13 +13,14 @@ describe earlier states of the backend and are superseded by this file.
 the consumers and the measurements behind the design.
 
 **Minimum hardware: klaussCPU `3508f87`** (master with the hw-proposals
-merge).  The cost models are tuned for `9e15047` (master with 1a stage 3,
-dcache-s3: a D-cache load hit takes one issue slot and its result is at the
-consumer 3 cycles after it issues; on fetch-2a, taken branches predicted in
-fetch, 2 cycles for a predicted-taken FBR; dcache-1a stage 2 and mem-early
-`8e6b8e5`: ID-stage branch prediction, a 4-entry return stack; no AMP core
-2), whose bitstream the board's QSPI holds since 2026-11-02.  None of them
-changed an instruction.
+merge).  The cost models are tuned for `0cccefa` (master with st-1slot: a
+store takes one issue slot; on 1a stage 3, dcache-s3: a D-cache load hit
+takes one issue slot and its result is at the consumer 3 cycles after it
+issues; fetch-2a: taken branches predicted in fetch, 2 cycles for a
+predicted-taken FBR; dcache-1a stage 2 and mem-early `8e6b8e5`: ID-stage
+branch prediction, a 4-entry return stack; no AMP core 2), whose bitstream
+the board's QSPI holds since 2026-11-02.  None of them changed an
+instruction.
 The assembler and the AsmPrinter use its 1-word `CMPRVW`, `MULV`/`MULUV`
 and `LEAPC` forms (ISA map §8.3) wherever they fit, which older cores trap
 on, FuseCmpBr fuses branches on W and imm32 compares into its new fused
@@ -545,7 +546,9 @@ when clobbered.
   slow path (about 2 cycles more), so the recognizer keeps it out of those
   cycles; the same base register within 32 bytes counts as the same line
   (`-klausscpu-postra-store-load-line`, `sched-store-load-line.mir`; board:
-  Embench -0.08% at -O2 and -Os, statemate -0.7%, nothing slower).  The
+  Embench -0.08% at -O2 and -Os, statemate -0.7%, nothing slower).  With
+  one-slot stores (st-1slot) the hazard lasts a cycle longer, but a window
+  of 3 measured the same as 2 (-0.05..-0.07%), so it stays 2.  The
   data port (KCMem) is now only pre-RA resource pressure; as an unbuffered resource (`BufferSize = 0`)
   the pre-RA scheduler reordered around it too, and nettle-aes got 2.2%
   slower (its .text 3.4% larger) and statemate 1.2%.
