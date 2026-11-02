@@ -68,8 +68,9 @@ public:
   }
 
   // Run the post-RA list scheduler from -O1 up.  The default threshold is -O2,
-  // but clang -O1 (CodeGenOptLevel::Less) is the production level, and only the
-  // top-down post-RA pass can move a later independent instruction up into a
+  // but clang -O1 (CodeGenOptLevel::Less) is still built and validated (the
+  // runtime's default is -O2 since 2026-11-02), and only the top-down post-RA
+  // pass can move a later independent instruction up into a
   // load-use gap (the pre-RA MISched is bottom-up here).  Whether it runs at all
   // is still decided by enablePostRAScheduler(), i.e. the sched model's
   // PostRAScheduler bit, so `-mcpu=no-sched` (NoSchedModel) keeps it off.
