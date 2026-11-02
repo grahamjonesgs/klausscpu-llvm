@@ -41,6 +41,18 @@ static cl::opt<bool> PostRAExBusy(
              "multi-cycle op's ReleaseAtCycles (MUL 4, DIV 20), as the RTL's "
              "EX hold does.  =false: every op takes one slot (A/B)."));
 
+static cl::opt<bool> PostRAStoreLoadLine(
+    "klausscpu-postra-store-load-line", cl::Hidden, cl::init(true),
+    cl::desc("Post-RA list scheduler keeps a load out of the cycles behind "
+             "a store that may write its 32-byte D-cache line (the same base "
+             "register within 32 bytes, or the same line of an absolute "
+             "address)."));
+
+static cl::opt<unsigned> PostRAStoreLoadLineCycles(
+    "klausscpu-postra-store-load-line-cycles", cl::Hidden, cl::init(2),
+    cl::desc("The cycles behind a store in which "
+             "-klausscpu-postra-store-load-line keeps a same-line load out."));
+
 KlaussCPUInstrInfo::KlaussCPUInstrInfo(const KlaussCPUSubtarget &STI_,
                                         const KlaussCPURegisterInfo &RI)
     : KlaussCPUGenInstrInfo(STI_, RI,
@@ -357,16 +369,83 @@ namespace {
 // free, and an independent ALU op placed between the two costs its own cycle
 // (klaussCPU fetch-2a, board perf_kern, two addresses: `ld ; alu ; ld` 6.93
 // cycles, `ld ; ld` 5.93; `st ; alu ; st` 4.99, `st ; st` 3.99), while ALU
-// ops behind a load run in its shadow (`ld ; 2 ALU` 3.99, `ld` 3.87).  So there is no port
-// gap to fill: the list scheduler's own order, which issues a ready load
-// early, is the right one.  Keeping memory ops apart as the port model of
+// ops behind a load run in its shadow (`ld ; 2 ALU` 3.99, `ld` 3.87).  So
+// there is no port gap to fill: the list scheduler's own order, which issues
+// a ready load early, is the right one.  Keeping memory ops apart as the port model of
 // 8e6b8e5 did (`-klausscpu-postra-mem-port`, removed) made 2a 0.9% slower on
 // CoreMark (ud +1.7%, Embench geomean +0.1%).  The KCMem entries remain for
 // the pre-RA scheduler, which counts them as resource pressure.
+//
+// One memory order does matter (klaussCPU 1a stage 3, dcache-s3): a load
+// whose 32-byte D-cache line a store issued 1 or 2 cycles earlier may still
+// be writing leaves the hit pipe for the slow path, about 2 cycles more.  The
+// recognizer keeps such a load out of those cycles
+// (-klausscpu-postra-store-load-line, -klausscpu-postra-store-load-line-cycles),
+// so the list scheduler puts two independent instructions between them when
+// it has them.  Lines are not known, so the same base register within 32
+// bytes counts as the same line (the same line, for an absolute address).
+// Board: Embench -0.08% cycles at -O2 and -Os (statemate -0.7%, nettle-aes
+// -0.3..-0.7%), nothing slower, CoreMark unchanged.
 class KlaussCPUPostRAHazardRecognizer : public ScheduleHazardRecognizer {
   const ScheduleDAGInstrs &DAG;
   bool Issued = false;
   unsigned BusyCycles = 0; // cycles left in which nothing may issue
+
+  // A recent store's address, for -klausscpu-postra-store-load-line: the base
+  // register (none for an absolute address) and the offset.
+  struct RecentStore {
+    Register Base;
+    int64_t Offset;
+    unsigned Left; // cycles left in which a same-line load is a hazard
+  };
+  SmallVector<RecentStore, 2> Stores;
+
+  // The base register (none for an absolute address) and offset of MI's
+  // access, when it is `[r]`, `r + imm` or an absolute address; false for
+  // `r + r` and the SP-relative stack ops.
+  static bool baseAndOffset(const MachineInstr &MI, Register &Base,
+                            int64_t &Offset) {
+    if (MI.mayLoad() == MI.mayStore() || MI.getNumMemOperands() != 1 ||
+        MI.hasUnmodeledSideEffects())
+      return false;
+    SmallVector<const MachineOperand *, 3> Uses;
+    for (const MachineOperand &MO : MI.explicit_operands())
+      if (!(MO.isReg() && MO.isDef()))
+        Uses.push_back(&MO);
+    unsigned Data = MI.mayStore(); // a store's first use is its data
+    if (Uses.size() == Data + 2 && Uses[Data]->isReg() &&
+        Uses[Data + 1]->isImm()) {
+      Base = Uses[Data]->getReg();
+      Offset = Uses[Data + 1]->getImm();
+      return true;
+    }
+    if (Uses.size() == Data + 1 && Uses[Data]->isReg()) {
+      Base = Uses[Data]->getReg();
+      Offset = 0;
+      return true;
+    }
+    if (Uses.size() == Data + 1 && Uses[Data]->isImm()) {
+      Base = Register();
+      Offset = Uses[Data]->getImm();
+      return true;
+    }
+    return false;
+  }
+
+  bool storeLoadHazard(const MachineInstr &MI) const {
+    Register Base;
+    int64_t Offset;
+    if (!MI.mayLoad() || !baseAndOffset(MI, Base, Offset))
+      return false;
+    for (const RecentStore &S : Stores) {
+      if (S.Base != Base)
+        continue;
+      if (!Base ? (S.Offset >> 5) == (Offset >> 5)
+                : std::abs(S.Offset - Offset) < 32)
+        return true;
+    }
+    return false;
+  }
 
   bool isPortResource(unsigned Idx) const {
     return StringRef(DAG.getSchedModel()->getProcResource(Idx)->Name) ==
@@ -400,22 +479,46 @@ public:
     MaxLookAhead = 1;
   }
   HazardType getHazardType(SUnit *SU, int) override {
-    return BusyCycles ? Hazard : NoHazard;
+    if (BusyCycles)
+      return Hazard;
+    if (!Stores.empty() && SU->getInstr() && storeLoadHazard(*SU->getInstr()))
+      return Hazard;
+    return NoHazard;
   }
   bool atIssueLimit() const override { return Issued || BusyCycles; }
   void EmitInstruction(SUnit *SU) override {
     Issued = true;
     BusyCycles = occupancy(SU) - 1;
+    const MachineInstr *MI = SU->getInstr();
+    if (!PostRAStoreLoadLine || !MI)
+      return;
+    // A later write of a base register ends what we know about its address.
+    for (const MachineOperand &MO : MI->operands())
+      if (MO.isReg() && MO.isDef())
+        llvm::erase_if(Stores, [&](const RecentStore &S) {
+          return S.Base && S.Base == MO.getReg();
+        });
+    Register Base;
+    int64_t Offset;
+    if (MI->mayStore() && baseAndOffset(*MI, Base, Offset)) {
+      if (Stores.size() == 2)
+        Stores.erase(Stores.begin());
+      Stores.push_back({Base, Offset, PostRAStoreLoadLineCycles + 1});
+    }
   }
   void AdvanceCycle() override {
     if (Issued)
       Issued = false;
     else if (BusyCycles)
       --BusyCycles;
+    for (RecentStore &S : Stores)
+      --S.Left;
+    llvm::erase_if(Stores, [](const RecentStore &S) { return !S.Left; });
   }
   void Reset() override {
     Issued = false;
     BusyCycles = 0;
+    Stores.clear();
   }
 };
 } // end anonymous namespace

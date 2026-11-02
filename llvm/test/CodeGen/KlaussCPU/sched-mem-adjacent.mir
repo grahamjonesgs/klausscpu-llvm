@@ -5,7 +5,8 @@
 # independent ALU op put between them costs its own cycle (board perf_kern:
 # `ld ; alu ; ld` 6.93 cycles, `ld ; ld` 5.93), so the port model that moved
 # ALU work into that gap (8e6b8e5) is gone and the memory ops, ready first,
-# issue back to back.
+# issue back to back.  (A load in a store's 32-byte line is kept apart:
+# sched-store-load-line.mir.)
 ---
 name:            two_stores
 tracksRegLiveness: true
@@ -31,9 +32,9 @@ body:             |
 
     ; CHECK-LABEL: name: store_load
     ; CHECK:      STIDX64 killed $r1, $r0, 0
-    ; CHECK-NEXT: $r13 = LDIDX64 killed $r0, 8
+    ; CHECK-NEXT: $r13 = LDIDX64 killed $r0, 32
     STIDX64 $r1, $r0, 0 :: (store (s64))
-    $r13 = LDIDX64 $r0, 8 :: (load (s64))
+    $r13 = LDIDX64 $r0, 32 :: (load (s64))
     $r12 = INCR killed $r12, implicit-def dead $flags
     $r14 = INCR killed $r14, implicit-def dead $flags
     RET_I

@@ -181,8 +181,8 @@ define i64 @stack_arg(i64 %a, i64 %b, i64 %c, i64 %d, i64 %e) nounwind {
 ; O1-NEXT:    stidx64 r7, r15, -16 # 8-byte Folded Spill
 ; O1-NEXT:    andi r7, r15, -32
 ; O1-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; O1-NEXT:    ldidx64 r4, r15, 16
 ; O1-NEXT:    addi r0, r7, -64
+; O1-NEXT:    ldidx64 r4, r15, 16
 ; O1-NEXT:    callrel use
 ; O1-NEXT:    copy r12, r4
 ; O1-NEXT:    ldidx64 r7, r15, -16 # 8-byte Folded Reload
@@ -210,8 +210,8 @@ define i64 @stack_arg(i64 %a, i64 %b, i64 %c, i64 %d, i64 %e) nounwind {
 ; PUSH-NEXT:    stidx64 r7, r15, -16 # 8-byte Folded Spill
 ; PUSH-NEXT:    andi r7, r15, -32
 ; PUSH-NEXT:    stidx64 r4, r15, -8 # 8-byte Folded Spill
-; PUSH-NEXT:    ldidx64 r4, r15, 16
 ; PUSH-NEXT:    addi r0, r7, -64
+; PUSH-NEXT:    ldidx64 r4, r15, 16
 ; PUSH-NEXT:    callrel use
 ; PUSH-NEXT:    copy r12, r4
 ; PUSH-NEXT:    ldidx64 r7, r15, -16 # 8-byte Folded Reload

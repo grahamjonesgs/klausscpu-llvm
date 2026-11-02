@@ -13,13 +13,13 @@ describe earlier states of the backend and are superseded by this file.
 the consumers and the measurements behind the design.
 
 **Minimum hardware: klaussCPU `3508f87`** (master with the hw-proposals
-merge).  The cost models are tuned for `b26385d` (master with fetch-2a: taken
-branches predicted in fetch, 2 cycles for a predicted-taken FBR; on
-dcache-1a stage 2 and mem-early `8e6b8e5`: ID-stage branch prediction, a
-4-entry return stack, a D-cache load hit that leaves MEM after 2 cycles;
-no AMP core 2); the board's QSPI holds master `646f44e` (timing headroom
-and exclusive stall counters on it, cycle-identical) since 2026-11-02.
-None of them changed an instruction.
+merge).  The cost models are tuned for `9e15047` (master with 1a stage 3,
+dcache-s3: a D-cache load hit takes one issue slot and its result is at the
+consumer 3 cycles after it issues; on fetch-2a, taken branches predicted in
+fetch, 2 cycles for a predicted-taken FBR; dcache-1a stage 2 and mem-early
+`8e6b8e5`: ID-stage branch prediction, a 4-entry return stack; no AMP core
+2), whose bitstream the board's QSPI holds since 2026-11-02.  None of them
+changed an instruction.
 The assembler and the AsmPrinter use its 1-word `CMPRVW`, `MULV`/`MULUV`
 and `LEAPC` forms (ISA map §8.3) wherever they fit, which older cores trap
 on, FuseCmpBr fuses branches on W and imm32 compares into its new fused
@@ -540,8 +540,13 @@ when clobbered.
   -O2 and -Os and 0.1-0.7% of Embench (`-Os` matmult-int 3.8%, statemate
   2.8%), and is gone.  Load latency 4 (the
   issue distance on 2a) measured no faster: post-RA only it was neutral,
-  in the model it cost nettle-aes 5%.  The data port (KCMem) is now only
-  pre-RA resource pressure; as an unbuffered resource (`BufferSize = 0`)
+  in the model it cost nettle-aes 5%.  One order still matters on stage 3: a load
+  in the 32-byte D-cache line a store issued 1 or 2 cycles before takes the
+  slow path (about 2 cycles more), so the recognizer keeps it out of those
+  cycles; the same base register within 32 bytes counts as the same line
+  (`-klausscpu-postra-store-load-line`, `sched-store-load-line.mir`; board:
+  Embench -0.08% at -O2 and -Os, statemate -0.7%, nothing slower).  The
+  data port (KCMem) is now only pre-RA resource pressure; as an unbuffered resource (`BufferSize = 0`)
   the pre-RA scheduler reordered around it too, and nettle-aes got 2.2%
   slower (its .text 3.4% larger) and statemate 1.2%.
   `-mcpu=no-sched` (clang, llc, or `-Xclang -target-cpu -Xclang no-sched`) is
@@ -748,6 +753,7 @@ when clobbered.
 | `-klausscpu-break-anti-deps` | on | post-RA scheduler renames registers to break critical-path anti-dependencies |
 | `-klausscpu-postra-single-issue` | on | post-RA scheduler issues one instruction per cycle (=false: LLVM's unlimited default) |
 | `-klausscpu-postra-ex-busy` | on | post-RA scheduler issues nothing behind a MUL/DIV until its EX hold ends (=false: every op takes one slot) |
+| `-klausscpu-postra-store-load-line` / `-cycles` | on / 2 | post-RA scheduler keeps a load out of the cycles behind a store to (probably) the same 32-byte D-cache line |
 | `-klausscpu-fetch-line-layout` | 2 | KlaussCPUFetchLayout: 0 off, 1 moves only, 2 moves and NOPs (not under optsize) |
 | `-klausscpu-early-iv-inc` | on | count a single-block loop from Init - C so its increment can issue early |
 | `-klausscpu-postinc-loop-cmp` | on | compare a loop's updated counter with the limit, not the old counter with limit - step, so the compare and the branch fuse |
