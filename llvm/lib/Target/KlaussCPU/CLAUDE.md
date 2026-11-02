@@ -13,7 +13,8 @@ describe earlier states of the backend and are superseded by this file.
 the consumers and the measurements behind the design.
 
 **Minimum hardware: klaussCPU `3508f87`** (master with the hw-proposals
-merge).  The cost models are tuned for `b4e9055` (master with callret: SP
+merge).  The cost models are tuned for `9b49ac1` (master with mul2: a
+multiply holds EX 2 cycles, product at +4; on callret: SP
 and store-to-load forwarding, RET answered in MEM; on fetch-bypass: a
 2-entry next-line buffer and next-line prefetch on a BTIC redirect; on
 st-1slot: a store takes one issue slot; on 1a stage 3, dcache-s3: a D-cache load hit
