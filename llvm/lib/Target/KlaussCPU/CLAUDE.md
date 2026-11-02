@@ -13,10 +13,10 @@ describe earlier states of the backend and are superseded by this file.
 the consumers and the measurements behind the design.
 
 **Minimum hardware: klaussCPU `3508f87`** (master with the hw-proposals
-merge).  The cost models are tuned for `8e6b8e5` (master with mem-early:
-ID-stage branch prediction, a 4-entry return stack, early load issue),
-whose bitstream the board's QSPI holds since 2026-11-02; it changed no
-instruction.
+merge).  The cost models are tuned for `67efcfd` (master with dcache-1a stage 2,
+on mem-early `8e6b8e5`: ID-stage branch prediction, a 4-entry return
+stack, a D-cache load hit that leaves MEM after 2 cycles), whose bitstream
+the board's QSPI holds since 2026-11-02; neither changed an instruction.
 The assembler and the AsmPrinter use its 1-word `CMPRVW`, `MULV`/`MULUV`
 and `LEAPC` forms (ISA map §8.3) wherever they fit, which older cores trap
 on, FuseCmpBr fuses branches on W and imm32 compares into its new fused
@@ -538,7 +538,12 @@ when clobbered.
   -3.5%, ud -2.2%), the rules of 3508f87 (a store held every memory op 4
   cycles, nothing between loads) 0.3%; at -Os single loops move by a cycle
   an iteration with their unaligned head's phase (matmult-int +3.3%,
-  nettle-aes -4.1%; geomean -0.1%).  Only the post-RA
+  nettle-aes -4.1%; geomean -0.1%).  On 67efcfd (dcache-1a: a load hit
+  holds 2 cycles) an ALU op between two memory ops no longer hides a cycle
+  (`ld;alu;ld` 6.93, `st;alu;st` 4.99), and the port model measured neutral
+  (without it: CoreMark -0.4%, Embench +0.1%, both within layout noise); it
+  stays for the planned core change that lets a memory op issue on the edge
+  the previous access completes.  Only the post-RA
   recognizer reads it: as an unbuffered resource (`BufferSize = 0`) the
   pre-RA scheduler reordered around it too, and nettle-aes got 2.2% slower
   (its .text 3.4% larger) and statemate 1.2%.
@@ -670,7 +675,11 @@ when clobbered.
 - TTI (`KlaussCPUTargetTransformInfo.cpp`): moderate partial/runtime
   unrolling (MaxCount 4) with the budget scaled down for branch-dense loop
   bodies, no peeling; `-mcpu=no-sched` reverts to no body-duplicating
-  unrolling.  Loop strength reduction ranks solutions by instruction count first
+  unrolling.  A loop without a constant trip count is unrolled at most twice
+  (`-klausscpu-runtime-unroll-max-count`): the remainder loop and trip check
+  of runtime unrolling cost a loop of few iterations per entry more than a
+  predicted back edge (~3 cycles) saves (board, klaussCPU 67efcfd, -O2:
+  Embench speed +1.2%, ud -17%, .text -3.7%; `runtime-unroll-cap.ll`).  Loop strength reduction ranks solutions by instruction count first
   (`isLSRCostLess`, as RISC-V), sees 15 GPRs and no vector registers, and
   drops a solution that costs more than the loop it started from
   (`shouldDropLSRSolutionIfLessProfitable`); `-klausscpu-lsr-insns-first=false`
@@ -759,6 +768,7 @@ when clobbered.
 | `-klausscpu-split-load64-at-legalize` | on | testing only: =false leaves an under-aligned non-volatile i64 load to the `PreprocessISelDAG` backstop |
 | `-klausscpu-mul-imm-shift-add` | off | multiply by a simm32 2^N±1 / 1-2^N as shift + add/sub when the schedule model rates MULV slower |
 | `-klausscpu-unroll-branch-density-gate` | on | scale the unroll budget for branchy loops |
+| `-klausscpu-runtime-unroll-max-count` | 2 | most copies of a loop without a constant trip count (0 = the general cap, 4) |
 | `-enable-machine-outliner` (generic; clang `-moutline` / `-mno-outline`) | minsize functions | the MachineOutliner everywhere (`=always`, also the bare flag) or nowhere (`=never`) |
 
 ---

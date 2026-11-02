@@ -19,6 +19,12 @@ static cl::opt<bool> EnableBranchDensityGate(
     cl::desc("Scale the M8 unroll budget down for branch-dense loop bodies "
              "(M8 spec §7.4).  =false restores the flat M8 budget for A/B."));
 
+static cl::opt<unsigned> RuntimeUnrollMaxCount(
+    "klausscpu-runtime-unroll-max-count", cl::Hidden, cl::init(2),
+    cl::desc("Most copies of a loop body whose trip count is not a "
+             "compile-time constant (runtime unrolling); 0 = the general "
+             "cap (MaxCount 4)."));
+
 static cl::opt<bool> EnableLSRInsnsFirst(
     "klausscpu-lsr-insns-first", cl::Hidden, cl::init(true),
     cl::desc("Rank loop strength reduction solutions by instruction count "
@@ -103,6 +109,18 @@ void KlaussCPUTTIImpl::getUnrollingPreferences(
   UP.Threshold        = 200;   // full-unroll budget (~ a few hundred bytes of code)
   UP.PartialThreshold = 100;   // partial-unroll budget — stay < ~1 KB unrolled
   UP.OptSizeThreshold = 0;     // never grow code when optimising for size
+
+  // A loop without a constant trip count is unrolled at most twice: its
+  // runtime unrolling adds a remainder loop and a trip-count check in front,
+  // which a loop that runs only a few iterations per entry (triangular
+  // nests, short scans) pays every time, while a predicted-taken back edge
+  // costs only ~3 cycles (klaussCPU 8e6b8e5 and later).  Board (67efcfd, -O2):
+  // Embench speed +1.2% (ud -17%, minver -2.3%, nothing worse than +0.2%),
+  // size -3.7%, CoreMark unchanged.  Capping every loop at 2 instead costs
+  // edn, nettle-sha256 and picojpeg 1-1.4% (their constant-trip loops), and at
+  // 1 runtime-unrolled loops lose too (aha-mont64 +12%, edn +23%).
+  if (RuntimeUnrollMaxCount && !SE.getSmallConstantTripCount(L))
+    UP.MaxCount = std::min<unsigned>(UP.MaxCount, RuntimeUnrollMaxCount);
 
   // Spec §7.4: back the budget off where fetch pressure outweighs the scheduling
   // win.  The budget above assumes the scheduler can interleave the unrolled

@@ -8,10 +8,14 @@
 ; DATA win (board, `branchy`: DATA 18.6%->13.1%, IF_MISS 52.2%->55.1%, net +6.5%).
 ;
 ; GATE pins the density-scaled budget; FLAT pins the ungated budget, proving the
-; gate (not some other cost-model effect) is what separates these loops.
+; gate (not some other cost-model effect) is what separates these loops.  The
+; loops have runtime trip counts, so both runs lift the runtime-unroll cap
+; (runtime-unroll-cap.ll tests it).
 ;
-; RUN: opt -passes=loop-unroll -S < %s | FileCheck %s --check-prefixes=CHECK,GATE
-; RUN: opt -passes=loop-unroll -klausscpu-unroll-branch-density-gate=false -S < %s \
+; RUN: opt -passes=loop-unroll -klausscpu-runtime-unroll-max-count=0 -S < %s \
+; RUN:   | FileCheck %s --check-prefixes=CHECK,GATE
+; RUN: opt -passes=loop-unroll -klausscpu-unroll-branch-density-gate=false \
+; RUN:   -klausscpu-runtime-unroll-max-count=0 -S < %s \
 ; RUN:   | FileCheck %s --check-prefixes=CHECK,FLAT
 
 target datalayout = "e-m:e-p:64:64-i64:64-i128:128-n32:64"
