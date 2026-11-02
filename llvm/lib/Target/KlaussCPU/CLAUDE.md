@@ -13,8 +13,9 @@ describe earlier states of the backend and are superseded by this file.
 the consumers and the measurements behind the design.
 
 **Minimum hardware: klaussCPU `3508f87`** (master with the hw-proposals
-merge).  The cost models are tuned for `0cccefa` (master with st-1slot: a
-store takes one issue slot; on 1a stage 3, dcache-s3: a D-cache load hit
+merge).  The cost models are tuned for `3f2f82a` (master with fetch-bypass:
+a 2-entry next-line buffer and next-line prefetch on a BTIC redirect; on
+st-1slot: a store takes one issue slot; on 1a stage 3, dcache-s3: a D-cache load hit
 takes one issue slot and its result is at the consumer 3 cycles after it
 issues; fetch-2a: taken branches predicted in fetch, 2 cycles for a
 predicted-taken FBR; dcache-1a stage 2 and mem-early `8e6b8e5`: ID-stage
@@ -626,6 +627,12 @@ when clobbered.
   cycles without making the stalls worse (the post-RA scheduler chose the
   order for those); a NOP must lower the total.  `-klausscpu-fetch-line-layout=0`
   turns it off, `=1` allows moves only (`fetch-layout.ll`, `fetch-layout-nop.ll`).
+  On klaussCPU fetch-bypass (`3f2f82a`, a 2-entry next-line buffer: a
+  2-word op costs ~1.2 cycles in straight code, not 2) the pass measured
+  neutral (off: Embench +0.03%, -Os unchanged) and its timing model's
+  fetch costs are those of 8e6b8e5; it stays for now.  Loop-head
+  alignment still pays there: without it Embench runs 1.2% more cycles
+  (nsichneu +9.4%).
   It also takes back the alignment of a loop that runs about once per entry
   (`KlaussCPULoopTripCount`'s `klausscpu.loop.est_trips` metadata, at most
   `-klausscpu-fall-through-align-max-trips`, default 1) when the preheader
