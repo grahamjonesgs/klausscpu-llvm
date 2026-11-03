@@ -103,9 +103,9 @@ static cl::opt<bool> EnableFuseLoopConst(
 namespace {
 
 // simm13 words: the fused branch reaches PC-16384 .. PC+16380. The worst-case
-// layout below is an upper bound already; the margin (384 bytes) is for anything
-// added after this pass: KlaussCPUFetchLayout adds at most 96 four-byte NOPs per
-// function (MaxFetchLayoutNops).
+// layout below is an upper bound already (alignment padding included); the
+// margin (384 bytes) is slack.  Nothing after this pass adds code:
+// KlaussCPULoopAlign only removes alignment.
 constexpr int64_t MaxFusedDisp = 16000;
 // Size of an instruction whose length is unknown: no branch across it fuses.
 constexpr uint64_t UnboundedSize = uint64_t(1) << 20;

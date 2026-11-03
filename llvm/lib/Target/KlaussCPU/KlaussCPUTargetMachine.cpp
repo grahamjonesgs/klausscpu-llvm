@@ -42,7 +42,7 @@ FunctionPass *createKlaussCPUConstAddrBasePass();
 FunctionPass *createKlaussCPUEarlyIVIncPass();
 FunctionPass *createKlaussCPUPostIncLoopCmpPass();
 FunctionPass *createKlaussCPULoopTripCountPass();
-FunctionPass *createKlaussCPUFetchLayoutPass();
+FunctionPass *createKlaussCPULoopAlignPass();
 FunctionPass *createKlaussCPUFlagReusePass();
 FunctionPass *createKlaussCPUFuseCmpBrPass(bool LoopConstsOnly = false);
 FunctionPass *createKlaussCPUJumpTableHoistPass();
@@ -54,7 +54,7 @@ void initializeKlaussCPUDAGToDAGISelLegacyPass(PassRegistry &);
 void initializeKlaussCPUEarlyIVIncPass(PassRegistry &);
 void initializeKlaussCPUPostIncLoopCmpPass(PassRegistry &);
 void initializeKlaussCPULoopTripCountPass(PassRegistry &);
-void initializeKlaussCPUFetchLayoutPass(PassRegistry &);
+void initializeKlaussCPULoopAlignPass(PassRegistry &);
 void initializeKlaussCPUFlagReusePass(PassRegistry &);
 void initializeKlaussCPUFuseCmpBrPass(PassRegistry &);
 void initializeKlaussCPUJumpTableHoistPass(PassRegistry &);
@@ -76,7 +76,7 @@ LLVMInitializeKlaussCPUTarget() {
   initializeKlaussCPUEarlyIVIncPass(PR);
   initializeKlaussCPUPostIncLoopCmpPass(PR);
   initializeKlaussCPULoopTripCountPass(PR);
-  initializeKlaussCPUFetchLayoutPass(PR);
+  initializeKlaussCPULoopAlignPass(PR);
   initializeKlaussCPUFlagReusePass(PR);
   initializeKlaussCPUFuseCmpBrPass(PR);
   initializeKlaussCPUJumpTableHoistPass(PR);
@@ -274,10 +274,11 @@ void KlaussCPUPassConfig::addPreEmitPass() {
 }
 
 void KlaussCPUPassConfig::addPreEmitPass2() {
-  // Last before the AsmPrinter, when every size is final: loops against the
-  // 16-byte fetch lines (KlaussCPUFetchLayout.cpp).
+  // Last before the AsmPrinter, after block placement aligned the loop heads:
+  // no alignment NOPs for a loop that runs once per entry and is entered by
+  // falling into its head (KlaussCPULoopAlign.cpp).
   if (getOptLevel() != CodeGenOptLevel::None)
-    addPass(createKlaussCPUFetchLayoutPass());
+    addPass(createKlaussCPULoopAlignPass());
 }
 
 TargetTransformInfo

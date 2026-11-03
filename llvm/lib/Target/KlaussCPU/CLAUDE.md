@@ -26,7 +26,7 @@ takes one issue slot and its result is at the consumer 3 cycles after it
 issues; fetch-2a: taken branches predicted in fetch, 2 cycles for a
 predicted-taken FBR; dcache-1a stage 2 and mem-early `8e6b8e5`: ID-stage
 branch prediction, a 4-entry return stack; no AMP core 2), whose bitstream
-the board's QSPI holds since 2026-11-02.  None of them changed an
+the board's QSPI holds since 2026-11-03.  None of them changed an
 instruction.
 The assembler and the AsmPrinter use its 1-word `CMPRVW`, `MULV`/`MULUV`
 and `LEAPC` forms (ISA map §8.3) wherever they fit, which older cores trap
@@ -54,7 +54,7 @@ older core stops at the first new instruction (`hw_div_fbr.kla` /
 | C type model | `int`=32; `long`/`long long`/`void*`=64 |
 | Hardware FP | none — soft-float (compiler-rt builtins); `fabs`/`fneg`/`copysign` are bit operations on the integer representation (`BCLR`/`ANDV`, `BTGL`/`XORI`, a masked OR), never libcalls (`fp-sign-ops.ll`) |
 | CMOV | none — `select` becomes a `SELECT_CC_RR/RI` pseudo, expanded to compare + branch; a run of selects on the same condition shares one compare/branch (one PHI each) |
-| Atomics | no instructions — "forced atomics" (as RISC-V `+forced-atomics`), **atomic within one core only**: an aligned atomic load/store of 1/2/4/8 bytes is the plain access (patterns), a fence a compiler barrier, every RMW / cmpxchg a `__sync_*_N` libcall (LibCall actions) that the runtime's `src/atomic.c` runs between a `DI` and an `EI` of the old enable bit (about 3 cycles; `INT_MASK` is not touched); FP / `uinc_wrap` / `udec_wrap` / `usub_*` RMWs are cmpxchg loops (`shouldExpandAtomicRMWInIR`); wider or misaligned atomics are `__atomic_*` libcalls (not provided).  The type legaliser promotes a 1/2/4-byte RMW to i64 first, so those libcall values go in any-extended and come back zero-extended (not the C ABI's sign-extended i32; `atomic.c` takes and returns `uint64_t`).  Clang inlines atomics up to 64 bits (`MaxAtomicInlineWidth`), and the Rust target spec has `max-atomic-width` 64 with `atomic-cas` (`rust-target-spec.test` checks that the backend lowers exactly those widths without `__atomic_*`; Rust bare-metal programs get `__sync_*` from `klauss-rt`, LLEXT extensions, C or Rust, from the export table in the runtime's `ssh/llext_exports.c`, which every Zephyr app built with `CONFIG_LLEXT` links — today `ssh_shell` and `llext_demo`).  Nothing makes them atomic against core 2 (AMP), whose DDR view also bypasses core 1's D-cache |
+| Atomics | no instructions — "forced atomics" (as RISC-V `+forced-atomics`), **atomic within one core only**: an aligned atomic load/store of 1/2/4/8 bytes is the plain access (patterns), a fence a compiler barrier, every RMW / cmpxchg a `__sync_*_N` libcall (LibCall actions) that the runtime's `src/atomic.c` runs between a `DI` and an `EI` of the old enable bit (about 3 cycles; `INT_MASK` is not touched); FP / `uinc_wrap` / `udec_wrap` / `usub_*` RMWs are cmpxchg loops (`shouldExpandAtomicRMWInIR`); wider or misaligned atomics are `__atomic_*` libcalls (not provided).  The type legaliser promotes a 1/2/4-byte RMW to i64 first, so those libcall values go in any-extended and come back zero-extended (not the C ABI's sign-extended i32; `atomic.c` takes and returns `uint64_t`).  Clang inlines atomics up to 64 bits (`MaxAtomicInlineWidth`), and the Rust target spec has `max-atomic-width` 64 with `atomic-cas` (`rust-target-spec.test` checks that the backend lowers exactly those widths without `__atomic_*`; Rust bare-metal programs get `__sync_*` from `klauss-rt`, LLEXT extensions, C or Rust, from the export table in the runtime's `ssh/llext_exports.c`, which every Zephyr app built with `CONFIG_LLEXT` links — today `ssh_shell` and `llext_demo`).  The CPU has one core (klaussCPU no longer builds the AMP core 2), so nothing else races with them; DMA masters (the blitter, LiteEth) are not covered |
 | Sign-extending loads | i8/i16/i32: hardware (`LDIDX8_S`/`LDIDX16_S`/`LDIDX32_S`) |
 | Load/store addressing | `[r]` (`MEMGETn`/`MEMSETn`), `r + simm32` (`LDIDXn`/`STIDXn`, 1-word short form for a small scaled offset), `r + r` at every width (`LDIDXnR`/`LDIDXn_SR`/`STIDXnR`, MODE=11), an absolute imm32 at every width (`LDABSn`/`LDABSn_S`/`STABSn`, `MEMREADR`/`MEMSETR`, MODE=10, 2 words) for a naturally aligned constant address such as an MMIO register; 16/32-bit forms other than `MEMGET32` trap on a misaligned EA (crash dump `ERR=0A`, klausscc `stop = Misaligned`) and no 64-bit form reads an unaligned doubleword, so an under-aligned non-volatile 32-bit load is `MEMGET32` of the computed address (`allowsMisalignedMemoryAccesses`, loads only) and an under-aligned i64 load two 32-bit loads (`MEMGET32` below 4-byte alignment, `LDIDX32` at 4): `allowsMisalignedMemoryAccesses` allows it so that the combiner can build one from 8 byte loads, then `LowerLOAD` splits it at legalization (the post-legalize combiner legalizes what it creates; `PreprocessISelDAG` is a backstop for one that still reaches isel, `unaligned-load-backstop.ll`), and the `STORE` combine keeps a copy two 32-bit copies when store merging swapped its halves (a ROLV) or under optsize (otherwise SHLV + ORR + `STIDX64`: one instruction more than two copies, 0.3-0.5 cycles per 8 bytes faster on the board); the halves carry `KlaussCPU::MOSplitHalf`, so nothing joins them again; every other under-aligned access (stores, volatile) is split |
 | C environment | hosted by default (the driver no longer adds `-ffreestanding`): `memcpy`/`memset`/`memmove` of a constant size are intrinsics, inline up to 8 accesses (4 under optsize) at the width both sides' alignment allows (a source below 4-byte alignment still allows 4, `MEMGET32`); a constant source is stored as immediates (`shouldConvertConstantLoadToIntImm`); stack objects and module globals they touch get 8-byte alignment (`shouldAlignPointerArgs`).  `printf`/`fprintf` are not turned into `puts`/`putchar`/`fputc`/`fputs`/`fwrite` (`TargetLibraryInfo`: each would link another stdio function for UART-bound output).  Code that implements the C library (picolibc, compiler-rt, crt0's BSS loop, kernels) is built `-ffreestanding` / `no_builtin` |
@@ -129,8 +129,7 @@ assembler spells them:
 - `di rd` (rd = the old interrupt-enable bit, then disable) and `ei rs`
   (enable = rs[0]): `DI_I`/`EI_I`, `hasSideEffects`, no flags.  The bit is
   separate from `INT_MASK`, saved in the IRQ frame's bit 43 (1 = disabled)
-  and restored by `iret`; `wait` still wakes while disabled.  Not atomic
-  against core 2.  Source level: `unsigned __builtin_klausscpu_di(void)` /
+  and restored by `iret`; `wait` still wakes while disabled.  Source level: `unsigned __builtin_klausscpu_di(void)` /
   `void __builtin_klausscpu_ei(unsigned)` in C, `llvm.klausscpu.di` /
   `.ei` (i64, `IntrHasSideEffects`, read and write memory: compiler barriers
   that are never merged, moved across a memory access or deleted;
@@ -617,30 +616,7 @@ when clobbered.
   register whose high bits change is set undef unless its variable fits in
   the low bits (`DebugInfo/KlaussCPU/opt-extensions-dbg.ll`).
 - Last before the AsmPrinter (`addPreEmitPass2`, -O1 and up):
-  `KlaussCPUFetchLayout` keeps 2- and 3-word instructions of loops from
-  crossing a 16-byte fetch line (on 8e6b8e5, `perf_kern`: a straddle costs a
-  cycle; a 2-word load or store costs one more than its 1-word form unless
-  it starts a line, and a straddling 2-word store one more again; on
-  3508f87 picolibc's `sqrt` lost 7.2% to two straddles).  Offsets are only
-  known from a 16-byte aligned point, so it handles loops whose first block
-  carries the loop-head alignment.  It scores the layout with a small
-  in-order timing model of the board measurements (issue slots by size, fetch
-  penalties, load-use/ALU/MUL/data-port stalls), weighted by block
-  frequency, and applies the best of: moving one instruction up to
-  `-klausscpu-fetch-layout-max-move` (4) places inside its block past
-  independent ones (registers, FLAGS, memory order, SP, side effects; never a
-  terminator, call, CFI or debug instruction), or, when not optimising for
-  size, one NOP in front of a wide instruction.  A move must save fetch
-  cycles without making the stalls worse (the post-RA scheduler chose the
-  order for those); a NOP must lower the total.  `-klausscpu-fetch-line-layout=0`
-  turns it off, `=1` allows moves only (`fetch-layout.ll`, `fetch-layout-nop.ll`).
-  On klaussCPU fetch-bypass (`3f2f82a`, a 2-entry next-line buffer: a
-  2-word op costs ~1.2 cycles in straight code, not 2) the pass measured
-  neutral (off: Embench +0.03%, -Os unchanged) and its timing model's
-  fetch costs are those of 8e6b8e5; it stays for now.  Loop-head
-  alignment still pays there: without it Embench runs 1.2% more cycles
-  (nsichneu +9.4%).
-  It also takes back the alignment of a loop that runs about once per entry
+  `KlaussCPULoopAlign` takes back the alignment of a loop that runs about once per entry
   (`KlaussCPULoopTripCount`'s `klausscpu.loop.est_trips` metadata, at most
   `-klausscpu-fall-through-align-max-trips`, default 1) when the preheader
   falls into the head: the NOPs run once per entry, and cost more than an
@@ -651,10 +627,16 @@ when clobbered.
   unaligned, from the layout shift behind it, so it keeps the alignment.  A
   loop entered by a branch keeps it (the padding is dead code there)
   (`loop-align-fall-through.ll`).  perf_baseline `calls_fib` -2.9% (25.94M ->
-  25.18M cycles: one NOP per call).
-  Board: perf_baseline `branchy` -5.5% (16.03M -> 15.16M cycles, its best
-  head offset), picojpeg -0.7%, qrduino -0.7%, and with picolibc rebuilt
-  nbody -2.1%, cubic -1.3%; nothing worse.
+  25.18M cycles: one NOP per call); on klaussCPU stq the rule is still worth
+  0.11% of Embench cycles at -O2.  Loop-head alignment itself
+  (`-klausscpu-pref-loop-align`, 16) pays too: without it Embench ran 1.2%
+  more cycles on klaussCPU fetch-bypass (nsichneu +9.4%).  The pass used to
+  be `KlaussCPUFetchLayout`, which also moved instructions and added NOPs to
+  keep loops' 2- and 3-word instructions off 16-byte line crossings
+  (`branchy` -5.5% on 8e6b8e5); since fetch-bypass (a 2-word op ~1.25
+  cycles in straight code, not 2) that measured neutral to slightly negative
+  (Embench without it: +0.02% at -O2, -0.17% at -O1, -Os unchanged, on
+  stq) and was removed with `-klausscpu-fetch-line-layout`.
 - Before the post-RA scheduler: FuseCmpBr's loop constants; pre-emit passes:
   LeaveRet (see Frame layout, -O1 and up), FlagReuse, then FuseCmpBr (see
   Flags), then CalleeSavedCFI (see CFI).
@@ -742,7 +724,7 @@ when clobbered.
   entry), or 1 for a loop that still calls its own function (tail-call
   elimination made a loop of one of two recursive calls, as in `fib`), as
   `!{!"klausscpu.loop.est_trips", i32 N}` in its `llvm.loop` metadata, for
-  KlaussCPUFetchLayout's alignment decision (above);
+  KlaussCPULoopAlign's alignment decision (above);
   `-klausscpu-loop-trip-count=false` disables it.
 - After LSR (end of `addIRPasses`, -O1 and up), `KlaussCPUEarlyIVInc`
   rewrites a single-block loop whose exit test `icmp eq/ne %i.next, N`
@@ -781,7 +763,6 @@ when clobbered.
 | `-klausscpu-break-anti-deps` | on | post-RA scheduler renames registers to break critical-path anti-dependencies |
 | `-klausscpu-postra-single-issue` | on | post-RA scheduler issues one instruction per cycle (=false: LLVM's unlimited default) |
 | `-klausscpu-postra-ex-busy` | on | post-RA scheduler issues nothing behind a MUL/DIV until its EX hold ends (=false: every op takes one slot) |
-| `-klausscpu-fetch-line-layout` | 2 | KlaussCPUFetchLayout: 0 off, 1 moves only, 2 moves and NOPs (not under optsize) |
 | `-klausscpu-early-iv-inc` | on | count a single-block loop from Init - C so its increment can issue early |
 | `-klausscpu-postinc-loop-cmp` | on | compare a loop's updated counter with the limit, not the old counter with limit - step, so the compare and the branch fuse |
 | `-klausscpu-loop-trip-count` | on | record a loop's constant trip count bound (or 1 for a self-recursive loop) in its metadata |
@@ -980,7 +961,7 @@ llvm/lib/Target/KlaussCPU/
 ├── KlaussCPUEarlyIVInc.cpp     IR, after LSR: loop counter counts from Init - C so its increment can issue early
 ├── KlaussCPUPostIncLoopCmp.cpp IR, before LSR: a loop's exit compare reads the updated counter (so compare + branch fuse)
 ├── KlaussCPULoopTripCount.cpp  IR, after LSR: a loop's trip count bound in its metadata (alignment decision)
-├── KlaussCPUFetchLayout.cpp    last pass before the AsmPrinter: loops' 2/3-word instructions kept inside one 16-byte fetch line
+├── KlaussCPULoopAlign.cpp      last pass before the AsmPrinter: no alignment NOPs in front of a run-once loop entered by fall-through
 ├── KlaussCPUFlagReuse.cpp      pre-emit: CMPRV Rd,0 + JMPE/NE → JMPZ/NZ (default on)
 ├── KlaussCPUJumpTableHoist.cpp pre-RA: jump-table base and entry offset into the range-check block
 ├── KlaussCPULeaveRet.cpp       pre-emit: a shrink-wrapped epilogue's LEAVE ... RET → LEAVERET

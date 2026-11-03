@@ -1,51 +1,47 @@
 //===-- KlaussCPUSchedule.td - KlaussCPU scheduling model -----*- tablegen -*-===//
 //
-// In-order, single-issue 5-stage pipeline (IF/ID/EX/MEM/WB) with
-// register-sourced forwarding.  The interlocks (pipeline_core.sv:852-875)
-// stall the instruction in ID, so a dependent instruction costs cycles only
-// when it follows its producer too closely; the latencies below are the
-// producer -> consumer issue distance at which it stops stalling:
+// In-order, single-issue 5-stage pipeline (IF/ID/EX/MEM/WB).  A dependent
+// instruction waits in ID until its operand can be forwarded, so it costs
+// cycles only when it follows its producer too closely; the latencies below
+// are the producer -> consumer issue distance at which it stops waiting
+// (klaussCPU CPU_ARCHITECTURE.md §14, master with stq 27439c7):
 //
-//   GPR, ALU producer      2  A producer in EX stalls the consumer one cycle
-//                             (hit1/hit2/hitd on b_ex); from MEM it forwards
-//                             (mem_fwd_ok).  This covers every register read:
-//                             ALU operands, a load/store base or index
-//                             register (the EA is formed in EX), store data
-//                             (use_rdd) and the FBR compare operands.
-//   GPR, load              3  A load also blocks while in MEM (mem_loadlk:
-//                             LOAD, LOAD32, POP, LEAVE, LEAVERET) and
-//                             forwards from WB, so it needs two independent
-//                             instructions behind it.
-//   FLAGS                  2  A flag writer (fmask != 0) in EX stalls a flag
-//                             reader (fread: conditional JMP/CALL, ADC/SBC,
-//                             RCL/RCR, GETF) one cycle (flag_busy); from MEM
-//                             the reader takes the WB-register flags.
-//                             WriteFlags is the second write of an ALU op
-//                             with a destination; a compare's FLAGS is its
-//                             only def and takes WriteALU.  FBR reads no
-//                             FLAGS: a compare fused into one (FuseCmpBr,
+//   GPR, ALU producer      2  A consumer right behind its producer waits one
+//                             cycle (forwarded from MEM).  This covers every
+//                             register read: ALU operands, a load/store base
+//                             or index register, store data and the FBR
+//                             compare operands.
+//   GPR, load              3  A load hit takes one issue slot (the load-hit
+//                             pipe); its consumer issues 3 cycles after it,
+//                             2 for an ALU, boolean or compare operand
+//                             (ReadLoadByp below, klaussCPU ldbyp).
+//                             MEMGET32 (U_LOAD32) keeps 3 for every consumer.
+//   FLAGS                  2  A flag reader (conditional JMP/CALL, ADC/SBC,
+//                             RCL/RCR, GETF) right behind a flag writer waits
+//                             one cycle.  WriteFlags is the second write of
+//                             an ALU op with a destination; a compare's FLAGS
+//                             is its only def and takes WriteALU.  FBR reads
+//                             no FLAGS: a compare fused into one (FuseCmpBr,
 //                             after scheduling) reads its registers at the
 //                             branch, which is never earlier than the
 //                             compare it replaces.
-//   MUL                    4  EX busy for 2 cycles, then the product travels
-//                             through MEM to WB from the DSP's last stage
-//                             (klaussCPU mul2); a flag reader also waits 4.
-//   DIV/MOD               20  Iterative (dv.counter to 64 after a CLZ skip);
-//                             one conservative value.
-//   SP                        A writer (CALL, RET, PUSH, POP, ENTER, LEAVE,
-//                             ADDSP) holds an SP reader in ID until it leaves
-//                             WB (sp_busy), but SP is only touched by calls,
-//                             frame setup and inline asm, which do not move;
-//                             not modelled.
+//   MUL                    4  EX busy for 2 cycles; the product (and a flag
+//                             reader) at +4 (klaussCPU mul2).
+//   DIV/MOD               20  Iterative (a CLZ skip then up to 64 steps); one
+//                             conservative value.
+//   SP                     2  An SP user right behind an SP writer (CALL,
+//                             RET, PUSH, POP, ENTER, LEAVE, ADDSP) waits one
+//                             cycle (klaussCPU callret forwards SP), but SP
+//                             is only touched by calls, frame setup and
+//                             inline asm, which do not move.
 //
-// The D-cache is not modelled either (the data port, KCMem below, is only
-// pressure for the pre-RA scheduler).  On klaussCPU fetch-2a (the runtime's
-// perf_kern) a load hit takes two issue cycles and its result reaches a
-// consumer 4 cycles after it issues, so two independent instructions behind
-// it run for free and a third waits; a store takes two.  A memory op behind
-// another waits for the data port, and an ALU op between them costs its own
-// cycle, so no order of memory and ALU ops hides that wait; the schedulers
-// keep the latencies above (latency 4 for loads measured no faster).
+// A store takes one issue slot (posted; klaussCPU stq queues a second one),
+// a load directly behind a store to the same doubleword takes its data
+// (store-to-load forwarding), and the other store/load cases cost too little
+// to schedule around (a narrow store then a wider load of its doubleword, or
+// a load of another doubleword of the line exactly 2 instructions later).
+// The D-cache itself is not modelled; the data port (KCMem below) is only
+// pressure for the pre-RA scheduler.
 //
 // Both schedulers use this model.  The pre-RA machine scheduler is
 // GenericScheduler: with MicroOpBufferSize = 0 a node whose operands are not

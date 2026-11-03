@@ -22,7 +22,7 @@ add_llvm_target(KlaussCPUCodeGen
   KlaussCPUEarlyIVInc.cpp
   KlaussCPULoopTripCount.cpp
   KlaussCPUPostIncLoopCmp.cpp
-  KlaussCPUFetchLayout.cpp
+  KlaussCPULoopAlign.cpp
   KlaussCPUFlagReuse.cpp
   KlaussCPUFuseCmpBr.cpp
   KlaussCPUFrameLowering.cpp

@@ -10,7 +10,7 @@
 // passes cannot see the trip count, so this pass, after loop strength
 // reduction, asks ScalarEvolution for it and records an upper bound
 // (getSmallConstantMaxTripCount, iterations per entry) in the loop's
-// metadata as !{!"klausscpu.loop.est_trips", i32 N}; KlaussCPUFetchLayout
+// metadata as !{!"klausscpu.loop.est_trips", i32 N}; KlaussCPULoopAlign
 // drops the alignment of a loop that is entered by fall-through and runs at
 // most -klausscpu-fall-through-align-max-trips times per entry.
 //
@@ -47,7 +47,7 @@ FunctionPass *createKlaussCPULoopTripCountPass();
 
 using namespace llvm;
 
-// Read back by KlaussCPUFetchLayout.cpp.
+// Read back by KlaussCPULoopAlign.cpp.
 static const char *const EstTripsMD = "klausscpu.loop.est_trips";
 
 static cl::opt<bool> EnableLoopTripCount(

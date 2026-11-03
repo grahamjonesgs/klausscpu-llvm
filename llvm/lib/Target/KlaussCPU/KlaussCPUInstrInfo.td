@@ -1704,7 +1704,7 @@ def WAIT_I  : I0<0x6C020000, (outs), (ins), "wait">;
 // restores the previous state.  An IRQ is never taken between a retired DI
 // and its EI; WAIT still wakes (without entering the handler).  The bit is
 // saved in the IRQ context word [43] (1 = disabled) and restored by IRET.
-// Not atomic against core 2.  No flags.  hasSideEffects keeps memory
+// No flags.  hasSideEffects keeps memory
 // accesses from moving across them.
 let hasSideEffects = 1 in {
 def DI_I : R_out<0x6C060000, (outs GPR:$reg), "di\t$reg">;
