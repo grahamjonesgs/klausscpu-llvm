@@ -26,6 +26,14 @@ public:
 
   BitVector getReservedRegs(const MachineFunction &MF) const override;
 
+  /// Pointers are 64-bit GPRs.  Needed by passes that constrain the address
+  /// register of an inline-asm memory operand ("m"), e.g. Machine Copy
+  /// Propagation forwarding a copy into one.
+  const TargetRegisterClass *
+  getPointerRegClass(unsigned Kind = 0) const override {
+    return &KlaussCPU::GPRRegClass;
+  }
+
   bool shouldRealignStack(const MachineFunction &MF) const override;
   bool canRealignStack(const MachineFunction &MF) const override;
 
