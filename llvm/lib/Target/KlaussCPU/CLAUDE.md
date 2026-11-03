@@ -13,8 +13,10 @@ describe earlier states of the backend and are superseded by this file.
 the consumers and the measurements behind the design.
 
 **Minimum hardware: klaussCPU `3508f87`** (master with the hw-proposals
-merge).  The cost models are tuned for klaussCPU ldbyp `c6ba1db` (a load
-bypassed from WB to ALU/boolean/compare operands: load-use 2 for them; on
+merge).  The cost models are tuned for klaussCPU stq `27439c7` (a second
+store entry: a store takes one issue slot unless 3 or more come back to
+back; on ldbyp `c6ba1db`: a load bypassed from WB to ALU/boolean/compare
+operands, load-use 2 for them; on
 btic64 `f8fd12c`, a 64-entry BTIC; mul2: a multiply holds EX 2 cycles,
 product at +4; on callret: SP
 and store-to-load forwarding, RET answered in MEM; on fetch-bypass: a

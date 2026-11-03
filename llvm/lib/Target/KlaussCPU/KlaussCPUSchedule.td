@@ -119,9 +119,10 @@ let SchedModel = KlaussCPUSchedModel in {
   // MUL/DIV, addresses or store data, which keep 3.  The consumers are listed
   // in KlaussCPUScheduleBypass.td, which needs the instruction records.
   def : ReadAdvance<ReadLoadByp, 1, [WriteLoad]>;
-  // A store issues for 2 cycles (its slot plus one bubble).
+  // A store takes one issue slot (klaussCPU stq: a second store entry, so a
+  // store finds a free port unless 3 or more come back to back).
   def : WriteRes<WriteStore,  [KCUnit, KCMem]> { let Latency = 1;
-                                                 let ReleaseAtCycles = [2, 4]; }
+                                                 let ReleaseAtCycles = [1, 2]; }
   def : WriteRes<WriteBranch, [KCUnit]> { let Latency = 1; }
   def : WriteRes<WriteSP,     [KCUnit]> { let Latency = 2; }
   // EX-serializing multi-cycle ops: hold the unit so nothing issues behind
