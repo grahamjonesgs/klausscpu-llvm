@@ -9,8 +9,8 @@ ALU/compare operands; the AMP core 2 is gone.  Board, -O2: CoreMark 205.8
 (106.4 on 3508f87), Embench speed 1.067 (0.588).  klausscpu-llvm `main` is
 tuned for it (KlaussCPUSchedule.td, CLAUDE.md), and the runtime builds at
 -O2 by default.  Every bitstream in the chain passed the board suite,
-csmith-board, Zephyr and klausscc's hw_* fixtures before QSPI; lldb on the
-board could not run (item 30).
+csmith-board, Zephyr and klausscc's hw_* fixtures before QSPI, and lldb on
+the board passed 47/47 with a DEBUG_EN=1 build of master c57f5f7 over JTAG.
 
 Nothing here is a known miscompile.  The list comes from two sources:
 
@@ -94,8 +94,7 @@ The remainders are listed below with their item numbers.
 | 21 | VGA board run | small | The VGA controller is in klaussCPU master since 3508f87 (merged in 8e9a477) and in the QSPI bitstream. Left: test_vga, test_vga_scan, VGA doom and the zero-copy path need a board run with the current toolchain; Zephyr already takes source 3 (its `irq_dev` app, 59.5 Hz, no lost interrupts). |
 | 22 | Performance proposals | the user's call | Done since 3508f87, in QSPI: branch prediction in ID and fetch (2a, a 64-entry BTIC, a 4-entry return stack), the pipelined D-cache hit (1a stages 2 and 3), one-slot and queued stores, store-to-load and SP forwarding, the 2-cycle multiplier, the 2-entry next-line buffer and the load-to-ALU/compare bypass (HARDWARE_PROPOSALS_RESPONSE §0a-§0m in the hardware repo).  Left, all in the front end's ID-latch cone, the core's tightest timing path: the BTIC taken bubble (~2% of cycles in sim), the I-cache refill latch bubble (~3%), and a better direction predictor (~3% at stake).  Not planned: 1 store per cycle (~0.5%, a new core-cache write protocol), a general EX->EX bypass (parked at -0.6% in sim). |
 | 27 | LVGL CPU rendering was slower on 3508f87 than on the bitstream before it, for identical code | small | `gui_lvgl` (render ms/frame, `fill` 63 -> 76, `gradient` 43 -> 58), layout-dependent, suspected DRAM arbitration with the VGA scan-out or the blitter, or the posted-store drain in a fill loop.  The core has changed a great deal since (pipelined D-cache, store queue, store forwarding).  Re-run `gui_lvgl` on the current QSPI image and compare with the old figures; close this if the gap is gone. |
-| 30 | lldb on the board | small (hardware) | `validate.sh lldb-board` needs a DEBUG_EN=1 bitstream (klaussCPU tools/build_debug.sh); the last one, of 3508f87 (~/.cache/klausscpu-debug-build/), passed 47/47 over JTAG.  None exists for the current master, so the chain since was checked only with lldb on the emulator (`validate.sh full`, 47/47).  Build one of the QSPI master and run lldb-board over JTAG. |
-| 31 | Zephyr still builds at -Os | small | Zephyr apps take Zephyr's default (CONFIG_SIZE_OPTIMIZATIONS); the bare-metal runtime moved to -O2 (CoreMark +7.5%, Embench +7.8% over -O1 on mul2).  Measure CONFIG_SPEED_OPTIMIZATIONS on doom fps, tick_cost, gui_lvgl and the image and LLEXT sizes, and switch if it pays. |
+| 31 | Zephyr's -Os is forced to -O2 because of an old -Os miscompile | small | The port's `cmake/compiler/clang/compiler_flags.cmake` maps CONFIG_SIZE_OPTIMIZATIONS (Zephyr's default) to -O2, so every Zephyr app already builds at -O2 (CONFIG_SPEED_OPTIMIZATIONS gives identical binaries).  Its note: real -Os once gave wrong kernel code (the scheduler returned garbage switch_handle values and IRET jumped into .text); -Oz, with and without LTO, passed the suite on 2026-10-28, but plain -Os was not retried.  Build the apps at real -Os and run tools/validate/zephyr on the emulator and the board: either the override is stale (drop it, or keep -O2 on purpose for speed) or there is an -Os miscompile to find. |
 
 ## Housekeeping
 
