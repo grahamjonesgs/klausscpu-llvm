@@ -132,6 +132,11 @@ std::unique_ptr<TargetInfo> AllocateTarget(const llvm::Triple &Triple,
     return std::make_unique<HexagonTargetInfo>(Triple, Opts);
 
   case llvm::Triple::klausscpu:
+    // klausscpu-*-linux-*: user space under the KlaussCPU Linux port
+    // (__linux__, __unix__, ...); anything else is bare metal.
+    if (os == llvm::Triple::Linux)
+      return std::make_unique<LinuxTargetInfo<KlaussCPUTargetInfo>>(Triple,
+                                                                    Opts);
     return std::make_unique<KlaussCPUTargetInfo>(Triple, Opts);
 
   case llvm::Triple::lanai:

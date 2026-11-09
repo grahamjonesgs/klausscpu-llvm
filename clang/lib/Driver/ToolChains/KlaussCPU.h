@@ -26,7 +26,14 @@ public:
   KlaussCPUToolChain(const Driver &D, const llvm::Triple &Triple,
                       const llvm::opt::ArgList &Args);
 
-  bool isBareMetal()         const override { return true; }
+  // klausscpu-*-linux-*: static user programs against a libc sysroot
+  // (musl); otherwise bare metal with clang's headers only.
+  bool isLinux() const { return getTriple().isOSLinux(); }
+  // The sysroot's root: --sysroot, else <prefix>/klausscpu-linux-musl
+  // beside the compiler's bin directory.
+  std::string computeSysRoot() const override;
+
+  bool isBareMetal()         const override { return !isLinux(); }
   bool isCrossCompiling()    const override { return true; }
   bool HasNativeLLVMSupport()const override { return true; }
   bool isPICDefault()        const override { return false; }
