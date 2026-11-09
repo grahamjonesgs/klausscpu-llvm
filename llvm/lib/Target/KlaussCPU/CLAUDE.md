@@ -34,8 +34,10 @@ on, FuseCmpBr fuses branches on W and imm32 compares into its new fused
 branches (§8.1), and the toolchain knows its other additions (`di`/`ei`,
 the misaligned-access trap).  The assembler and disassembler also know the
 MMU stage 1 instructions (`syscall`, `mfsr`/`mtsr`, `lr64`/`lr32`/`lr32s`,
-`sc64`/`sc32`; see "MMU stage 1 instructions" below), which need klaussCPU
-branch `mmu` hardware and which the compiler never emits.  The squash fixes of
+`sc64`/`sc32`) and the stage 2/3 MPU and TLB system-register names and TLB
+instructions (`tlbwi`/`tlbr`/`tlbp`/`tlbinv`; see "MMU instructions" below),
+which need klaussCPU branch `mmu` hardware and which the compiler never
+emits.  The squash fixes of
 `9ad6614` (a taken fused branch or an EX squash resets the divider and
 gates the LCD strobe) are assumed too.  There is no option to target an
 older core: older bitstreams are not supported, and the CPU and all the
@@ -155,20 +157,27 @@ assembler spells them:
   compiler emits names data in another section, so few compress (21 of
   9447 in the -O1 corpus); the rest would need lld relaxation.
 
-The MMU stage 1 instructions (klaussCPU branch `mmu`, `MMU_PLAN.md` §5,
-§5.1, §6.1, ISA map §9) are MC-only for now: the assembler (`clang` inline
-asm and `.S` files, `llvm-mc`), the disassembler and the printer know them,
-but there are no isel patterns, intrinsics or builtins, so the compiler
-never emits them, and older bitstreams trap on all of them.  All are
-1 word, `hasSideEffects`, no flags (`mmu-stage1.s`):
+The MMU instructions (klaussCPU branch `mmu`: stage 1 `MMU_PLAN.md` §5,
+§5.1, §6.1, ISA map §9; stages 2 and 3 `MMU_PLAN.md` §10.1, §11.3, ISA map
+§10) are MC-only for now: the assembler (`clang` inline asm and `.S` files,
+`llvm-mc`), the disassembler and the printer know them, but there are no
+isel patterns, intrinsics or builtins, so the compiler never emits them,
+and older bitstreams trap on all of them.  All are 1 word,
+`hasSideEffects`, no flags (`mmu-stage1.s`, `mmu-stage23.s`):
 
 - `syscall` (`SYSCALL_I`, 0x6C080000): raises SYSCALL; not a call or
   terminator.
 - `mfsr rd, sr` / `mtsr sr, rs1` (`MFSR_I` 0x6C400000 / `MTSR_I`
-  0x6C600000, sr in [19:12]): sr is a name, in any case (`status`, `evec`,
-  `ecause`, `eaddr`, `usp`, `scratch0`, `scratch1`, `tp`, `cycle` = 0..8,
-  `KlaussCPU::getSysRegName`), or any number 0..255 for the SRs of later
-  stages; the printer shows the name for 0..8, else the number.
+  0x6C600000, sr in [19:12]): sr is a name, in any case, or any number
+  0..255; the printer shows the name when the number has one, else the
+  number.  The names (`SysRegs` in `KlaussCPUMCTargetDesc.cpp`,
+  `KlaussCPU::getSysRegName` / `lookupSysReg`): stage 1 `status`, `evec`,
+  `ecause`, `eaddr`, `usp`, `scratch0`, `scratch1`, `tp`, `cycle` = 0..8;
+  stage 2 (MPU) `mpu_base0`..`mpu_base15` = 0x10 + 2n and
+  `mpu_limit0`..`mpu_limit15` = 0x11 + 2n; stage 3 (TLB) `tlb_hi` 0x30,
+  `tlb_lo` 0x31, `tlb_index` 0x32, `asid` 0x33, `tlbvec` 0x34.  A name
+  shadows a symbol of the same name (`.set asid, 5` does not make
+  `mfsr r1, asid` read SR 5).
 - `lr64 rd, rs1` / `lr32 rd, rs1` / `lr32s rd, rs1` (`LR_D` / `LR_W` /
   `LR_W_S`, `mayLoad`): load-reserved from the address in rs1, spelled like
   `memget64`; `lr32_s` and the ISA map's `LR_D`/`LR_W`/`LR_W_S` are accepted.
@@ -178,6 +187,16 @@ never emits them, and older bitstreams trap on all of them.  All are
   is the result and the data is in rs2 [3:0]; the operand order (result,
   data, address) follows `memset64 data, address`.  `SC_D`/`SC_W` are
   accepted too.
+- `tlbwi` / `tlbr` / `tlbp` / `tlbinv` (`TLBWI_I` 0x6C090000 / `TLBR_I`
+  0x6C0A0000 / `TLBP_I` 0x6C0B0000 / `TLBINV_I` 0x6C0C0000, class B, no
+  operands, privileged, serializing): write / read TLB entry `TLB_INDEX`
+  from / to `TLB_HI` + `TLB_LO`, probe for `TLB_HI` into `TLB_INDEX`,
+  invalidate every entry.  Not calls or terminators; any field set does not
+  decode.
+
+The runtime's flags test generator (`gen_test_flags.py`) does not list the
+MMU instructions yet: it reports each as "no test and not skipped" until
+they are added to its tests or `SKIP`.
 
 The atomics still go to libcalls (Architecture facts, Atomics); the runtime
 can build its `__sync_*` on LR/SC in asm.

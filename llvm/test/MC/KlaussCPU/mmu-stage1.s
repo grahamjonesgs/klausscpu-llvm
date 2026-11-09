@@ -10,7 +10,8 @@
 # the ISA map's templates and field positions, not from this backend.  The
 # first block of each kind uses distinct registers so that every register
 # field is pinned; the DIS lines check that the object disassembles back to
-# the same text (SR names for 0..8, numbers otherwise).
+# the same text (SR names where they have one, numbers otherwise; the names
+# of the stage 2/3 SRs are in mmu-stage23.s).
 
 ## SYSCALL = 0x6C080000
 # CHECK: syscall                    # encoding: [0x00,0x00,0x08,0x6c]
@@ -49,22 +50,22 @@
 # DIS-NEXT: mfsr r15, cycle
         mfsr    r15, cycle
 
-## Numeric SRs: 0..8 print as their names, others as numbers
+## Numeric SRs: a named one prints as its name, others as numbers
 # CHECK: mfsr r0, cycle             # encoding: [0x00,0x80,0x40,0x6c]
 # DIS-NEXT: mfsr r0, cycle
         mfsr    r0, 8
 # CHECK: mfsr r1, 9                 # encoding: [0x00,0x91,0x40,0x6c]
 # DIS-NEXT: mfsr r1, 9
         mfsr    r1, 9
-# CHECK: mfsr r1, 16                # encoding: [0x00,0x01,0x41,0x6c]
-# DIS-NEXT: mfsr r1, 16
+# CHECK: mfsr r1, mpu_base0         # encoding: [0x00,0x01,0x41,0x6c]
+# DIS-NEXT: mfsr r1, mpu_base0
         mfsr    r1, 0x10
 # CHECK: mfsr r12, 255              # encoding: [0x00,0xfc,0x4f,0x6c]
 # DIS-NEXT: mfsr r12, 255
         mfsr    r12, 255
 .set SR_MPU0, 0x10
-# CHECK: mfsr r1, 16                # encoding: [0x00,0x01,0x41,0x6c]
-# DIS-NEXT: mfsr r1, 16
+# CHECK: mfsr r1, mpu_base0         # encoding: [0x00,0x01,0x41,0x6c]
+# DIS-NEXT: mfsr r1, mpu_base0
         mfsr    r1, SR_MPU0
 
 ## MTSR sr, rs1 = 0x6C600000 | sr << 12 | rs1 << 4
@@ -133,21 +134,21 @@
         SC_W    r6, r5, r1
 
 .ifdef ERR
-# ERR: [[#@LINE+1]]:21: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle or an integer in the range [0, 255]
+# ERR: [[#@LINE+1]]:21: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle, mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, tlb_hi, tlb_lo, tlb_index, asid, tlbvec or an integer in the range [0, 255]
         mfsr    r1, sr9
-# ERR: [[#@LINE+1]]:21: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle or an integer in the range [0, 255]
+# ERR: [[#@LINE+1]]:21: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle, mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, tlb_hi, tlb_lo, tlb_index, asid, tlbvec or an integer in the range [0, 255]
         mfsr    r1, 256
-# ERR: [[#@LINE+1]]:21: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle or an integer in the range [0, 255]
+# ERR: [[#@LINE+1]]:21: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle, mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, tlb_hi, tlb_lo, tlb_index, asid, tlbvec or an integer in the range [0, 255]
         mfsr    r1, -1
-# ERR: [[#@LINE+1]]:21: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle or an integer in the range [0, 255]
+# ERR: [[#@LINE+1]]:21: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle, mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, tlb_hi, tlb_lo, tlb_index, asid, tlbvec or an integer in the range [0, 255]
         mfsr    r1, r2
-# ERR: [[#@LINE+1]]:21: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle or an integer in the range [0, 255]
+# ERR: [[#@LINE+1]]:21: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle, mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, tlb_hi, tlb_lo, tlb_index, asid, tlbvec or an integer in the range [0, 255]
         mfsr    r1, tp+1
-# ERR: [[#@LINE+1]]:17: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle or an integer in the range [0, 255]
+# ERR: [[#@LINE+1]]:17: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle, mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, tlb_hi, tlb_lo, tlb_index, asid, tlbvec or an integer in the range [0, 255]
         mtsr    sp_alt, r1
-# ERR: [[#@LINE+1]]:17: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle or an integer in the range [0, 255]
+# ERR: [[#@LINE+1]]:17: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle, mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, tlb_hi, tlb_lo, tlb_index, asid, tlbvec or an integer in the range [0, 255]
         mtsr    0x100, r1
-# ERR: [[#@LINE+1]]:17: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle or an integer in the range [0, 255]
+# ERR: [[#@LINE+1]]:17: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle, mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, tlb_hi, tlb_lo, tlb_index, asid, tlbvec or an integer in the range [0, 255]
         mtsr    r1, tp
 # ERR: [[#@LINE+1]]:17: error: invalid operand for instruction
         mfsr    tp, r1

@@ -162,9 +162,9 @@ def FBRCondAsmOperand : AsmOperandClass {
 
 def SImm4AsmOperand : SImmAsmOperand<4>;
 
-// MFSR / MTSR system register (klaussCPU MMU_PLAN.md §6.1): a name
-// (KlaussCPU::getSysRegName, parsed by parseSysReg) or an 8-bit number, so
-// that SRs of later MMU stages assemble before they have names.
+// MFSR / MTSR system register (klaussCPU MMU_PLAN.md §6.1, §10.1, §11.3): a
+// name (KlaussCPU::getSysRegName, parsed by parseSysReg) or an 8-bit number,
+// so that SRs without a name assemble too.
 def SysRegAsmOperand : AsmOperandClass {
   let Name             = "SysReg";
   let ParserMethod     = "parseSysReg";
@@ -172,7 +172,9 @@ def SysRegAsmOperand : AsmOperandClass {
   let RenderMethod     = "addImmOperands";
   let DiagnosticType   = "InvalidSysReg";
   let DiagnosticString = "system register must be status, evec, ecause, "
-                         "eaddr, usp, scratch0, scratch1, tp, cycle or an "
+                         "eaddr, usp, scratch0, scratch1, tp, cycle, "
+                         "mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, "
+                         "tlb_hi, tlb_lo, tlb_index, asid, tlbvec or an "
                          "integer in the range [0, 255]";
 }
 
@@ -1815,6 +1817,29 @@ def : MnemonicAlias<"lr_w",   "lr32">;
 def : MnemonicAlias<"lr_w_s", "lr32s">;
 def : MnemonicAlias<"sc_d",   "sc64">;
 def : MnemonicAlias<"sc_w",   "sc32">;
+
+//===----------------------------------------------------------------------===//
+// MMU stages 2 and 3 (klaussCPU branch `mmu`; MMU_PLAN.md §10, §11.3,
+// ISA_ENCODING_V2_MAP §10)
+//
+// Stage 2 (MPU) adds only system registers (MPU_BASEn / MPU_LIMITn, named in
+// KlaussCPU::getSysRegName).  Stage 3 adds the TLB SRs and the four TLB
+// instructions below.  As for stage 1: assembler / disassembler only, older
+// bitstreams trap on them, no FLAGS written, hasSideEffects.
+//===----------------------------------------------------------------------===//
+
+// Class B, no operands, privileged, serializing.  Not calls or terminators.
+let hasSideEffects = 1 in {
+// TLBWI: entry[TLB_INDEX[4:0]] = {TLB_HI, TLB_LO}.
+def TLBWI_I  : I0<0x6C090000, (outs), (ins), "tlbwi">;
+// TLBR: {TLB_HI, TLB_LO} = entry[TLB_INDEX[4:0]].
+def TLBR_I   : I0<0x6C0A0000, (outs), (ins), "tlbr">;
+// TLBP: look TLB_HI up; hit: TLB_INDEX = {P = 0, index}, miss:
+// TLB_INDEX[31] = 1.
+def TLBP_I   : I0<0x6C0B0000, (outs), (ins), "tlbp">;
+// TLBINV: V = 0 in every entry.
+def TLBINV_I : I0<0x6C0C0000, (outs), (ins), "tlbinv">;
+}
 
 //===----------------------------------------------------------------------===//
 // Assembler-only opcodes

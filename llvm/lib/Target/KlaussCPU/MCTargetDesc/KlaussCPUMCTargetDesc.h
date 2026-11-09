@@ -41,9 +41,9 @@ bool compress(MCInst &OutInst, const MCInst &MI, const MCSubtargetInfo &STI);
 bool uncompress(MCInst &OutInst, const MCInst &MI,
                 const MCSubtargetInfo &STI);
 
-/// System registers of MFSR / MTSR (klaussCPU MMU_PLAN.md §6.1): the
-/// assembler name of SR number Num (lower case), or an empty StringRef for a
-/// number that has none.
+/// System registers of MFSR / MTSR (klaussCPU MMU_PLAN.md §6.1, §10.1,
+/// §11.3): the assembler name of SR number Num (lower case), or an empty
+/// StringRef for a number that has none.
 StringRef getSysRegName(unsigned Num);
 /// The SR number of a name, in any case (`ecause`, `ECAUSE`).
 std::optional<unsigned> lookupSysReg(StringRef Name);

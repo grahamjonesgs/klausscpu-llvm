@@ -347,7 +347,7 @@ ParseStatus KlaussCPUAsmParser::parseImmOrRegName(OperandVector &Operands,
 
 // An MFSR / MTSR system register (SysRegAsmOperand): a name from
 // KlaussCPU::getSysRegName, in any case, or an expression that the operand
-// class requires to be a constant in [0, 255] (later SRs have no name yet).
+// class requires to be a constant in [0, 255] (numbers without a name too).
 ParseStatus KlaussCPUAsmParser::parseSysReg(OperandVector &Operands) {
   const AsmToken &Tok = getLexer().getTok();
   if (Tok.is(AsmToken::Identifier)) {

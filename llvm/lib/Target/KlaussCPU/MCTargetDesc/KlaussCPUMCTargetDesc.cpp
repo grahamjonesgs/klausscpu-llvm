@@ -65,27 +65,62 @@ bool KlaussCPU::uncompress(MCInst &OutInst, const MCInst &MI,
   return uncompressInst(OutInst, MI, STI);
 }
 
-// A/B switches for the ISA v3 short forms, on by default in every processor.
-// Given explicitly they override -mattr.
-// MMU stage 1 SR numbers (klaussCPU MMU_PLAN.md §6.1, ISA_ENCODING_V2_MAP
-// §9.1).  Later stages add numbers (MPU 0x10-0x2F, TLB 0x30-0x3F) that the
-// assembler takes as plain numbers until they get names here.
-static constexpr StringLiteral SysRegNames[] = {"status",   "evec", "ecause",
-                                                "eaddr",    "usp",  "scratch0",
-                                                "scratch1", "tp",   "cycle"};
+// System registers of MFSR / MTSR and their assembler names (klaussCPU
+// ISA_ENCODING_V2_MAP §9.1, §10.1; MMU_PLAN.md §6.1, §10.1, §11.3).  A
+// number missing here has no name: the assembler takes it as a number and
+// the printer prints it as one.
+namespace {
+struct SysRegEntry {
+  unsigned Num;
+  StringLiteral Name; // lower case
+};
+} // namespace
+
+// clang-format off: one MPU region per line.
+static constexpr SysRegEntry SysRegs[] = {
+    // Stage 1 (MMU_PLAN §6.1).
+    {0x00, "status"},   {0x01, "evec"},     {0x02, "ecause"},
+    {0x03, "eaddr"},    {0x04, "usp"},      {0x05, "scratch0"},
+    {0x06, "scratch1"}, {0x07, "tp"},       {0x08, "cycle"},
+    // Stage 2, MPU (MMU_PLAN §10.1): region n at 0x10 + 2n / 0x11 + 2n.
+    {0x10, "mpu_base0"},   {0x11, "mpu_limit0"},
+    {0x12, "mpu_base1"},   {0x13, "mpu_limit1"},
+    {0x14, "mpu_base2"},   {0x15, "mpu_limit2"},
+    {0x16, "mpu_base3"},   {0x17, "mpu_limit3"},
+    {0x18, "mpu_base4"},   {0x19, "mpu_limit4"},
+    {0x1A, "mpu_base5"},   {0x1B, "mpu_limit5"},
+    {0x1C, "mpu_base6"},   {0x1D, "mpu_limit6"},
+    {0x1E, "mpu_base7"},   {0x1F, "mpu_limit7"},
+    {0x20, "mpu_base8"},   {0x21, "mpu_limit8"},
+    {0x22, "mpu_base9"},   {0x23, "mpu_limit9"},
+    {0x24, "mpu_base10"},  {0x25, "mpu_limit10"},
+    {0x26, "mpu_base11"},  {0x27, "mpu_limit11"},
+    {0x28, "mpu_base12"},  {0x29, "mpu_limit12"},
+    {0x2A, "mpu_base13"},  {0x2B, "mpu_limit13"},
+    {0x2C, "mpu_base14"},  {0x2D, "mpu_limit14"},
+    {0x2E, "mpu_base15"},  {0x2F, "mpu_limit15"},
+    // Stage 3, TLB (MMU_PLAN §11.3).
+    {0x30, "tlb_hi"},   {0x31, "tlb_lo"},   {0x32, "tlb_index"},
+    {0x33, "asid"},     {0x34, "tlbvec"},
+};
+// clang-format on
 
 StringRef KlaussCPU::getSysRegName(unsigned Num) {
-  return Num < std::size(SysRegNames) ? StringRef(SysRegNames[Num])
-                                      : StringRef();
+  for (const SysRegEntry &E : SysRegs)
+    if (E.Num == Num)
+      return E.Name;
+  return StringRef();
 }
 
 std::optional<unsigned> KlaussCPU::lookupSysReg(StringRef Name) {
-  for (unsigned I = 0; I != std::size(SysRegNames); ++I)
-    if (Name.equals_insensitive(SysRegNames[I]))
-      return I;
+  for (const SysRegEntry &E : SysRegs)
+    if (Name.equals_insensitive(E.Name))
+      return E.Num;
   return std::nullopt;
 }
 
+// A/B switches for the ISA v3 short forms, on by default in every processor.
+// Given explicitly they override -mattr.
 static cl::opt<bool> EnableShortForms(
     "klausscpu-short-forms", cl::init(true), cl::Hidden,
     cl::desc("Emit ISA v3 short 1-word immediate forms when the value fits "

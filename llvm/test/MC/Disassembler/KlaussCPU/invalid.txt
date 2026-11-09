@@ -71,6 +71,32 @@
 # CHECK: warning: invalid instruction encoding
 0x10 0x10 0x70 0x6c
 
+# MMU stage 3 (MMU_PLAN.md §11.3): TLBWI / TLBR / TLBP / TLBINV take no
+# operands, so any field set ([7:4], [11:8], [3:0], [19:12]) is illegal; class
+# B OP 0x0D-0x0F stay undefined.
+# CHECK: warning: invalid instruction encoding
+0x10 0x00 0x09 0x6c
+# CHECK: warning: invalid instruction encoding
+0x00 0x01 0x09 0x6c
+# CHECK: warning: invalid instruction encoding
+0x01 0x00 0x09 0x6c
+# CHECK: warning: invalid instruction encoding
+0x00 0x10 0x09 0x6c
+# CHECK: warning: invalid instruction encoding
+0x30 0x00 0x0a 0x6c
+# CHECK: warning: invalid instruction encoding
+0x00 0x02 0x0b 0x6c
+# CHECK: warning: invalid instruction encoding
+0x04 0x00 0x0c 0x6c
+# CHECK: warning: invalid instruction encoding
+0x00 0x80 0x0c 0x6c
+# CHECK: warning: invalid instruction encoding
+0x00 0x00 0x0d 0x6c
+# CHECK: warning: invalid instruction encoding
+0x00 0x00 0x0e 0x6c
+# CHECK: warning: invalid instruction encoding
+0x00 0x00 0x0f 0x6c
+
 # LR / SC (MMU_PLAN.md §5.1): with [12] = 1 the other [19:13] bits, an LR's
 # rs2 field, SGN on LR.D or SC, A = 1, and the 8/16-bit sizes are illegal.
 # CHECK: warning: invalid instruction encoding
