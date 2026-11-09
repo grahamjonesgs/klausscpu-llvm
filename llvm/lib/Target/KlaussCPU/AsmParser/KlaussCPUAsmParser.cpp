@@ -243,6 +243,12 @@ public:
                       const MCTargetOptions &Options)
       : MCTargetAsmParser(Options, STI, MII), Parser(Parser) {
     setAvailableFeatures(ComputeAvailableFeatures(STI.getFeatureBits()));
+    // GNU as data sizes, as on RISC-V: a word is 4 bytes (32-bit
+    // addresses), a half-word 2, a double-word 8.
+    Parser.addAliasForDirective(".half", ".2byte");
+    Parser.addAliasForDirective(".hword", ".2byte");
+    Parser.addAliasForDirective(".word", ".4byte");
+    Parser.addAliasForDirective(".dword", ".8byte");
   }
 
   bool parseRegister(MCRegister &Reg, SMLoc &StartLoc,
