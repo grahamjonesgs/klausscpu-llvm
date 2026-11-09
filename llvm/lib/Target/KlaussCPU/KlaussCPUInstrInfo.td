@@ -162,6 +162,20 @@ def FBRCondAsmOperand : AsmOperandClass {
 
 def SImm4AsmOperand : SImmAsmOperand<4>;
 
+// MFSR / MTSR system register (klaussCPU MMU_PLAN.md §6.1): a name
+// (KlaussCPU::getSysRegName, parsed by parseSysReg) or an 8-bit number, so
+// that SRs of later MMU stages assemble before they have names.
+def SysRegAsmOperand : AsmOperandClass {
+  let Name             = "SysReg";
+  let ParserMethod     = "parseSysReg";
+  let PredicateMethod  = "isImmRange<0, 255, 1, false>";
+  let RenderMethod     = "addImmOperands";
+  let DiagnosticType   = "InvalidSysReg";
+  let DiagnosticString = "system register must be status, evec, ecause, "
+                         "eaddr, usp, scratch0, scratch1, tp, cycle or an "
+                         "integer in the range [0, 255]";
+}
+
 //===----------------------------------------------------------------------===//
 // Operand types
 //
@@ -343,6 +357,13 @@ def fbr_cc : Operand<i64> {
 def fbr_simm4 : Operand<i64> {
   let DecoderMethod    = "decodeSImmOperand<4>";
   let ParserMatchClass = SImm4AsmOperand;
+}
+
+// MFSR / MTSR SR number [19:12]; prints as its name when it has one.
+def sysreg : Operand<i64> {
+  let DecoderMethod    = "decodeUImmOperand<8>";
+  let ParserMatchClass = SysRegAsmOperand;
+  let PrintMethod      = "printSysReg";
 }
 
 //===----------------------------------------------------------------------===//
@@ -1720,6 +1741,80 @@ def : Pat<(int_klausscpu_ei GPR:$rs), (EI_I GPR:$rs)>;
 // EI reads bit 0 only: the zero-extension clang puts around the builtin's
 // unsigned int key (a trunc of DI's result) is not needed.
 def : Pat<(int_klausscpu_ei (and GPR:$rs, 0xFFFFFFFF)), (EI_I GPR:$rs)>;
+
+//===----------------------------------------------------------------------===//
+// MMU stage 1 (klaussCPU branch `mmu`; MMU_PLAN.md §5, ISA_ENCODING_V2_MAP §9)
+//
+// Assembler / disassembler only: no isel patterns or intrinsics yet (the
+// runtime uses them from inline asm and .S files).  Older bitstreams trap on
+// all of them as illegal.  None writes FLAGS.  Every one is hasSideEffects,
+// so that nothing moves, merges or deletes one should it reach the machine
+// IR (inline asm does not, but a future pattern might).
+//===----------------------------------------------------------------------===//
+
+let hasSideEffects = 1 in {
+// SYSCALL (class B, OP 8): raise the SYSCALL exception; the frame PC is the
+// next instruction.  Not a call or terminator: control comes back to the
+// next instruction as after an interrupt.
+def SYSCALL_I : I0<0x6C080000, (outs), (ins), "syscall">;
+
+// MFSR rd, sr: rd = SR[sr], zero-extended; sr [19:12], rd [11:8].
+// MTSR sr, rs1: SR[sr] = rs1, serializing; sr [19:12], rs1 [7:4].
+def MFSR_I : KCInst32<0x6C400000, (outs GPR:$rd), (ins sysreg:$sr),
+                      "mfsr\t$rd, $sr"> {
+  bits<4> rd;
+  bits<8> sr;
+  let Inst{19-12} = sr;
+  let Inst{11-8}  = rd;
+}
+def MTSR_I : KCInst32<0x6C600000, (outs), (ins sysreg:$sr, GPR:$rs1),
+                      "mtsr\t$sr, $rs1"> {
+  bits<8> sr;
+  bits<4> rs1;
+  let Inst{19-12} = sr;
+  let Inst{7-4}   = rs1;
+}
+}
+
+// LR / SC (MMU_PLAN §5.1): class 6/7 MODE=00 with [12] = 1.  The address is
+// a plain register, as for memget/memset; widths and the sign-extending
+// suffix are spelled as the other loads (`lr32s`, `lr32_s` accepted).
+// The address must be naturally aligned (4 or 8) or the access traps.
+// LR: rd = mem[rs1] and reserve the doubleword.
+let hasSideEffects = 1, mayLoad = 1 in {
+def LR_D   : RR1<0x5B001000, (outs GPR:$rd), (ins GPR:$rs), "lr64\t$rd, $rs">;
+def LR_W   : RR1<0x5A001000, (outs GPR:$rd), (ins GPR:$rs), "lr32\t$rd, $rs">;
+def LR_W_S : RR1<0x5A801000, (outs GPR:$rd), (ins GPR:$rs), "lr32s\t$rd, $rs">;
+}
+def : MnemonicAlias<"lr32_s", "lr32s">;
+
+// SC rd, rs2, rs1: if the reservation holds, mem[rs1] = rs2 and rd = 0, else
+// rd = 1 and no store; the reservation is cleared either way.  Unlike every
+// other store, the rd field [11:8] is the result and the data is rs2 [3:0];
+// the operand order (result, data, address) follows memset's (data, address).
+class SCInst<bits<32> word0, string mnem>
+    : KCInst32<word0, (outs GPR:$rd), (ins GPR:$rs2, GPR:$rs1),
+               mnem # "\t$rd, $rs2, $rs1"> {
+  bits<4> rd;
+  bits<4> rs1;
+  bits<4> rs2;
+  let Inst{11-8} = rd;
+  let Inst{7-4}  = rs1;
+  let Inst{3-0}  = rs2;
+  let hasSideEffects = 1;
+  let mayLoad    = 1;
+  let mayStore   = 1;
+  let SchedRW    = [WriteLoad];   // rd comes from MEM, like a load's
+}
+def SC_D : SCInst<0x5F001000, "sc64">;
+def SC_W : SCInst<0x5E001000, "sc32">;
+
+// The ISA map's symbols (ISA_ENCODING_V2_MAP §9.3), which name the records.
+def : MnemonicAlias<"lr_d",   "lr64">;
+def : MnemonicAlias<"lr_w",   "lr32">;
+def : MnemonicAlias<"lr_w_s", "lr32s">;
+def : MnemonicAlias<"sc_d",   "sc64">;
+def : MnemonicAlias<"sc_w",   "sc32">;
 
 //===----------------------------------------------------------------------===//
 // Assembler-only opcodes

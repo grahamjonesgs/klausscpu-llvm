@@ -32,7 +32,10 @@ The assembler and the AsmPrinter use its 1-word `CMPRVW`, `MULV`/`MULUV`
 and `LEAPC` forms (ISA map §8.3) wherever they fit, which older cores trap
 on, FuseCmpBr fuses branches on W and imm32 compares into its new fused
 branches (§8.1), and the toolchain knows its other additions (`di`/`ei`,
-the misaligned-access trap).  The squash fixes of
+the misaligned-access trap).  The assembler and disassembler also know the
+MMU stage 1 instructions (`syscall`, `mfsr`/`mtsr`, `lr64`/`lr32`/`lr32s`,
+`sc64`/`sc32`; see "MMU stage 1 instructions" below), which need klaussCPU
+branch `mmu` hardware and which the compiler never emits.  The squash fixes of
 `9ad6614` (a taken fused branch or an EX squash resets the divider and
 gates the LCD strobe) are assumed too.  There is no option to target an
 older core: older bitstreams are not supported, and the CPU and all the
@@ -151,6 +154,33 @@ assembler spells them:
   the same section, like the short branches.  Almost every `LEAPC` the
   compiler emits names data in another section, so few compress (21 of
   9447 in the -O1 corpus); the rest would need lld relaxation.
+
+The MMU stage 1 instructions (klaussCPU branch `mmu`, `MMU_PLAN.md` §5,
+§5.1, §6.1, ISA map §9) are MC-only for now: the assembler (`clang` inline
+asm and `.S` files, `llvm-mc`), the disassembler and the printer know them,
+but there are no isel patterns, intrinsics or builtins, so the compiler
+never emits them, and older bitstreams trap on all of them.  All are
+1 word, `hasSideEffects`, no flags (`mmu-stage1.s`):
+
+- `syscall` (`SYSCALL_I`, 0x6C080000): raises SYSCALL; not a call or
+  terminator.
+- `mfsr rd, sr` / `mtsr sr, rs1` (`MFSR_I` 0x6C400000 / `MTSR_I`
+  0x6C600000, sr in [19:12]): sr is a name, in any case (`status`, `evec`,
+  `ecause`, `eaddr`, `usp`, `scratch0`, `scratch1`, `tp`, `cycle` = 0..8,
+  `KlaussCPU::getSysRegName`), or any number 0..255 for the SRs of later
+  stages; the printer shows the name for 0..8, else the number.
+- `lr64 rd, rs1` / `lr32 rd, rs1` / `lr32s rd, rs1` (`LR_D` / `LR_W` /
+  `LR_W_S`, `mayLoad`): load-reserved from the address in rs1, spelled like
+  `memget64`; `lr32_s` and the ISA map's `LR_D`/`LR_W`/`LR_W_S` are accepted.
+- `sc64 rd, rs2, rs1` / `sc32 rd, rs2, rs1` (`SC_D` / `SC_W`, `mayLoad` +
+  `mayStore`): store rs2 to the address in rs1 if the reservation holds;
+  rd = 0 on success, 1 on failure.  Unlike every other store the rd field
+  is the result and the data is in rs2 [3:0]; the operand order (result,
+  data, address) follows `memset64 data, address`.  `SC_D`/`SC_W` are
+  accepted too.
+
+The atomics still go to libcalls (Architecture facts, Atomics); the runtime
+can build its `__sync_*` on LR/SC in asm.
 
 ### Adding an instruction
 

@@ -229,6 +229,7 @@ class KlaussCPUAsmParser : public MCTargetAsmParser {
   ParseStatus parsePCRelTarget(OperandVector &Operands) {
     return parseImmOrRegName(Operands, /*PCRel=*/true);
   }
+  ParseStatus parseSysReg(OperandVector &Operands);
 
 public:
   enum KlaussCPUMatchResultTy : unsigned {
@@ -342,6 +343,27 @@ ParseStatus KlaussCPUAsmParser::parseImmOrRegName(OperandVector &Operands,
   else
     Operands.push_back(KlaussCPUOperand::createImm(Expr, S, E));
   return ParseStatus::Success;
+}
+
+// An MFSR / MTSR system register (SysRegAsmOperand): a name from
+// KlaussCPU::getSysRegName, in any case, or an expression that the operand
+// class requires to be a constant in [0, 255] (later SRs have no name yet).
+ParseStatus KlaussCPUAsmParser::parseSysReg(OperandVector &Operands) {
+  const AsmToken &Tok = getLexer().getTok();
+  if (Tok.is(AsmToken::Identifier)) {
+    AsmToken Next = getLexer().peekTok();
+    if (Next.is(AsmToken::Comma) || Next.is(AsmToken::EndOfStatement) ||
+        Next.is(AsmToken::Eof))
+      if (std::optional<unsigned> Num =
+              KlaussCPU::lookupSysReg(Tok.getIdentifier())) {
+        SMLoc S = Tok.getLoc(), E = Tok.getEndLoc();
+        Parser.Lex();
+        Operands.push_back(KlaussCPUOperand::createImm(
+            MCConstantExpr::create(*Num, getContext()), S, E));
+        return ParseStatus::Success;
+      }
+  }
+  return parseImmOrRegName(Operands, /*PCRel=*/false);
 }
 
 // A PC-relative target (PCRelAsmOperand): a bare number is the

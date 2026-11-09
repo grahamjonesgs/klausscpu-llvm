@@ -5,6 +5,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "KlaussCPUInstPrinter.h"
+#include "KlaussCPUMCTargetDesc.h"
 #include "llvm/MC/MCInstrInfo.h"
 
 #define GET_INSTRINFO_ENUM
@@ -77,4 +78,16 @@ void KlaussCPUInstPrinter::printOperand(const MCInst *MI, uint64_t Address,
     O << Target;
   else
     O << Op.getImm();
+}
+
+void KlaussCPUInstPrinter::printSysReg(const MCInst *MI, unsigned OpNo,
+                                       const MCSubtargetInfo &STI,
+                                       raw_ostream &O) {
+  const MCOperand &Op = MI->getOperand(OpNo);
+  if (Op.isImm())
+    if (StringRef Name = KlaussCPU::getSysRegName(Op.getImm()); !Name.empty()) {
+      O << Name;
+      return;
+    }
+  printOperand(MI, OpNo, STI, O);
 }

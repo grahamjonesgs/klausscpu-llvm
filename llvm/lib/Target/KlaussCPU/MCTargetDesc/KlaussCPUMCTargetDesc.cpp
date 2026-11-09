@@ -67,6 +67,25 @@ bool KlaussCPU::uncompress(MCInst &OutInst, const MCInst &MI,
 
 // A/B switches for the ISA v3 short forms, on by default in every processor.
 // Given explicitly they override -mattr.
+// MMU stage 1 SR numbers (klaussCPU MMU_PLAN.md §6.1, ISA_ENCODING_V2_MAP
+// §9.1).  Later stages add numbers (MPU 0x10-0x2F, TLB 0x30-0x3F) that the
+// assembler takes as plain numbers until they get names here.
+static constexpr StringLiteral SysRegNames[] = {"status",   "evec", "ecause",
+                                                "eaddr",    "usp",  "scratch0",
+                                                "scratch1", "tp",   "cycle"};
+
+StringRef KlaussCPU::getSysRegName(unsigned Num) {
+  return Num < std::size(SysRegNames) ? StringRef(SysRegNames[Num])
+                                      : StringRef();
+}
+
+std::optional<unsigned> KlaussCPU::lookupSysReg(StringRef Name) {
+  for (unsigned I = 0; I != std::size(SysRegNames); ++I)
+    if (Name.equals_insensitive(SysRegNames[I]))
+      return I;
+  return std::nullopt;
+}
+
 static cl::opt<bool> EnableShortForms(
     "klausscpu-short-forms", cl::init(true), cl::Hidden,
     cl::desc("Emit ISA v3 short 1-word immediate forms when the value fits "
