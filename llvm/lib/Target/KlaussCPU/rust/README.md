@@ -110,7 +110,9 @@ cp .klaussbuild.env.sample .klaussbuild.env   # edit KLAUSSCPU_RUSTC (stage1 rus
 
 It operates on the `crates/` workspace; see `crates/README.md`. Setting
 `KLAUSSCPU_RUNTIME` additionally cross-checks every llext import against the
-kernel's `ssh/llext_exports.c`.
+kernel's `ssh/llext_exports.c`.  `KLAUSSCPU_WS` points it at another
+workspace instead: klausscpu-runtime's `rust/` (programs for the board,
+built, copied and run by its `tools/klauss-rust`) uses this.
 
 **Standalone `hello-*` crates** (legacy reference, predate the workspace) build
 directly. Bare metal → a normal ELF for the `klausscc` serial loader:

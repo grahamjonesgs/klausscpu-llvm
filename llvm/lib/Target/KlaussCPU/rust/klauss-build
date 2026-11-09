@@ -21,6 +21,10 @@
 #   KLAUSSCPU_CARGO_TOOLCHAIN  cargo's +toolchain argument (default +nightly if
 #                        rustup has one, else none); RUSTC_BOOTSTRAP=1 is set
 #                        for any toolchain but a +nightly one
+#   KLAUSSCPU_WS         another Cargo workspace to build <pkg> in (default:
+#                        crates/ here); klausscpu-runtime's rust/ uses it.  The
+#                        output goes next to the package's Cargo.toml:
+#                        <ws>/examples/<pkg>/ if that exists, else <ws>/<pkg>/
 # A machine-local rust/.klaussbuild.env (gitignored), if present, is sourced
 # first so each dev sets these once.
 set -eu
@@ -28,13 +32,13 @@ set -eu
 # ── locate ourselves and the repo ────────────────────────────────────────
 RUSTDIR="$(cd "$(dirname "$0")" && pwd)"               # .../KlaussCPU/rust
 REPO="$(cd "$RUSTDIR/../../../../.." && pwd)"          # llvm-project repo root
-WS="$RUSTDIR/crates"                                    # the cargo workspace
-
 [ -f "$RUSTDIR/.klaussbuild.env" ] && . "$RUSTDIR/.klaussbuild.env"
 
+WS="${KLAUSSCPU_WS:-$RUSTDIR/crates}"                   # the cargo workspace
+WS="$(cd "$WS" && pwd)"
 LLVM_BIN="${KLAUSSCPU_LLVM_BIN:-$REPO/build/bin}"
 LD_SCRIPT="${KLAUSSCPU_LD:-$RUSTDIR/klausscpu.ld}"
-MERGE_LD="$WS/llext-merge.ld"
+MERGE_LD="$RUSTDIR/crates/llext-merge.ld"
 TARGET="klausscpu-unknown-none-elf"
 CARGO="${CARGO:-cargo}"
 # The -Z flags need a nightly cargo: rustup's +nightly if it is installed,
@@ -63,6 +67,11 @@ need "$LLVM_BIN/ld.lld"; need "$LLVM_BIN/llvm-readelf"; need "$LLVM_BIN/llvm-nm"
 # with '-' -> '_'); the .llext / .elf basename uses the same underscored form.
 crate_name() { echo "$1" | tr '-' '_'; }
 
+# where a package's outputs go: next to its Cargo.toml
+pkg_dir() {
+    if [ -d "$WS/examples/$1" ]; then echo "$WS/examples/$1"; else echo "$WS/$1"; fi
+}
+
 REL="$WS/target/$TARGET/release"
 
 # ── bare-metal ELF ───────────────────────────────────────────────────────
@@ -75,9 +84,9 @@ build_elf() {
       KLAUSSCPU_LLVM_BIN="$LLVM_BIN" \
       RUSTFLAGS="-Zunstable-options -Clinker=$LLVM_BIN/ld.lld -Clink-arg=-T$LD_SCRIPT" \
         "$CARGO" $KLAUSSCPU_CARGO_TOOLCHAIN build -p "$pkg" --release )
-    out="$WS/examples/$pkg/$cn.elf"
+    out="$(pkg_dir "$pkg")/$cn.elf"
     cp "$REL/$cn" "$out" 2>/dev/null || cp "$REL/$pkg" "$out"
-    "$LLVM_BIN/llvm-objcopy" -O binary "$out" "$WS/examples/$pkg/$cn.bin"
+    "$LLVM_BIN/llvm-objcopy" -O binary "$out" "$(pkg_dir "$pkg")/$cn.bin"
     # verify
     "$LLVM_BIN/llvm-readelf" -h "$out" | grep -qE "Machine: +(KlaussCPU|.*4b43)" || die "$out: not EM_KLAUSSCPU"
     "$LLVM_BIN/llvm-readelf" -h "$out" | grep -qE "Entry.*0x20$" || die "$out: entry not 0x20"
@@ -110,7 +119,7 @@ build_llext() {
       done
       "$LLVM_BIN/llvm-ar" rcs nomem.a ./*.o )
 
-    out="$WS/examples/$pkg/$cn.llext"
+    out="$(pkg_dir "$pkg")/$cn.llext"
     # -u main: member selection (ld -r can't gc-sections).
     # -T merge: collapse Rust's per-function sections to one .text/.rodata —
     #           the KlaussCPU LLEXT loader needs a C-like single-.text layout.
