@@ -249,7 +249,11 @@ public:
     // addend modulo 2^32; an 8-byte one sign-extends it.
     if (!IsResolved) {
       int64_t Addend = Target.getConstant();
-      if (!isInt<32>(Addend) && (Kind == FK_Data_8 || !isUInt<32>(Addend))) {
+      // R_KLAUSSCPU_TPREL32 is a signed offset (lld sign-extends it), so
+      // its addend must fit as one too.
+      bool Signed = Kind == FK_Data_8 ||
+                    unsigned(Kind) == KlaussCPU::FK_KlaussCPU_TPREL32;
+      if (!isInt<32>(Addend) && (Signed || !isUInt<32>(Addend))) {
         getContext().reportError(Fixup.getLoc(),
                                  "relocation addend out of range");
         return;

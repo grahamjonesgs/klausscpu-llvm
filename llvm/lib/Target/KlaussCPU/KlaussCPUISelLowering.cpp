@@ -1004,6 +1004,13 @@ KlaussCPUTargetLowering::LowerGlobalTLSAddress(SDValue Op,
                                                SelectionDAG &DAG) const {
   auto *N = cast<GlobalAddressSDNode>(Op);
   SDLoc DL(N);
+  // Only Linux user programs have a thread pointer (musl sets TP); bare
+  // metal and Zephyr leave it 0, and older bitstreams have no TP at all.
+  // clang already refuses TLS there; IR from elsewhere gets an error too
+  // rather than code that reads TP.
+  if (!getTargetMachine().getTargetTriple().isOSLinux())
+    report_fatal_error("thread-local storage is supported on KlaussCPU only "
+                       "for Linux (klausscpu-*-linux-*)");
   int64_t Offset = N->getOffset();
   // The TP offset of a TLS block is a small negative number; the addend of
   // R_KLAUSSCPU_TPREL32 is a signed 32-bit r_addend.
