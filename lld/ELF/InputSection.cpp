@@ -786,7 +786,12 @@ static int64_t getTlsTpOffset(Ctx &ctx, const Symbol &s) {
       return 0;
     return s.getVA(ctx, 0) + (tls->p_vaddr & (tls->p_align - 1));
 
-    // Variant 2.
+    // Variant 2.  KlaussCPU (musl's default layout, no TLS_ABOVE_TP): TP
+    // points at the thread structure, aligned to p_align, and the TLS block
+    // sits just below it, at TP - (p_memsz rounded up so that the block
+    // start is congruent to p_vaddr modulo p_align) (musl static_init_tls,
+    // __copy_tls), which is this formula.
+  case EM_KLAUSSCPU:
   case EM_HEXAGON:
   case EM_S390:
   case EM_SPARCV9:

@@ -34,6 +34,16 @@
 //                             placed within reach.  The thunk returns
 //                             nothing itself: the callee returns straight to
 //                             the call's PC + 4.
+//   R_KLAUSSCPU_TPREL32(7) — TLS local exec, `%tprel(sym)`: the 32-bit signed
+//                             offset S + A − TP of a TLS symbol from the
+//                             thread pointer, in the word-1 slot of an ADDI,
+//                             an indexed load / store or a SETR.  TLS
+//                             variant II, as musl lays it out by default
+//                             (getTlsTpOffset): TP points at the thread
+//                             structure with the static TLS block below it,
+//                             so the offset is negative.  Static executables
+//                             only, so this is the only TLS relocation:
+//                             the compiler lowers every TLS model to it.
 //
 // Only static links are supported: there are no dynamic relocation types.
 // Code loaded at run time is relocated by its loader, from an ET_REL object
@@ -127,6 +137,20 @@ RelExpr KlaussCPU::getRelExpr(RelType type, const Symbol &s,
   case R_KLAUSSCPU_PC64:
   case R_KLAUSSCPU_CALL18:
     return R_PC;
+  case R_KLAUSSCPU_TPREL32:
+    // TP-relative offsets exist only in the executable that holds the TLS
+    // block: there is no dynamic TLS model.
+    if (ctx.arg.shared) {
+      Err(ctx) << getErrorLoc(ctx, loc) << "relocation " << type
+               << " against " << &s << " cannot be used with -shared";
+      return R_NONE;
+    }
+    if (!s.isTls() && !s.isUndefined()) {
+      Err(ctx) << getErrorLoc(ctx, loc) << "relocation " << type
+               << " against non-TLS symbol " << &s;
+      return R_NONE;
+    }
+    return R_TPREL;
   default:
     Err(ctx) << getErrorLoc(ctx, loc) << "unrecognized relocation " << type;
     return R_NONE;
@@ -181,6 +205,12 @@ void KlaussCPU::relocate(uint8_t *loc, const Relocation &rel,
     // val is already sign-extended from 32 bits (ELFCLASS32), which is
     // exactly the 64-bit difference.
     write64le(loc, val);
+    break;
+  case R_KLAUSSCPU_TPREL32:
+    // A negative offset from TP (variant II): signed 32 bits, which the
+    // instruction sign-extends.
+    checkInt(ctx, loc, static_cast<int64_t>(val), 32, rel);
+    write32le(loc, static_cast<uint32_t>(val));
     break;
   case R_KLAUSSCPU_CALL18:
     // val = S + A − P with P the instruction itself.  A callee out of reach
