@@ -124,6 +124,17 @@ public:
     return Val >= Lo && Val <= Hi && Val % Scale == 0;
   }
 
+  // The imm32 of ADDI and the indexed loads / stores (SImm32TPRelAsmOperand):
+  // a signed 32-bit constant, or an expression with `%tprel` (TLS local exec).
+  bool isSImm32TPRel() const {
+    const MCExpr *Expr = getImmExpr();
+    if (!Expr)
+      return false;
+    int64_t Val;
+    if (isConstantImm(Val))
+      return isInt<32>(Val);
+    return KlaussCPU::getExprSpecifier(Expr) == KlaussCPU::S_TPREL;
+  }
   // Fused-branch condition PRED | INV << 3 (PRED 5..7 are the W compares).
   bool isFBRCond() const {
     int64_t Val;
@@ -399,6 +410,27 @@ bool KlaussCPUAsmParser::parsePCRelExpr(const MCExpr *&Expr, SMLoc &E) {
 }
 
 bool KlaussCPUAsmParser::parsePrimaryExpr(const MCExpr *&Res, SMLoc &EndLoc) {
+  // A relocation specifier, `%tprel(expr)`: the TLS local-exec offset of a
+  // symbol from the thread pointer (the operand classes say where it may go).
+  if (getLexer().is(AsmToken::Percent)) {
+    SMLoc S = getLexer().getLoc();
+    AsmToken Next = getLexer().peekTok();
+    if (Next.isNot(AsmToken::Identifier))
+      return TokError("expected relocation specifier after '%'");
+    if (!Next.getIdentifier().equals_insensitive("tprel"))
+      return Error(Next.getLoc(), "unknown relocation specifier '%" +
+                                      Next.getIdentifier() + "'");
+    Parser.Lex(); // '%'
+    Parser.Lex(); // specifier
+    if (getLexer().isNot(AsmToken::LParen))
+      return TokError("expected '(' after %tprel");
+    Parser.Lex();
+    const MCExpr *Sub;
+    if (Parser.parseParenExpression(Sub, EndLoc))
+      return true;
+    Res = MCSpecifierExpr::create(Sub, KlaussCPU::S_TPREL, getContext(), S);
+    return false;
+  }
   if (!InPCRelTarget)
     return MCTargetAsmParser::parsePrimaryExpr(Res, EndLoc);
 

@@ -17,6 +17,7 @@
 #include "KlaussCPUMachineFunctionInfo.h"
 #include "KlaussCPURegisterInfo.h"
 #include "KlaussCPUSubtarget.h"
+#include "MCTargetDesc/KlaussCPUMCTargetDesc.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "KlaussCPUInstrInfo.h"
@@ -227,6 +228,9 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::ExternalSymbol, MVT::i64, Custom);
   setOperationAction(ISD::BlockAddress,   MVT::i64, Custom);
   setOperationAction(ISD::JumpTable,      MVT::i64, Custom);
+  // TLS: TP + %tprel(sym), local exec whatever the model
+  // (LowerGlobalTLSAddress).
+  setOperationAction(ISD::GlobalTLSAddress, MVT::i64, Custom);
 
   // ---- Branch/control ----
   // Jump tables from MinJumpTableEntries cases at JumpTableDensity.  The
@@ -271,7 +275,7 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setBooleanContents(ZeroOrOneBooleanContent);
   // (and (freeze (extload)), lowmask) → (freeze (zextload)); see
   // PerformDAGCombine.
-  setTargetDAGCombine({ISD::AND, ISD::STORE});
+  setTargetDAGCombine({ISD::ADD, ISD::AND, ISD::STORE});
 
   // Hardware 64-bit rotate (ROLR/RORR, ROLV/RORV).  There is no 32-bit
   // rotate, but a 64-bit rotate of a value whose two halves are equal is a
@@ -369,6 +373,7 @@ SDValue KlaussCPUTargetLowering::LowerOperation(SDValue Op,
                                                  SelectionDAG &DAG) const {
   switch (Op.getOpcode()) {
   case ISD::GlobalAddress:  return LowerGlobalAddress(Op, DAG);
+  case ISD::GlobalTLSAddress: return LowerGlobalTLSAddress(Op, DAG);
   case ISD::ExternalSymbol: return LowerExternalSymbol(Op, DAG);
   case ISD::BlockAddress:   return LowerBlockAddress(Op, DAG);
   case ISD::JumpTable:      return LowerJumpTable(Op, DAG);
@@ -731,6 +736,31 @@ SDValue KlaussCPUTargetLowering::PerformDAGCombine(SDNode *N,
                                                    DAGCombinerInfo &DCI) const {
   SelectionDAG &DAG = DCI.DAG;
   switch (N->getOpcode()) {
+  case ISD::ADD: {
+    // (add (add X, (TPREL sym+o)), C) -> (add X, (TPREL sym+o+C)): a constant
+    // offset into a TLS variable (a field, an element) joins %tprel, so the
+    // access is the indexed load / store off TP alone.
+    auto *C = dyn_cast<ConstantSDNode>(N->getOperand(1));
+    SDValue Inner = N->getOperand(0);
+    if (!C || Inner.getOpcode() != ISD::ADD)
+      break;
+    unsigned TPIdx;
+    if (Inner.getOperand(1).getOpcode() == KlaussCPUISD::TPREL)
+      TPIdx = 1;
+    else if (Inner.getOperand(0).getOpcode() == KlaussCPUISD::TPREL)
+      TPIdx = 0;
+    else
+      break;
+    auto *GA = cast<GlobalAddressSDNode>(Inner.getOperand(TPIdx).getOperand(0));
+    int64_t Off = GA->getOffset() + C->getSExtValue();
+    if (!isInt<32>(Off))
+      break;
+    SDLoc DL(N);
+    SDValue TGA = DAG.getTargetGlobalAddress(GA->getGlobal(), DL, MVT::i64,
+                                             Off, GA->getTargetFlags());
+    return DAG.getNode(ISD::ADD, DL, MVT::i64, Inner.getOperand(1 - TPIdx),
+                       DAG.getNode(KlaussCPUISD::TPREL, DL, MVT::i64, TGA));
+  }
   case ISD::STORE: {
     // (store (rotl (load p), 32), q) of an under-aligned i64, at least
     // 4-aligned q: two 32-bit copies.  Store merging makes this from two
@@ -954,6 +984,41 @@ SDValue KlaussCPUTargetLowering::LowerGlobalAddress(SDValue Op,
   unsigned WrapOp = getTargetMachine().isPositionIndependent()
                         ? KlaussCPUISD::LEAPC : KlaussCPUISD::ADDR;
   return wrapSymbolWithOffset(DAG, DL, WrapOp, TGA, Fold ? 0 : Offset);
+}
+
+// Thread-local storage.  KlaussCPU Linux user programs are static executables
+// (no shared libraries, no dynamic linker), so every TLS access, whatever
+// model the front end chose (general dynamic, local dynamic, initial exec),
+// is local exec: the variable is at a link-time constant offset from the
+// thread pointer, TP (SR 7; musl keeps it pointing at the thread's pthread
+// structure, the static TLS block just below it: TLS variant II, as on
+// x86-64).  The address is
+//   mfsr  rd, tp                  (MFSR_TP)
+//   addi  rd, rd, %tprel(sym+off) (R_KLAUSSCPU_TPREL32, a negative offset)
+// and an access folds the add into its indexed load / store
+// (`ldidx32 rd, tp_reg, %tprel(sym)`).  TP is constant for the thread that
+// runs the function, so the read is side-effect free and the scheduler,
+// MachineCSE and MachineLICM may share or hoist it.
+SDValue
+KlaussCPUTargetLowering::LowerGlobalTLSAddress(SDValue Op,
+                                               SelectionDAG &DAG) const {
+  auto *N = cast<GlobalAddressSDNode>(Op);
+  SDLoc DL(N);
+  int64_t Offset = N->getOffset();
+  // The TP offset of a TLS block is a small negative number; the addend of
+  // R_KLAUSSCPU_TPREL32 is a signed 32-bit r_addend.
+  bool Fold = isInt<32>(Offset);
+  SDValue TGA = DAG.getTargetGlobalAddress(N->getGlobal(), DL, MVT::i64,
+                                           Fold ? Offset : 0,
+                                           KlaussCPUII::MO_TPREL);
+  SDValue TP = DAG.getNode(KlaussCPUISD::READ_TP, DL, MVT::i64);
+  SDValue Addr =
+      DAG.getNode(ISD::ADD, DL, MVT::i64, TP,
+                  DAG.getNode(KlaussCPUISD::TPREL, DL, MVT::i64, TGA));
+  if (Fold)
+    return Addr;
+  return DAG.getNode(ISD::ADD, DL, MVT::i64, Addr,
+                     DAG.getSignedConstant(Offset, DL, MVT::i64));
 }
 
 SDValue KlaussCPUTargetLowering::LowerExternalSymbol(SDValue Op,
@@ -1249,6 +1314,8 @@ KlaussCPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case KlaussCPUISD::TAIL:     return "KlaussCPUISD::TAIL";
   case KlaussCPUISD::ADDR:     return "KlaussCPUISD::ADDR";
   case KlaussCPUISD::LEAPC:    return "KlaussCPUISD::LEAPC";
+  case KlaussCPUISD::READ_TP:  return "KlaussCPUISD::READ_TP";
+  case KlaussCPUISD::TPREL:    return "KlaussCPUISD::TPREL";
   case KlaussCPUISD::SELECT_CC: return "KlaussCPUISD::SELECT_CC";
   case KlaussCPUISD::ROLW:     return "KlaussCPUISD::ROLW";
   case KlaussCPUISD::RORW:     return "KlaussCPUISD::RORW";

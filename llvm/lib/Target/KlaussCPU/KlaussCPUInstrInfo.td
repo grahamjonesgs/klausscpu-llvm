@@ -58,6 +58,12 @@ def callseq_end   : SDNode<"ISD::CALLSEQ_END", SDT_KlaussCPUCallSeqEnd,
 def KlaussCPUAddr  : SDNode<"KlaussCPUISD::ADDR", SDTIntUnaryOp>;
 def KlaussCPULeaPC : SDNode<"KlaussCPUISD::LEAPC", SDTIntUnaryOp>;
 
+// TLS (LowerGlobalTLSAddress): the thread pointer, and a TLS variable's
+// offset from it (a TargetGlobalTLSAddress with MO_TPREL, `%tprel(sym)`).
+def KlaussCPUReadTP : SDNode<"KlaussCPUISD::READ_TP",
+                             SDTypeProfile<1, 0, [SDTCisVT<0, i64>]>>;
+def KlaussCPUTPRel  : SDNode<"KlaussCPUISD::TPREL", SDTIntUnaryOp>;
+
 // 32-bit rotates of the low half (ReplaceNodeResults for an i32 rotl/rotr).
 def KlaussCPURolW : SDNode<"KlaussCPUISD::ROLW", SDTIntShiftOp>;
 def KlaussCPURorW : SDNode<"KlaussCPUISD::RORW", SDTIntShiftOp>;
@@ -126,6 +132,17 @@ def Imm32AsmOperand : KCImmAsmOperand<"Imm32", -2147483648, 4294967295> {
 def Imm32SymAsmOperand
     : KCImmAsmOperand<"Imm32Sym", -2147483648, 4294967295, 1, 1> {
   let RenderMethod = "addImm32Operands";
+}
+
+// The imm32 of ADDI and the indexed loads / stores: a signed 32-bit constant
+// or `%tprel(sym)`, the TLS local-exec offset (FK_KlaussCPU_TPREL32).
+def SImm32TPRelAsmOperand : AsmOperandClass {
+  let Name             = "SImm32TPRel";
+  let PredicateMethod  = "isSImm32TPRel";
+  let RenderMethod     = "addImmOperands";
+  let DiagnosticType   = "InvalidSImm32TPRel";
+  let DiagnosticString = "immediate must be an integer in the range "
+                         "[-2147483648, 2147483647] or %tprel(symbol)";
 }
 
 // Absolute address: a symbol or a 32-bit address (FK_KlaussCPU_ABS32).
@@ -205,6 +222,14 @@ def uimm32 : Operand<i64> {
 def imm32 : Operand<i64> {
   let DecoderMethod    = "decodeSImmOperand<32>";
   let ParserMatchClass = Imm32AsmOperand;
+}
+
+// ADDI / indexed load and store imm32: simm32, or a TLS symbol's offset from
+// the thread pointer (`%tprel(sym)`, LowerGlobalTLSAddress).
+def simm32_tprel : Operand<i64> {
+  let EncoderMethod    = "getSImm32TPRelOpValue";
+  let DecoderMethod    = "decodeSImmOperand<32>";
+  let ParserMatchClass = SImm32TPRelAsmOperand;
 }
 
 // Shift count / bit index in word0[20:15].
@@ -650,8 +675,9 @@ class RV_cmp<bits<32> word0, string asmstr, Operand immop = simm32>
 //===----------------------------------------------------------------------===//
 
 // ALU variant: rd = rs op sign_extend(imm32) — no memory side-effect.
-class RRV_alu<bits<32> word0, string asmstr, list<dag> pat = []>
-    : KCInst64<word0, (outs GPR:$rd), (ins GPR:$rs, simm32:$imm), asmstr,
+class RRV_alu<bits<32> word0, string asmstr, list<dag> pat = [],
+              Operand immop = simm32>
+    : KCInst64<word0, (outs GPR:$rd), (ins GPR:$rs, immop:$imm), asmstr,
                pat> {
   bits<4>  rd;
   bits<4>  rs;
@@ -665,7 +691,7 @@ class RRV_alu<bits<32> word0, string asmstr, list<dag> pat = []>
 
 // Indexed load: rd = mem[base + offset]
 class RRV_ld<bits<32> word0, string asmstr, list<dag> pat = []>
-    : KCInst64<word0, (outs GPR:$rd), (ins GPR:$base, simm32:$offset),
+    : KCInst64<word0, (outs GPR:$rd), (ins GPR:$base, simm32_tprel:$offset),
                asmstr, pat> {
   bits<4>  rd;
   bits<4>  base;
@@ -679,7 +705,8 @@ class RRV_ld<bits<32> word0, string asmstr, list<dag> pat = []>
 
 // Indexed store: mem[base + offset] = rs_data
 class RRV_st<bits<32> word0, string asmstr, list<dag> pat = []>
-    : KCInst64<word0, (outs), (ins GPR:$rs_data, GPR:$base, simm32:$offset),
+    : KCInst64<word0, (outs), (ins GPR:$rs_data, GPR:$base,
+                                   simm32_tprel:$offset),
                asmstr, pat> {
   bits<4>  rs_data;
   bits<4>  base;
@@ -1210,7 +1237,8 @@ def RORV    : ShiftImmN<0x51204000, "rorv">;
 
 // reg+imm32 add: rd = rs + sign_extend(imm32). Two distinct regs; sign-extends.
 // Also materialises a frame address in one instruction (see AddrFI).
-def ADDI : RRV_alu<0x88300000, "addi\t$rd, $rs, $imm">;
+// Its imm32 may be `%tprel(sym)`: TP + offset is a TLS variable's address.
+def ADDI : RRV_alu<0x88300000, "addi\t$rd, $rs, $imm", [], simm32_tprel>;
 
 // Compare register to immediate — flags only (see CMPRR_I on side effects).
 // CMPRVU_I zero-extends its imm32 (class 3 SGN=0: pipeline_core.sv
@@ -1611,6 +1639,41 @@ defm : FrameStorePat<truncstorei16, STIDX16>;
 defm : FrameStorePat<truncstorei8,  STIDX8>;
 }
 
+// TLS local exec (LowerGlobalTLSAddress): TP + %tprel(sym).  The add is the
+// ADDI of the address, or folds into the access as its offset, so a TLS
+// load or store is MFSR_TP plus the indexed access.  The alignment rules are
+// those of the base + offset forms above (an under-aligned access takes the
+// address).  A lone offset (not added to TP) is a SETR.
+def : Pat<(KlaussCPUTPRel tglobaltlsaddr:$sym), (SETR tglobaltlsaddr:$sym)>;
+multiclass TPRelLoadPat<PatFrag ld, Instruction Inst> {
+  def : Pat<(i64 (ld (add (i64 GPR:$base),
+                          (KlaussCPUTPRel tglobaltlsaddr:$sym)))),
+            (Inst GPR:$base, tglobaltlsaddr:$sym)>;
+}
+multiclass TPRelStorePat<PatFrag st, Instruction Inst> {
+  def : Pat<(st (i64 GPR:$val), (add (i64 GPR:$base),
+                                     (KlaussCPUTPRel tglobaltlsaddr:$sym))),
+            (Inst GPR:$val, GPR:$base, tglobaltlsaddr:$sym)>;
+}
+let AddedComplexity = 10 in {
+def : Pat<(add (i64 GPR:$base), (KlaussCPUTPRel tglobaltlsaddr:$sym)),
+          (ADDI GPR:$base, tglobaltlsaddr:$sym)>;
+defm : TPRelLoadPat<load_a8,        LDIDX64>;
+defm : TPRelLoadPat<zextloadi32_a4, LDIDX32>;
+defm : TPRelLoadPat<extloadi32_a4,  LDIDX32>;
+defm : TPRelLoadPat<sextloadi32_a4, LDIDX32_S>;
+defm : TPRelLoadPat<zextloadi16,    LDIDX16>;
+defm : TPRelLoadPat<extloadi16,     LDIDX16>;
+defm : TPRelLoadPat<sextloadi16,    LDIDX16_S>;
+defm : TPRelLoadPat<zextloadi8,     LDIDX8>;
+defm : TPRelLoadPat<extloadi8,      LDIDX8>;
+defm : TPRelLoadPat<sextloadi8,     LDIDX8_S>;
+defm : TPRelStorePat<store,         STIDX64>;
+defm : TPRelStorePat<truncstorei32, STIDX32>;
+defm : TPRelStorePat<truncstorei16, STIDX16>;
+defm : TPRelStorePat<truncstorei8,  STIDX8>;
+}
+
 //===----------------------------------------------------------------------===//
 // Control flow: branches and calls
 //===----------------------------------------------------------------------===//
@@ -1767,6 +1830,19 @@ def MFSR_I : KCInst32<0x6C400000, (outs GPR:$rd), (ins sysreg:$sr),
   bits<4> rd;
   bits<8> sr;
   let Inst{19-12} = sr;
+  let Inst{11-8}  = rd;
+}
+// The thread pointer for TLS (KlaussCPUISD::READ_TP): MFSR rd, tp.  TP is
+// constant for the thread that runs the code (only musl's thread setup
+// writes it, from inline asm), so unlike MFSR_I this read has no side
+// effects and may be CSEd, hoisted and rematerialized.  Codegen only (the
+// assembler and disassembler know it as MFSR_I).
+let hasSideEffects = 0, isCodeGenOnly = 1, isReMaterializable = 1,
+    isAsCheapAsAMove = 1 in
+def MFSR_TP : KCInst32<0x6C400000, (outs GPR:$rd), (ins), "mfsr\t$rd, tp",
+                       [(set GPR:$rd, (KlaussCPUReadTP))]> {
+  bits<4> rd;
+  let Inst{19-12} = 0x07;   // KlaussCPU::SysRegTP
   let Inst{11-8}  = rd;
 }
 def MTSR_I : KCInst32<0x6C600000, (outs), (ins sysreg:$sr, GPR:$rs1),

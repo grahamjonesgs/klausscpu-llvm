@@ -252,6 +252,29 @@ rule by rule:
   runtime does not provide (`src/atomic.c`; the link fails, with either
   alignment).
 
+## Thread-local storage
+
+`__thread` / `_Thread_local` exist for Linux user programs
+(`klausscpu-*-linux-*`; bare metal sets up no thread pointer and clang rejects
+them there).  Those are static executables, so the only TLS model is local
+exec, whatever the source or `-ftls-model` asks for:
+
+- **Thread pointer**: TP, system register 7 (`mfsr rd, tp`), user readable and
+  writable.  The kernel switches it with the thread and sets it on
+  `clone(CLONE_SETTLS)`.
+- **Layout**: TLS variant II, musl's default (no `TLS_ABOVE_TP`), as on
+  x86-64: TP points at the thread's `struct pthread`, aligned to the TLS
+  segment's `p_align`; the static TLS block ends just below it, padded so that
+  its start is congruent to `p_vaddr` modulo `p_align`.  A variable's offset
+  from TP is negative: `S - p_memsz - ((-p_vaddr - p_memsz) & (p_align - 1))`
+  with S its offset in the segment (lld `getTlsTpOffset`; musl
+  `static_init_tls`).
+- **Code**: `mfsr rd, tp` then `addi rd, rd, %tprel(var)` for the address, or
+  the offset in the access itself (`ldidx32 rd, rtp, %tprel(var+4)`).
+  `%tprel` is the 32-bit signed relocation `R_KLAUSSCPU_TPREL32` (7) in the
+  word-1 immediate of `addi`, `setr` and the indexed loads and stores.  There
+  are no dynamic TLS relocations.
+
 ## Versioning
 
 - `KlaussCPUABI::ABIVersion` is 3.  The assembler writes it into the low byte

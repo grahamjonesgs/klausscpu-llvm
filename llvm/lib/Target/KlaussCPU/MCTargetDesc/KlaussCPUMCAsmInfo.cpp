@@ -5,9 +5,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "KlaussCPUMCAsmInfo.h"
+#include "KlaussCPUMCTargetDesc.h"
+#include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCTargetOptions.h"
 #include "llvm/TargetParser/KlaussCPUABI.h"
 #include "llvm/TargetParser/Triple.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 
@@ -20,4 +24,17 @@ KlaussCPUMCAsmInfo::KlaussCPUMCAsmInfo(const Triple & /*TheTriple*/,
   SupportsDebugInformation = true;
   ExceptionsType = ExceptionHandling::DwarfCFI;
   MinInstAlignment = KlaussCPUABI::MinInstBytes; // 1-3 words, word aligned
+}
+
+void KlaussCPUMCAsmInfo::printSpecifierExpr(raw_ostream &OS,
+                                            const MCSpecifierExpr &Expr) const {
+  switch (Expr.getSpecifier()) {
+  case KlaussCPU::S_TPREL:
+    OS << "%tprel(";
+    break;
+  default:
+    llvm_unreachable("unknown KlaussCPU relocation specifier");
+  }
+  printExpr(OS, *Expr.getSubExpr());
+  OS << ')';
 }

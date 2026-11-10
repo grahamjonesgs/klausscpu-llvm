@@ -441,6 +441,13 @@ KlaussCPUInstrInfo::getSerializableMachineMemOperandTargetFlags() const {
   return ArrayRef(TargetFlags);
 }
 
+ArrayRef<std::pair<unsigned, const char *>>
+KlaussCPUInstrInfo::getSerializableDirectMachineOperandTargetFlags() const {
+  static const std::pair<unsigned, const char *> TargetFlags[] = {
+      {KlaussCPUII::MO_TPREL, "klausscpu-tprel"}};
+  return ArrayRef(TargetFlags);
+}
+
 unsigned KlaussCPUInstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   if (MI.isMetaInstruction())
     return 0;

@@ -64,6 +64,14 @@ public:
     getImmOrFixup(MI, OpNo, Op, Fixups, 4, KlaussCPU::FK_KlaussCPU_ABS32,
                   /*PCRel=*/false);
   }
+  // The imm32 of an ADDI or an indexed load / store (simm32_tprel): a
+  // constant, or `%tprel(sym)`, the TLS local-exec offset.
+  void getSImm32TPRelOpValue(const MCInst &MI, unsigned OpNo, APInt &Op,
+                             SmallVectorImpl<MCFixup> &Fixups,
+                             const MCSubtargetInfo &STI) const {
+    getImmOrFixup(MI, OpNo, Op, Fixups, 4, KlaussCPU::FK_KlaussCPU_TPREL32,
+                  /*PCRel=*/false);
+  }
   void getPCRel32OpValue(const MCInst &MI, unsigned OpNo, APInt &Op,
                          SmallVectorImpl<MCFixup> &Fixups,
                          const MCSubtargetInfo &STI) const {
@@ -138,6 +146,21 @@ void KlaussCPUMCCodeEmitter::getImmOrFixup(const MCInst &MI, unsigned OpNo,
     return;
   }
   assert(MO.isExpr() && "operand must be imm or expr");
+  // `%tprel(sym)` is the only expression a TPREL slot (ADDI, indexed loads
+  // and stores) takes.  Of the absolute word-1 slots only SETR's, which
+  // sign-extends the negative offset, takes it; it means nothing as an
+  // address or a PC-relative target.
+  bool TPRel = KlaussCPU::getExprSpecifier(MO.getExpr()) == KlaussCPU::S_TPREL;
+  if (TPRel && Kind == KlaussCPU::FK_KlaussCPU_ABS32 &&
+      MI.getOpcode() == KlaussCPU::SETR) {
+    Kind = KlaussCPU::FK_KlaussCPU_TPREL32;
+  } else if (TPRel != (Kind == KlaussCPU::FK_KlaussCPU_TPREL32)) {
+    Ctx.reportError(MI.getLoc(),
+                    TPRel ? "%tprel is not allowed in this operand"
+                          : "operand must be a constant or %tprel(symbol)");
+    Op = 0;
+    return;
+  }
   Fixups.push_back(
       MCFixup::create(Offset, MO.getExpr(), MCFixupKind(Kind), PCRel));
   Op = 0;

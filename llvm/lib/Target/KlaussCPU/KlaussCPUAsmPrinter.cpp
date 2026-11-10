@@ -73,6 +73,9 @@ static MCOperand lowerMachineOperand(const MachineOperand &MO,
     if (int64_t Off = MO.getOffset())
       Sym = MCBinaryExpr::createAdd(
           Sym, MCConstantExpr::create(Off, AP.OutContext), AP.OutContext);
+    // A TLS variable's offset from the thread pointer: `%tprel(sym+off)`.
+    if (MO.getTargetFlags() == KlaussCPUII::MO_TPREL)
+      Sym = MCSpecifierExpr::create(Sym, KlaussCPU::S_TPREL, AP.OutContext);
     return MCOperand::createExpr(Sym);
   }
 

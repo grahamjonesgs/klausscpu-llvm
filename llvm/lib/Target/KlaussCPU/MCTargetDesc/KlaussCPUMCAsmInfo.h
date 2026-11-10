@@ -18,6 +18,10 @@ class KlaussCPUMCAsmInfo : public MCAsmInfoELF {
 public:
   explicit KlaussCPUMCAsmInfo(const Triple &TheTriple,
                                const MCTargetOptions &Options);
+
+  // `%tprel(expr)` (KlaussCPU::S_TPREL).
+  void printSpecifierExpr(raw_ostream &OS,
+                          const MCSpecifierExpr &Expr) const override;
 };
 
 } // namespace llvm

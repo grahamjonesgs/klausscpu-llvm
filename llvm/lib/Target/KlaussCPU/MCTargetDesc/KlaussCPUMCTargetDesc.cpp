@@ -20,6 +20,7 @@
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCELFObjectWriter.h"
 #include "llvm/MC/MCELFStreamer.h"
+#include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrAnalysis.h"
 #include "llvm/MC/MCInstrInfo.h"
@@ -117,6 +118,23 @@ std::optional<unsigned> KlaussCPU::lookupSysReg(StringRef Name) {
     if (Name.equals_insensitive(E.Name))
       return E.Num;
   return std::nullopt;
+}
+
+uint16_t KlaussCPU::getExprSpecifier(const MCExpr *Expr) {
+  switch (Expr->getKind()) {
+  case MCExpr::Specifier:
+    return cast<MCSpecifierExpr>(Expr)->getSpecifier();
+  case MCExpr::Unary:
+    return getExprSpecifier(cast<MCUnaryExpr>(Expr)->getSubExpr());
+  case MCExpr::Binary: {
+    const auto *BE = cast<MCBinaryExpr>(Expr);
+    if (uint16_t S = getExprSpecifier(BE->getLHS()))
+      return S;
+    return getExprSpecifier(BE->getRHS());
+  }
+  default:
+    return S_None;
+  }
 }
 
 // A/B switches for the ISA v3 short forms, on by default in every processor.

@@ -109,6 +109,14 @@ public:
   ArrayRef<std::pair<MachineMemOperand::Flags, const char *>>
   getSerializableMachineMemOperandTargetFlags() const override;
 
+  // MO_TPREL (`klausscpu-tprel` in MIR).
+  std::pair<unsigned, unsigned>
+  decomposeMachineOperandsTargetFlags(unsigned TF) const override {
+    return std::make_pair(TF, 0u);
+  }
+  ArrayRef<std::pair<unsigned, const char *>>
+  getSerializableDirectMachineOperandTargetFlags() const override;
+
   // Size in bytes as emitted: the 1-word short form where the AsmPrinter
   // will compress the instruction (a call or tail call to a symbol, a
   // literal immediate in short reach).  An estimate for the MachineOutliner;

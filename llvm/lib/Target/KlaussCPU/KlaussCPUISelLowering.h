@@ -28,6 +28,10 @@ enum NodeType : unsigned {
   LEAPC,    // materialise a global address via LEAPC (PIC mode)
             //   (i64) = LEAPC (TargetGlobalAddress/TargetExternalSymbol/...)
             // Selected to LEAPC by a pattern.  Same wrapper as ADDR.
+  READ_TP,  // (i64) = READ_TP: the thread pointer, TP (SR 7).  MFSR_TP.
+  TPREL,    // (i64) = TPREL (TargetGlobalTLSAddress, MO_TPREL): a TLS
+            // variable's offset from TP, `%tprel(sym)`.  Folded into the
+            // ADDI or indexed load / store that adds it to TP, else SETR.
   SELECT_CC, // (lhs:i64, rhs:i64, cc:CondCode, trueV:i64, falseV:i64) -> i64
             // Selected to SELECT_CC_RR/RI, then expanded to compare +
             // conditional jump + PHI by EmitInstrWithCustomInserter.
@@ -176,6 +180,7 @@ private:
       const MachineFunction &MF) const;
 
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerExternalSymbol(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerJumpTable(SDValue Op, SelectionDAG &DAG) const;

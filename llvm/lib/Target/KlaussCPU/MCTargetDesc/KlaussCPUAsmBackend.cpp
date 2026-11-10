@@ -32,6 +32,11 @@
 //     PCREL18: a LEAPC.S out of range or not resolvable in-section is
 //     RELAXED to the 2-word LEAPC (PCREL32).
 //
+//   FK_KlaussCPU_TPREL32 — `%tprel(sym)`, the offset of TLS symbol sym from
+//     the thread pointer, in the word-1 slot of an ADDI, an indexed load /
+//     store or a SETR(U).  Always R_KLAUSSCPU_TPREL32: only the linker knows
+//     the TLS layout.
+//
 //   FK_Data_{1,2,4,8} — data directives.  4- and 8-byte data have absolute
 //     (ABS32/ABS64) and PC-relative (PC32/PC64, no instruction +4) relocations;
 //     1- and 2-byte data must resolve at assembly time.
@@ -51,6 +56,8 @@
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCSubtargetInfo.h"
+#include "llvm/MC/MCSectionELF.h"
+#include "llvm/MC/MCSymbolELF.h"
 #include "llvm/MC/MCValue.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/EndianStream.h"
@@ -74,6 +81,34 @@ public:
 
   unsigned getRelocType(const MCFixup &Fixup, const MCValue &Target,
                         bool IsPCRel) const override {
+    // `%tprel(sym)`: TLS local exec, the only TLS model (static executables;
+    // KlaussCPUISelLowering lowers every TLS access this way).  The encoder
+    // gives it FK_KlaussCPU_TPREL32 in an instruction; data has no TP-relative
+    // relocation.
+    if (Target.getSpecifier() == KlaussCPU::S_TPREL) {
+      if (unsigned(Fixup.getKind()) != KlaussCPU::FK_KlaussCPU_TPREL32 ||
+          IsPCRel) {
+        reportError(Fixup.getLoc(), "%tprel is only allowed as the immediate "
+                                    "of addi, setr or an indexed load / store");
+        return ELF::R_KLAUSSCPU_NONE;
+      }
+      if (auto *SA = const_cast<MCSymbol *>(Target.getAddSym())) {
+        if (SA->isInSection() &&
+            !(static_cast<const MCSectionELF &>(SA->getSection()).getFlags() &
+              ELF::SHF_TLS)) {
+          reportError(Fixup.getLoc(), "%tprel of '" + SA->getName() +
+                                          "', which is not in a TLS section");
+          return ELF::R_KLAUSSCPU_NONE;
+        }
+        static_cast<MCSymbolELF *>(SA)->setType(ELF::STT_TLS);
+      }
+      return ELF::R_KLAUSSCPU_TPREL32;
+    }
+    if (unsigned(Fixup.getKind()) == KlaussCPU::FK_KlaussCPU_TPREL32) {
+      reportError(Fixup.getLoc(),
+                  "operand must be a constant or %tprel(symbol)");
+      return ELF::R_KLAUSSCPU_NONE;
+    }
     switch (Fixup.getKind()) {
     case FK_Data_4:
       // A cross-section symbol difference (A - B) reaches us as a PC-relative
@@ -132,6 +167,7 @@ public:
         {"FK_KlaussCPU_PCREL13",   8,         13,      0},
         {"FK_KlaussCPU_CALL18",    0,         18,      0},
         {"FK_KlaussCPU_PCREL16",   0,         20,      0},
+        {"FK_KlaussCPU_TPREL32",   0,         32,      0},
     };
     if (Kind >= FirstTargetFixupKind &&
         Kind < FirstTargetFixupKind + KlaussCPU::NumTargetFixupKinds)
@@ -193,6 +229,14 @@ public:
       return;
     }
 
+    // FK_KlaussCPU_TPREL32: an offset from the thread pointer, which only the
+    // linker knows.  `%tprel(<constant>)` would "resolve" to the constant.
+    if (Kind == MCFixupKind(KlaussCPU::FK_KlaussCPU_TPREL32) && IsResolved) {
+      getContext().reportError(Fixup.getLoc(),
+                               "%tprel needs a TLS symbol, not a constant");
+      return;
+    }
+
     // A PC-relative relocation already subtracts P; it cannot subtract a
     // second symbol (`leapc r1, ext - label`).
     if (!IsResolved && Fixup.isPCRel() && Target.getSubSym()) {
@@ -228,6 +272,7 @@ public:
     // slot (CALL/SETR(U)) or 4-byte data reference (EK_Custom32 jump tables).
     case FK_Data_4:
     case KlaussCPU::FK_KlaussCPU_ABS32:
+    case KlaussCPU::FK_KlaussCPU_TPREL32:
       NumBytes = 4;
       break;
     // FK_Data_8: 8-byte pointer field in .rodata/.data (memp_pools[], struct

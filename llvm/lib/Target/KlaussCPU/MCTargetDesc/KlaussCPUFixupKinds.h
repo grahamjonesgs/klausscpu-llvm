@@ -11,6 +11,9 @@
 // FK_KlaussCPU_PCREL13 — simm13 word displacement in word0[20:8] (FBR).
 // FK_KlaussCPU_PCREL16 — simm16 byte displacement in word0[19:12] (high
 //                         byte) and word0[7:0] (low byte) of a LEAPC.S.
+// FK_KlaussCPU_TPREL32 — 32-bit signed offset of a TLS symbol from the thread
+//                         pointer (`%tprel(sym)`), word 1 of an 8-byte
+//                         ADDI / LDIDX* / STIDX* / SETR: R_KLAUSSCPU_TPREL32.
 //
 //===----------------------------------------------------------------------===//
 
@@ -45,7 +48,11 @@ enum Fixups {
   // assembly time only, like PCREL18: a LEAPC.S whose target is out of range
   // or not in its section is relaxed to the 2-word LEAPC (PCREL32).
   FK_KlaussCPU_PCREL16,
-  NumTargetFixupKinds = FK_KlaussCPU_PCREL16 + 1 - FirstTargetFixupKind,
+  // TLS local exec: `%tprel(sym)` in the word-1 slot of an ADDI, an indexed
+  // load / store or a SETR.  Never resolved at assembly time (the offset from
+  // the thread pointer is known only to the linker): R_KLAUSSCPU_TPREL32.
+  FK_KlaussCPU_TPREL32,
+  NumTargetFixupKinds = FK_KlaussCPU_TPREL32 + 1 - FirstTargetFixupKind,
 };
 
 } // namespace KlaussCPU
