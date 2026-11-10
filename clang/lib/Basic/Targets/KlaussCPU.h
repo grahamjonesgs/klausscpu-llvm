@@ -36,7 +36,10 @@ public:
     IntMaxType  = SignedLong;
     Int64Type   = SignedLong;
     resetDataLayout();
-    TLSSupported = false;
+    // __thread / _Thread_local for Linux user programs: static executables,
+    // so every access is TLS local exec off TP (KlaussCPUISelLowering).  Bare
+    // metal sets no thread pointer.
+    TLSSupported = Triple.isOSLinux();
     // No hardware FP.
     HasFloat128 = false;
     // Atomics up to 8 bytes are inline: the backend makes their loads and
