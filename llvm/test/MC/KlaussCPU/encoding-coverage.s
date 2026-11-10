@@ -317,6 +317,13 @@
         memget64	r1, r2
 # CHECK: memreadrr r1, r2 # encoding: [0x20,0x01,0x00,0x5b]
         memreadrr	r1, r2
+## LR (klaussCPU mmu): MODE=00 with [12] = 1
+# CHECK: lr64 r1, r2 # encoding: [0x20,0x11,0x00,0x5b]
+        lr64	r1, r2
+# CHECK: lr32 r1, r2 # encoding: [0x20,0x11,0x00,0x5a]
+        lr32	r1, r2
+# CHECK: lr32s r1, r2 # encoding: [0x20,0x11,0x80,0x5a]
+        lr32s	r1, r2
 # CHECK: ldidx8r r1, r2, r3 # encoding: [0x23,0x01,0x60,0x58]
         ldidx8r	r1, r2, r3
 # CHECK: ldidx8sr r1, r2, r3 # encoding: [0x23,0x01,0xe0,0x58]
@@ -389,6 +396,11 @@
         memset64	r1, r2
 # CHECK: memset64rr r1, r2 # encoding: [0x20,0x01,0x00,0x5f]
         memset64rr	r1, r2
+## SC (klaussCPU mmu): rd = result, rs2 [3:0] = data, rs1 [7:4] = address
+# CHECK: sc64 r1, r3, r2 # encoding: [0x23,0x11,0x00,0x5f]
+        sc64	r1, r3, r2
+# CHECK: sc32 r1, r3, r2 # encoding: [0x23,0x11,0x00,0x5e]
+        sc32	r1, r3, r2
 # CHECK: stidx8r r1, r2, r3 # encoding: [0x23,0x01,0x60,0x5c]
         stidx8r	r1, r2, r3
 # CHECK: stidx16r r1, r2, r3 # encoding: [0x23,0x01,0x60,0x5d]
@@ -677,6 +689,28 @@
         di	r3
 # CHECK: ei r4 # encoding: [0x40,0x00,0x07,0x6c]
         ei	r4
+## SYSCALL / MFSR rd, sr / MTSR sr, rs1 (klaussCPU mmu): sr [19:12]
+# CHECK: syscall # encoding: [0x00,0x00,0x08,0x6c]
+        syscall
+# CHECK: mfsr r1, ecause # encoding: [0x00,0x21,0x40,0x6c]
+        mfsr	r1, ecause
+# CHECK: mtsr evec, r2 # encoding: [0x20,0x10,0x60,0x6c]
+        mtsr	evec, r2
+## MPU / TLB SRs and TLB instructions (klaussCPU mmu stages 2/3)
+# CHECK: mfsr r3, mpu_base1 # encoding: [0x00,0x23,0x41,0x6c]
+        mfsr	r3, mpu_base1
+# CHECK: mtsr mpu_limit1, r4 # encoding: [0x40,0x30,0x61,0x6c]
+        mtsr	mpu_limit1, r4
+# CHECK: mtsr tlb_hi, r5 # encoding: [0x50,0x00,0x63,0x6c]
+        mtsr	tlb_hi, r5
+# CHECK: tlbwi # encoding: [0x00,0x00,0x09,0x6c]
+        tlbwi
+# CHECK: tlbr # encoding: [0x00,0x00,0x0a,0x6c]
+        tlbr
+# CHECK: tlbp # encoding: [0x00,0x00,0x0b,0x6c]
+        tlbp
+# CHECK: tlbinv # encoding: [0x00,0x00,0x0c,0x6c]
+        tlbinv
 # CHECK: delayr r2 # encoding: [0x20,0x00,0x05,0x6c]
         delayr	r2
 # CHECK: delayv 1000 # encoding: [0x00,0x00,0x05,0xac,0xe8,0x03,0x00,0x00]
