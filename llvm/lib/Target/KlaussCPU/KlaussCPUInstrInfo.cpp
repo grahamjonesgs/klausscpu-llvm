@@ -444,7 +444,11 @@ KlaussCPUInstrInfo::getSerializableMachineMemOperandTargetFlags() const {
 ArrayRef<std::pair<unsigned, const char *>>
 KlaussCPUInstrInfo::getSerializableDirectMachineOperandTargetFlags() const {
   static const std::pair<unsigned, const char *> TargetFlags[] = {
-      {KlaussCPUII::MO_TPREL, "klausscpu-tprel"}};
+      {KlaussCPUII::MO_TPREL, "klausscpu-tprel"},
+      {KlaussCPUII::MO_GOTPCREL, "klausscpu-gotpcrel"},
+      {KlaussCPUII::MO_PLT, "klausscpu-plt"},
+      {KlaussCPUII::MO_GOTTPREL, "klausscpu-gottprel"},
+      {KlaussCPUII::MO_TLSGD, "klausscpu-tlsgd"}};
   return ArrayRef(TargetFlags);
 }
 

@@ -109,7 +109,8 @@ public:
   ArrayRef<std::pair<MachineMemOperand::Flags, const char *>>
   getSerializableMachineMemOperandTargetFlags() const override;
 
-  // MO_TPREL (`klausscpu-tprel` in MIR).
+  // MO_TPREL, MO_GOTPCREL, ... (`klausscpu-tprel`, `klausscpu-gotpcrel`, ...
+  // in MIR).
   std::pair<unsigned, unsigned>
   decomposeMachineOperandsTargetFlags(unsigned TF) const override {
     return std::make_pair(TF, 0u);

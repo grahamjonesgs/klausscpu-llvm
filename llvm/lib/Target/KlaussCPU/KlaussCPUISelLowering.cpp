@@ -223,7 +223,8 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
 
   // ---- Global addresses / symbols ----
   // Non-PIC: GlobalAddress → ADDR → SETRU (absolute 32-bit address).
-  // PIC:     GlobalAddress → LEAPC → LEAPC insn (PC-relative, PCREL32 fixup).
+  // PIC:     GlobalAddress → LEAPC → LEAPC insn (PC-relative, PCREL32 fixup);
+  //          Linux PIC, a symbol that may be preempted: its GOT entry.
   setOperationAction(ISD::GlobalAddress,  MVT::i64, Custom);
   setOperationAction(ISD::ExternalSymbol, MVT::i64, Custom);
   setOperationAction(ISD::BlockAddress,   MVT::i64, Custom);
@@ -971,11 +972,45 @@ static bool isFoldableSymbolOffset(int64_t Offset) {
   return isUInt<31>(Offset);
 }
 
+bool KlaussCPUTargetLowering::isLinuxPIC() const {
+  const TargetMachine &TM = getTargetMachine();
+  return TM.isPositionIndependent() && TM.getTargetTriple().isOSLinux();
+}
+
+// The 8-byte value in a GOT entry: `leapc rD, %gotpcrel(sym)` (or
+// `%gottprel(sym)`, the TLS offset entry) then `ldidx64 rD, rD, 0`.  The
+// entry does not change once the dynamic linker has filled it (`-z now`),
+// so the load is invariant and dereferenceable: MachineCSE shares it and
+// MachineLICM takes it out of loops.
+SDValue KlaussCPUTargetLowering::getGOTEntry(SDValue TSym, const SDLoc &DL,
+                                             SelectionDAG &DAG) const {
+  MachineFunction &MF = DAG.getMachineFunction();
+  SDValue Entry = DAG.getNode(KlaussCPUISD::LEAPC, DL, MVT::i64, TSym);
+  return DAG.getLoad(MVT::i64, DL, DAG.getEntryNode(), Entry,
+                     MachinePointerInfo::getGOT(MF), Align(8),
+                     MachineMemOperand::MODereferenceable |
+                         MachineMemOperand::MOInvariant);
+}
+
 SDValue KlaussCPUTargetLowering::LowerGlobalAddress(SDValue Op,
                                                       SelectionDAG &DAG) const {
   auto *N = cast<GlobalAddressSDNode>(Op);
   SDLoc DL(N);
   int64_t Offset = N->getOffset();
+  // Linux PIC: a symbol another module may define or preempt comes from its
+  // GOT entry, `%gotpcrel(sym)` with no addend (the entry is the symbol's);
+  // an offset is added after the load, where an access folds it.
+  if (isLinuxPIC() &&
+      !getTargetMachine().shouldAssumeDSOLocal(N->getGlobal())) {
+    SDValue Addr =
+        getGOTEntry(DAG.getTargetGlobalAddress(N->getGlobal(), DL, MVT::i64, 0,
+                                               KlaussCPUII::MO_GOTPCREL),
+                    DL, DAG);
+    if (Offset == 0)
+      return Addr;
+    return DAG.getNode(ISD::ADD, DL, MVT::i64, Addr,
+                       DAG.getSignedConstant(Offset, DL, MVT::i64));
+  }
   bool Fold = isFoldableSymbolOffset(Offset);
   SDValue TGA = DAG.getTargetGlobalAddress(N->getGlobal(), DL, MVT::i64,
                                            Fold ? Offset : 0);
@@ -1031,6 +1066,12 @@ KlaussCPUTargetLowering::LowerGlobalTLSAddress(SDValue Op,
 SDValue KlaussCPUTargetLowering::LowerExternalSymbol(SDValue Op,
                                                        SelectionDAG &DAG) const {
   auto *N = cast<ExternalSymbolSDNode>(Op);
+  // Linux PIC: a symbol the backend names itself (a libcall such as memcpy)
+  // may be defined in another module, so its address is its GOT entry.
+  if (isLinuxPIC())
+    return getGOTEntry(DAG.getTargetExternalSymbol(N->getSymbol(), MVT::i64,
+                                                   KlaussCPUII::MO_GOTPCREL),
+                       SDLoc(N), DAG);
   SDValue TES = DAG.getTargetExternalSymbol(N->getSymbol(), MVT::i64);
   unsigned WrapOp = getTargetMachine().isPositionIndependent()
                         ? KlaussCPUISD::LEAPC : KlaussCPUISD::ADDR;
@@ -1681,10 +1722,24 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
   // ---- Resolve callee address --------------------------------------------
   // Use CallVT (i64) so the callee node is typed as a GPR-width value.
   // The CALL_I instruction encoder uses only bits [31:0] of the address.
+  // Linux PIC: a direct call is the short `callrel sym` (R_KLAUSSCPU_CALL18),
+  // which lld sends to the PLT entry of a callee that may be preempted; the
+  // 2-word form (short calls off) says so itself, `callrel %plt(sym)`
+  // (R_KLAUSSCPU_PLT32), as does `tail %plt(sym)`.
+  unsigned CalleeFlags = KlaussCPUII::MO_None;
+  if (isLinuxPIC() && !Subtarget.hasShortCalls()) {
+    if (auto *GA = dyn_cast<GlobalAddressSDNode>(Callee)) {
+      if (!getTargetMachine().shouldAssumeDSOLocal(GA->getGlobal()))
+        CalleeFlags = KlaussCPUII::MO_PLT;
+    } else if (isa<ExternalSymbolSDNode>(Callee)) {
+      CalleeFlags = KlaussCPUII::MO_PLT;
+    }
+  }
   if (auto *GA = dyn_cast<GlobalAddressSDNode>(Callee))
-    Callee = DAG.getTargetGlobalAddress(GA->getGlobal(), DL, CallVT, 0);
+    Callee =
+        DAG.getTargetGlobalAddress(GA->getGlobal(), DL, CallVT, 0, CalleeFlags);
   else if (auto *ES = dyn_cast<ExternalSymbolSDNode>(Callee))
-    Callee = DAG.getTargetExternalSymbol(ES->getSymbol(), CallVT);
+    Callee = DAG.getTargetExternalSymbol(ES->getSymbol(), CallVT, CalleeFlags);
 
   // ---- Build the call node -----------------------------------------------
   SmallVector<SDValue, 16> Ops;

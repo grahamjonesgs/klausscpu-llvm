@@ -50,6 +50,29 @@ public:
 
 char KlaussCPUAsmPrinter::ID = 0;
 
+// The relocation specifier of an operand's target flags (MO_TPREL ->
+// `%tprel(...)`, MO_GOTPCREL -> `%gotpcrel(...)`, ...), or the bare
+// expression.  The flags and the specifiers have the same values.
+static const MCExpr *addSpecifier(const MCExpr *Sym, unsigned TF,
+                                  MCContext &Ctx) {
+  switch (TF) {
+  case KlaussCPUII::MO_None:
+    return Sym;
+  case KlaussCPUII::MO_TPREL:
+    return MCSpecifierExpr::create(Sym, KlaussCPU::S_TPREL, Ctx);
+  case KlaussCPUII::MO_GOTPCREL:
+    return MCSpecifierExpr::create(Sym, KlaussCPU::S_GOTPCREL, Ctx);
+  case KlaussCPUII::MO_PLT:
+    return MCSpecifierExpr::create(Sym, KlaussCPU::S_PLT, Ctx);
+  case KlaussCPUII::MO_GOTTPREL:
+    return MCSpecifierExpr::create(Sym, KlaussCPU::S_GOTTPREL, Ctx);
+  case KlaussCPUII::MO_TLSGD:
+    return MCSpecifierExpr::create(Sym, KlaussCPU::S_TLSGD, Ctx);
+  default:
+    llvm_unreachable("unknown KlaussCPU operand target flag");
+  }
+}
+
 // Lower a single MachineOperand to an MCOperand.
 // Returns an invalid MCOperand for implicit register operands (caller skips them).
 static MCOperand lowerMachineOperand(const MachineOperand &MO,
@@ -68,20 +91,31 @@ static MCOperand lowerMachineOperand(const MachineOperand &MO,
         MCSymbolRefExpr::create(MO.getMBB()->getSymbol(), AP.OutContext));
 
   case MachineOperand::MO_GlobalAddress: {
-    const MCExpr *Sym =
-        MCSymbolRefExpr::create(AP.getSymbol(MO.getGlobal()), AP.OutContext);
+    // Linux PIC: a dso_local definition that a shared library would export
+    // (clang's -fPIC functions) is reached through its local alias
+    // `.Lfoo$local`, as on x86-64 and RISC-V: the codegen relied on it being
+    // local, which a reference to the preemptible `foo` would not be.  Other
+    // triples have no shared objects and keep the symbol itself.
+    const TargetMachine &TM = AP.TM;
+    MCSymbol *GVSym =
+        TM.isPositionIndependent() && TM.getTargetTriple().isOSLinux()
+            ? AP.getSymbolPreferLocal(*MO.getGlobal())
+            : AP.getSymbol(MO.getGlobal());
+    const MCExpr *Sym = MCSymbolRefExpr::create(GVSym, AP.OutContext);
     if (int64_t Off = MO.getOffset())
       Sym = MCBinaryExpr::createAdd(
           Sym, MCConstantExpr::create(Off, AP.OutContext), AP.OutContext);
-    // A TLS variable's offset from the thread pointer: `%tprel(sym+off)`.
-    if (MO.getTargetFlags() == KlaussCPUII::MO_TPREL)
-      Sym = MCSpecifierExpr::create(Sym, KlaussCPU::S_TPREL, AP.OutContext);
-    return MCOperand::createExpr(Sym);
+    // A TLS variable's offset from the thread pointer, `%tprel(sym+off)`;
+    // under Linux PIC a GOT, PLT or TLS GOT reference, `%gotpcrel(sym)`.
+    return MCOperand::createExpr(
+        addSpecifier(Sym, MO.getTargetFlags(), AP.OutContext));
   }
 
   case MachineOperand::MO_ExternalSymbol:
-    return MCOperand::createExpr(MCSymbolRefExpr::create(
-        AP.GetExternalSymbolSymbol(MO.getSymbolName()), AP.OutContext));
+    return MCOperand::createExpr(addSpecifier(
+        MCSymbolRefExpr::create(AP.GetExternalSymbolSymbol(MO.getSymbolName()),
+                                AP.OutContext),
+        MO.getTargetFlags(), AP.OutContext));
 
   case MachineOperand::MO_BlockAddress: {
     // blockaddress(@f, %bb) — GNU computed goto (`&&label`).

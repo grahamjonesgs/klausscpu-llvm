@@ -201,6 +201,9 @@ private:
   SDValue LowerATOMIC_FENCE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
+  // Linux PIC: the address in Sym's GOT entry (LEAPC %gotpcrel(sym) or
+  // %gottprel(sym), then an invariant 8-byte load).
+  SDValue getGOTEntry(SDValue TSym, const SDLoc &DL, SelectionDAG &DAG) const;
 
 public:
   // Inline assembly constraint support.
@@ -222,6 +225,12 @@ public:
   // would make BR_JT add the table base to each entry under -fPIC, jumping
   // to table+target.
   bool isJumpTableRelative() const override { return false; }
+
+  // Linux PIC code (ABI.md "Dynamic linking"): a symbol that may be
+  // preempted is reached through the GOT, TLS uses the dynamic models and
+  // jump tables are table-relative.  Every other triple keeps PIC code in
+  // which every symbol is local.
+  bool isLinuxPIC() const;
 
   // EK_Custom32: emit each entry as a 4-byte absolute target address.
   // The assembler emits R_KLAUSSCPU_ABS32 for each entry; the linker fills
