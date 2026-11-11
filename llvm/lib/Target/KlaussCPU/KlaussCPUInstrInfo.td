@@ -1894,6 +1894,17 @@ def : MnemonicAlias<"lr_w_s", "lr32s">;
 def : MnemonicAlias<"sc_d",   "sc64">;
 def : MnemonicAlias<"sc_w",   "sc32">;
 
+// DCBZ rs1 (klaussCPU HW_PERF_PLAN.md §1): class 7 MODE=00 with [13] = 1.
+// Zeroes the whole D-cache line containing rs1 (address aligned down to the
+// CACHE_INFO line size) without fetching it; checked as a store, never
+// misaligned, ACCESS_STORE on MMIO.  Assembler/disassembler only: no
+// codegen pattern (the kernel and libc call it explicitly).
+let hasSideEffects = 1, mayStore = 1, SchedRW = [WriteStore] in
+def DCBZ : KCInst32<0x5F002000, (outs), (ins GPR:$rs1), "dcbz\t$rs1"> {
+  bits<4> rs1;
+  let Inst{7-4} = rs1;
+}
+
 //===----------------------------------------------------------------------===//
 // MMU stages 2 and 3 (klaussCPU branch `mmu`; MMU_PLAN.md §10, §11.3,
 // ISA_ENCODING_V2_MAP §10)
