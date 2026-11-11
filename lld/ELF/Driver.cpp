@@ -1369,8 +1369,9 @@ static SmallVector<StringRef, 0> getSymbolOrderingFile(Ctx &ctx,
 
 static bool getIsRela(Ctx &ctx, opt::InputArgList &args) {
   // The psABI specifies the default relocation entry format.
-  bool rela = is_contained({EM_AARCH64, EM_AMDGPU, EM_HEXAGON, EM_LOONGARCH,
-                            EM_PPC, EM_PPC64, EM_RISCV, EM_S390, EM_X86_64},
+  bool rela = is_contained({EM_AARCH64, EM_AMDGPU, EM_HEXAGON, EM_KLAUSSCPU,
+                            EM_LOONGARCH, EM_PPC, EM_PPC64, EM_RISCV, EM_S390,
+                            EM_X86_64},
                            ctx.arg.emachine);
   // If -z rel or -z rela is specified, use the last option.
   for (auto *arg : args.filtered(OPT_z)) {
@@ -2075,6 +2076,11 @@ static void setConfigs(Ctx &ctx, opt::InputArgList &args) {
   ctx.arg.endianness = ctx.arg.isLE ? endianness::little : endianness::big;
   ctx.arg.isMips64EL = (k == ELF64LEKind && m == EM_MIPS);
   ctx.arg.isPic = ctx.arg.pie || ctx.arg.shared;
+  // KlaussCPU has no lazy binding (no PLT header; musl binds every
+  // JUMP_SLOT at load), so its shared libraries and PIE default to -z now,
+  // which also puts .got.plt in PT_GNU_RELRO.
+  if (m == EM_KLAUSSCPU && ctx.arg.isPic)
+    ctx.arg.zNow = getZFlag(args, "now", "lazy", true);
   ctx.arg.picThunk = args.hasArg(OPT_pic_veneer, ctx.arg.isPic);
   ctx.arg.wordsize = ctx.arg.is64 ? 8 : 4;
 

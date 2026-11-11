@@ -2426,6 +2426,11 @@ PltSection::PltSection(Ctx &ctx)
   // modify the instructions in the PLT entries.
   if (ctx.arg.emachine == EM_SPARCV9)
     this->flags |= SHF_WRITE;
+
+  // KlaussCPU's PLT has no header: sh_entsize tells consumers (lldb) the
+  // entry size, so that they make no PLT0.
+  if (ctx.arg.emachine == EM_KLAUSSCPU)
+    entsize = ctx.target->pltEntrySize;
 }
 
 void PltSection::writeTo(uint8_t *buf) {

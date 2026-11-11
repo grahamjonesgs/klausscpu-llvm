@@ -1584,7 +1584,10 @@ void HexagonThunk::addSymbols(ThunkSection &isec) {
 
 // KlaussCPU Target Thunks
 void KlaussCPUThunk::writeTo(uint8_t *buf) {
-  uint64_t s = destination.getVA(ctx, addend);
+  // A preemptible callee is reached through its PLT entry.
+  uint64_t s = destination.isInPlt(ctx)
+                   ? destination.getPltVA(ctx) + addend
+                   : destination.getVA(ctx, addend);
   uint64_t p = getThunkTargetSym()->getVA(ctx);
   // JMPREL (pipeline_core.sv U_JMP, brel: target = PC + imm32 of word 1).
   write32(ctx, buf, KlaussCPUABI::JmpRelWord);
