@@ -1385,7 +1385,7 @@ void elf::postScanRelocations(Ctx &ctx) {
 
       // If the symbol is preemptible we need the dynamic linker to write
       // the offset too.
-      uint64_t offsetOff = off + ctx.arg.wordsize;
+      uint64_t offsetOff = off + ctx.target->gotEntrySize;
       if (sym.isPreemptible)
         ctx.mainPart->relaDyn->addSymbolReloc(ctx.target->tlsOffsetRel, *got,
                                               offsetOff, sym);
