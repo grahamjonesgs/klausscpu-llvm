@@ -1385,7 +1385,11 @@ void elf::postScanRelocations(Ctx &ctx) {
 
       // If the symbol is preemptible we need the dynamic linker to write
       // the offset too.
-      uint64_t offsetOff = off + ctx.target->gotEntrySize;
+      // KlaussCPU (LP64 in ELF32) has 8-byte GOT entries, so the offset is a
+      // whole entry further; other targets keep upstream's wordsize.
+      uint64_t offsetOff =
+          off + (ctx.arg.emachine == EM_KLAUSSCPU ? ctx.target->gotEntrySize
+                                                  : ctx.arg.wordsize);
       if (sym.isPreemptible)
         ctx.mainPart->relaDyn->addSymbolReloc(ctx.target->tlsOffsetRel, *got,
                                               offsetOff, sym);
