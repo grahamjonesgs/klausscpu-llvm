@@ -204,6 +204,7 @@ private:
   // Linux PIC: the address in Sym's GOT entry (LEAPC %gotpcrel(sym) or
   // %gottprel(sym), then an invariant 8-byte load).
   SDValue getGOTEntry(SDValue TSym, const SDLoc &DL, SelectionDAG &DAG) const;
+  SDValue getDynamicTLSAddr(GlobalAddressSDNode *N, SelectionDAG &DAG) const;
 
 public:
   // Inline assembly constraint support.

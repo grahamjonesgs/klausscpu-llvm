@@ -1764,6 +1764,9 @@ foreach sym = [tglobaladdr, texternalsym, tblockaddress, tjumptable] in {
 def : Pat<(KlaussCPUAddr sym:$sym), (SETRU sym:$sym)>;
 def : Pat<(KlaussCPULeaPC sym:$sym), (LEAPC sym:$sym)>;
 }
+// Linux PIC TLS: `leapc rT, %gottprel(var)` (initial exec, the GOT entry of
+// its TP offset) and `leapc r0, %tlsgd(var)` (general dynamic, its GOT pair).
+def : Pat<(KlaussCPULeaPC tglobaltlsaddr:$sym), (LEAPC tglobaltlsaddr:$sym)>;
 
 //===----------------------------------------------------------------------===//
 // Special / system

@@ -229,8 +229,8 @@ KlaussCPUTargetLowering::KlaussCPUTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::ExternalSymbol, MVT::i64, Custom);
   setOperationAction(ISD::BlockAddress,   MVT::i64, Custom);
   setOperationAction(ISD::JumpTable,      MVT::i64, Custom);
-  // TLS: TP + %tprel(sym), local exec whatever the model
-  // (LowerGlobalTLSAddress).
+  // TLS: TP + %tprel(sym), local exec, except in Linux PIC code, which uses
+  // the model getTLSModel picks (LowerGlobalTLSAddress).
   setOperationAction(ISD::GlobalTLSAddress, MVT::i64, Custom);
 
   // ---- Branch/control ----
@@ -1021,19 +1021,29 @@ SDValue KlaussCPUTargetLowering::LowerGlobalAddress(SDValue Op,
   return wrapSymbolWithOffset(DAG, DL, WrapOp, TGA, Fold ? 0 : Offset);
 }
 
-// Thread-local storage.  KlaussCPU Linux user programs are static executables
-// (no shared libraries, no dynamic linker), so every TLS access, whatever
-// model the front end chose (general dynamic, local dynamic, initial exec),
-// is local exec: the variable is at a link-time constant offset from the
-// thread pointer, TP (SR 7; musl keeps it pointing at the thread's pthread
-// structure, the static TLS block just below it: TLS variant II, as on
-// x86-64).  The address is
+// Thread-local storage (ABI.md "Thread-local storage", "Dynamic linking").
+// Code that is not PIC can only go into a static executable or a PIE whose
+// TLS is all its own, so every TLS access there, whatever model the front
+// end chose, is local exec: the variable is at a link-time constant offset
+// from the thread pointer, TP (SR 7; musl keeps it pointing at the thread's
+// pthread structure, the static TLS block just below it: TLS variant II, as
+// on x86-64).  The address is
 //   mfsr  rd, tp                  (MFSR_TP)
 //   addi  rd, rd, %tprel(sym+off) (R_KLAUSSCPU_TPREL32, a negative offset)
 // and an access folds the add into its indexed load / store
 // (`ldidx32 rd, tp_reg, %tprel(sym)`).  TP is constant for the thread that
 // runs the function, so the read is side-effect free and the scheduler,
 // MachineCSE and MachineLICM may share or hoist it.
+//
+// PIC code takes getTLSModel's model: local exec or initial exec in a PIE,
+// general dynamic in a shared library (local dynamic is lowered as general
+// dynamic).  Initial exec loads the TP offset from the GOT:
+//   leapc   rT, %gottprel(sym)    (R_KLAUSSCPU_TLS_GOTTPREL32)
+//   ldidx64 rT, rT, 0             (invariant)
+//   mfsr    rD, tp
+//   addr    rD, rD, rT            (or the r + r index of the access)
+// General dynamic calls musl's __tls_get_addr with the GOT pair's address
+// (getDynamicTLSAddr).
 SDValue
 KlaussCPUTargetLowering::LowerGlobalTLSAddress(SDValue Op,
                                                SelectionDAG &DAG) const {
@@ -1047,6 +1057,25 @@ KlaussCPUTargetLowering::LowerGlobalTLSAddress(SDValue Op,
     report_fatal_error("thread-local storage is supported on KlaussCPU only "
                        "for Linux (klausscpu-*-linux-*)");
   int64_t Offset = N->getOffset();
+  TLSModel::Model Model = getTargetMachine().isPositionIndependent()
+                              ? getTargetMachine().getTLSModel(N->getGlobal())
+                              : TLSModel::LocalExec;
+  if (Model != TLSModel::LocalExec) {
+    SDValue Addr;
+    if (Model == TLSModel::InitialExec)
+      Addr = DAG.getNode(
+          ISD::ADD, DL, MVT::i64,
+          DAG.getNode(KlaussCPUISD::READ_TP, DL, MVT::i64),
+          getGOTEntry(DAG.getTargetGlobalAddress(N->getGlobal(), DL, MVT::i64,
+                                                 0, KlaussCPUII::MO_GOTTPREL),
+                      DL, DAG));
+    else
+      Addr = getDynamicTLSAddr(N, DAG);
+    if (Offset == 0)
+      return Addr;
+    return DAG.getNode(ISD::ADD, DL, MVT::i64, Addr,
+                       DAG.getSignedConstant(Offset, DL, MVT::i64));
+  }
   // The TP offset of a TLS block is a small negative number; the addend of
   // R_KLAUSSCPU_TPREL32 is a signed 32-bit r_addend.
   bool Fold = isInt<32>(Offset);
@@ -1061,6 +1090,29 @@ KlaussCPUTargetLowering::LowerGlobalTLSAddress(SDValue Op,
     return Addr;
   return DAG.getNode(ISD::ADD, DL, MVT::i64, Addr,
                      DAG.getSignedConstant(Offset, DL, MVT::i64));
+}
+
+// General dynamic (and local dynamic): `leapc r0, %tlsgd(sym)`, the
+// address of sym's GOT pair {module ID, offset}, then an ordinary C call of
+// musl's `void *__tls_get_addr(tls_mod_off_t *)`, which returns the address
+// in R12 (as RISC-V's getDynamicTLSAddr).
+SDValue KlaussCPUTargetLowering::getDynamicTLSAddr(GlobalAddressSDNode *N,
+                                                   SelectionDAG &DAG) const {
+  SDLoc DL(N);
+  Type *CallTy = Type::getInt64Ty(*DAG.getContext());
+  SDValue Pair =
+      DAG.getNode(KlaussCPUISD::LEAPC, DL, MVT::i64,
+                  DAG.getTargetGlobalAddress(N->getGlobal(), DL, MVT::i64, 0,
+                                             KlaussCPUII::MO_TLSGD));
+  ArgListTy Args;
+  Args.emplace_back(Pair, CallTy);
+  TargetLowering::CallLoweringInfo CLI(DAG);
+  CLI.setDebugLoc(DL)
+      .setChain(DAG.getEntryNode())
+      .setLibCallee(CallingConv::C, CallTy,
+                    DAG.getExternalSymbol("__tls_get_addr", MVT::i64),
+                    std::move(Args));
+  return LowerCallTo(CLI).first;
 }
 
 SDValue KlaussCPUTargetLowering::LowerExternalSymbol(SDValue Op,
