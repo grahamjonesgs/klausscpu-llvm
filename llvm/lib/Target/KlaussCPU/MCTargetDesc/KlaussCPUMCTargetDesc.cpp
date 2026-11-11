@@ -120,6 +120,44 @@ std::optional<unsigned> KlaussCPU::lookupSysReg(StringRef Name) {
   return std::nullopt;
 }
 
+StringRef KlaussCPU::getSpecifierName(uint16_t S) {
+  switch (S) {
+  case S_TPREL:
+    return "tprel";
+  case S_GOTPCREL:
+    return "gotpcrel";
+  case S_PLT:
+    return "plt";
+  case S_GOTTPREL:
+    return "gottprel";
+  case S_TLSGD:
+    return "tlsgd";
+  default:
+    return "";
+  }
+}
+
+uint16_t KlaussCPU::parseSpecifierName(StringRef Name) {
+  for (uint16_t S : {S_TPREL, S_GOTPCREL, S_PLT, S_GOTTPREL, S_TLSGD})
+    if (Name.equals_insensitive(getSpecifierName(S)))
+      return S;
+  return S_None;
+}
+
+bool KlaussCPU::isSpecifierAllowed(unsigned Opcode, uint16_t S) {
+  switch (S) {
+  case S_GOTPCREL:
+  case S_GOTTPREL:
+  case S_TLSGD:
+    return Opcode == KlaussCPU::LEAPC;
+  case S_PLT:
+    return Opcode == KlaussCPU::CALLREL || Opcode == KlaussCPU::JMPREL ||
+           Opcode == KlaussCPU::TAILREL;
+  default:
+    return false;
+  }
+}
+
 uint16_t KlaussCPU::getExprSpecifier(const MCExpr *Expr) {
   switch (Expr->getKind()) {
   case MCExpr::Specifier:

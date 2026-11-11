@@ -1,0 +1,55 @@
+## Test that llvm-readobj/llvm-readelf shows proper relocation type
+## names and values for the KlaussCPU target (KlaussCPU.def, ABI.md).
+
+# RUN: yaml2obj %s -o %t-klausscpu.o
+# RUN: llvm-readobj -r --expand-relocs %t-klausscpu.o | FileCheck %s
+
+# CHECK: Type: R_KLAUSSCPU_NONE (0)
+# CHECK: Type: R_KLAUSSCPU_ABS32 (1)
+# CHECK: Type: R_KLAUSSCPU_ABS64 (2)
+# CHECK: Type: R_KLAUSSCPU_PCREL32 (3)
+# CHECK: Type: R_KLAUSSCPU_PC32 (4)
+# CHECK: Type: R_KLAUSSCPU_PC64 (5)
+# CHECK: Type: R_KLAUSSCPU_CALL18 (6)
+# CHECK: Type: R_KLAUSSCPU_TPREL32 (7)
+# CHECK: Type: R_KLAUSSCPU_GOTPCREL32 (8)
+# CHECK: Type: R_KLAUSSCPU_PLT32 (9)
+# CHECK: Type: R_KLAUSSCPU_TLS_GOTTPREL32 (10)
+# CHECK: Type: R_KLAUSSCPU_TLS_GD32 (11)
+# CHECK: Type: R_KLAUSSCPU_COPY (12)
+# CHECK: Type: R_KLAUSSCPU_GLOB_DAT (13)
+# CHECK: Type: R_KLAUSSCPU_JUMP_SLOT (14)
+# CHECK: Type: R_KLAUSSCPU_RELATIVE (15)
+# CHECK: Type: R_KLAUSSCPU_TPOFF64 (16)
+# CHECK: Type: R_KLAUSSCPU_DTPMOD64 (17)
+# CHECK: Type: R_KLAUSSCPU_DTPOFF64 (18)
+
+--- !ELF
+FileHeader:
+  Class:   ELFCLASS32
+  Data:    ELFDATA2LSB
+  Type:    ET_REL
+  Machine: EM_KLAUSSCPU
+Sections:
+  - Name: .rela.text
+    Type: SHT_RELA
+    Relocations:
+      - Type: R_KLAUSSCPU_NONE
+      - Type: R_KLAUSSCPU_ABS32
+      - Type: R_KLAUSSCPU_ABS64
+      - Type: R_KLAUSSCPU_PCREL32
+      - Type: R_KLAUSSCPU_PC32
+      - Type: R_KLAUSSCPU_PC64
+      - Type: R_KLAUSSCPU_CALL18
+      - Type: R_KLAUSSCPU_TPREL32
+      - Type: R_KLAUSSCPU_GOTPCREL32
+      - Type: R_KLAUSSCPU_PLT32
+      - Type: R_KLAUSSCPU_TLS_GOTTPREL32
+      - Type: R_KLAUSSCPU_TLS_GD32
+      - Type: R_KLAUSSCPU_COPY
+      - Type: R_KLAUSSCPU_GLOB_DAT
+      - Type: R_KLAUSSCPU_JUMP_SLOT
+      - Type: R_KLAUSSCPU_RELATIVE
+      - Type: R_KLAUSSCPU_TPOFF64
+      - Type: R_KLAUSSCPU_DTPMOD64
+      - Type: R_KLAUSSCPU_DTPOFF64

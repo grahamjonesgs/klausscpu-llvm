@@ -28,13 +28,10 @@ KlaussCPUMCAsmInfo::KlaussCPUMCAsmInfo(const Triple & /*TheTriple*/,
 
 void KlaussCPUMCAsmInfo::printSpecifierExpr(raw_ostream &OS,
                                             const MCSpecifierExpr &Expr) const {
-  switch (Expr.getSpecifier()) {
-  case KlaussCPU::S_TPREL:
-    OS << "%tprel(";
-    break;
-  default:
+  StringRef Name = KlaussCPU::getSpecifierName(Expr.getSpecifier());
+  if (Name.empty())
     llvm_unreachable("unknown KlaussCPU relocation specifier");
-  }
+  OS << '%' << Name << '(';
   printExpr(OS, *Expr.getSubExpr());
   OS << ')';
 }

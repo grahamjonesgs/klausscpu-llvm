@@ -37,6 +37,16 @@
 //     store or a SETR(U).  Always R_KLAUSSCPU_TPREL32: only the linker knows
 //     the TLS layout.
 //
+//   FK_KlaussCPU_GOTPCREL32, FK_KlaussCPU_PLT32, FK_KlaussCPU_TLS_GOTTPREL32,
+//   FK_KlaussCPU_TLS_GD32 — dynamic linking (ABI.md): `%gotpcrel(sym)`,
+//     `%gottprel(sym)`, `%tlsgd(sym)` in the word-1 slot of a 2-word LEAPC,
+//     `%plt(sym)` in that of CALLREL / JMPREL / TAILREL.  Relative to the
+//     instruction like PCREL32, but never resolved here, even for a local
+//     symbol in the same section (the linker picks the GOT entry or PLT
+//     entry), and always against the symbol, with addend 0:
+//     R_KLAUSSCPU_GOTPCREL32 (8), PLT32 (9), TLS_GOTTPREL32 (10), TLS_GD32
+//     (11).
+//
 //   FK_Data_{1,2,4,8} — data directives.  4- and 8-byte data have absolute
 //     (ABS32/ABS64) and PC-relative (PC32/PC64, no instruction +4) relocations;
 //     1- and 2-byte data must resolve at assembly time.
@@ -79,8 +89,72 @@ public:
                                  /*EMachine=*/ELF::EM_KLAUSSCPU,
                                  /*HasRelocationAddend=*/true) {}
 
+  // The GOT / PLT / TLS relocations name the symbol itself: the linker
+  // makes one GOT entry (or PLT entry, GOT pair) per symbol, so a local one
+  // must not become its section symbol plus an offset.
+  bool needsRelocateWithSymbol(const MCValue &, unsigned Type) const override {
+    switch (Type) {
+    case ELF::R_KLAUSSCPU_GOTPCREL32:
+    case ELF::R_KLAUSSCPU_PLT32:
+    case ELF::R_KLAUSSCPU_TLS_GOTTPREL32:
+    case ELF::R_KLAUSSCPU_TLS_GD32:
+      return true;
+    default:
+      return false;
+    }
+  }
+
   unsigned getRelocType(const MCFixup &Fixup, const MCValue &Target,
                         bool IsPCRel) const override {
+    // The dynamic-linking specifiers: only from the encoder, in the word-1
+    // slot of the instruction each belongs to (KlaussCPUMCCodeEmitter), and
+    // on a bare symbol: an offset is added after the GOT load, so the
+    // relocations have addend 0 (ABI.md).
+    if (uint16_t Spec = Target.getSpecifier();
+        KlaussCPU::isPCRelSpecifier(Spec)) {
+      StringRef Name = KlaussCPU::getSpecifierName(Spec);
+      if (unsigned(Fixup.getKind()) != KlaussCPU::getSpecifierFixup(Spec)) {
+        reportError(Fixup.getLoc(),
+                    "%" + Name +
+                        (Spec == KlaussCPU::S_PLT
+                             ? " is only allowed as the target of a 2-word "
+                               "callrel, jmprel or tail"
+                             : " is only allowed as the offset of a 2-word "
+                               "leapc"));
+        return ELF::R_KLAUSSCPU_NONE;
+      }
+      if (!Target.getAddSym() || Target.getSubSym()) {
+        reportError(Fixup.getLoc(), "%" + Name + " needs a symbol");
+        return ELF::R_KLAUSSCPU_NONE;
+      }
+      if (Target.getConstant()) {
+        reportError(Fixup.getLoc(),
+                    "%" + Name + " takes a symbol without an offset");
+        return ELF::R_KLAUSSCPU_NONE;
+      }
+      auto *SA = const_cast<MCSymbol *>(Target.getAddSym());
+      bool TLS = Spec == KlaussCPU::S_GOTTPREL || Spec == KlaussCPU::S_TLSGD;
+      if (TLS) {
+        if (SA->isInSection() &&
+            !(static_cast<const MCSectionELF &>(SA->getSection()).getFlags() &
+              ELF::SHF_TLS)) {
+          reportError(Fixup.getLoc(), "%" + Name + " of '" + SA->getName() +
+                                          "', which is not in a TLS section");
+          return ELF::R_KLAUSSCPU_NONE;
+        }
+        static_cast<MCSymbolELF *>(SA)->setType(ELF::STT_TLS);
+      }
+      switch (Spec) {
+      case KlaussCPU::S_GOTPCREL:
+        return ELF::R_KLAUSSCPU_GOTPCREL32;
+      case KlaussCPU::S_PLT:
+        return ELF::R_KLAUSSCPU_PLT32;
+      case KlaussCPU::S_GOTTPREL:
+        return ELF::R_KLAUSSCPU_TLS_GOTTPREL32;
+      default:
+        return ELF::R_KLAUSSCPU_TLS_GD32;
+      }
+    }
     // `%tprel(sym)`: TLS local exec, the only TLS model (static executables;
     // KlaussCPUISelLowering lowers every TLS access this way).  The encoder
     // gives it FK_KlaussCPU_TPREL32 in an instruction; data has no TP-relative
@@ -168,6 +242,10 @@ public:
         {"FK_KlaussCPU_CALL18",    0,         18,      0},
         {"FK_KlaussCPU_PCREL16",   0,         20,      0},
         {"FK_KlaussCPU_TPREL32",   0,         32,      0},
+        {"FK_KlaussCPU_GOTPCREL32",       0,  32,      0},
+        {"FK_KlaussCPU_PLT32",            0,  32,      0},
+        {"FK_KlaussCPU_TLS_GOTTPREL32",   0,  32,      0},
+        {"FK_KlaussCPU_TLS_GD32",         0,  32,      0},
     };
     if (Kind >= FirstTargetFixupKind &&
         Kind < FirstTargetFixupKind + KlaussCPU::NumTargetFixupKinds)
@@ -237,6 +315,20 @@ public:
       return;
     }
 
+    // The dynamic-linking fixups name a GOT entry, a PLT entry or a GOT
+    // pair, which only the linker knows: never resolved here, even for a
+    // local symbol in this section (as on x86-64, `x@GOTPCREL`).
+    switch (unsigned(Kind)) {
+    case KlaussCPU::FK_KlaussCPU_GOTPCREL32:
+    case KlaussCPU::FK_KlaussCPU_PLT32:
+    case KlaussCPU::FK_KlaussCPU_TLS_GOTTPREL32:
+    case KlaussCPU::FK_KlaussCPU_TLS_GD32:
+      IsResolved = false;
+      break;
+    default:
+      break;
+    }
+
     // A PC-relative relocation already subtracts P; it cannot subtract a
     // second symbol (`leapc r1, ext - label`).
     if (!IsResolved && Fixup.isPCRel() && Target.getSubSym()) {
@@ -277,6 +369,10 @@ public:
     case FK_Data_4:
     case KlaussCPU::FK_KlaussCPU_ABS32:
     case KlaussCPU::FK_KlaussCPU_TPREL32:
+    case KlaussCPU::FK_KlaussCPU_GOTPCREL32:
+    case KlaussCPU::FK_KlaussCPU_PLT32:
+    case KlaussCPU::FK_KlaussCPU_TLS_GOTTPREL32:
+    case KlaussCPU::FK_KlaussCPU_TLS_GD32:
       NumBytes = 4;
       break;
     // FK_Data_8: 8-byte pointer field in .rodata/.data (memp_pools[], struct

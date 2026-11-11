@@ -146,18 +146,33 @@ void KlaussCPUMCCodeEmitter::getImmOrFixup(const MCInst &MI, unsigned OpNo,
     return;
   }
   assert(MO.isExpr() && "operand must be imm or expr");
+  uint16_t Spec = KlaussCPU::getExprSpecifier(MO.getExpr());
   // `%tprel(sym)` is the only expression a TPREL slot (ADDI, indexed loads
   // and stores) takes.  Of the absolute word-1 slots only SETR's, which
   // sign-extends the negative offset, takes it; it means nothing as an
   // address or a PC-relative target.
-  bool TPRel = KlaussCPU::getExprSpecifier(MO.getExpr()) == KlaussCPU::S_TPREL;
-  if (TPRel && Kind == KlaussCPU::FK_KlaussCPU_ABS32 &&
+  if (Spec == KlaussCPU::S_TPREL && Kind == KlaussCPU::FK_KlaussCPU_ABS32 &&
       MI.getOpcode() == KlaussCPU::SETR) {
     Kind = KlaussCPU::FK_KlaussCPU_TPREL32;
-  } else if (TPRel != (Kind == KlaussCPU::FK_KlaussCPU_TPREL32)) {
+  } else if (KlaussCPU::isPCRelSpecifier(Spec)) {
+    // The dynamic-linking specifiers: the word-1 immediate of a 2-word
+    // leapc (%gotpcrel, %gottprel, %tlsgd) or callrel / jmprel / tail
+    // (%plt).  The asm parser diagnoses any other place with the operand's
+    // location; this catches what reaches the encoder another way.
+    if (Kind != KlaussCPU::FK_KlaussCPU_PCREL32 ||
+        !KlaussCPU::isSpecifierAllowed(MI.getOpcode(), Spec)) {
+      Ctx.reportError(MI.getLoc(), "%" + KlaussCPU::getSpecifierName(Spec) +
+                                       " is not allowed in this operand");
+      Op = 0;
+      return;
+    }
+    Kind = KlaussCPU::getSpecifierFixup(Spec);
+  } else if ((Spec == KlaussCPU::S_TPREL) !=
+             (Kind == KlaussCPU::FK_KlaussCPU_TPREL32)) {
     Ctx.reportError(MI.getLoc(),
-                    TPRel ? "%tprel is not allowed in this operand"
-                          : "operand must be a constant or %tprel(symbol)");
+                    Spec == KlaussCPU::S_TPREL
+                        ? "%tprel is not allowed in this operand"
+                        : "operand must be a constant or %tprel(symbol)");
     Op = 0;
     return;
   }

@@ -19,7 +19,8 @@ public:
   explicit KlaussCPUMCAsmInfo(const Triple &TheTriple,
                                const MCTargetOptions &Options);
 
-  // `%tprel(expr)` (KlaussCPU::S_TPREL).
+  // `%tprel(expr)`, `%gotpcrel(sym)`, `%plt(sym)`, `%gottprel(sym)`,
+  // `%tlsgd(sym)` (KlaussCPU::Specifier).
   void printSpecifierExpr(raw_ostream &OS,
                           const MCSpecifierExpr &Expr) const override;
 };

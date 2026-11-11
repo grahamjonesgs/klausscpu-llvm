@@ -10,3 +10,16 @@ ELF_RELOC(R_KLAUSSCPU_PC32,    4)  // 32-bit PC-relative *data* (symbol differen
 ELF_RELOC(R_KLAUSSCPU_PC64,    5)  // 64-bit PC-relative *data* (symbol difference A-B), no instruction +4
 ELF_RELOC(R_KLAUSSCPU_CALL18,  6)  // ISA v3 short CALL or tail-call short jump: simm18 word displacement (S+A-P)/4 in word0[17:0]; lld may route it through a thunk
 ELF_RELOC(R_KLAUSSCPU_TPREL32, 7)  // TLS local exec, %tprel(S): S + A - TP (variant II, negative), signed 32-bit word-1 slot of ADDI/LDIDX*/STIDX*/SETR
+// Dynamic linking (ABI.md "Dynamic linking").  Static: the signed 32-bit word-1 immediate of a 2-word instruction, relative to the instruction (I = P - 4), as PCREL32.
+ELF_RELOC(R_KLAUSSCPU_GOTPCREL32,      8)  // leapc rD, %gotpcrel(S): G + A - I, the symbol's 8-byte GOT entry
+ELF_RELOC(R_KLAUSSCPU_PLT32,           9)  // callrel / jmprel / tail %plt(S), 2-word forms: L + A - I, the PLT entry if S has one, else S
+ELF_RELOC(R_KLAUSSCPU_TLS_GOTTPREL32, 10)  // TLS initial exec, leapc rD, %gottprel(S): GT + A - I, the GOT entry holding TPOFF(S)
+ELF_RELOC(R_KLAUSSCPU_TLS_GD32,       11)  // TLS general dynamic, leapc rD, %tlsgd(S): GD + A - I, the GOT pair {module ID, offset} for __tls_get_addr
+// Dynamic: a 64-bit little-endian, 8-aligned field, computed in 64 bits; the addend is sign-extended.
+ELF_RELOC(R_KLAUSSCPU_COPY,           12)  // PIE: st_size bytes of a shared library's data object copied from its definition
+ELF_RELOC(R_KLAUSSCPU_GLOB_DAT,       13)  // GOT entry: S + A
+ELF_RELOC(R_KLAUSSCPU_JUMP_SLOT,      14)  // .got.plt slot: S + A (the only .rela.plt type; bound at load)
+ELF_RELOC(R_KLAUSSCPU_RELATIVE,       15)  // B + A, B the module's load base
+ELF_RELOC(R_KLAUSSCPU_TPOFF64,        16)  // initial-exec GOT entry: TPOFF(S) + A (variant II, negative)
+ELF_RELOC(R_KLAUSSCPU_DTPMOD64,       17)  // general-dynamic GOT pair, first entry: module ID of S's module
+ELF_RELOC(R_KLAUSSCPU_DTPOFF64,       18)  // general-dynamic GOT pair, second entry: S + A, S the offset in its module's TLS segment (no bias)

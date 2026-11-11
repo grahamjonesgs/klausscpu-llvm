@@ -327,7 +327,9 @@ def pcrel_simm32 : Operand<i64> {
 // from the instruction, split over word0[19:12] (high byte) and [7:0]
 // (FK_KlaussCPU_PCREL16).  A literal compresses when it fits; a symbol
 // always does, and the asm backend relaxes it back to LEAPC when the target
-// is out of range or not resolved in the same section.
+// is out of range or not resolved in the same section.  An operand with a
+// relocation specifier (`%gotpcrel(sym)`, ...) never compresses: its
+// relocation exists only for the 2-word form.
 def pcrel_simm16 : Operand<i64>, ImmLeaf<i64, [{return isInt<16>(Imm);}]> {
   let EncoderMethod    = "getPCRel16OpValue";
   let DecoderMethod    = "decodeSImmOperand<16>";
@@ -335,7 +337,7 @@ def pcrel_simm16 : Operand<i64>, ImmLeaf<i64, [{return isInt<16>(Imm);}]> {
   let MCOperandPredicate = [{
     if (MCOp.isImm())
       return isInt<16>(MCOp.getImm());
-    return MCOp.isExpr();
+    return MCOp.isExpr() && !KlaussCPU::getExprSpecifier(MCOp.getExpr());
   }];
 }
 
@@ -343,27 +345,33 @@ def pcrel_simm16 : Operand<i64>, ImmLeaf<i64, [{return isInt<16>(Imm);}]> {
 // displacement in word0[17:0] (FK_KlaussCPU_PCREL18).  Only a symbolic
 // target compresses into a short branch (the CompressPats below): the asm
 // backend relaxes it back when the target is out of range or not local.  A
-// literal target stays in the 2-word form it was written in.
+// literal target stays in the 2-word form it was written in, and so does
+// `%plt(sym)` (R_KLAUSSCPU_PLT32 is a word-1 relocation).
 def PCRelTarget18 : Operand<OtherVT>,
                     ImmLeaf<i64, [{return isShiftedInt<18, 2>(Imm);}]> {
   let EncoderMethod    = "getPCRel18OpValue";
   let DecoderMethod    = "decodeSImmOperand<20>";
   let ParserMatchClass = PCRel20AsmOperand;
   let OperandType      = "OPERAND_PCREL";
-  let MCOperandPredicate = [{ return MCOp.isExpr(); }];
+  let MCOperandPredicate = [{
+    return MCOp.isExpr() && !KlaussCPU::getExprSpecifier(MCOp.getExpr());
+  }];
 }
 
 // ISA v3 short call target: as PCRelTarget18, but a target the assembler
 // cannot resolve becomes an R_KLAUSSCPU_CALL18 relocation
 // (FK_KlaussCPU_CALL18) instead of relaxing; lld adds a thunk when the
-// callee is out of range.  Only a symbolic target compresses.
+// callee is out of range.  Only a symbolic target compresses, and not
+// `%plt(sym)`: `callrel %plt(f)` / `tail %plt(f)` stay 2 words.
 def CallTarget18 : Operand<i64>,
                    ImmLeaf<i64, [{return isShiftedInt<18, 2>(Imm);}]> {
   let EncoderMethod    = "getCall18OpValue";
   let DecoderMethod    = "decodeSImmOperand<20>";
   let ParserMatchClass = PCRel20AsmOperand;
   let OperandType      = "OPERAND_PCREL";
-  let MCOperandPredicate = [{ return MCOp.isExpr(); }];
+  let MCOperandPredicate = [{
+    return MCOp.isExpr() && !KlaussCPU::getExprSpecifier(MCOp.getExpr());
+  }];
 }
 
 // ISA v3 fused-branch target: byte displacement, encoded as a simm13 word

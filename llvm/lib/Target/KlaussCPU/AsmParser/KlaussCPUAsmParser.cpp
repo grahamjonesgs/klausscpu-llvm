@@ -410,25 +410,39 @@ bool KlaussCPUAsmParser::parsePCRelExpr(const MCExpr *&Expr, SMLoc &E) {
 }
 
 bool KlaussCPUAsmParser::parsePrimaryExpr(const MCExpr *&Res, SMLoc &EndLoc) {
-  // A relocation specifier, `%tprel(expr)`: the TLS local-exec offset of a
-  // symbol from the thread pointer (the operand classes say where it may go).
+  // A relocation specifier: `%tprel(expr)`, the TLS local-exec offset of a
+  // symbol from the thread pointer (the operand classes say where it may
+  // go), or a dynamic-linking one, `%gotpcrel(sym)`, `%plt(sym)`,
+  // `%gottprel(sym)`, `%tlsgd(sym)`, which takes a bare symbol
+  // (matchAndEmitInstruction checks the instruction).
   if (getLexer().is(AsmToken::Percent)) {
     SMLoc S = getLexer().getLoc();
     AsmToken Next = getLexer().peekTok();
     if (Next.isNot(AsmToken::Identifier))
       return TokError("expected relocation specifier after '%'");
-    if (!Next.getIdentifier().equals_insensitive("tprel"))
+    uint16_t Spec = KlaussCPU::parseSpecifierName(Next.getIdentifier());
+    if (!Spec)
       return Error(Next.getLoc(), "unknown relocation specifier '%" +
                                       Next.getIdentifier() + "'");
+    StringRef Name = KlaussCPU::getSpecifierName(Spec);
     Parser.Lex(); // '%'
     Parser.Lex(); // specifier
     if (getLexer().isNot(AsmToken::LParen))
-      return TokError("expected '(' after %tprel");
+      return TokError("expected '(' after %" + Name);
     Parser.Lex();
+    SMLoc SubLoc = getLexer().getLoc();
     const MCExpr *Sub;
-    if (Parser.parseParenExpression(Sub, EndLoc))
-      return true;
-    Res = MCSpecifierExpr::create(Sub, KlaussCPU::S_TPREL, getContext(), S);
+    {
+      // The symbol is the operand of the specifier, not a branch target.
+      SaveAndRestore NotTarget(InPCRelTarget, false);
+      if (Parser.parseParenExpression(Sub, EndLoc))
+        return true;
+    }
+    if (KlaussCPU::isPCRelSpecifier(Spec) && !isa<MCSymbolRefExpr>(Sub))
+      return Error(SubLoc, "%" + Name +
+                               " takes a symbol without an offset "
+                               "(add the offset after the access)");
+    Res = MCSpecifierExpr::create(Sub, Spec, getContext(), S);
     return false;
   }
   if (!InPCRelTarget)
@@ -521,6 +535,33 @@ bool KlaussCPUAsmParser::matchAndEmitInstruction(SMLoc IDLoc,
   switch (Result) {
   case Match_Success: {
     Inst.setLoc(IDLoc);
+    // A dynamic-linking specifier belongs to one operand of one instruction
+    // (the word-1 immediate of a 2-word leapc, or callrel / jmprel / tail),
+    // as the whole operand: `%plt(f)+4` would be a PLT entry plus 4.
+    for (const MCOperand &MO : Inst) {
+      if (!MO.isExpr())
+        continue;
+      uint16_t Spec = KlaussCPU::getExprSpecifier(MO.getExpr());
+      if (!KlaussCPU::isPCRelSpecifier(Spec))
+        continue;
+      SMLoc Loc = IDLoc;
+      for (const auto &Op : drop_begin(Operands))
+        if (static_cast<const KlaussCPUOperand &>(*Op).getImmExpr() ==
+            MO.getExpr())
+          Loc = Op->getStartLoc();
+      StringRef Name = KlaussCPU::getSpecifierName(Spec);
+      if (!KlaussCPU::isSpecifierAllowed(Inst.getOpcode(), Spec))
+        return Error(Loc, "%" + Name +
+                              (Spec == KlaussCPU::S_PLT
+                                   ? " is only allowed as the target of "
+                                     "callrel, jmprel or tail"
+                                   : " is only allowed as the offset of "
+                                     "leapc"));
+      if (!isa<MCSpecifierExpr>(MO.getExpr()))
+        return Error(Loc, "%" + Name +
+                              " takes a symbol without an offset "
+                              "(add the offset after the access)");
+    }
     // ISA v3 short 1-word forms.
     MCInst CInst;
     bool Compressed = KlaussCPU::compress(CInst, Inst, getSTI());
