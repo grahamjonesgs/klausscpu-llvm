@@ -24,7 +24,9 @@
 # RUN: ld.lld old.o data.o -o old
 # RUN: llvm-readobj -h old | FileCheck %s --check-prefix=OLD
 ## Shared libraries are checked by the same rule: a shared library with
-## code of ABI 2 is refused, one without code (data only) is not.
+## code of ABI 2 is refused, one without code (data only) is not.  A shared
+## library never chooses the output's version: without code in the objects
+## it is the current one, 3.
 # RUN: ld.lld -shared main.o -o main.so
 # RUN: llvm-readobj -h main.so | FileCheck %s --check-prefix=EXE
 # RUN: ld.lld -shared v2.o -o v2.so
@@ -33,6 +35,9 @@
 # RUN: ld.lld -shared data.o -o data.so
 # RUN: ld.lld -pie main.o data.so main.so -o pie
 # RUN: llvm-readobj -h pie | FileCheck %s --check-prefix=EXE
+# RUN: not ld.lld -shared data.o v2.so -o /dev/null 2>&1 | FileCheck %s --check-prefix=ERRSO3
+# RUN: ld.lld -shared data.o main.so -o data2.so
+# RUN: llvm-readobj -h data2.so | FileCheck %s --check-prefix=EXE
 
 # OBJ: Flags [ (0x3)
 # EXE: Flags [ (0x3)
@@ -41,6 +46,7 @@
 # ERR2R: error: main.o: KlaussCPU ABI version 3 cannot be linked with ABI version 2 in v2.o; rebuild it with the current toolchain
 # OLD: Flags [ (0x0)
 # ERRSO: error: v2.so: KlaussCPU ABI version 2 cannot be linked with ABI version 3 in main.o; rebuild it with the current toolchain
+# ERRSO3: error: v2.so: KlaussCPU ABI version 2 cannot be linked with ABI version 3; rebuild it with the current toolchain
 
 #--- main.s
   .globl _start

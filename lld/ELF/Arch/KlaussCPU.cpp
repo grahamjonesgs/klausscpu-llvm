@@ -70,8 +70,8 @@
 // which a JUMP_SLOT filled at load.  A short call (CALL18) to a preemptible
 // function goes to its PLT entry, through a thunk if out of reach.  Shared
 // libraries and PIE get 64 KiB pages; static links keep lld's defaults.
-// Not supported (link errors): IFUNC, RELR, TLSDESC, local dynamic, 32-bit
-// dynamic relocations.
+// Not supported (link errors): IFUNC, RELR and Android packing (in dynamic
+// outputs), TLSDESC, local dynamic, 32-bit dynamic relocations.
 //
 // Code loaded at run time outside Linux is relocated by its loader, from an
 // ET_REL object (Zephyr llext) or from the RELA sections kept by
@@ -85,6 +85,7 @@
 #include "InputFiles.h"
 #include "InputSection.h"
 #include "RelocScan.h"
+#include "Relocations.h"
 #include "Symbols.h"
 #include "SyntheticSections.h"
 #include "Target.h"
@@ -104,6 +105,7 @@ class KlaussCPU final : public TargetInfo {
 public:
   KlaussCPU(Ctx &);
   uint32_t calcEFlags() const override;
+  int64_t getImplicitAddend(const uint8_t *buf, RelType type) const override;
   RelExpr getRelExpr(RelType type, const Symbol &s,
                      const uint8_t *loc) const override;
   RelType getDynRel(RelType type) const override;
@@ -159,11 +161,18 @@ KlaussCPU::KlaussCPU(Ctx &ctx) : TargetInfo(ctx) {
     defaultCommonPageSize = 0x10000;
   }
 
-  // ELF32 RELR describes 4-byte words; the fields here are 8 bytes.  REL
-  // would keep the addends in those fields, which musl does not read.
-  if (ctx.arg.relrPackDynRelocs)
+  // ELF32 RELR describes 4-byte words; the fields here are 8 bytes.
+  // Android's packed format replaces DT_RELA, which musl does not read
+  // without it.  REL would keep the addends in those fields, which musl does
+  // not read either.  Only dynamic outputs are refused: a static link has no
+  // dynamic relocations to pack, and accepts the options as before.
+  bool dynamic = ctx.arg.isPic || !ctx.sharedFiles.empty();
+  if (dynamic && ctx.arg.relrPackDynRelocs)
     ErrAlways(ctx) << "-z pack-relative-relocs and --pack-dyn-relocs=relr "
                       "are not supported for KlaussCPU";
+  if (dynamic && ctx.arg.androidPackDynRelocs)
+    ErrAlways(ctx) << "--pack-dyn-relocs=android is not supported for "
+                      "KlaussCPU";
   if (ctx.arg.isPic && !ctx.arg.isRela)
     ErrAlways(ctx) << "-z rel is not supported for KlaussCPU shared libraries "
                       "and PIE";
@@ -174,25 +183,24 @@ KlaussCPU::KlaussCPU(Ctx &ctx) : TargetInfo(ctx) {
 // Objects and shared libraries with code must agree: one compiled for another
 // convention, such as one a build system left behind from an older toolchain,
 // would otherwise call and be called wrongly.  Files without code (data,
-// -b binary) do not count.
+// -b binary) do not count.  The objects choose the output's version (the
+// current one if none has code); a shared library is only checked against
+// it, never chooses it.
 //
-// This also rejects STT_GNU_IFUNC definitions: musl has no IFUNC, and there
-// is no R_KLAUSSCPU_IRELATIVE.
+// This also rejects STT_GNU_IFUNC definitions in a shared library or PIE:
+// musl has no IFUNC, and there is no R_KLAUSSCPU_IRELATIVE.  Static links and
+// -r accept an unreferenced one as before (a reference is an error in any
+// link, scanSectionImpl).
 uint32_t KlaussCPU::calcEFlags() const {
   const InputFile *first = nullptr;
   uint32_t target = KlaussCPUABI::ABIVersion;
-  auto check = [&](const InputFile *f, bool hasCode, uint32_t eflags) {
-    if (!hasCode)
-      return;
-    uint32_t abi = eflags & KlaussCPUABI::EFlagsABIMask;
-    if (!first) {
-      first = f;
-      target = abi;
-    } else if (abi != target) {
-      Err(ctx) << f << ": KlaussCPU ABI version " << abi
-               << " cannot be linked with ABI version " << target << " in "
-               << first << "; rebuild it with the current toolchain";
-    }
+  auto mismatch = [&](const InputFile *f, uint32_t abi) {
+    auto diag = Err(ctx);
+    diag << f << ": KlaussCPU ABI version " << abi
+         << " cannot be linked with ABI version " << target;
+    if (first)
+      diag << " in " << first;
+    diag << "; rebuild it with the current toolchain";
   };
   for (InputFile *f : ctx.objectFiles) {
     auto *obj = cast<ObjFile<ELF32LE>>(f);
@@ -200,20 +208,56 @@ uint32_t KlaussCPU::calcEFlags() const {
       return s && s != &InputSection::discarded &&
              (s->flags & SHF_EXECINSTR) && s->getSize() != 0;
     });
-    check(f, hasCode, obj->getObj().getHeader().e_flags);
-    for (Symbol *sym : obj->getSymbols())
-      if (sym->isGnuIFunc() && sym->isDefined() && sym->file == f)
-        Err(ctx) << f << ": STT_GNU_IFUNC symbol " << sym
-                 << " is not supported for KlaussCPU";
+    if (hasCode) {
+      uint32_t abi =
+          obj->getObj().getHeader().e_flags & KlaussCPUABI::EFlagsABIMask;
+      if (!first) {
+        first = f;
+        target = abi;
+      } else if (abi != target) {
+        mismatch(f, abi);
+      }
+    }
+    if (ctx.arg.isPic)
+      for (Symbol *sym : obj->getSymbols())
+        if (sym->isGnuIFunc() && sym->isDefined() && sym->file == f)
+          Err(ctx) << f << ": STT_GNU_IFUNC symbol " << sym
+                   << " is not supported for KlaussCPU";
   }
   for (SharedFile *f : ctx.sharedFiles) {
     bool hasCode =
         llvm::any_of(f->getELFShdrs<ELF32LE>(), [](const ELF32LE::Shdr &s) {
           return (s.sh_flags & SHF_EXECINSTR) && s.sh_size != 0;
         });
-    check(f, hasCode, f->getObj<ELF32LE>().getHeader().e_flags);
+    uint32_t abi =
+        f->getObj<ELF32LE>().getHeader().e_flags & KlaussCPUABI::EFlagsABIMask;
+    if (hasCode && abi != target)
+      mismatch(f, abi);
   }
   return target;
+}
+
+// The addend a dynamic relocation finds in its 64-bit field, for
+// --check-dynamic-relocations with --apply-dynamic-relocs (the relocations
+// of the object files are RELA).
+int64_t KlaussCPU::getImplicitAddend(const uint8_t *buf, RelType type) const {
+  switch (type) {
+  case R_KLAUSSCPU_ABS64:
+  case R_KLAUSSCPU_GLOB_DAT:
+  case R_KLAUSSCPU_RELATIVE:
+  case R_KLAUSSCPU_TPOFF64:
+  case R_KLAUSSCPU_DTPMOD64:
+  case R_KLAUSSCPU_DTPOFF64:
+    return read64le(buf);
+  case R_KLAUSSCPU_NONE:
+  case R_KLAUSSCPU_COPY:
+  case R_KLAUSSCPU_JUMP_SLOT:
+    // These relocations are defined as not having an implicit addend.
+    return 0;
+  default:
+    InternalErr(ctx, buf) << "cannot read addend for relocation " << type;
+    return 0;
+  }
 }
 
 // The RelExpr of each type, for the sections the generic code relocates
@@ -288,8 +332,8 @@ void KlaussCPU::scanSectionImpl(InputSectionBase &sec, Relocs<RelTy> rels) {
       continue;
     int64_t addend = rs.getAddend<ELFT>(*it, type);
     const uint8_t *loc = sec.content().data() + offset;
-    // A reference to an IFUNC another module defines (definitions are
-    // rejected in calcEFlags).
+    // A reference to an IFUNC, in any link (definitions in a shared library
+    // or PIE are rejected in calcEFlags).
     if (LLVM_UNLIKELY(sym.isGnuIFunc())) {
       Err(ctx) << getErrorLoc(ctx, loc) << "relocation " << type
                << " against STT_GNU_IFUNC symbol " << &sym
@@ -299,9 +343,26 @@ void KlaussCPU::scanSectionImpl(InputSectionBase &sec, Relocs<RelTy> rels) {
     RelExpr expr;
     switch (type) {
     // Absolute: ABS64 becomes RELATIVE or a dynamic ABS64 in a writable
-    // section of a shared library or PIE; ABS32 has no dynamic form.
+    // section of a shared library or PIE; ABS32 has no dynamic form, so
+    // the generic code rejects it against any symbol that is not absolute.
+    // Against a preemptible symbol the generic code would give a PIE a copy
+    // relocation or a canonical PLT entry and resolve R_ABS to its link-time
+    // address, which does not move with the PIE: refuse it here, ABS32
+    // always, ABS64 where no dynamic relocation can be written (the same
+    // rule as processAux's canWrite).
     case R_KLAUSSCPU_ABS32:
     case R_KLAUSSCPU_ABS64:
+      if (ctx.arg.isPic && sym.isPreemptible &&
+          (type == R_KLAUSSCPU_ABS32 ||
+           (!(sec.flags & SHF_WRITE) &&
+            (ctx.arg.zText || isa<EhInputSection>(&sec))))) {
+        auto diag = Err(ctx);
+        diag << "relocation " << type << " cannot be used against symbol '"
+             << &sym << "'; recompile with "
+             << (ctx.arg.shared ? "-fPIC" : "-fPIE");
+        printLocation(diag, sec, sym, offset);
+        continue;
+      }
       expr = R_ABS;
       break;
 
@@ -409,14 +470,19 @@ void KlaussCPU::relocate(uint8_t *loc, const Relocation &rel,
       write64le(loc, val);
       break;
     }
+    // The addend of a dynamic ABS64 (--apply-dynamic-relocs), or the module
+    // ID 1 of a general-dynamic GOT pair in an executable: A, sign-extended
+    // (`val` is), as the dynamic linker adds it.
+    if (rel.expr == R_ADDEND) {
+      write64le(loc, val);
+      break;
+    }
     // A non-alloc section (relocateNonAlloc: expr R_NONE, no symbol), i.e.
     // .debug_*, where S + A is an address: zero-extend the low half, except
     // the all-ones tombstone of a reference to a discarded section, which
     // DWARF consumers expect.  (A live reference to exactly 0xFFFFFFFF also
     // reaches here as all-ones; relocateNoSym passes nothing to tell them
-    // apart; nothing the compiler describes in DWARF lives there.)  Also
-    // the module ID 1 of a general-dynamic GOT pair in an executable
-    // (R_ADDEND).
+    // apart; nothing the compiler describes in DWARF lives there.)
     if (val == UINT64_MAX)
       write64le(loc, val);
     else
