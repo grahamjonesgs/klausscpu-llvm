@@ -280,49 +280,58 @@ libraries, on the same layout and thread pointer:
 ## Dynamic linking
 
 **Status: design, agreed before code** (milestone M1 of klausscpu-runtime
-`DYNLINK_PLAN.md`); nothing below is implemented yet.  It defines shared
-libraries, dynamically linked executables and PIE for `klausscpu-*-linux-*`
-with musl's dynamic linker, `/lib/ld-musl-klausscpu.so.1`.
+`DYNLINK_PLAN.md`, reviewed); nothing below is implemented yet.  It defines
+shared libraries and position-independent executables (PIE) for
+`klausscpu-*-linux-*` with musl's dynamic linker,
+`/lib/ld-musl-klausscpu.so.1`.  There are no dynamically linked executables
+that are not PIE.
 
 The one structural fact: KlaussCPU is **LP64 in ELFCLASS32 files**.  The ELF
 structures are the 32-bit ones (`Elf32_Dyn`, `Elf32_Sym`, `Elf32_Rela`,
 `Elf32_Phdr`), but **every field the dynamic linker writes is 64 bits**: GOT
 entries, `.got.plt` slots, relocated data pointers, TLS offsets and module
 IDs.  A C pointer is 8 bytes, and the code loads all of them with
-`ldidx64`.
+`ldidx64`.  The same split holds for the C structures that describe loaded
+modules (`<link.h>`, below).
 
 ### What stays the same
 
 - **Everything outside Linux.**  Bare metal, Zephyr (LLEXT), FreeRTOS's PIC
-  loader, the kernel and Rust (`klausscpu-unknown-none-elf`) keep today's
-  `-fPIC`: position-independent *code* in which every symbol is local, with
-  absolute (`R_KLAUSSCPU_ABS32`) jump tables and `R_KLAUSSCPU_ABS64` pointer
+  loader and Rust (`klausscpu-unknown-none-elf`) keep today's `-fPIC`:
+  position-independent *code* in which every symbol is local, with absolute
+  (`R_KLAUSSCPU_ABS32`) jump tables and `R_KLAUSSCPU_ABS64` pointer
   initialisers that their loaders apply.  The rules below that change code
   are keyed on the Linux triple, in clang and in the backend (the backend
   checks the triple, not only `dso_local`, so IR from other frontends with
   the PIC model does not grow GOT accesses), and output for other triples is
   byte-identical.
-- **Non-PIC code and static links**, Linux included: the same code, the same
-  relocations, the same lld layout (page-size defaults unchanged, below).
+- **Non-PIC code**, Linux included: the same code and relocations.  That
+  covers the kernel (`klausscpu-unknown-linux-gnu`, `-fno-pic -fno-PIE`) and
+  today's static programs.  A future vDSO is Linux PIC code and follows the
+  rules below.
+- **Static links**: the same lld layout (page-size defaults unchanged,
+  below).  What changes is only the code of objects built with `-fPIC` or
+  `-fPIE` on Linux ("Code generation"): they use the GOT, and TLS initial
+  exec or general dynamic.  They still link statically: lld fills the GOT
+  at link time (an address, a TP offset, or module 1 and an offset for
+  general dynamic, which needs musl's `__tls_get_addr`, present in the
+  static libc too) and emits no dynamic relocations into a static
+  executable.
 - **The calling convention.**  The PLT's scratch register (R14) is already
   caller-saved, so ABI version 3 stays, with no `e_flags` change.
 - **Relocation format**: RELA, `Elf32_Rela` (12 bytes), `r_info = sym << 8 |
   type`, `r_addend` a signed 32-bit value.
 
-What does change for Linux code built with `-fPIC` or `-fPIE`, as it must for
-shared libraries, is listed under "Code generation".  Static links of such
-objects still work: lld fills the GOT at link time and emits no dynamic
-relocations into a static executable.
-
 ### Relocations
 
-Notation: S the symbol's value, A the addend (`r_addend`, sign-extended to
-64 bits), P the address of the field (`r_offset`), I the address of the
-instruction the field belongs to (P − 4 for the word-1 immediate), B the
-load base of the module, G the address of the symbol's GOT entry, GT that of
-its TLS offset GOT entry, GD that of its general-dynamic GOT pair, L the
-symbol's PLT entry if it has one, else S.  TPOFF(S) is the variant II offset
-from TP of "Thread-local storage" (negative).
+Notation: S the symbol's value, A the addend (`r_addend`, an `Elf32_Sword`,
+**sign-extended to 64 bits for every type**, static and dynamic), P the
+address of the field (`r_offset`), I the address of the instruction the field
+belongs to (P − 4 for the word-1 immediate), B the load base of the module,
+G the address of the symbol's GOT entry, GT that of its TLS offset GOT entry,
+GD that of its general-dynamic GOT pair, L the symbol's PLT entry if it has
+one, else S.  TPOFF(S) is the variant II offset from TP of "Thread-local
+storage" (negative).
 
 **Static relocations**, new.  Each is the signed 32-bit word-1 immediate of
 a 2-word instruction, relative to the instruction itself, as
@@ -342,51 +351,56 @@ the load.  A `leapc` with one of them is never compressed to `leapc.s`.
 **Existing static relocations in a dynamic link** (lld):
 
 - `R_KLAUSSCPU_CALL18` (6, the 1-word short call and the short tail jump)
-  is resolved to L, not S: a call to a preemptible function goes to its PLT
-  entry, and one out of reach goes through a `jmprel` thunk to the PLT entry.
-  So calls need no new relocation: the compiler's calls are already
-  `callrel`/`tail` with CALL18, and every existing object, non-PIC ones too,
-  can call into a shared library.  `R_KLAUSSCPU_PLT32` is only for the
+  is resolved to L, not S (`R_PLT_PC`): a call to a preemptible function
+  goes to its PLT entry.  The range check and the thunk decision use the PLT
+  entry's address (`getPltVA`, as ARM's `needsThunk` does), and a thunk
+  jumps to the PLT entry.  So calls need no new relocation: the compiler's
+  calls are already `callrel`/`tail` with CALL18, and every existing
+  object can call into a shared library.  `R_KLAUSSCPU_PLT32` is only for the
   2-word forms (`-mllvm -klausscpu-short-calls=false`, hand-written
   assembly).
-- `R_KLAUSSCPU_ABS64` (2): a link-time constant in an executable that is not
-  PIE, `R_KLAUSSCPU_RELATIVE` for a symbol that cannot be preempted in a
-  shared library or PIE, else a dynamic `R_KLAUSSCPU_ABS64` (the dynamic
-  linker's symbolic relocation, lld `symbolicRel`).  In a read-only section a
-  dynamic relocation is an error ("recompile with -fPIC"); the compiler puts
-  such data in `.data.rel.ro` under PIC.
+- `R_KLAUSSCPU_ABS64` (2): a link-time constant in a static executable; in
+  a shared library or PIE, `R_KLAUSSCPU_RELATIVE` for a symbol that cannot
+  be preempted, else a dynamic `R_KLAUSSCPU_ABS64` (the dynamic linker's
+  symbolic relocation, lld `symbolicRel`).  In a read-only section a dynamic
+  relocation is an error ("recompile with -fPIC"); the compiler puts such
+  data in `.data.rel.ro` under PIC.
 - `R_KLAUSSCPU_PCREL32` (3), `R_KLAUSSCPU_ABS32` (1), `R_KLAUSSCPU_PC32`
-  (4), `R_KLAUSSCPU_PC64` (5) against a symbol that a shared library defines or
-  that can be preempted: in an executable that is not PIE, lld gives a data
-  symbol a `R_KLAUSSCPU_COPY` and a function a canonical PLT entry (its
-  address in the executable); in a shared library or PIE the link fails
-  ("recompile with -fPIC").  There are no 32-bit dynamic relocations, so an
-  `R_KLAUSSCPU_ABS32` against any non-absolute symbol in a shared library or
-  PIE fails too.
+  (4), `R_KLAUSSCPU_PC64` (5) against a symbol that can be preempted: an
+  error in a shared library ("recompile with -fPIC").  In a PIE, against a
+  symbol a shared library defines (code that reached it directly:
+  `-fdirect-access-external-data`, hand-written assembly), lld gives a data
+  symbol an `R_KLAUSSCPU_COPY` and a function a canonical PLT entry (the
+  function's address in the program becomes its PLT entry, the `st_value`
+  of its undefined `.dynsym` entry, which the libraries then resolve to;
+  musl supports it).  Neither is possible for a **protected** symbol of a
+  shared library (lld: "cannot preempt symbol"): an executable reaches those
+  only through the GOT, which `-fPIE` code does by default.  There are no
+  32-bit dynamic relocations, so an `R_KLAUSSCPU_ABS32` against any
+  non-absolute symbol in a shared library or PIE fails too.
 - `R_KLAUSSCPU_TPREL32` (7, local exec): executables only, PIE included; an
   error in a shared library (as today) and against a TLS symbol a shared
   library defines ("recompile with -fPIE").
 
 **Dynamic relocations**, in `.rela.dyn` and `.rela.plt` (`DT_JMPREL`).
-Every field is 64 bits, little-endian, 8-aligned, computed in 64 bits with
-the address zero-extended:
+Every field is 64 bits, little-endian, 8-aligned, computed in 64 bits:
 
 | # | Name | Value | Where |
 |---|---|---|---|
 | 2 | `R_KLAUSSCPU_ABS64` | S + A | data pointers to symbols that may be preempted (existing type) |
-| 12 | `R_KLAUSSCPU_COPY` | `st_size` bytes copied from the definition | executables: library data reached directly |
+| 12 | `R_KLAUSSCPU_COPY` | `st_size` bytes copied from the definition | PIE: library data reached directly (above) |
 | 13 | `R_KLAUSSCPU_GLOB_DAT` | S + A | GOT entries |
 | 14 | `R_KLAUSSCPU_JUMP_SLOT` | S + A | `.got.plt` slots (the only `.rela.plt` type) |
 | 15 | `R_KLAUSSCPU_RELATIVE` | B + A | anything that only moves with the module |
-| 16 | `R_KLAUSSCPU_TPOFF64` | TPOFF(S) + A, sign-extended | initial-exec GOT entries |
-| 17 | `R_KLAUSSCPU_DTPMOD64` | module ID of S's module (the executable is 1) | first entry of a GD pair |
+| 16 | `R_KLAUSSCPU_TPOFF64` | TPOFF(S) + A | initial-exec GOT entries (negative) |
+| 17 | `R_KLAUSSCPU_DTPMOD64` | module ID of S's module | first entry of a GD pair |
 | 18 | `R_KLAUSSCPU_DTPOFF64` | S + A, S the offset in its module's TLS segment (no bias) | second entry of a GD pair |
 
-User addresses lie below `0x8000_0000` (Linux `TASK_SIZE`; the kernel is above),
-and shared libraries and PIE are linked at 0, so the addends of
-`R_KLAUSSCPU_RELATIVE`, which are link-time addresses, are non-negative 32-bit
-values: sign- and zero-extension agree.  The value written is the 64-bit
-value `leapc` or `setru` builds for the same address.
+S, an address, is zero-extended; A is sign-extended (a negative addend
+occurs: a `RELATIVE` for `&arr[-1]` with `arr` at the start of a PIE).  User
+addresses lie below `0x8000_0000` (Linux `TASK_SIZE`), so the result for an
+address is the 64-bit value `leapc` or `setru` builds for it.  Module IDs are
+musl's: the executable is module 1 if it has a `PT_TLS`.
 
 Not provided: `IRELATIVE` (musl has no IFUNC; `STT_GNU_IFUNC` is a link
 error), TLSDESC, local-dynamic relocations (local dynamic is lowered as
@@ -403,10 +417,15 @@ KlaussCPU.
   (`DTPMOD64`, `DTPOFF64`), which is musl's `tls_mod_off_t` of two
   `size_t`.
 - No reserved entries in `.got` or `.got.plt`: there is no lazy binding, so
-  nothing reads GOT[0..2].  `DT_PLTGOT` is the start of `.got.plt`.  The
-  dynamic linker finds its own `_DYNAMIC` with `leapc`.
-- Bound at load and read-only afterwards: links get `-z now` and RELRO, which
-  puts `.got.plt` in `PT_GNU_RELRO` too.
+  nothing reads GOT[0..2].  `.got.plt` slots hold 0 in the file; their
+  `JUMP_SLOT`s fill them at load.  `DT_PLTGOT` is the start of `.got.plt`.
+  lld defines `_GLOBAL_OFFSET_TABLE_` (its default place), but no code
+  sequence, PLT entry or loader uses it.  The dynamic linker finds its own
+  `_DYNAMIC` with `leapc` (a hidden reference).
+- Bound at load and read-only afterwards: `-z now` is lld's default for
+  KlaussCPU shared libraries and PIE (not only the driver's), so `.got.plt`
+  lies in `PT_GNU_RELRO` and musl never has to write it after `mprotect`, even
+  for `RTLD_LAZY`.
 
 ### Code generation (`klausscpu-*-linux-*`)
 
@@ -416,7 +435,9 @@ KlaussCPU.
 `dso_local`.  (`shouldAssumeDSOLocal` treats `-fPIC` as `-fPIE` for
 KlaussCPU today; that stays for every other OS.)  Hidden, protected and
 `static` symbols are always local.  GlobalMerge merges only `dso_local`
-globals, so it follows by itself.
+globals, so it follows by itself.  External symbols the backend names itself
+(`LowerExternalSymbol`: libcalls such as `memcpy`, whose address it may take)
+are not local under Linux PIC.
 
 **Address of a local symbol**: as today,
 
@@ -435,7 +456,9 @@ ldidx64 rD, rD, 0               # 1 word: the GOT entry
 Three words and a load.  The ISA has no PC-relative load, and `leapc` is
 cheaper than a GOT base register (a callee-saved register taken in every
 function, set up in every prologue).  `sym + off` adds `off` after the load
-or folds it into the access (`ldidx32 rX, rD, off`).
+or folds it into the access (`ldidx32 rX, rD, off`).  The GOT load is
+invariant and dereferenceable (its memory operand says so), so MachineCSE
+and MachineLICM share and hoist it.
 
 **Calls**: unchanged, `callrel sym` / `tail sym` with
 `R_KLAUSSCPU_CALL18`.  lld sends them to the PLT entry when the callee can be
@@ -458,8 +481,9 @@ triples keep the absolute tables.
 | `-fPIE` | local exec | initial exec |
 | `-fPIC` | general dynamic (local dynamic lowered as GD) | general dynamic |
 
-So non-PIC code stays byte-identical, and an executable that is not PIE
-cannot reach a shared library's TLS (lld says to recompile with `-fPIE`).
+So non-PIC code stays byte-identical; it can only be linked into a static
+executable or a PIE whose TLS is all its own (a reference to a library's TLS
+from local-exec code is an lld error: recompile with `-fPIE`).
 
 Initial exec:
 
@@ -487,10 +511,19 @@ callrel __tls_get_addr          # R_KLAUSSCPU_CALL18, through the PLT
 call clobbers what any call clobbers).  It returns `dtv[module] + offset`;
 the DTP offset has no bias (RISC-V's is 0x800).
 
-**Position-independent images**: on Linux every allocated section of a
-`-fPIC`/`-fPIE` object takes only the relocations above.  This includes
-`.eh_frame` and `.gcc_except_table` (FDE addresses `pcrel|sdata4`, personality
-and type info `indirect|pcrel|sdata4`), checked in M2.
+**TLS in debug info** stays as today, `DW_OP_const4u` of the variable
+(`.long var`, `R_KLAUSSCPU_ABS32`) and `DW_OP_GNU_push_tls_address`: lld
+resolves a TLS symbol to its offset in its module's TLS segment, which is
+the DTP offset, in shared libraries too.  No new relocation is needed.
+
+**Exception tables**, changed in M2 for all Linux code (PIC or not): the
+personality is `indirect|pcrel|sdata4` (through an 8-byte
+`DW.ref.<personality>` in `.data.rel.ro`), the LSDA `pcrel|sdata4`, type
+info `indirect|pcrel|sdata4`.  FDE addresses are `pcrel|sdata4` already
+(augmentation `zR`, `R_KLAUSSCPU_PC32`).  Today the three fall into LLVM's
+default `absptr`, which MC writes as 4 bytes and libunwind reads as 8, so
+this also fixes static C++ exception handling; C code (no personality) is
+unaffected.
 
 **Hand-written assembly** that may end up in a shared library or PIE calls
 functions in other modules with `callrel` / `tail` (which the assembler
@@ -502,11 +535,13 @@ module's data with `%gotpcrel`, and keeps no value in R14 across a call.
 ### PLT
 
 No PLT header (PLT0): musl binds every `R_KLAUSSCPU_JUMP_SLOT` at load.
-Each entry is 16 bytes, 16-aligned (one fetch line):
+Each entry is 16 bytes, 16-aligned (one fetch line); `.plt` has
+`sh_entsize` 16 (without it lldb assumes a PLT0 and makes no `@plt`
+symbols):
 
 ```
 +0   8B800E00 dddddddd   leapc   r14, slot − (entry + 0)   # this entry's .got.plt slot
-+8   5B300EE0            ldidx64 r14, r14, 0
++8   5B300EE0            ldidx64 r14, r14, 0               # the short LDIDX64A (address & ~7)
 +12  6080000E            jmpr    r14
 ```
 
@@ -516,24 +551,44 @@ Each entry is 16 bytes, 16-aligned (one fetch line):
   a PLT entry sees the same state as with a direct call.  `CALL` has already
   pushed the return address and `JMPR` touches neither SP nor `[SP]`, so no
   link register is needed (RISC-V's PLT uses t1 and t3 the same way).
+  `ldidx64` is LLVM's name for the force-aligned load (klausscc
+  `LDIDX64A.S`); the slot is 8-aligned anyway.
 - **Unwinding**: the entry changes neither SP nor R15, so the CIE's rule
   (CFA = SP + 8, return address at `[SP]`) is right on every instruction of
   it.  `.plt` needs no FDE.
-- **Canonical PLT entries**: in an executable that is not PIE, a library
-  function whose address the code takes (`setru`, `R_KLAUSSCPU_ABS32`/`ABS64`)
-  is given the address of its PLT entry, which is the `st_value` of its
-  undefined `.dynsym` entry.  Libraries resolve to it, which musl supports.
 - The cost of a call through the PLT, against a direct call, is three
   instructions, one of them a load the `jmpr` waits for.  M6 measures it on
   the board.  `-fno-plt` (a GOT load and `callr` at the call site, 4 words
   instead of 1) is not provided.
 
+### `<link.h>` and the loader's structures
+
+The ELF types of `<link.h>` are the ELFCLASS32 ones: `ElfW(Phdr)`,
+`ElfW(Dyn)`, `ElfW(Sym)` and `ElfW(Half)` are `Elf32_*`.  Every pointer and
+every address-typed (`ElfW(Addr)`) field of the structures the loader
+publishes is 8 bytes, because it holds a C pointer or a load address in
+memory, not an ELF field:
+
+| Structure | Layout (offset: field) | Size |
+|---|---|---|
+| `struct dl_phdr_info` | 0 `dlpi_addr` (8), 8 `dlpi_name`, 16 `dlpi_phdr` (→ `Elf32_Phdr`), 24 `dlpi_phnum` (`Elf32_Half`), 32 `dlpi_adds`, 40 `dlpi_subs`, 48 `dlpi_tls_modid` (`size_t`), 56 `dlpi_tls_data` | 64 |
+| `struct link_map` | 0 `l_addr` (8), 8 `l_name`, 16 `l_ld` (→ `Elf32_Dyn`), 24 `l_next`, 32 `l_prev` | 40 |
+| `struct r_debug` | 0 `r_version` (`int`), 8 `r_map`, 16 `r_brk` (8), 24 `r_state` (`int`), 32 `r_ldbase` (8) | 40 |
+
+`r_debug` matches musl's internal `struct debug { int ver; void *head; void
+(*bp)(void); int state; void *base; }`, and `link_map` the head of its
+`struct dso`.  `DT_DEBUG`'s `d_val` (4 bytes) points at it.  Today's musl
+`<link.h>` picks `Elf64_*` from `UINTPTR_MAX`, so even the static
+`dl_iterate_phdr` misreads `PT_TLS` / `PT_GNU_EH_FRAME`; M4 fixes it.  The
+auxiliary vector has 8-byte entries (`a_type`, `a_val`), whose values
+(`AT_PHDR`, `AT_BASE`, `AT_ENTRY`) are addresses of ELF32 structures.
+
 ### Images
 
-- **ELF header**: ELFCLASS32, `EM_KLAUSSCPU`, `e_flags` = the ABI version.
-  `ET_DYN` for shared libraries and PIE, `ET_EXEC` for an executable that is
-  not PIE.  lld checks the version of the shared libraries it links against
-  too (the rule of "Versioning").
+- **ELF header**: ELFCLASS32, `EM_KLAUSSCPU`, `e_flags` = the ABI version,
+  `ET_DYN` for shared libraries and PIE.  lld checks the version of the
+  shared libraries it links against too (the rule of "Versioning"); musl's
+  `map_library` checks `e_machine` and the version when it loads one.
 - **Dynamic section**: `Elf32_Dyn`.  `DT_NEEDED`, `DT_SONAME`, `DT_RUNPATH`,
   `DT_SYMTAB`/`DT_STRTAB`/`DT_STRSZ`/`DT_SYMENT`, `DT_HASH` and
   `DT_GNU_HASH`, `DT_RELA`/`DT_RELASZ`/`DT_RELAENT` (12)/`DT_RELACOUNT`,
@@ -548,43 +603,59 @@ Each entry is 16 bytes, 16-aligned (one fetch line):
   32-bit.
 - **Interpreter**: `PT_INTERP` = `/lib/ld-musl-klausscpu.so.1`.
 - **Pages: 64 KiB** (the TLB's only size).  Every `PT_LOAD` of a shared
-  library, PIE or dynamically linked executable has `p_align` = 0x10000,
-  and the common page size is 64 KiB too, so `PT_GNU_RELRO` ends on a page
-  boundary and `mprotect` covers all of it.  lld's KlaussCPU defaults
-  (`max-page-size`, `common-page-size`) are 64 KiB for `-shared` and `-pie`
-  outputs, and the driver passes both for every dynamic link.  Static links
-  keep their current defaults and layout: the driver already passes
-  `max-page-size=0x10000` for static Linux links, and bare-metal images must
-  not move.  Each library's writable segment costs at least 64 KiB per
-  process.
+  library or PIE has `p_align` = 0x10000, and the common page size is
+  64 KiB too, so `PT_GNU_RELRO` ends on a page boundary and `mprotect`
+  covers all of it.  lld's KlaussCPU defaults (`max-page-size`,
+  `common-page-size`) are 64 KiB for `-shared` and `-pie` outputs, and the
+  driver passes both too.  Static links keep their current defaults and
+  layout: the driver already passes `max-page-size=0x10000` for static Linux
+  links, and bare-metal images must not move.  Each library's writable
+  segment costs at least 64 KiB per process.
 - `PT_TLS`, `PT_GNU_STACK` (not executable), `PT_GNU_RELRO`,
   `PT_GNU_EH_FRAME` (`--eh-frame-hdr`, for `dl_iterate_phdr` unwinders).
-- **Base address**: 0 for `ET_DYN`, where the kernel puts a PIE at
-  `ELF_ET_DYN_BASE` and the interpreter elsewhere.  An executable that is not
-  PIE uses the address static Linux executables use today.
+- **Base address**: 0 (`ET_DYN`); the kernel puts a PIE at
+  `ELF_ET_DYN_BASE` (randomised once the kernel enables it) and the
+  interpreter elsewhere.
 
 ### Executables
 
-1. **Not PIE (first)**: the code is today's non-PIC code, linked dynamically
-   (`crt1.o`).  Library data reached with `setru`/`leapc` gets a COPY
-   relocation, a library function whose address is taken a canonical PLT
-   entry, and calls go through the PLT.  The only TLS is the executable's
-   own (local exec).
-2. **PIE (then the default)**: `-fPIE -pie`, `Scrt1.o`, `ET_DYN` with ASLR.
-   Definitions are `leapc`-relative, external data comes through the GOT
-   (no COPY), and TLS is local exec or initial exec.
-3. A static PIE (`-static-pie`, musl's `rcrt1.o`, only `RELATIVE`) would
-   work with the same relocations; it is not planned.
+- **PIE** (`-fPIE -pie`, `Scrt1.o`, `ET_DYN`): definitions are
+  `leapc`-relative, external data and the addresses of external functions
+  come through the GOT, and TLS is local exec or initial exec.  It becomes
+  the default executable form once dynamic linking works (see Driver).
+- **Static executables** (`-static`) as today.  A static PIE (`-static-pie`,
+  musl's `rcrt1.o`, only `RELATIVE`) would work with the same relocations;
+  it is not planned.
+- A dynamically linked executable that is not PIE is not supported: the
+  driver never makes one, and no test covers one.
+
+### Building shared libraries
+
+- **compiler-rt builtins for the Linux triple**, compiled by a compiler with
+  these rules, `-fPIC -fvisibility=hidden`: every module links its own hidden
+  copy, as with `libgcc.a`, and none of them exports or preempts another's.
+  The bare-metal (`klausscpu-unknown-elf`) archive that musl's build uses
+  today has absolute jump tables and default-visibility symbols, so it
+  cannot go into a shared library.  The Linux archive's place is the one the
+  driver already prefers for the Linux triple, `<build>/lib/clang/<version>/
+  lib/klausscpu-unknown-linux-musl/libclang_rt.builtins.a` (`clang
+  --target=klausscpu-unknown-linux-musl -print-libgcc-file-name`).
+- **`libc.so`** is linked with musl's own flags: `--dynamic-list`,
+  `--exclude-libs=ALL`, `--no-undefined`, and symbolic binding of libc's
+  calls to itself.  Then libc's internal calls, including the `memcpy` /
+  `memset` the compiler makes in `_dlstart_c`, are bound at link time and
+  never go through a PLT, which is not relocated yet at that point.
+- **C++**: each module has its own hidden `__dso_handle` (for
+  `__cxa_atexit`), from the crtbegin of the C++ runtime; C needs none.
 
 ### Driver (`klausscpu-*-linux-*`)
 
-Today every Linux link is `-static`.  Proposed: `-shared` links a shared
-library (no `crt1.o`), and `-pie` a PIE (`Scrt1.o`).  Every link that is not
-static gets `-dynamic-linker /lib/ld-musl-klausscpu.so.1`, `-z now`,
-`--hash-style=both`, `--eh-frame-hdr` and both 64 KiB page sizes.  Static
-stays the default until the dynamic linker works on the emulator (M5); then
-the default becomes dynamic PIE, with `-static` as on other Linux targets
-(M7).
+Today every Linux link is `-static`.  `-shared` links a shared library (no
+start file), and `-pie` a PIE (`Scrt1.o`).  Both get `-dynamic-linker
+/lib/ld-musl-klausscpu.so.1`, `-z now`, `--hash-style=both`,
+`--eh-frame-hdr` and both 64 KiB page sizes.  Static stays the default
+until the dynamic linker works on the emulator (M5); then the default
+becomes dynamic PIE, with `-static` as on other Linux targets (M7).
 
 ### Not in the first version
 
@@ -593,7 +664,7 @@ the default becomes dynamic PIE, with `-static` as on other Linux targets
   marker relocation in the style of x86's `GOTPCRELX`), and GD/IE turned into
   LE in executables.  Worth it only if measurements show the loads matter.
 - `-fno-plt`, TLSDESC, RELR, IFUNC, lazy binding, `dlopen` of an
-  initial-exec library.
+  initial-exec library, dynamically linked executables that are not PIE.
 - A PC-relative 64-bit load in the ISA would make a GOT access one
   instruction.  It is a candidate for `HARDWARE_PROPOSALS.md` once the
   loads are measured.
@@ -603,12 +674,13 @@ the default becomes dynamic PIE, with `-static` as on other Linux targets
 | Consumer | What it does |
 |---|---|
 | clang | Linux `dso_local` rule; the driver (above) |
-| Backend | GOT, PLT and TLS sequences under the Linux triple; PC-relative jump tables |
+| Backend | GOT, PLT and TLS sequences under the Linux triple; external symbols through the GOT; PC-relative jump tables; exception-table encodings |
 | MC | `%gotpcrel`, `%plt`, `%gottprel`, `%tlsgd`; fixups; relocations 8–11; `KlaussCPU.def` 8–18 |
-| lld | `-shared`, `-pie`, `.dynamic`, GOT/PLT, COPY, canonical PLT, the dynamic relocations, TLS IE/GD, CALL18 through the PLT, 64 KiB pages, `e_flags` of shared libraries |
-| musl (runtime) | `reloc.h` (`REL_SYMBOLIC` 2, `REL_GOT` 13, `REL_PLT` 14, `REL_RELATIVE` 15, `REL_COPY` 12, `REL_TPOFF` 16, `REL_DTPMOD` 17, `REL_DTPOFF` 18); `dynlink.c` reading ELF32 structures (`Elf32_Dyn`, 12-byte `Elf32_Rela` with `r_info >> 8` / `& 0xff`, `Elf32_Sym`, 32-bit `.gnu.hash` Bloom words) while writing 64-bit fields; `_dlstart`, `__tls_get_addr`, `Scrt1.o` |
+| lld | `-shared`, `-pie`, `.dynamic`, GOT (8-byte entries) and `.got.plt` (no header, zero-filled), PLT (`sh_entsize` 16), COPY, canonical PLT, the dynamic relocations, TLS IE/GD, CALL18 through the PLT with thunks to the PLT entry, `-z now` and 64 KiB pages for dynamic outputs, `e_flags` of shared libraries |
+| compiler-rt | builtins for `klausscpu-unknown-linux-musl`, `-fPIC -fvisibility=hidden` |
+| musl (runtime) | `reloc.h` (`REL_SYMBOLIC` 2, `REL_GOT` 13, `REL_PLT` 14, `REL_RELATIVE` 15, `REL_COPY` 12, `REL_TPOFF` 16, `REL_DTPMOD` 17, `REL_DTPOFF` 18, addends sign-extended); `dynlink.c` reading ELF32 structures (`Elf32_Dyn`, 12-byte `Elf32_Rela` with `r_info >> 8` / `& 0xff`, `Elf32_Sym`, 32-bit `.gnu.hash` Bloom words) while writing 64-bit fields; `<link.h>` as above; `_dlstart`, `__tls_get_addr`, `Scrt1.o`, `libc.so`'s link flags |
 | Kernel | `PT_INTERP`, `ET_DYN`, 64 KiB `p_align` |
-| lldb | the POSIX-DYLD plugin reads `r_debug`/`link_map` with 8-byte pointers, not the ELF class's 4 (later) |
+| lldb | the POSIX-DYLD plugin reads `r_debug`/`link_map` with 8-byte pointers and addresses (the layout above), 8-byte auxv entries, and 4-byte ELF addresses (later); `.plt` entries from `sh_entsize` |
 | `check-toolchain-constants.py` | relocation numbers in musl's `reloc.h` against `KlaussCPU.def` |
 | Runtime ELF loaders, Zephyr LLEXT | unaffected: no object built for them carries the new types (Zephyr's relocator rejects unknown types; the bare-metal and FreeRTOS loaders apply `ABS32`/`ABS64` and skip the rest) |
 
