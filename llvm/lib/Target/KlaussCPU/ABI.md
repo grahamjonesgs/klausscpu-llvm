@@ -580,10 +580,15 @@ symbols):
 ### `<link.h>` and the loader's structures
 
 The ELF types of `<link.h>` are the ELFCLASS32 ones: `ElfW(Phdr)`,
-`ElfW(Dyn)`, `ElfW(Sym)` and `ElfW(Half)` are `Elf32_*`.  Every pointer and
-every address-typed (`ElfW(Addr)`) field of the structures the loader
-publishes is 8 bytes, because it holds a C pointer or a load address in
-memory, not an ELF field:
+`ElfW(Dyn)`, `ElfW(Sym)`, `ElfW(Half)` and also **`ElfW(Addr)` are
+`Elf32_*`**, so `ElfW(Addr)` matches `p_vaddr` and `st_value`.  Every pointer
+and every load-address field of the structures the loader publishes is
+8 bytes, because it holds a C pointer or an address in memory, not an ELF
+field.  The four address fields, `dlpi_addr`, `l_addr`, `r_brk` and
+`r_ldbase`, therefore do not have type `ElfW(Addr)` on KlaussCPU but an
+8-byte unsigned integer (musl: `unsigned long`).  Code that takes
+`&info->dlpi_addr` as an `ElfW(Addr) *` does not compile there; code that
+reads the value is unaffected.
 
 | Structure | Layout (offset: field) | Size |
 |---|---|---|
