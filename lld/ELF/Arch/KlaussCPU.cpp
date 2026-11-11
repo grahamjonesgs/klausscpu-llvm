@@ -41,13 +41,16 @@
 //                             variant II, as musl lays it out by default
 //                             (getTlsTpOffset): TP points at the thread
 //                             structure with the static TLS block below it,
-//                             so the offset is negative.  Static executables
-//                             only, so this is the only TLS relocation:
-//                             the compiler lowers every TLS model to it.
+//                             so the offset is negative.  The compiler emits
+//                             it for every TLS access in code that is not
+//                             PIC, and for local exec in a PIE.
 //
-// Only static links are supported: there are no dynamic relocation types.
-// Code loaded at run time is relocated by its loader, from an ET_REL object
-// (Zephyr llext) or from the RELA sections kept by --emit-relocs.
+// Only static links are supported.  KlaussCPU.def also defines the dynamic-
+// linking relocations of ABI.md (8-18), and MC emits R_KLAUSSCPU_GOTPCREL32,
+// PLT32, TLS_GOTTPREL32 and TLS_GD32 (8-11) for Linux -fPIC / -fPIE code;
+// this backend does not handle them yet (DYNLINK_PLAN M3).  Code loaded at
+// run time is relocated by its loader, from an ET_REL object (Zephyr llext)
+// or from the RELA sections kept by --emit-relocs.
 //
 // The gaps between code sections are filled with KlaussCPUABI::InvalidWord,
 // an architecturally reserved word that traps as an invalid opcode.

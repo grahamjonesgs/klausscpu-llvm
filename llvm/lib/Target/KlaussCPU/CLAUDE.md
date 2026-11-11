@@ -66,10 +66,12 @@ older core stops at the first new instruction (`hw_div_fbr.kla` /
 | 32-bit ops | `ADDW`/`SUBW`/`ADDIW`/`MULW`, `CMPRRW`/`CMPRVW`, boolean `CMPxxRW`/`CMPxxVW` (ISA v3 D2/D3); a branch on `CMPRRW`/`CMPRVW` fuses into an FBR with a W predicate (`fbr`/`fbri`/`fbrv` cc 5-7, 13-15; see Flags) |
 | Immediates | each class 2/3 op exists with a sign- and a zero-extended imm32 (SGN bit); isel picks the one that holds the constant: `SETR`/`SETRU` (MOV), `ADDI`/`ADDV`/`MINUSV`, `ANDI`/`ANDV` (and OR/XOR), `CMPRV`/`CMPRVU`; boolean compares (`setcc` as a value) `CMPxxV` with a simm32; `SETR64` only for a value neither reaches.  An add of -255..-129 (a frame address too) is `MINUSV` of the negation, whose short form reaches it |
 | Multiply by a constant | `MULV` (simm32, 1 word for a simm8; EX-serialised, `WriteMul`); a constant 2^N+1, 2^N-1 or 1-2^N that is not a simm32 becomes `SHLV` + `ADDR`/`SUBR` (`decomposeMulByConstant`); a simm32 one stays one `MULV` (klaussCPU mul2: its product is ready 4 cycles after issue, as fast as the dependent pair) |
-| Addresses | 32-bit, zero-extended in a register: `SETRU sym` (static), `LEAPC` (PIC); `sym+off` is folded only for `off` in [0, 2^31), other offsets are a separate add so a negative S + off stays negative; `R_KLAUSSCPU_ABS64` data is the exact 64-bit S + A (lld) |
-| Direct call | the 1-word short `CALL` (ISA v3 A1, LINK=1: PC + 4·simm18, ±512 KiB, pushes PC+4; written `callrel`; a tail call's jump likewise, `tail`) for every call to a symbol: resolved by the assembler for a local (static) callee in its own section (relaxed to the 2-word `CALLREL` if out of reach), else (a global or weak callee too, which the link may override) an `R_KLAUSSCPU_CALL18` relocation, for which lld calls an out-of-reach callee through a `jmprel` thunk.  Code a loader without thunks relocates (Zephyr LLEXT) is built with `-mllvm -klausscpu-short-calls=false` (2-word `CALL` / `CALLREL`) |
+| Addresses | 32-bit, zero-extended in a register: `SETRU sym` (static), `LEAPC` (PIC); `sym+off` is folded only for `off` in [0, 2^31), other offsets are a separate add so a negative S + off stays negative; `R_KLAUSSCPU_ABS64` data is the exact 64-bit S + A (lld).  Linux PIC code only (`isOSLinux()` and `-fPIC`/`-fPIE`, `KlaussCPUTargetLowering::isLinuxPIC`; [`ABI.md`](ABI.md) "Dynamic linking"): a symbol that is not dso_local (`shouldAssumeDSOLocal`), and an external symbol the backend names (`LowerExternalSymbol`), comes from its GOT entry, `leapc rD, %gotpcrel(sym)` + `ldidx64 rD, rD, 0` (an invariant, dereferenceable load that MachineCSE shares and MachineLICM hoists; an offset is added after it, the relocation's addend is 0; `dynlink-got.ll`), and a dso_local definition a shared library would export is named by its local alias `.Lsym$local` (`getSymbolPreferLocal`, as x86-64 and RISC-V).  Every other triple keeps PIC code in which every symbol is local, whatever the IR's dso_local says (byte-identical to before) |
+| Direct call | the 1-word short `CALL` (ISA v3 A1, LINK=1: PC + 4·simm18, ±512 KiB, pushes PC+4; written `callrel`; a tail call's jump likewise, `tail`) for every call to a symbol: resolved by the assembler for a local (static) callee in its own section (relaxed to the 2-word `CALLREL` if out of reach), else (a global or weak callee too, which the link may override) an `R_KLAUSSCPU_CALL18` relocation, for which lld calls an out-of-reach callee through a `jmprel` thunk.  Code a loader without thunks relocates (Zephyr LLEXT) is built with `-mllvm -klausscpu-short-calls=false` (2-word `CALL` / `CALLREL`).  Linux PIC code calls the same way (lld is to route a CALL18 to a preemptible callee through its PLT entry, M3); with short calls off there, a call or tail call to a callee that is not dso_local (or a libcall) is `callrel %plt(f)` / `tail %plt(f)` (`MO_PLT`, `R_KLAUSSCPU_PLT32`), which never compresses (`dynlink-calls.ll`) |
 | Indirect branch / call | `JMPR` / `CALLR` |
-| Switches | a compare tree, or a jump table from 12 cases (clusters) at 40% density (the board break-even): a 4-byte-aligned table of absolute 32-bit block addresses (`EK_Custom32`, `R_KLAUSSCPU_ABS32`, also under PIC: only the base is PC-relative, `LEAPC`), dispatched by `LDIDX32R` + `JMPR` (`LowerBR_JT`).  So `-fPIC` gives position-independent code, not a position-independent image: like its pointer initialisers (`R_KLAUSSCPU_ABS64`), its jump tables need the image linked at its run address or a loader that applies the ABS32 relocations (the runtime's ELF loaders, which need `--emit-relocs`; Zephyr LLEXT); a flat binary (`objcopy -O binary`) runs only at its link address.  Table-relative entries (`EK_LabelDifference32`, an `R_KLAUSSCPU_PC32` each) would add a dependent add to every dispatch in every program (the whole runtime is built `-fPIC`) and serve no loader in use |
+| Switches | a compare tree, or a jump table from 12 cases (clusters) at 40% density (the board break-even): a 4-byte-aligned table of absolute 32-bit block addresses (`EK_Custom32`, `R_KLAUSSCPU_ABS32`, also under PIC: only the base is PC-relative, `LEAPC`), dispatched by `LDIDX32R` + `JMPR` (`LowerBR_JT`).  Linux PIC code (shared libraries and PIE have no 32-bit dynamic relocation) has table-relative entries instead (`EK_LabelDifference32`, `.long .LBB-.LJTI`, `R_KLAUSSCPU_PC32` from `.rodata`; `isJumpTableRelative`), dispatched by `LEAPC` + `LDIDX32_SR` + `ADDR` + `JMPR` (`jump-table-linux-pic.ll`); the rest of this row is about every other triple.  So `-fPIC` gives position-independent code, not a position-independent image: like its pointer initialisers (`R_KLAUSSCPU_ABS64`), its jump tables need the image linked at its run address or a loader that applies the ABS32 relocations (the runtime's ELF loaders, which need `--emit-relocs`; Zephyr LLEXT); a flat binary (`objcopy -O binary`) runs only at its link address.  Table-relative entries (`EK_LabelDifference32`, an `R_KLAUSSCPU_PC32` each) would add a dependent add to every dispatch in every program (the whole runtime is built `-fPIC`) and serve no loader in use |
+| Thread-local storage | Linux only (`LowerGlobalTLSAddress`; [`ABI.md`](ABI.md) "Thread-local storage", "Dynamic linking"): code that is not PIC is local exec throughout, `mfsr rT, tp` + `%tprel(sym)` (`R_KLAUSSCPU_TPREL32`) folded into the access; PIC code takes `getTLSModel`'s model: local exec or initial exec in a PIE (`leapc %gottprel(sym)`, an invariant `ldidx64`, added to TP or the r + r index of the access), general dynamic in a shared library (local dynamic too: `leapc r0, %tlsgd(sym)` and an ordinary call of musl's `__tls_get_addr`, result in R12; `tls-dynlink.ll`).  Other triples: a fatal error (clang rejects `__thread` there) |
+| Exception tables | Linux, PIC or not (`TargetLoweringObjectFileELF::Initialize`): personality and type info `indirect\|pcrel\|sdata4` through 8-byte `DW.ref.<personality>` / `.DW.stub` pointers, LSDA `pcrel\|sdata4`; other triples LLVM's default `absptr`, which MC writes as 4 bytes (`eh-encodings.ll`).  The backend defines no exception pointer / selector registers yet, so a landing pad that reads them does not compile |
 | `llvm.trap` / `llvm.debugtrap` | both `TRAP`: an abnormal stop (crash dump; `stop = Trap` in the emulator; a debug halt with SIGTRAP under the debugger).  `HALT` is the clean stop the runtime ends a program with (exit status in R12) |
 | Shifts / rotates | 64-bit only; a register amount uses only rs2[5:0], so isel drops masks/extensions of it (`shamt`); an i32 rotate is a 64-bit rotate of the value copied into both halves (`ROLW`/`RORW`) |
 | Bit fields | `BEXTR` for `(x >> s) & (2^l - 1)` with s, l in [1, 31]; other fields and high/low masks beyond an imm32 as a shift pair (a mask stays SETR64 + ANDR in a loop, where MachineLICM hoists the SETR64, unless optsize) |
@@ -111,6 +113,22 @@ the imm32: `setr rX, 0xFFFFFFFF` loads -1 (kept for the runtime's
 compresses to the zero-extending short `setru` (same value), so the asm
 printer and disassembler show `setru` there; likewise `addi`/`andi`/`ori`/
 `xori` with 128..255 become the short `addv`/`andv`/`orv`/`xorv`.
+
+Relocation specifiers (`KlaussCPU::Specifier`, `MCSpecifierExpr`; parsed
+in `parsePrimaryExpr`, printed by `KlaussCPUMCAsmInfo`): `%tprel(sym)` in
+the imm32 of `addi`, `setr` and the indexed loads / stores (TLS local exec,
+`R_KLAUSSCPU_TPREL32`), and the dynamic-linking ones of
+[`ABI.md`](ABI.md), each on a bare symbol: `%gotpcrel(sym)`,
+`%gottprel(sym)`, `%tlsgd(sym)` as the offset of the 2-word `leapc`, and
+`%plt(sym)` as the target of the 2-word `callrel` / `jmprel` / `tail`
+(relocations 8-11: `dynlink-relocs.s`, `dynlink-errors.s`).  The asm parser
+checks the instruction (`KlaussCPU::isSpecifierAllowed`), an instruction
+with one never compresses (the short forms' `MCOperandPredicate`s), and the
+asm backend never resolves one, even for a local symbol in the same section,
+and relocates against the symbol, not its section
+(`needsRelocateWithSymbol`).  Codegen marks the operands with
+`KlaussCPUII::MO_*` target flags, which the AsmPrinter turns into the
+specifiers.
 
 The disassembler is `-gen-disassembler` with one table per width
 (`--specialize-decoders-per-bitwidth`: 32/64/96 bits); `getInstruction` picks
@@ -615,8 +633,9 @@ when clobbered.
   a jump table's base (`SETRU`/`LEAPC`) and entry offset (`SHLV`, and a
   `COPY` of the index it reads) from the dispatch block into the range-check
   block in front of its compare, where they fill bubbles; the dispatch block
-  is left with the dependent `LDIDX32R` + `JMPR` (`jump-table-hoist.ll`,
-  `.mir`).  It runs after MachineSink, which would sink them back.
+  is left with the dependent `LDIDX32R` + `JMPR` (Linux PIC: `LDIDX32_SR`
+  + `ADDR` + `JMPR`) (`jump-table-hoist.ll`, `.mir`,
+  `jump-table-linux-pic.ll`).  It runs after MachineSink, which would sink them back.
 - In the machine SSA optimisations, before MachineLICM (`addILPOpts`, -O1
   and up): `KlaussCPUConstAddrBase` gives three or more absolute accesses
   within short-form reach of one of them (simm8 scaled by the access size)
@@ -642,9 +661,11 @@ when clobbered.
   the access.  External globals are merged too (`MergeExternalByDefault`;
   each keeps its symbol as an alias into the block) when they are
   dso_local, which clang makes every KlaussCPU definition, also under
-  `-fPIC`: there are no shared objects, so nothing can preempt one
-  (`clang/lib/CodeGen/CodeGenModule.cpp` `shouldAssumeDSOLocal`,
-  `klausscpu-pic-dso-local.c`).  Weak, `used` and thread-local globals are
+  `-fPIC`, outside Linux: there are no shared objects there, so nothing can
+  preempt one (`clang/lib/CodeGen/CodeGenModule.cpp` `shouldAssumeDSOLocal`,
+  `klausscpu-pic-dso-local.c`).  On Linux the ELF rules hold: `-fPIC`
+  variable definitions are not dso_local (and so not merged), `-fPIE` ones
+  are.  Weak, `used` and thread-local globals are
   not merged (`global-merge.ll`).  Board (klaussCPU 0cccefa): statemate,
   whose 105 external globals each took a `LEAPC`, runs 38% fewer
   instructions and 26% fewer cycles at -O2 (-20% at -Os), Embench -1.0%
@@ -1030,8 +1051,8 @@ llvm/lib/Target/KlaussCPU/
 │   ├── KlaussCPUMCAsmInfo.h/.cpp  MCAsmInfoELF subclass
 │   ├── KlaussCPUInstPrinter.h/.cpp printInst / printOperand; uses GenAsmWriter.inc
 │   ├── KlaussCPUMCCodeEmitter.cpp  generated getBinaryCodeForInstr (encodings = .td Inst fields) + fixup operand hooks
-│   ├── KlaussCPUFixupKinds.h   ABS32, PCREL32, PCREL18 (short branch), PCREL13 (FBR), CALL18 (short call, tail jump), PCREL16 (LEAPC.S)
-│   ├── KlaussCPUAsmBackend.cpp fixups, ELF relocations, short-branch / short-call / LEAPC.S relaxation, NOP fill
+│   ├── KlaussCPUFixupKinds.h   ABS32, PCREL32, PCREL18 (short branch), PCREL13 (FBR), CALL18 (short call, tail jump), PCREL16 (LEAPC.S), TPREL32 (%tprel), GOTPCREL32 / PLT32 / TLS_GOTTPREL32 / TLS_GD32 (%gotpcrel / %plt / %gottprel / %tlsgd)
+│   ├── KlaussCPUAsmBackend.cpp fixups, ELF relocations (the dynamic-linking ones never resolved, always against the symbol), short-branch / short-call / LEAPC.S relaxation, NOP fill
 │   └── KlaussCPUMCTargetDesc.h/.cpp  LLVMInitializeKlaussCPUTargetMC; MCInstrAnalysis; generated CompressPat compress/uncompress; ELF target streamer (ABI version in e_flags)
 ├── TargetInfo/
 │   ├── KlaussCPUTargetInfo.h   declares getTheKlaussCPUTarget()
@@ -1055,7 +1076,11 @@ thunk decision; the ABI version check of `e_flags`) with the `jmprel` call thunk
 target; `klausscpu-thunk-names.s`)
 and, for LTO, KlaussCPU bitcode read as an ELFCLASS32 `EM_KLAUSSCPU` file in `lld/ELF/InputFiles.cpp`
 (`lld/test/ELF/klausscpu-lto.ll`; the runtime's `make LTO=1`),
-`llvm/include/llvm/BinaryFormat/ELFRelocs/KlaussCPU.def`,
+`llvm/include/llvm/BinaryFormat/ELFRelocs/KlaussCPU.def` (relocations 0-18,
+`reloc-types-klausscpu.test`),
+`llvm/lib/CodeGen/TargetLoweringObjectFileImpl.cpp` (Linux exception-table
+encodings), `clang/lib/CodeGen/CodeGenModule.cpp` (`shouldAssumeDSOLocal`:
+`-fPIC` means `-fPIE` outside Linux),
 `llvm/lib/TargetParser/TargetDataLayout.cpp` (the DataLayout),
 `llvm/include/llvm/TargetParser/KlaussCPUABI.h` (shared constants) with its
 check `llvm/unittests/Target/KlaussCPU/`,

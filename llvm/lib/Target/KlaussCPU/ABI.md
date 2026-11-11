@@ -279,8 +279,12 @@ libraries, on the same layout and thread pointer:
 
 ## Dynamic linking
 
-**Status: design, agreed before code** (milestone M1 of klausscpu-runtime
-`DYNLINK_PLAN.md`, reviewed); nothing below is implemented yet.  It defines
+**Status: design agreed** (milestone M1 of klausscpu-runtime
+`DYNLINK_PLAN.md`, reviewed); **compiler and assembler implemented** (M2:
+clang's `dso_local` rule, the backend's code generation, MC's specifiers
+and relocations 8–11, `KlaussCPU.def` 8–18); lld (M3), the driver, the
+runtime and lldb not yet, so Linux `-fPIC` / `-fPIE` objects do not link
+until M3.  It defines
 shared libraries and position-independent executables (PIE) for
 `klausscpu-*-linux-*` with musl's dynamic linker,
 `/lib/ld-musl-klausscpu.so.1`.  There are no dynamically linked executables
