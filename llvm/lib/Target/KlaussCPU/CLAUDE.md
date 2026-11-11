@@ -1076,8 +1076,9 @@ thunk decision; the ABI version check of `e_flags`, of objects and shared
 libraries; dynamic linking, [`ABI.md`](ABI.md): 8-byte GOT and `.got.plt`
 entries without headers, the 16-byte PLT entry, the dynamic relocations,
 TLS IE / GD GOT entries, 64 KiB pages and `-z now` for `-shared` / `-pie`,
-RELR / REL / IFUNC rejected; `klausscpu-dynlink-*.s`; KlaussCPU's small
-hooks in generic lld: `getIsRela` and the `-z now` default in `Driver.cpp`,
+RELR / Android packing / REL / IFUNC rejected, ABS32 and read-only ABS64
+against a preemptible symbol refused in a PIE too; `klausscpu-dynlink-*.s`;
+KlaussCPU's small hooks in generic lld: `getIsRela` and the `-z now` default in `Driver.cpp`,
 `.plt`'s `sh_entsize` in `SyntheticSections.cpp`, the GD pair's
 `gotEntrySize` in `Relocations.cpp`) with the `jmprel` call thunk in `lld/ELF/Thunks.cpp`
 (one per symbol and addend, named `__KlaussCPUThunk_<symbol>[+addend]`,

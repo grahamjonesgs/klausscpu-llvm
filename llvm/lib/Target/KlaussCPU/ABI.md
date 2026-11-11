@@ -368,10 +368,15 @@ offset into the object is added after the load.  A `leapc` with one of them is n
   a shared library or PIE, `R_KLAUSSCPU_RELATIVE` for a symbol that cannot
   be preempted, else a dynamic `R_KLAUSSCPU_ABS64` (the dynamic linker's
   symbolic relocation, lld `symbolicRel`).  In a read-only section a dynamic
-  relocation is an error ("recompile with -fPIC"); the compiler puts such
-  data in `.data.rel.ro` under PIC.
-- `R_KLAUSSCPU_PCREL32` (3), `R_KLAUSSCPU_ABS32` (1), `R_KLAUSSCPU_PC32`
-  (4), `R_KLAUSSCPU_PC64` (5) against a symbol that can be preempted: an
+  relocation is an error ("recompile with -fPIC", or `-fPIE` in a PIE,
+  also against a library symbol: no copy relocation or canonical PLT entry
+  stands in for it; `-z notext` allows it); the compiler puts such data in
+  `.data.rel.ro` under PIC.
+- `R_KLAUSSCPU_ABS32` (1): there are no 32-bit dynamic relocations, so in a
+  shared library or PIE it fails against any symbol that is not absolute
+  (a library symbol in a PIE included: "recompile with -fPIE").
+- `R_KLAUSSCPU_PCREL32` (3), `R_KLAUSSCPU_PC32` (4), `R_KLAUSSCPU_PC64` (5)
+  against a symbol that can be preempted: an
   error in a shared library ("recompile with -fPIC").  In a PIE, against a
   symbol a shared library defines (code that reached it directly:
   `-fdirect-access-external-data`, hand-written assembly), lld gives a data
@@ -380,9 +385,7 @@ offset into the object is added after the load.  A `leapc` with one of them is n
   of its undefined `.dynsym` entry, which the libraries then resolve to;
   musl supports it).  Neither is possible for a **protected** symbol of a
   shared library (lld: "cannot preempt symbol"): an executable reaches those
-  only through the GOT, which `-fPIE` code does by default.  There are no
-  32-bit dynamic relocations, so an `R_KLAUSSCPU_ABS32` against any
-  non-absolute symbol in a shared library or PIE fails too.
+  only through the GOT, which `-fPIE` code does by default.
 - `R_KLAUSSCPU_TPREL32` (7, local exec): executables only, PIE included; an
   error in a shared library (as today) and against a TLS symbol a shared
   library defines ("recompile with -fPIE").
@@ -407,11 +410,14 @@ addresses lie below `0x8000_0000` (Linux `TASK_SIZE`), so the result for an
 address is the 64-bit value `leapc` or `setru` builds for it.  Module IDs are
 musl's: the executable is module 1 if it has a `PT_TLS`.
 
-Not provided: `IRELATIVE` (musl has no IFUNC; `STT_GNU_IFUNC` is a link
-error), TLSDESC, local-dynamic relocations (local dynamic is lowered as
-general dynamic), 32-bit dynamic relocations, REL, and RELR: ELF32 RELR
-(`-z pack-relative-relocs`) describes 4-byte words, so lld rejects it for
-KlaussCPU.
+Not provided: `IRELATIVE` (musl has no IFUNC; a reference to an
+`STT_GNU_IFUNC` symbol is a link error, as is a definition in a shared
+library or PIE), TLSDESC, local-dynamic relocations (local dynamic is
+lowered as general dynamic), 32-bit dynamic relocations, REL, RELR and
+Android's packed relocations: ELF32 RELR (`-z pack-relative-relocs`)
+describes 4-byte words, and `--pack-dyn-relocs=android` replaces
+`DT_RELA`, which musl reads, so lld rejects both for KlaussCPU shared
+libraries and PIE (a static link has nothing to pack and ignores them).
 
 ### GOT
 
