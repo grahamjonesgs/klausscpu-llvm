@@ -451,7 +451,11 @@ driver passes `-fhalf-no-semantic-interposition`, also under
 `.L<sym>$local` aliases on Linux PIC (adding Linux KlaussCPU to that list
 would make `-fno-semantic-interposition` work): function definitions are not `dso_local`
 either, so calls to them stay CALL18 that lld may send through the PLT,
-though the optimiser may still inline them.  (`cc1` on its own defaults to
+though the optimiser may still inline them or fold their results.  So a
+library's calls to its own default-visibility functions are not reliably
+interposable (by the executable, another library or `LD_PRELOAD`): a library
+that must allow that is built with `-fsemantic-interposition`, which keeps
+every such call and reference a real one.  (`cc1` on its own defaults to
 full `-fno-semantic-interposition`, where function definitions are
 `dso_local` and referenced through their local alias.)  Hidden, protected and
 `static` symbols are always local.  GlobalMerge merges only `dso_local`
