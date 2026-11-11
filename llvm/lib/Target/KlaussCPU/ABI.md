@@ -348,9 +348,9 @@ a 2-word instruction, relative to the instruction itself, as
 | 10 | `R_KLAUSSCPU_TLS_GOTTPREL32` | `leapc` | GT + A − I | `leapc rD, %gottprel(sym)` |
 | 11 | `R_KLAUSSCPU_TLS_GD32` | `leapc` | GD + A − I | `leapc rD, %tlsgd(sym)` |
 
-The four specifiers take a bare symbol (`%gotpcrel(x+8)` is an assembler
-error; the assembler writes A = 0): an offset into the object is added after
-the load.  A `leapc` with one of them is never compressed to `leapc.s`.
+The four specifiers take a bare symbol (`%gotpcrel(x+8)` and
+`%gotpcrel(x)+8` are assembler errors; the assembler writes A = 0): an
+offset into the object is added after the load.  A `leapc` with one of them is never compressed to `leapc.s`.
 
 **Existing static relocations in a dynamic link** (lld):
 
@@ -437,7 +437,14 @@ KlaussCPU.
 `-fPIC` makes default-visibility definitions preemptible (not `dso_local`);
 `-fPIE` keeps definitions `dso_local` and leaves external declarations not
 `dso_local`.  (`shouldAssumeDSOLocal` treats `-fPIC` as `-fPIE` for
-KlaussCPU today; that stays for every other OS.)  Hidden, protected and
+KlaussCPU today; that stays for every other OS.)  For `-fPIC` the clang
+driver passes `-fhalf-no-semantic-interposition`, as for every ELF target
+without `.L<sym>$local` aliases (and also under
+`-fno-semantic-interposition`): function definitions are not `dso_local`
+either, so calls to them stay CALL18 that lld may send through the PLT,
+though the optimiser may still inline them.  (`cc1` on its own defaults to
+full `-fno-semantic-interposition`, where function definitions are
+`dso_local` and referenced through their local alias.)  Hidden, protected and
 `static` symbols are always local.  GlobalMerge merges only `dso_local`
 globals, so it follows by itself.  External symbols the backend names itself
 (`LowerExternalSymbol`: libcalls such as `memcpy`, whose address it may take)
@@ -521,9 +528,11 @@ resolves a TLS symbol to its offset in its module's TLS segment, which is
 the DTP offset, in shared libraries too.  No new relocation is needed.
 
 **Exception tables**, changed in M2 for all Linux code (PIC or not): the
-personality is `indirect|pcrel|sdata4` (through an 8-byte
-`DW.ref.<personality>` in `.data.rel.ro`), the LSDA `pcrel|sdata4`, type
-info `indirect|pcrel|sdata4`.  FDE addresses are `pcrel|sdata4` already
+personality is `indirect|pcrel|sdata4` (through an 8-byte hidden weak
+`DW.ref.<personality>` in a writable COMDAT section
+`.data.DW.ref.<personality>`, LLVM's generic placement), the LSDA
+`pcrel|sdata4`, type info `indirect|pcrel|sdata4` (8-byte `.L<sym>.DW.stub`
+in `.data`).  FDE addresses are `pcrel|sdata4` already
 (augmentation `zR`, `R_KLAUSSCPU_PC32`).  Today the three fall into LLVM's
 default `absptr`, which MC writes as 4 bytes and libunwind reads as 8, so
 this also fixes static C++ exception handling; C code (no personality) is
