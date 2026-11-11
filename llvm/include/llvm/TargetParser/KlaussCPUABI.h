@@ -53,6 +53,14 @@ inline constexpr uint32_t HaltWord = 0x6C010000;
 inline constexpr uint32_t TrapWord = 0x6C040000;
 /// Word 0 of JMPREL (the imm32 displacement follows): lld's call thunk.
 inline constexpr uint32_t JmpRelWord = 0xA1000000;
+/// A PLT entry (ABI.md "PLT"), 16 bytes, no PLT header: `leapc r14, slot -
+/// entry` (2 words, the displacement of the entry's .got.plt slot from the
+/// entry follows), `ldidx64 r14, r14, 0` (the 1-word short form) and
+/// `jmpr r14`.
+inline constexpr unsigned PltEntrySize = 16;
+inline constexpr uint32_t PltLeaPcR14Word = 0x8B800E00;
+inline constexpr uint32_t PltLdIdx64R14Word = 0x5B300EE0;
+inline constexpr uint32_t PltJmpRR14Word = 0x6080000E;
 /// An architecturally reserved word: LEN [31:30] = 00 and class [29:26] = 0
 /// both trap with ERR_INV_OPCODE (ISA_ENCODING_V2_MAP.md §1).  lld fills the
 /// gaps between code sections with it, so a stray jump into padding traps

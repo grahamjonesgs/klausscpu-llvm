@@ -109,6 +109,18 @@ TEST_F(KlaussCPUABITest, InstructionWords) {
   EXPECT_EQ(encode(MCInstBuilder(KlaussCPU::TRAP_I)), KlaussCPUABI::TrapWord);
   EXPECT_EQ(encode(MCInstBuilder(KlaussCPU::JMPREL).addImm(0)),
             KlaussCPUABI::JmpRelWord);
+  // lld's PLT entry.
+  EXPECT_EQ(encode(MCInstBuilder(KlaussCPU::LEAPC)
+                       .addReg(KlaussCPU::R14)
+                       .addImm(0)),
+            KlaussCPUABI::PltLeaPcR14Word);
+  EXPECT_EQ(encode(MCInstBuilder(KlaussCPU::LDIDX64_SH)
+                       .addReg(KlaussCPU::R14)
+                       .addReg(KlaussCPU::R14)
+                       .addImm(0)),
+            KlaussCPUABI::PltLdIdx64R14Word);
+  EXPECT_EQ(encode(MCInstBuilder(KlaussCPU::JMPR_R).addReg(KlaussCPU::R14)),
+            KlaussCPUABI::PltJmpRR14Word);
   EXPECT_EQ(TM->getMCAsmInfo()->getMinInstAlignment(),
             KlaussCPUABI::MinInstBytes);
   // The word lld fills code gaps with must not decode as an instruction.
