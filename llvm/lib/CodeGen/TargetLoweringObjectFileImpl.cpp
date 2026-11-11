@@ -256,6 +256,18 @@ void TargetLoweringObjectFileELF::Initialize(MCContext &Ctx,
                     dwarf::DW_EH_PE_sdata4;
     CallSiteEncoding = dwarf::DW_EH_PE_udata4;
     break;
+  case Triple::klausscpu:
+    // Linux (ABI.md "Dynamic linking"), PIC or not: 4-byte PC-relative
+    // references, the personality and type info through an 8-byte pointer
+    // (DW.ref.<personality>).  Other OSes keep absptr.
+    if (TgtM.getTargetTriple().isOSLinux()) {
+      PersonalityEncoding = dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel |
+                            dwarf::DW_EH_PE_sdata4;
+      LSDAEncoding = dwarf::DW_EH_PE_pcrel | dwarf::DW_EH_PE_sdata4;
+      TTypeEncoding = dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel |
+                      dwarf::DW_EH_PE_sdata4;
+    }
+    break;
   case Triple::sparcv9:
     LSDAEncoding = dwarf::DW_EH_PE_pcrel | dwarf::DW_EH_PE_sdata4;
     if (isPositionIndependent()) {
