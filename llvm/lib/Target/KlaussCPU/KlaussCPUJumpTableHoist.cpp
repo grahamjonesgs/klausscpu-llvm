@@ -34,6 +34,10 @@
 // when that FLAGS writer also reads FLAGS (add with carry), or when the
 // header has none and its flags come from another block.
 //
+// Linux PIC code has table-relative entries (LowerBR_JT): a sign-extending
+// `ldidx32sr` and an `addr %tgt, %base, %entry` in front of the JMPR.  The
+// base and the offset move the same way; the ADDR stays.
+//
 // -mllvm -klausscpu-hoist-jt-addr=false disables it.
 //
 //===----------------------------------------------------------------------===//
@@ -93,15 +97,32 @@ char KlaussCPUJumpTableHoist::ID = 0;
 
 INITIALIZE_PASS(KlaussCPUJumpTableHoist, DEBUG_TYPE, PASS_NAME, false, false)
 
-// The jump-table load feeding Br, a JMPR_R in the same block, or null.
+// The jump-table load feeding Br, a JMPR_R in the same block, directly
+// (an absolute entry) or through the ADDR that adds a relative entry to the
+// table base, or null.
 static MachineInstr *getJumpTableLoad(MachineInstr &Br,
                                       const MachineRegisterInfo &MRI) {
-  Register Tgt = Br.getOperand(0).getReg();
-  if (!Tgt.isVirtual())
+  auto DefInBlock = [&](Register R) -> MachineInstr * {
+    if (!R.isVirtual())
+      return nullptr;
+    MachineInstr *Def = MRI.getUniqueVRegDef(R);
+    return Def && Def->getParent() == Br.getParent() ? Def : nullptr;
+  };
+  MachineInstr *Load = DefInBlock(Br.getOperand(0).getReg());
+  if (Load && Load->getOpcode() == KlaussCPU::ADDR) {
+    MachineInstr *Add = Load;
+    Load = DefInBlock(Add->getOperand(2).getReg());
+    if (!Load || Load->getOpcode() != KlaussCPU::LDIDX32_SR ||
+        Load->getOperand(1).getReg() != Add->getOperand(1).getReg()) {
+      Load = DefInBlock(Add->getOperand(1).getReg());
+      if (!Load || Load->getOpcode() != KlaussCPU::LDIDX32_SR ||
+          Load->getOperand(1).getReg() != Add->getOperand(2).getReg())
+        return nullptr;
+    }
+  } else if (!Load || Load->getOpcode() != KlaussCPU::LDIDX32R) {
     return nullptr;
-  MachineInstr *Load = MRI.getUniqueVRegDef(Tgt);
-  if (!Load || Load->getParent() != Br.getParent() ||
-      Load->getOpcode() != KlaussCPU::LDIDX32R || !Load->hasOneMemOperand())
+  }
+  if (!Load->hasOneMemOperand())
     return nullptr;
   const PseudoSourceValue *PSV =
       (*Load->memoperands_begin())->getPseudoValue();

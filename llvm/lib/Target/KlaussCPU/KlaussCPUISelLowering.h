@@ -221,10 +221,9 @@ public:
 
   // EK_Custom32 entries are ABSOLUTE block addresses, in PIC mode too (a PIC
   // image's loader applies their R_KLAUSSCPU_ABS32, as it does for its data
-  // pointers; see LowerBR_JT).  The default (== isPositionIndependent())
-  // would make BR_JT add the table base to each entry under -fPIC, jumping
-  // to table+target.
-  bool isJumpTableRelative() const override { return false; }
+  // pointers; see LowerBR_JT), except for Linux PIC code, whose
+  // EK_LabelDifference32 entries are relative to the table.
+  bool isJumpTableRelative() const override { return isLinuxPIC(); }
 
   // Linux PIC code (ABI.md "Dynamic linking"): a symbol that may be
   // preempted is reached through the GOT, TLS uses the dynamic models and

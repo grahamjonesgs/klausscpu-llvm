@@ -1111,6 +1111,16 @@ SDValue KlaussCPUTargetLowering::LowerJumpTable(SDValue Op,
 // runtime's ELF loaders, Zephyr LLEXT).  Table-relative entries
 // (EK_LabelDifference32) would cost a dependent add in every dispatch, and
 // everything in the runtime is built -fPIC.
+//
+// Linux PIC code (shared libraries, PIE) has no 32-bit dynamic relocation
+// for an absolute entry, so its tables are EK_LabelDifference32: each entry
+// is the block's offset from the table (`.long .LBB0_3-.LJTI0_0`,
+// R_KLAUSSCPU_PC32 when the table is in .rodata), and the dispatch adds it
+// to the base:
+//   leapc     rB, .LJTI0_0
+//   ldidx32sr rE, rB, rOff        (sign-extending: a block may lie below)
+//   addr      rT, rB, rE
+//   jmpr      rT
 SDValue KlaussCPUTargetLowering::LowerBR_JT(SDValue Op,
                                               SelectionDAG &DAG) const {
   SDValue Chain = Op.getOperand(0);
@@ -1134,9 +1144,14 @@ SDValue KlaussCPUTargetLowering::LowerBR_JT(SDValue Op,
   // selects the register-offset LDIDX32R, which force-aligns its EA; the
   // table is 4-byte aligned (EK_Custom32's entry alignment).
   MachineFunction &MF = DAG.getMachineFunction();
-  SDValue Target =
-      DAG.getExtLoad(ISD::ZEXTLOAD, DL, MVT::i64, Chain, EntryAddr,
-                     MachinePointerInfo::getJumpTable(MF), MVT::i32);
+  bool Relative = isJumpTableRelative();
+  SDValue Target = DAG.getExtLoad(
+      Relative ? ISD::SEXTLOAD : ISD::ZEXTLOAD, DL, MVT::i64, Chain, EntryAddr,
+      MachinePointerInfo::getJumpTable(MF), MVT::i32);
+  if (Relative) {
+    SDValue Dest = DAG.getNode(ISD::ADD, DL, MVT::i64, Base, Target);
+    return DAG.getNode(ISD::BRIND, DL, MVT::Other, Target.getValue(1), Dest);
+  }
 
   return DAG.getNode(ISD::BRIND, DL, MVT::Other,
                      Target.getValue(1), Target.getValue(0));
@@ -1152,7 +1167,8 @@ const MCExpr *KlaussCPUTargetLowering::LowerCustomJumpTableEntry(
 }
 
 unsigned KlaussCPUTargetLowering::getJumpTableEncoding() const {
-  return MachineJumpTableInfo::EK_Custom32;
+  return isLinuxPIC() ? MachineJumpTableInfo::EK_LabelDifference32
+                      : MachineJumpTableInfo::EK_Custom32;
 }
 
 bool KlaussCPUTargetLowering::isSuitableForJumpTable(
