@@ -1,6 +1,9 @@
 //===--- KlaussCPU.h - KlaussCPU ToolChain ---------------------*- C++ -*-===//
 //
-// Clang driver toolchain for KlaussCPU — a bare-metal FPGA target.
+// Clang driver toolchain for KlaussCPU — a bare-metal FPGA target, and
+// user programs and shared libraries for its Linux port
+// (klausscpu-*-linux-*: static by default, -shared / -pie for musl's dynamic
+// linker; ABI.md "Driver").
 //
 // Selecting this toolchain (via -target klausscpu-unknown-elf) automatically:
 //   - restricts includes to Clang's own built-in headers only (no system libc)
@@ -26,8 +29,8 @@ public:
   KlaussCPUToolChain(const Driver &D, const llvm::Triple &Triple,
                       const llvm::opt::ArgList &Args);
 
-  // klausscpu-*-linux-*: static user programs against a libc sysroot
-  // (musl); otherwise bare metal with clang's headers only.
+  // klausscpu-*-linux-*: user programs and shared libraries against a libc
+  // sysroot (musl); otherwise bare metal with clang's headers only.
   bool isLinux() const { return getTriple().isOSLinux(); }
   // The sysroot's root: --sysroot, else <prefix>/klausscpu-linux-musl
   // beside the compiler's bin directory.

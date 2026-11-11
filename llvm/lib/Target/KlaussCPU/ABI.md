@@ -282,9 +282,10 @@ libraries, on the same layout and thread pointer:
 **Status: design agreed** (milestone M1 of klausscpu-runtime
 `DYNLINK_PLAN.md`, reviewed); **compiler and assembler implemented** (M2:
 clang's `dso_local` rule, the backend's code generation, MC's specifiers
-and relocations 8–11, `KlaussCPU.def` 8–18); lld (M3), the driver, the
-runtime and lldb not yet, so Linux `-fPIC` / `-fPIE` objects do not link
-until M3.  It defines
+and relocations 8–11, `KlaussCPU.def` 8–18); **lld and the driver
+implemented** (M3: `-shared`, `-pie`, the GOT, PLT, TLS and dynamic
+relocations below, `lld/test/ELF/klausscpu-dynlink-*.s`); the runtime
+(musl's dynamic linker, M4) and lldb not yet.  It defines
 shared libraries and position-independent executables (PIE) for
 `klausscpu-*-linux-*` with musl's dynamic linker,
 `/lib/ld-musl-klausscpu.so.1`.  There are no dynamically linked executables
@@ -665,12 +666,17 @@ auxiliary vector has 8-byte entries (`a_type`, `a_val`), whose values
 
 ### Driver (`klausscpu-*-linux-*`)
 
-Today every Linux link is `-static`.  `-shared` links a shared library (no
-start file), and `-pie` a PIE (`Scrt1.o`).  Both get `-dynamic-linker
-/lib/ld-musl-klausscpu.so.1`, `-z now`, `--hash-style=both`,
-`--eh-frame-hdr` and both 64 KiB page sizes.  Static stays the default
-until the dynamic linker works on the emulator (M5); then the default
-becomes dynamic PIE, with `-static` as on other Linux targets (M7).
+A Linux link is `-static` (`crt1.o`) unless it asks otherwise; `-static`
+wins over `-pie`.  `-shared` links a shared library (no start file), and
+`-pie` a PIE (`Scrt1.o`) with `-dynamic-linker /lib/ld-musl-klausscpu.so.1`
+(a shared library has no `PT_INTERP`).  Both get `-z now`,
+`--hash-style=both`, `--eh-frame-hdr` and both 64 KiB page sizes, and
+`-rdynamic` becomes `--export-dynamic`; both take the builtins built for
+the Linux triple (the bare-metal archive, a static link's fallback, cannot
+go into either).  `-pie` is a link option: the compiler still needs
+`-fPIE`.  Static stays the default until the dynamic linker works on the
+emulator (M5); then the default becomes dynamic PIE, with `-static` as on
+other Linux targets (M7).
 
 ### Not in the first version
 
