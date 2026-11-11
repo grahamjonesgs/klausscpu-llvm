@@ -438,9 +438,11 @@ KlaussCPU.
 `-fPIE` keeps definitions `dso_local` and leaves external declarations not
 `dso_local`.  (`shouldAssumeDSOLocal` treats `-fPIC` as `-fPIE` for
 KlaussCPU today; that stays for every other OS.)  For `-fPIC` the clang
-driver passes `-fhalf-no-semantic-interposition`, as for every ELF target
-without `.L<sym>$local` aliases (and also under
-`-fno-semantic-interposition`): function definitions are not `dso_local`
+driver passes `-fhalf-no-semantic-interposition`, also under
+`-fno-semantic-interposition`, because its `SupportsLocalAlias` list
+(`Clang.cpp`) does not name KlaussCPU, although the backend emits and uses
+`.L<sym>$local` aliases on Linux PIC (adding Linux KlaussCPU to that list
+would make `-fno-semantic-interposition` work): function definitions are not `dso_local`
 either, so calls to them stay CALL18 that lld may send through the PLT,
 though the optimiser may still inline them.  (`cc1` on its own defaults to
 full `-fno-semantic-interposition`, where function definitions are

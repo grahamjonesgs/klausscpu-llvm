@@ -1,5 +1,5 @@
 ; RUN: llc -march=klausscpu -verify-machineinstrs -O2 < %s | FileCheck %s
-; RUN: llc -march=klausscpu -verify-machineinstrs -O2 -relocation-model=pic < %s \
+; RUN: llc -mtriple=klausscpu -verify-machineinstrs -O2 -relocation-model=pic < %s \
 ; RUN:   | FileCheck %s --check-prefix=PIC
 ; RUN: llc -march=klausscpu -O2 -filetype=obj < %s -o /dev/null
 ;

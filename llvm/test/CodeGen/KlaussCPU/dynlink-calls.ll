@@ -18,7 +18,7 @@
 ; PLT entry of a callee that may be preempted.  With short calls off, a
 ; call or tail call to a callee that is not dso_local, or to a libcall the
 ; backend names, is `callrel %plt(f)` / `tail %plt(f)` (R_KLAUSSCPU_PLT32);
-; a dso_local callee is reached through its local alias (`.Lf$local`, a
+; a dso_local definition is reached through its local alias (`.Lf$local`, a
 ; definition a shared library exports) or directly.  Other triples (BARE)
 ; have no %plt.
 
@@ -166,6 +166,7 @@ declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)
 ; RELOC-NEXT:   R_KLAUSSCPU_CALL18 ext2 0x0
 ; RELOC-NEXT:   R_KLAUSSCPU_CALL18 ext 0x0
 ; RELOC-NEXT:   R_KLAUSSCPU_CALL18 memcpy 0x0
+; RELOC-NEXT:   R_KLAUSSCPU_CALL18 dl_decl 0x0
 ; RELOC-NEXT: }
 
 ; RELOC-LONG:      .rela.text {
@@ -173,4 +174,30 @@ declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)
 ; RELOC-LONG-NEXT:   R_KLAUSSCPU_PLT32 ext2 0x0
 ; RELOC-LONG-NEXT:   R_KLAUSSCPU_PLT32 ext 0x0
 ; RELOC-LONG-NEXT:   R_KLAUSSCPU_PLT32 memcpy 0x0
+; RELOC-LONG-NEXT:   R_KLAUSSCPU_PLT32 dl_decl 0x0
 ; RELOC-LONG-NEXT: }
+
+; A dso_local declaration (mixed-model LTO) is still in another object, maybe
+; another module: with short calls off it gets %plt too, never PCREL32.
+declare dso_local void @dl_decl()
+define void @call_dso_local_decl() nounwind {
+; PIC-LABEL: call_dso_local_decl:
+; PIC:       # %bb.0:
+; PIC-NEXT:    enter 0
+; PIC-NEXT:    callrel dl_decl
+; PIC-NEXT:    leaveret
+;
+; LONG-LABEL: call_dso_local_decl:
+; LONG:       # %bb.0:
+; LONG-NEXT:    enter 0
+; LONG-NEXT:    callrel %plt(dl_decl)
+; LONG-NEXT:    leaveret
+;
+; BARE-LABEL: call_dso_local_decl:
+; BARE:       # %bb.0:
+; BARE-NEXT:    enter 0
+; BARE-NEXT:    callrel dl_decl
+; BARE-NEXT:    leaveret
+  call void @dl_decl()
+  ret void
+}

@@ -1793,11 +1793,16 @@ SDValue KlaussCPUTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI
   // Linux PIC: a direct call is the short `callrel sym` (R_KLAUSSCPU_CALL18),
   // which lld sends to the PLT entry of a callee that may be preempted; the
   // 2-word form (short calls off) says so itself, `callrel %plt(sym)`
-  // (R_KLAUSSCPU_PLT32), as does `tail %plt(sym)`.
+  // (R_KLAUSSCPU_PLT32), as does `tail %plt(sym)`.  A declaration gets it
+  // even when it is dso_local (mixed-model LTO can make one): only the link
+  // knows where it is, and R_KLAUSSCPU_PCREL32 against a symbol of another
+  // module fails there, while lld resolves PLT32 to a local symbol directly.
   unsigned CalleeFlags = KlaussCPUII::MO_None;
   if (isLinuxPIC() && !Subtarget.hasShortCalls()) {
     if (auto *GA = dyn_cast<GlobalAddressSDNode>(Callee)) {
-      if (!getTargetMachine().shouldAssumeDSOLocal(GA->getGlobal()))
+      const GlobalValue *GV = GA->getGlobal();
+      if (!getTargetMachine().shouldAssumeDSOLocal(GV) ||
+          GV->isDeclarationForLinker())
         CalleeFlags = KlaussCPUII::MO_PLT;
     } else if (isa<ExternalSymbolSDNode>(Callee)) {
       CalleeFlags = KlaussCPUII::MO_PLT;

@@ -14,7 +14,7 @@
 ; catches any swap (e.g. ult<->uge, the borrow-polarity landmine).
 ;
 ; RUN: llc -march=klausscpu -verify-machineinstrs -O1 -klausscpu-fuse-cmp-br=false < %s | FileCheck %s
-; RUN: llc -march=klausscpu -verify-machineinstrs -O1 -klausscpu-fuse-cmp-br=false -relocation-model=pic < %s \
+; RUN: llc -mtriple=klausscpu -verify-machineinstrs -O1 -klausscpu-fuse-cmp-br=false -relocation-model=pic < %s \
 ; RUN:   | FileCheck %s --check-prefix=PIC
 
 ; ---- reg-reg compares (CMPRR) --------------------------------------------
