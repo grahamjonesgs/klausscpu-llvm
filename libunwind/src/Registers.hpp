@@ -46,6 +46,7 @@ enum {
   REGISTERS_VE,
   REGISTERS_S390X,
   REGISTERS_LOONGARCH,
+  REGISTERS_KLAUSSCPU,
 };
 
 #if defined(_LIBUNWIND_TARGET_I386)
@@ -5533,6 +5534,145 @@ inline void Registers_loongarch::setVectorRegister(int, v128) {
   _LIBUNWIND_ABORT("loongarch vector support not implemented");
 }
 #endif //_LIBUNWIND_TARGET_LOONGARCH
+
+#if defined(_LIBUNWIND_TARGET_KLAUSSCPU)
+/// Registers_klausscpu holds the register state of a thread on a KlaussCPU
+/// (64-bit registers; ABI.md "Exceptions" in the llvm backend).  DWARF
+/// registers 0-15 are R0-R15 and 16 is SP.  17 is the CIE's return-address
+/// column: CALL pushes the return address at [SP], no register holds it, so
+/// the column is read as the PC.
+class _LIBUNWIND_HIDDEN Registers_klausscpu {
+public:
+  Registers_klausscpu();
+  Registers_klausscpu(const void *registers);
+
+  typedef uint64_t reg_t;
+  typedef uint64_t link_reg_t;
+  typedef const link_reg_t &link_hardened_reg_arg_t;
+
+  bool        validRegister(int num) const;
+  uint64_t    getRegister(int num) const;
+  void        setRegister(int num, uint64_t value);
+  bool        validFloatRegister(int num) const;
+  double      getFloatRegister(int num) const;
+  void        setFloatRegister(int num, double value);
+  bool        validVectorRegister(int num) const;
+  v128        getVectorRegister(int num) const;
+  void        setVectorRegister(int num, v128 value);
+  static const char *getRegisterName(int num);
+  void        jumpto();
+  static constexpr int lastDwarfRegNum() {
+    return _LIBUNWIND_HIGHEST_DWARF_REGISTER_KLAUSSCPU;
+  }
+  static int  getArch() { return REGISTERS_KLAUSSCPU; }
+
+  uint64_t  getSP() const         { return _registers.__sp; }
+  void      setSP(uint64_t value) { _registers.__sp = value; }
+  uint64_t  getIP() const         { return _registers.__pc; }
+  void      setIP(uint64_t value) { _registers.__pc = value; }
+
+private:
+  // The layout __unw_getcontext writes and jumpto reads
+  // (UnwindRegistersSave.S / UnwindRegistersRestore.S).
+  struct klausscpu_thread_state_t {
+    uint64_t __r[16]; // R0-R15, at 0..120
+    uint64_t __sp;    // at 128
+    uint64_t __pc;    // at 136
+  };
+
+  klausscpu_thread_state_t _registers;
+};
+
+inline Registers_klausscpu::Registers_klausscpu(const void *registers) {
+  static_assert((check_fit<Registers_klausscpu, unw_context_t>::does_fit),
+                "klausscpu registers do not fit into unw_context_t");
+  static_assert(offsetof(klausscpu_thread_state_t, __sp) == 128 &&
+                    offsetof(klausscpu_thread_state_t, __pc) == 136,
+                "the layout UnwindRegistersSave.S/Restore.S use");
+  memcpy(&_registers, static_cast<const uint8_t *>(registers),
+         sizeof(_registers));
+}
+
+inline Registers_klausscpu::Registers_klausscpu() {
+  memset(&_registers, 0, sizeof(_registers));
+}
+
+inline bool Registers_klausscpu::validRegister(int regNum) const {
+  if (regNum == UNW_REG_IP || regNum == UNW_REG_SP)
+    return true;
+  return regNum >= UNW_KLAUSSCPU_R0 && regNum <= UNW_KLAUSSCPU_PC;
+}
+
+inline uint64_t Registers_klausscpu::getRegister(int regNum) const {
+  if (regNum >= UNW_KLAUSSCPU_R0 && regNum <= UNW_KLAUSSCPU_R15)
+    return _registers.__r[regNum - UNW_KLAUSSCPU_R0];
+  switch (regNum) {
+  case UNW_REG_IP:
+  case UNW_KLAUSSCPU_PC:
+    return _registers.__pc;
+  case UNW_REG_SP:
+  case UNW_KLAUSSCPU_SP:
+    return _registers.__sp;
+  }
+  _LIBUNWIND_ABORT("unsupported klausscpu register");
+}
+
+inline void Registers_klausscpu::setRegister(int regNum, uint64_t value) {
+  if (regNum >= UNW_KLAUSSCPU_R0 && regNum <= UNW_KLAUSSCPU_R15) {
+    _registers.__r[regNum - UNW_KLAUSSCPU_R0] = value;
+    return;
+  }
+  switch (regNum) {
+  case UNW_REG_IP:
+  case UNW_KLAUSSCPU_PC:
+    _registers.__pc = value;
+    return;
+  case UNW_REG_SP:
+  case UNW_KLAUSSCPU_SP:
+    _registers.__sp = value;
+    return;
+  }
+  _LIBUNWIND_ABORT("unsupported klausscpu register");
+}
+
+inline bool Registers_klausscpu::validFloatRegister(int) const {
+  return false; // soft float: no FP registers
+}
+
+inline double Registers_klausscpu::getFloatRegister(int) const {
+  _LIBUNWIND_ABORT("klausscpu has no float registers");
+}
+
+inline void Registers_klausscpu::setFloatRegister(int, double) {
+  _LIBUNWIND_ABORT("klausscpu has no float registers");
+}
+
+inline bool Registers_klausscpu::validVectorRegister(int) const {
+  return false;
+}
+
+inline v128 Registers_klausscpu::getVectorRegister(int) const {
+  _LIBUNWIND_ABORT("klausscpu has no vector registers");
+}
+
+inline void Registers_klausscpu::setVectorRegister(int, v128) {
+  _LIBUNWIND_ABORT("klausscpu has no vector registers");
+}
+
+inline const char *Registers_klausscpu::getRegisterName(int regNum) {
+  static const char *const names[] = {"r0",  "r1",  "r2",  "r3",  "r4",
+                                      "r5",  "r6",  "r7",  "r8",  "r9",
+                                      "r10", "r11", "r12", "r13", "r14",
+                                      "r15", "sp",  "pc"};
+  if (regNum == UNW_REG_IP)
+    return "pc";
+  if (regNum == UNW_REG_SP)
+    return "sp";
+  if (regNum >= UNW_KLAUSSCPU_R0 && regNum <= UNW_KLAUSSCPU_PC)
+    return names[regNum];
+  return "unknown register";
+}
+#endif // _LIBUNWIND_TARGET_KLAUSSCPU
 
 } // namespace libunwind
 

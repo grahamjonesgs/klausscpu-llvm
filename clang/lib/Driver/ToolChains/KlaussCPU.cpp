@@ -70,6 +70,24 @@ void KlaussCPUToolChain::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
   }
 }
 
+void KlaussCPUToolChain::AddClangCXXStdlibIncludeArgs(
+    const ArgList &DriverArgs, ArgStringList &CC1Args) const {
+  if (!isLinux()) {
+    Generic_ELF::AddClangCXXStdlibIncludeArgs(DriverArgs, CC1Args);
+    return;
+  }
+  if (DriverArgs.hasArg(options::OPT_nostdinc, options::OPT_nostdincxx,
+                        options::OPT_nostdlibinc))
+    return;
+  if (GetCXXStdlibType(DriverArgs) != ToolChain::CST_Libcxx)
+    return;
+  // In front of the libc headers (AddClangSystemIncludeArgs), as libc++'s
+  // wrappers (<stdlib.h>, <math.h>, ...) need.
+  llvm::SmallString<128> P(computeSysRoot());
+  llvm::sys::path::append(P, "include", "c++", "v1");
+  addSystemInclude(DriverArgs, CC1Args, P);
+}
+
 Tool *KlaussCPUToolChain::buildLinker() const {
   return new tools::klausscpu::Linker(*this);
 }
@@ -126,10 +144,12 @@ void klausscpu::Linker::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("-z");
       CmdArgs.push_back("now");
       CmdArgs.push_back("--hash-style=both");
-      CmdArgs.push_back("--eh-frame-hdr");
       if (RDynamic)
         CmdArgs.push_back("--export-dynamic");
     }
+    // libunwind finds the FDEs through PT_GNU_EH_FRAME (dl_iterate_phdr),
+    // static programs too.  Without .eh_frame lld makes no header.
+    CmdArgs.push_back("--eh-frame-hdr");
     CmdArgs.push_back("-z");
     CmdArgs.push_back("max-page-size=0x10000");
     if (Shared || PIE) {
@@ -173,6 +193,17 @@ void klausscpu::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   // library or PIE needs the Linux ones (-fPIC, hidden; ABI.md "Building
   // shared libraries"): the bare-metal archive's absolute jump tables cannot
   // be linked into one.
+  // C++ (clang++): libc++, libc++abi and libunwind, which code with landing
+  // pads calls itself (_Unwind_Resume).  libc++.so's linker script names
+  // libc++abi too; a static link needs all three.
+  if (Linux && DefaultLibs && TC.ShouldLinkCXXStdlib(Args)) {
+    TC.AddCXXStdlibLibArgs(Args, CmdArgs);
+    if (TC.GetCXXStdlibType(Args) == ToolChain::CST_Libcxx) {
+      CmdArgs.push_back("-lc++abi");
+      CmdArgs.push_back("-lunwind");
+    }
+  }
+
   if (Linux && DefaultLibs) {
     CmdArgs.push_back("--start-group");
     CmdArgs.push_back("-lc");

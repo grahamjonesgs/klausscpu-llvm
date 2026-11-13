@@ -1292,6 +1292,12 @@ private:
   }
 #endif
 
+#if defined(_LIBUNWIND_TARGET_KLAUSSCPU)
+  compact_unwind_encoding_t dwarfEncoding(Registers_klausscpu &) const {
+    return 0;
+  }
+#endif
+
 #if defined (_LIBUNWIND_TARGET_HEXAGON)
   compact_unwind_encoding_t dwarfEncoding(Registers_hexagon &) const {
     return 0;

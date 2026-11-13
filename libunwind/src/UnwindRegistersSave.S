@@ -1279,6 +1279,43 @@ DEFINE_LIBUNWIND_FUNCTION(__unw_getcontext)
   lghi %r2, 0
   br %r14
 
+#elif defined(__klausscpu__)
+
+//
+// extern int __unw_getcontext(unw_context_t* thread_state)
+//
+// On entry:
+//  thread_state pointer is in R0, [SP] is the return address.
+//
+// Saves R0-R15, then the SP and PC this function returns with: SP + 8 (CALL
+// pushed the return address) and the return address.  Registers_klausscpu's
+// layout: R0-R15 at 0..120, SP at 128, PC at 136.
+//
+DEFINE_LIBUNWIND_FUNCTION(__unw_getcontext)
+  stidx64 r0, r0, 0
+  stidx64 r1, r0, 8
+  stidx64 r2, r0, 16
+  stidx64 r3, r0, 24
+  stidx64 r4, r0, 32
+  stidx64 r5, r0, 40
+  stidx64 r6, r0, 48
+  stidx64 r7, r0, 56
+  stidx64 r8, r0, 64
+  stidx64 r9, r0, 72
+  stidx64 r10, r0, 80
+  stidx64 r11, r0, 88
+  stidx64 r12, r0, 96
+  stidx64 r13, r0, 104
+  stidx64 r14, r0, 112
+  stidx64 r15, r0, 120
+  getsp   r1
+  ldidx64 r2, r1, 0       // the return address: PC
+  addi    r1, r1, 8       // the caller's SP after the return
+  stidx64 r1, r0, 128
+  stidx64 r2, r0, 136
+  setr    r12, 0          // UNW_ESUCCESS
+  ret
+
 #elif defined(__loongarch__) && __loongarch_grlen == 64
 
 #

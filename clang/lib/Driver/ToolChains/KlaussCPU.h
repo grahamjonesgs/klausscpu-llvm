@@ -64,6 +64,16 @@ public:
   void AddClangSystemIncludeArgs(const llvm::opt::ArgList &DriverArgs,
                                   llvm::opt::ArgStringList &CC1Args) const override;
 
+  // C++ on Linux: libc++, libc++abi and libunwind from the sysroot
+  // (<sysroot>/include/c++/v1, <sysroot>/lib); the runtime's
+  // linux/cxx/build.sh installs them.
+  CXXStdlibType GetDefaultCXXStdlibType() const override {
+    return isLinux() ? ToolChain::CST_Libcxx : Generic_ELF::GetDefaultCXXStdlibType();
+  }
+  void AddClangCXXStdlibIncludeArgs(
+      const llvm::opt::ArgList &DriverArgs,
+      llvm::opt::ArgStringList &CC1Args) const override;
+
 protected:
   Tool *buildLinker() const override;
 };

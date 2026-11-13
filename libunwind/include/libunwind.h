@@ -1406,4 +1406,28 @@ enum {
   UNW_LOONGARCH_F31 = 63,
 };
 
+// KlaussCPU registers (DWARF numbers; ABI.md "Exceptions" in the llvm
+// backend).  Column 17 is the return-address column of the CIE: no hardware
+// register (CALL pushes the return address), read as the PC.
+enum {
+  UNW_KLAUSSCPU_R0 = 0,
+  UNW_KLAUSSCPU_R1 = 1,
+  UNW_KLAUSSCPU_R2 = 2,
+  UNW_KLAUSSCPU_R3 = 3,
+  UNW_KLAUSSCPU_R4 = 4,
+  UNW_KLAUSSCPU_R5 = 5,
+  UNW_KLAUSSCPU_R6 = 6,
+  UNW_KLAUSSCPU_R7 = 7,
+  UNW_KLAUSSCPU_R8 = 8,
+  UNW_KLAUSSCPU_R9 = 9,
+  UNW_KLAUSSCPU_R10 = 10,
+  UNW_KLAUSSCPU_R11 = 11,
+  UNW_KLAUSSCPU_R12 = 12,
+  UNW_KLAUSSCPU_R13 = 13,
+  UNW_KLAUSSCPU_R14 = 14,
+  UNW_KLAUSSCPU_R15 = 15,
+  UNW_KLAUSSCPU_SP = 16,
+  UNW_KLAUSSCPU_PC = 17,
+};
+
 #endif

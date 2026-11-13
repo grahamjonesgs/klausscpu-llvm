@@ -1,7 +1,8 @@
 // klausscpu-*-linux-musl: user programs for the KlaussCPU Linux port.  The
 // KlaussCPU toolchain adds the sysroot's headers and links statically by
 // default with crt1.o, -lc and compiler-rt's builtins, 64 KiB pages, no PIE;
-// -shared and -pie link for musl's dynamic linker (ABI.md "Driver").
+// -shared and -pie link for musl's dynamic linker (ABI.md "Driver").  Every
+// link has .eh_frame_hdr (libunwind finds the FDEs through it).
 
 // RUN: %clang -### --target=klausscpu-unknown-linux-musl --sysroot=%S/Inputs/klausscpu_linux_tree \
 // RUN:   -c %s 2>&1 | FileCheck %s --check-prefix=CC1
@@ -11,7 +12,7 @@
 
 // RUN: %clang -### --target=klausscpu-unknown-linux-musl --sysroot=%S/Inputs/klausscpu_linux_tree \
 // RUN:   %s -o %t.elf 2>&1 | FileCheck %s --check-prefix=LINK
-// LINK: ld.lld{{(.exe)?}}" "-m" "elf32klausscpu" "-o" "{{.*}}.elf" "-static" "-z" "max-page-size=0x10000"
+// LINK: ld.lld{{(.exe)?}}" "-m" "elf32klausscpu" "-o" "{{.*}}.elf" "-static" "--eh-frame-hdr" "-z" "max-page-size=0x10000"
 // LINK-SAME: "-L{{.*}}klausscpu_linux_tree{{/|\\\\}}lib"
 // LINK-SAME: "{{.*}}klausscpu_linux_tree{{/|\\\\}}lib{{/|\\\\}}crt1.o"
 // LINK-SAME: "--start-group" "-lc" "{{.*}}libclang_rt.builtins.a" "--end-group"
@@ -20,7 +21,7 @@
 // LINK-NOT: "-dynamic-linker"
 // LINK-NOT: "now"
 // LINK-NOT: "--hash-style
-// LINK-NOT: "--eh-frame-hdr"
+// LINK-NOT: "-lc++"
 // LINK-NOT: "common-page-size
 
 // An explicit -static is the same link, and wins over -pie; -rdynamic does
@@ -28,7 +29,7 @@
 // RUN: %clang -### --target=klausscpu-unknown-linux-musl --sysroot=%S/Inputs/klausscpu_linux_tree \
 // RUN:   -static -pie -rdynamic %s -o %t.elf 2>&1 | FileCheck %s --check-prefix=STATIC
 // STATIC-NOT: warning
-// STATIC: ld.lld{{(.exe)?}}" "-m" "elf32klausscpu" "-o" "{{.*}}.elf" "-static" "-z" "max-page-size=0x10000" "-L
+// STATIC: ld.lld{{(.exe)?}}" "-m" "elf32klausscpu" "-o" "{{.*}}.elf" "-static" "--eh-frame-hdr" "-z" "max-page-size=0x10000" "-L
 // STATIC-NOT: "-static"
 // STATIC-NOT: "-pie"
 // STATIC-NOT: "--export-dynamic"
@@ -43,7 +44,7 @@
 // PIE: "-cc1"
 // PIE-NOT: "-pic-is-pie"
 // PIE: ld.lld{{(.exe)?}}" "-m" "elf32klausscpu" "-o" "{{.*}}.elf" "-pie"
-// PIE-SAME: "-dynamic-linker" "/lib/ld-musl-klausscpu.so.1" "-z" "now" "--hash-style=both" "--eh-frame-hdr" "--export-dynamic"
+// PIE-SAME: "-dynamic-linker" "/lib/ld-musl-klausscpu.so.1" "-z" "now" "--hash-style=both" "--export-dynamic" "--eh-frame-hdr"
 // PIE-SAME: "-z" "max-page-size=0x10000" "-z" "common-page-size=0x10000"
 // PIE-SAME: "-L{{.*}}klausscpu_linux_tree{{/|\\\\}}lib"
 // PIE-SAME: "{{.*}}klausscpu_linux_tree{{/|\\\\}}lib{{/|\\\\}}Scrt1.o"
@@ -68,6 +69,29 @@
 // SHARED-NOT: "-dynamic-linker"
 // SHARED-NOT: "--export-dynamic"
 // SHARED-NOT: crt1.o
+
+// C++: libc++ is the default, its headers (<sysroot>/include/c++/v1) in front
+// of the libc headers, and a link adds libc++, libc++abi and libunwind in
+// front of libc (static or not).
+// RUN: %clangxx -### --target=klausscpu-unknown-linux-musl --sysroot=%S/Inputs/klausscpu_linux_tree \
+// RUN:   -c -x c++ %s 2>&1 | FileCheck %s --check-prefix=CXX
+// CXX: "-cc1" "-triple" "klausscpu-unknown-linux-musl"
+// CXX-SAME: "-internal-isystem" "{{.*}}klausscpu_linux_tree{{/|\\\\}}include{{/|\\\\}}c++{{/|\\\\}}v1"
+// CXX-SAME: "-internal-externc-isystem" "{{.*}}klausscpu_linux_tree{{/|\\\\}}include"
+// CXX-SAME: "-fcxx-exceptions" "-fexceptions"
+// RUN: %clangxx -### --target=klausscpu-unknown-linux-musl --sysroot=%S/Inputs/klausscpu_linux_tree \
+// RUN:   -x c++ %s -o %t.elf 2>&1 | FileCheck %s --check-prefix=CXXLINK
+// RUN: %clangxx -### --target=klausscpu-unknown-linux-musl --sysroot=%S/Inputs/klausscpu_linux_tree \
+// RUN:   -fPIC -shared -x c++ %s -o %t.so 2>&1 | FileCheck %s --check-prefix=CXXLINK
+// CXXLINK: ld.lld
+// CXXLINK-SAME: "-lc++" "-lc++abi" "-lunwind" "--start-group" "-lc"
+// RUN: %clangxx -### --target=klausscpu-unknown-linux-musl --sysroot=%S/Inputs/klausscpu_linux_tree \
+// RUN:   -nostdlib++ -nostdinc++ -x c++ %s -o %t.elf 2>&1 | FileCheck %s --check-prefix=NOCXX
+// NOCXX-NOT: c++{{/|\\\\}}v1
+// NOCXX: ld.lld
+// NOCXX-NOT: "-lc++"
+// NOCXX-NOT: "-lunwind"
+// NOCXX: "-lc"
 
 // RUN: %clang -### --target=klausscpu-unknown-linux-musl --sysroot=%S/Inputs/klausscpu_linux_tree \
 // RUN:   -nostdlib %s -o %t.elf 2>&1 | FileCheck %s --check-prefix=NOSTD

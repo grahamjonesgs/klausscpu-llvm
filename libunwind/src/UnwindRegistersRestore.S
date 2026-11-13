@@ -1261,6 +1261,52 @@ DEFINE_LIBUNWIND_FUNCTION(_ZN9libunwind15Registers_s390x6jumptoEv)
   // Return to PSWA (was loaded into %r1 above)
   br %r1
 
+#elif defined(__klausscpu__)
+
+//
+// void libunwind::Registers_klausscpu::jumpto()
+//
+// On entry:
+//  thread_state pointer (this) is in R0.
+//
+// Every GPR is restored, so none can hold the target, and SP is not a GPR.
+// As on x86-64, the new R0 and PC are stored in the two doublewords just
+// below the new SP, every other register is loaded, SP is set to point at
+// them only then (until that, SP still protects the register state from a
+// signal handler's frame), and POP R0 / RET take them.  The two slots are
+// dead stack below the frame being resumed (the return address and saved
+// R15 of the call that frame made); the register state lies in a deeper
+// frame of the unwinder, or above the new SP when a context is resumed in
+// the frame that saved it.
+//
+  .p2align 2
+DEFINE_LIBUNWIND_FUNCTION(_ZN9libunwind19Registers_klausscpu6jumptoEv)
+  ldidx64 r1, r0, 128     // new SP
+  ldidx64 r2, r0, 136     // new PC
+  stidx64 r2, r1, -8
+  ldidx64 r2, r0, 0       // new R0
+  stidx64 r2, r1, -16
+  ldidx64 r1, r0, 8
+  ldidx64 r2, r0, 16
+  ldidx64 r3, r0, 24
+  ldidx64 r4, r0, 32
+  ldidx64 r5, r0, 40
+  ldidx64 r6, r0, 48
+  ldidx64 r7, r0, 56
+  ldidx64 r8, r0, 64
+  ldidx64 r9, r0, 72
+  ldidx64 r10, r0, 80
+  ldidx64 r11, r0, 88
+  ldidx64 r12, r0, 96
+  ldidx64 r13, r0, 104
+  ldidx64 r14, r0, 112
+  ldidx64 r15, r0, 120
+  ldidx64 r0, r0, 128
+  addi    r0, r0, -16
+  setsp   r0              // SP = new SP - 16
+  pop     r0              // new R0
+  ret                     // PC = new PC, SP = new SP
+
 #elif defined(__loongarch__) && __loongarch_grlen == 64
 
 //
