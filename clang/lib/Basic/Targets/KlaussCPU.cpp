@@ -46,4 +46,15 @@ void KlaussCPUTargetInfo::getTargetDefines(const LangOptions &Opts,
   // such as hand-written assembly.
   Builder.defineMacro("__klausscpu_abi__",
                       llvm::Twine(llvm::KlaussCPUABI::ABIVersion));
+  // GCC's spelling of "the __sync builtins work, lock-free, for N bytes",
+  // which code such as glib checks before it uses __atomic / __sync
+  // builtins: atomics up to 8 bytes are lock-free here (MaxAtomicInlineWidth,
+  // __CLANG_ATOMIC_*_LOCK_FREE 2).  Their loads and stores are plain
+  // accesses and their RMW / cmpxchg __sync_*_N calls ("forced atomics"):
+  // LR/SC loops in musl for Linux user programs, the runtime's atomic.c on
+  // bare metal, every size 1/2/4/8 in both.
+  Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_1");
+  Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_2");
+  Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4");
+  Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8");
 }

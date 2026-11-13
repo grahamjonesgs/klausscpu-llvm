@@ -3,7 +3,7 @@
 // RUN: %clang_cc1 -triple klausscpu-unknown-elf -fgnuc-version=4.2.1 -E -dM %s -o - \
 // RUN:   | FileCheck %s --check-prefix=MACROS
 // RUN: %clang_cc1 -triple klausscpu-unknown-elf -fgnuc-version=4.2.1 -E -dM %s -o - \
-// RUN:   | FileCheck %s --check-prefix=NOSYNC
+// RUN:   | FileCheck %s --check-prefix=SYNC
 
 // Atomics up to 8 bytes are inline (MaxAtomicInlineWidth = 64): clang emits
 // IR atomic instructions and the backend makes them plain loads/stores or
@@ -19,10 +19,16 @@
 // MACROS-DAG: #define __GCC_ATOMIC_LONG_LOCK_FREE 2
 // MACROS-DAG: #define __GCC_ATOMIC_LLONG_LOCK_FREE 2
 // MACROS-DAG: #define __GCC_ATOMIC_POINTER_LOCK_FREE 2
-// There is no compare-and-swap instruction (the __sync builtins are library
-// calls), so, as for RISC-V without Zalrsc, __GCC_HAVE_SYNC_COMPARE_AND_SWAP_N
-// stays undefined.
-// NOSYNC-NOT: __GCC_HAVE_SYNC_COMPARE_AND_SWAP
+// __GCC_HAVE_SYNC_COMPARE_AND_SWAP_N is defined for 1, 2, 4 and 8 bytes.
+// The __sync builtins are library calls here, not inline code (gcc's own
+// reading of the macro), but every one is there and lock-free: LR/SC loops
+// in musl's src/misc/klausscpu/sync_atomic.c for Linux, the runtime's
+// atomic.c on bare metal; clang already says so (LOCK_FREE 2 above), and
+// code such as glib refuses lock-free atomics without these macros.
+// SYNC-DAG: #define __GCC_HAVE_SYNC_COMPARE_AND_SWAP_1 1
+// SYNC-DAG: #define __GCC_HAVE_SYNC_COMPARE_AND_SWAP_2 1
+// SYNC-DAG: #define __GCC_HAVE_SYNC_COMPARE_AND_SWAP_4 1
+// SYNC-DAG: #define __GCC_HAVE_SYNC_COMPARE_AND_SWAP_8 1
 
 // CHECK-LABEL: @load_int(
 // CHECK: load atomic i32, ptr %{{.*}} seq_cst, align 4
