@@ -243,6 +243,16 @@ public:
   MachineBasicBlock *
   EmitInstrWithCustomInserter(MachineInstr &MI,
                                MachineBasicBlock *BB) const override;
+
+  // C++ exceptions (ABI.md "Exceptions"): the unwinder enters a landing pad
+  // with the exception pointer in R0 and the selector in R1 (DWARF registers
+  // 0 and 1, clang's __builtin_eh_return_data_regno(0/1)), as RISC-V uses
+  // a0/a1.  libunwind's KlaussCPU port and the personality routines rely on
+  // these numbers.
+  Register
+  getExceptionPointerRegister(const Constant *PersonalityFn) const override;
+  Register
+  getExceptionSelectorRegister(const Constant *PersonalityFn) const override;
 };
 
 } // namespace llvm

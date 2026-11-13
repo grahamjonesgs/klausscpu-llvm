@@ -2075,3 +2075,13 @@ MachineBasicBlock *KlaussCPUTargetLowering::EmitInstrWithCustomInserter(
   }
   return SinkBB;
 }
+
+Register KlaussCPUTargetLowering::getExceptionPointerRegister(
+    const Constant *PersonalityFn) const {
+  return KlaussCPU::R0;
+}
+
+Register KlaussCPUTargetLowering::getExceptionSelectorRegister(
+    const Constant *PersonalityFn) const {
+  return KlaussCPU::R1;
+}

@@ -720,6 +720,77 @@ other Linux targets (M7).
 | `check-toolchain-constants.py` | relocation numbers in musl's `reloc.h` against `KlaussCPU.def` |
 | Runtime ELF loaders, Zephyr LLEXT | unaffected: no object built for them carries the new types (Zephyr's relocator rejects unknown types; the bare-metal and FreeRTOS loaders apply `ABS32`/`ABS64` and skip the rest) |
 
+## Exceptions
+
+C++ exceptions on `klausscpu-*-linux-*` use the Itanium C++ ABI with DWARF
+unwinding (`.eh_frame`, `ExceptionHandling::DwarfCFI`), as on x86-64 and
+RISC-V: no SjLj, no ARM EHABI.  The unwinder is libunwind's KlaussCPU port,
+the personality routine libc++abi's `__gxx_personality_v0`.  The exception
+tables' encodings are in "Dynamic linking" ("Exception tables").  Only the
+Linux triple supports exceptions: on the other triples clang still compiles
+landing pads, but their tables use `absptr`, which MC writes as 4 bytes
+while libunwind and libc++abi read 8, and there is no C++ runtime for them.
+
+**Landing pad registers.** The unwinder enters a landing pad with the
+exception pointer in **R0** and the selector (the type index, or 0 for a
+cleanup) in **R1** (the backend's `getExceptionPointerRegister` /
+`getExceptionSelectorRegister`), as RISC-V uses a0/a1.  Personality routines
+set them with `_Unwind_SetGR(ctx, __builtin_eh_return_data_regno(0 / 1),
+...)`, which clang folds to the DWARF numbers 0 and 1.  The other registers
+at a landing pad: R4–R7 and R15 as at the call site (the unwinder
+restores them from the CFI of the frames it removed), SP as after the call
+(the call site's SP plus its `DW_CFA_GNU_args_size`, below); every caller-saved
+register other than R0 and R1 is undefined, as after any call.
+
+**DWARF register numbers** (`KlaussCPURegisterInfo.td`): 0–15 are R0–R15,
+16 is SP, and 17 is the return-address column, which names no register:
+CALL pushes the return address at `[SP]`, and the CIE says where it is.  An
+unwinder's register set therefore has 18 columns, 0–17 (libunwind's
+`_LIBUNWIND_HIGHEST_DWARF_REGISTER_KLAUSSCPU` is 17, the highest number);
+when it steps out of a frame it sets PC from column 17 and SP to the frame's
+CFA.  libunwind reads column 17 of a register set as the PC
+(`UNW_KLAUSSCPU_PC`), as x86-64's column 16 is RIP, for a CIE that gives the
+column no rule (this compiler's always gives one).
+
+**CFI** (`KlaussCPUFrameLowering.cpp`'s header has the details):
+
+- the CIE (one per object): code alignment 4, data alignment -4, return
+  address column 17, FDE addresses `pcrel|sdata4` (augmentation `zR`, with
+  a personality `zPLR`); initial rules CFA = SP+8, RA at CFA-8, which hold
+  throughout a frameless function;
+- after `ENTER` (or `PUSH R15` / `GETSP R15`, two steps): CFA = R15+16, the
+  caller's R15 at CFA-16; each callee-saved spill gets its `.cfi_offset`
+  (R4–R7 below the saved R15), the realigning base pointer R7 too;
+- the epilogue: `LEAVERET` needs no CFI; a plain `LEAVE` (a tail call, a
+  shrink-wrapped restore point) returns to the CIE's state, and the
+  CFIFixup pass gives every later block the state it is entered with;
+- SP moves inside a frame (dynamic allocas, the call frames of a function
+  that has them) need no CFI, since the CFA is R15-based;
+- a function with landing pads and without a reserved call frame (it has
+  dynamic allocas) gets `DW_CFA_GNU_args_size` before each call: the
+  landing pad is entered with SP as at the call, with the call's stack
+  arguments still allocated, and libunwind adds the size to SP when it
+  resumes there (`unw_set_reg(UNW_REG_IP)`; x86 does the same for its push
+  sequences).  The value is positional and holds until the next one, hence
+  one before every call, a size of 0 too;
+- MachineOutliner functions (`-Oz`) get an FDE whenever a function they
+  were outlined from may unwind or has `uwtable` (CFA = SP+8, or the
+  parent's frame for an outlined epilogue).
+
+**Which code has unwind tables.** A function that may throw (C++ without
+`noexcept`, or anything compiled with `-fexceptions`) and every function
+with `uwtable` (`-funwind-tables`, `-fasynchronous-unwind-tables`) gets an
+FDE.  The Linux triple has no unwind-tables default (x86-64, AArch64 and
+RISC-V Linux default to asynchronous tables), so plain C gets none.  An
+exception thrown through a C frame needs that C code built with
+`-fexceptions`; musl itself is built `-fno-unwind-tables
+-fno-asynchronous-unwind-tables` on every target, so an exception thrown
+from a `qsort` comparator terminates.
+
+**Not supported:** unwinding through a signal frame (musl has no
+`__restore_rt` CFI for KlaussCPU), `__builtin_eh_return` (libunwind does not
+need it), and SjLj / Wasm / WinEH.
+
 ## Versioning
 
 - `KlaussCPUABI::ABIVersion` is 3.  The assembler writes it into the low byte

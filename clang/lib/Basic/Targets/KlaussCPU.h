@@ -71,6 +71,14 @@ public:
 
   ArrayRef<const char *> getGCCRegNames() const override;
 
+  // __builtin_eh_return_data_regno: the DWARF numbers of the registers that
+  // carry the exception pointer (R0) and the selector (R1) into a landing
+  // pad (the backend's getExceptionPointerRegister /
+  // getExceptionSelectorRegister; ABI.md "Exceptions").
+  int getEHDataRegisterNumber(unsigned RegNo) const override {
+    return RegNo < 2 ? int(RegNo) : -1;
+  }
+
   ArrayRef<TargetInfo::GCCRegAlias> getGCCRegAliases() const override {
     return {};
   }

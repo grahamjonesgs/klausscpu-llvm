@@ -22,8 +22,8 @@ declare void @may_throw()
 declare void @abort()
 declare i32 @__gxx_personality_v0(...)
 
-; The landing pad does not read the exception pointer or the selector: the
-; backend does not define their registers (getExceptionPointerRegister) yet.
+; The landing pad does not read the exception pointer or the selector
+; (landingpad.ll tests the registers that carry them).
 define i32 @catcher() personality ptr @__gxx_personality_v0 {
 entry:
   invoke void @may_throw()

@@ -89,7 +89,10 @@
 // boundaries; the rest of the frame's CFI follows instructions that write SP,
 // which are boundaries anyway).
 // SP moves after the prologue (VLAs, call frames) need no CFI because the CFA
-// is R15-based.  An epilogue folded into LEAVERET leaves the function in the
+// is R15-based; but a function with landing pads whose call frames are not
+// reserved gets DW_CFA_GNU_args_size before each call, so that the unwinder
+// frees the call's stack arguments before it enters a landing pad
+// (eliminateCallFramePseudoInstr; ABI.md "Exceptions").  An epilogue folded into LEAVERET leaves the function in the
 // same instruction, so it needs no CFI; a plain LEAVE (a tail call, a
 // shrink-wrapped restore point) switches the CFA back to SP+8 and drops the
 // save rules, and the CFIFixup pass gives every block laid out after the
@@ -247,6 +250,16 @@ KlaussCPUFrameLowering::eliminateCallFramePseudoInstr(
         *MF.getSubtarget<KlaussCPUSubtarget>().getInstrInfo();
     MachineInstr &MI = *I;
     int64_t Amount = MI.getOperand(0).getImm();
+    // A landing pad is entered with SP as it was at the call (the callee's
+    // CFA), i.e. with the call's stack arguments still allocated, while its
+    // code assumes they were freed.  DW_CFA_GNU_args_size tells the unwinder
+    // how much to add to SP when it resumes in a landing pad (libunwind
+    // unw_set_reg(UNW_REG_IP)), as on x86.  The size holds for every call
+    // after it in the function, so every call gets one, also a size of 0.
+    if (MI.getOpcode() == TII.getCallFrameSetupOpcode() &&
+        !MF.getLandingPads().empty())
+      CFIInstBuilder(MBB, I, MachineInstr::NoFlags)
+          .insertCFIInst(MCCFIInstruction::createGnuArgsSize(nullptr, Amount));
     if (Amount != 0) {
       DebugLoc DL = MI.getDebugLoc();
       if (MI.getOpcode() == TII.getCallFrameSetupOpcode())
