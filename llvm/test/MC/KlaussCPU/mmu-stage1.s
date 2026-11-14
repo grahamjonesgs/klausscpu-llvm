@@ -134,21 +134,21 @@
         SC_W    r6, r5, r1
 
 .ifdef ERR
-# ERR: [[#@LINE+1]]:21: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle, mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, tlb_hi, tlb_lo, tlb_index, asid, tlbvec or an integer in the range [0, 255]
+# ERR: [[#@LINE+1]]:21: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle, mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, tlb_hi, tlb_lo, tlb_index, asid, tlbvec, tlb_ptb, tlb_walk, tlb_wcnt or an integer in the range [0, 255]
         mfsr    r1, sr9
-# ERR: [[#@LINE+1]]:21: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle, mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, tlb_hi, tlb_lo, tlb_index, asid, tlbvec or an integer in the range [0, 255]
+# ERR: [[#@LINE+1]]:21: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle, mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, tlb_hi, tlb_lo, tlb_index, asid, tlbvec, tlb_ptb, tlb_walk, tlb_wcnt or an integer in the range [0, 255]
         mfsr    r1, 256
-# ERR: [[#@LINE+1]]:21: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle, mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, tlb_hi, tlb_lo, tlb_index, asid, tlbvec or an integer in the range [0, 255]
+# ERR: [[#@LINE+1]]:21: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle, mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, tlb_hi, tlb_lo, tlb_index, asid, tlbvec, tlb_ptb, tlb_walk, tlb_wcnt or an integer in the range [0, 255]
         mfsr    r1, -1
-# ERR: [[#@LINE+1]]:21: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle, mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, tlb_hi, tlb_lo, tlb_index, asid, tlbvec or an integer in the range [0, 255]
+# ERR: [[#@LINE+1]]:21: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle, mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, tlb_hi, tlb_lo, tlb_index, asid, tlbvec, tlb_ptb, tlb_walk, tlb_wcnt or an integer in the range [0, 255]
         mfsr    r1, r2
-# ERR: [[#@LINE+1]]:21: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle, mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, tlb_hi, tlb_lo, tlb_index, asid, tlbvec or an integer in the range [0, 255]
+# ERR: [[#@LINE+1]]:21: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle, mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, tlb_hi, tlb_lo, tlb_index, asid, tlbvec, tlb_ptb, tlb_walk, tlb_wcnt or an integer in the range [0, 255]
         mfsr    r1, tp+1
-# ERR: [[#@LINE+1]]:17: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle, mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, tlb_hi, tlb_lo, tlb_index, asid, tlbvec or an integer in the range [0, 255]
+# ERR: [[#@LINE+1]]:17: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle, mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, tlb_hi, tlb_lo, tlb_index, asid, tlbvec, tlb_ptb, tlb_walk, tlb_wcnt or an integer in the range [0, 255]
         mtsr    sp_alt, r1
-# ERR: [[#@LINE+1]]:17: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle, mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, tlb_hi, tlb_lo, tlb_index, asid, tlbvec or an integer in the range [0, 255]
+# ERR: [[#@LINE+1]]:17: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle, mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, tlb_hi, tlb_lo, tlb_index, asid, tlbvec, tlb_ptb, tlb_walk, tlb_wcnt or an integer in the range [0, 255]
         mtsr    0x100, r1
-# ERR: [[#@LINE+1]]:17: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle, mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, tlb_hi, tlb_lo, tlb_index, asid, tlbvec or an integer in the range [0, 255]
+# ERR: [[#@LINE+1]]:17: error: system register must be status, evec, ecause, eaddr, usp, scratch0, scratch1, tp, cycle, mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, tlb_hi, tlb_lo, tlb_index, asid, tlbvec, tlb_ptb, tlb_walk, tlb_wcnt or an integer in the range [0, 255]
         mtsr    r1, tp
 # ERR: [[#@LINE+1]]:17: error: invalid operand for instruction
         mfsr    tp, r1

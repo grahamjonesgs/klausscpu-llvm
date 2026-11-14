@@ -103,6 +103,8 @@ static constexpr SysRegEntry SysRegs[] = {
     // Stage 3, TLB (MMU_PLAN §11.3).
     {0x30, "tlb_hi"},   {0x31, "tlb_lo"},   {0x32, "tlb_index"},
     {0x33, "asid"},     {0x34, "tlbvec"},
+    // TLB walker (MMU_PLAN §11.8).
+    {0x35, "tlb_ptb"},  {0x36, "tlb_walk"}, {0x37, "tlb_wcnt"},
 };
 // clang-format on
 

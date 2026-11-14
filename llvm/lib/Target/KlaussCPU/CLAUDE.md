@@ -193,7 +193,8 @@ and older bitstreams trap on all of them.  All are 1 word,
   `ecause`, `eaddr`, `usp`, `scratch0`, `scratch1`, `tp`, `cycle` = 0..8;
   stage 2 (MPU) `mpu_base0`..`mpu_base15` = 0x10 + 2n and
   `mpu_limit0`..`mpu_limit15` = 0x11 + 2n; stage 3 (TLB) `tlb_hi` 0x30,
-  `tlb_lo` 0x31, `tlb_index` 0x32, `asid` 0x33, `tlbvec` 0x34.  A name
+  `tlb_lo` 0x31, `tlb_index` 0x32, `asid` 0x33, `tlbvec` 0x34; TLB walker
+  (MMU_PLAN §11.8) `tlb_ptb` 0x35, `tlb_walk` 0x36, `tlb_wcnt` 0x37.  A name
   shadows a symbol of the same name (`.set asid, 5` does not make
   `mfsr r1, asid` read SR 5).
 - `lr64 rd, rs1` / `lr32 rd, rs1` / `lr32s rd, rs1` (`LR_D` / `LR_W` /

@@ -191,8 +191,9 @@ def SysRegAsmOperand : AsmOperandClass {
   let DiagnosticString = "system register must be status, evec, ecause, "
                          "eaddr, usp, scratch0, scratch1, tp, cycle, "
                          "mpu_base0..mpu_base15, mpu_limit0..mpu_limit15, "
-                         "tlb_hi, tlb_lo, tlb_index, asid, tlbvec or an "
-                         "integer in the range [0, 255]";
+                         "tlb_hi, tlb_lo, tlb_index, asid, tlbvec, "
+                         "tlb_ptb, tlb_walk, tlb_wcnt or an integer in "
+                         "the range [0, 255]";
 }
 
 //===----------------------------------------------------------------------===//
