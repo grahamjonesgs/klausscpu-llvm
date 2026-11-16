@@ -78,3 +78,4 @@ the emulator.
 | `HARDWARE_PROPOSALS.md` | measured, ranked hardware changes for compiled code (2026-10, for the RTL session) |
 | `FPGA_*.md`, `*_HANDOFF.md`, `RTOS_NOTES.md` | hardware errata and handoff notes (the finished ones are marked historical at the top) |
 | `RUST_PLAN.md`, `rust/` | Rust target spec, rustc patches and demo crates |
+| `NATIVE_TOOLCHAIN.md` | clang and lld built to run on the board (PGO + ThinLTO + call-graph order): what the build is, how to remake it and its profile, and why |
