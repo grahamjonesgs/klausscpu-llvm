@@ -58,6 +58,7 @@
 #include "KlaussCPUFixupKinds.h"
 #include "KlaussCPUMCTargetDesc.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringSwitch.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCContext.h"
@@ -232,6 +233,18 @@ public:
 
   // ── Fixup kind info ───────────────────────────────────────────────────────
 
+  // `.reloc` names: BFD_RELOC_NONE, which .cg_profile (every PGO build) and
+  // llvm.reloc.none emit.  The ELF writer takes such a literal kind's type
+  // as is (it never reaches getRelocType), and applyFixup writes no bytes.
+  std::optional<MCFixupKind> getFixupKind(StringRef Name) const override {
+    unsigned Type = StringSwitch<unsigned>(Name)
+                        .Case("BFD_RELOC_NONE", ELF::R_KLAUSSCPU_NONE)
+                        .Default(~0u);
+    if (Type == ~0u)
+      return std::nullopt;
+    return static_cast<MCFixupKind>(FirstLiteralRelocationKind + Type);
+  }
+
   MCFixupKindInfo getFixupKindInfo(MCFixupKind Kind) const override {
     static const MCFixupKindInfo Infos[] = {
         // Name                    BitOffset  BitSize  Flags
@@ -262,6 +275,10 @@ public:
                   const MCValue &Target, uint8_t *Data,
                   uint64_t Value, bool IsResolved) override {
     MCFixupKind Kind = Fixup.getKind();
+    if (mc::isRelocRelocation(Kind)) {
+      maybeAddReloc(F, Fixup, Target, Value, IsResolved);
+      return;
+    }
     // FK_KlaussCPU_PCREL18: short branch, word displacement into word0[17:0].
     // Only ever applied resolved and in range (see fixupNeedsRelaxationAdvanced).
     if (Kind == MCFixupKind(KlaussCPU::FK_KlaussCPU_PCREL18)) {
