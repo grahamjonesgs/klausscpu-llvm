@@ -7,7 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "int_lib.h"
-#if defined(__linux__)
+#if defined(__linux__) && !defined(__klausscpu__)
 #include <assert.h>
 #endif
 #include <stddef.h>
@@ -195,6 +195,27 @@ void __clear_cache(void *start, void *end) {
                    : "=r"(start_reg)
                    : "r"(start_reg), "r"(end_reg), "r"(flags), "r"(syscall_nr));
   assert(start_reg == 0 && "Cache flush syscall failed.");
+#elif defined(__klausscpu__) && defined(__linux__)
+  // KlaussCPU Linux: cacheflush(addr, bytes, ICACHE), syscall 244 (the
+  // klausscpu-runtime kernel's arch/klausscpu/mm/cacheflush.c).  Required
+  // for code written through one mapping and run through another: the
+  // I-cache snoops stores by physical address, but the front end's copies
+  // of fetched code are checked by virtual address.  User mode cannot reach
+  // CACHE_CTRL itself.  SYSCALL: number in r12, arguments in r0-r2, result
+  // in r12; no other register changes.  The builtins are freestanding (no C
+  // headers), hence the literal numbers.
+  register long nr_res __asm("r12") = 244; // __NR_cacheflush
+  register long a0 __asm("r0") = (long)start;
+  register long a1 __asm("r1") = (long)((char *)end - (char *)start);
+  register long a2 __asm("r2") = 1; // ICACHE
+  __asm __volatile("syscall"
+                   : "+r"(nr_res)
+                   : "r"(a0), "r"(a1), "r"(a2)
+                   : "memory");
+  // An error (-ENOSYS from a kernel older than the syscall, -EFAULT for a
+  // reversed range) is ignored, as everywhere else __clear_cache has no
+  // way to report one.
+  (void)nr_res;
 #elif defined(__riscv) && defined(__OpenBSD__)
   struct riscv_sync_icache_args arg;
 
