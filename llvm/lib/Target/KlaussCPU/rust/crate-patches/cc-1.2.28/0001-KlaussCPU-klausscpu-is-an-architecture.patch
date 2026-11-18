@@ -1,0 +1,25 @@
+From 5518c803f92a9358fdc411fb777a5bf7d4ce6778 Mon Sep 17 00:00:00 2001
+From: Graham Jones <grahamjonesgs@gmail.com>
+Date: Wed, 18 Nov 2026 13:21:40 +0200
+Subject: [PATCH] KlaussCPU: klausscpu is an architecture
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/target/parser.rs | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/target/parser.rs b/src/target/parser.rs
+index ffa4748..8855ce2 100644
+--- a/src/target/parser.rs
++++ b/src/target/parser.rs
+@@ -178,6 +178,7 @@ fn parse_arch(full_arch: &str) -> Option<&str> {
+         "avr" => "avr",
+         "csky" => "csky",
+         "hexagon" => "hexagon",
++        "klausscpu" => "klausscpu",
+         "m68k" => "m68k",
+         "msp430" => "msp430",
+         "r600" => "r600",
+-- 
+2.53.0
+

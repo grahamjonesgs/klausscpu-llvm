@@ -1,0 +1,39 @@
+# rustc for the board (klausscpu-runtime RUST_ON_BOARD_PLAN.md R3):
+#   ./x.py build --config bootstrap-cross.toml --stage 2 compiler/rustc library
+# Its own build directory, so build/ (the cross compiler klauss-linux-cargo
+# uses) is not touched.
+profile = "compiler"
+change-id = "ignore"
+
+[llvm]
+download-ci-llvm = false
+
+[build]
+build-dir = "build-cross"
+host = ["klausscpu-unknown-linux-musl"]
+target = ["klausscpu-unknown-linux-musl"]
+extended = false
+docs = false
+
+[rust]
+debug = false
+incremental = false
+deny-warnings = false
+# The board's LLVM build has no tools (llvm-cov, llvm-objcopy, ...) to ship.
+llvm-tools = false
+
+[target.x86_64-unknown-linux-gnu]
+llvm-config = "<klausscpu-llvm>/build/bin/llvm-config"
+
+[target.klausscpu-unknown-linux-musl]
+# The board's LLVM (linux/rustc/build-llvm.sh), described by a host script.
+llvm-config = "<klausscpu-runtime>/linux/rustc/llvm-config"
+cc = "<klausscpu-runtime>/linux/rustc/klausscpu-clang"
+cxx = "<klausscpu-runtime>/linux/rustc/klausscpu-clang++"
+linker = "<klausscpu-runtime>/linux/rustc/klausscpu-clang"
+ar = "<klausscpu-llvm>/build/bin/llvm-ar"
+ranlib = "<klausscpu-llvm>/build/bin/llvm-ranlib"
+# rustc is a small program plus librustc_driver.so (and proc macros are
+# dlopen'ed), so the host tools are dynamic.
+crt-static = false
+musl-root = "<klausscpu-runtime>/linux-ws/dyn/sysroot"

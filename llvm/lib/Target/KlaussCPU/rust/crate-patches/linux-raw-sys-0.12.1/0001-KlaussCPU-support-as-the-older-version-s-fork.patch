@@ -1,0 +1,156 @@
+From 5f47633bdf7e249b1be6e73486507ce4607b0a82 Mon Sep 17 00:00:00 2001
+From: Graham Jones <grahamjonesgs@gmail.com>
+Date: Wed, 18 Nov 2026 14:03:51 +0200
+Subject: [PATCH 1/2] KlaussCPU support (as the older version's fork)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/lib.rs | 52 +++++++++++++++++++++++++++++-----------------------
+ 1 file changed, 29 insertions(+), 23 deletions(-)
+
+diff --git a/src/lib.rs b/src/lib.rs
+index e08e09b..893f2d2 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -6,6 +6,11 @@ While newer bindgen versions follow this convention, we support Rust 1.63 which
+ this behavior. We can simply silence these warnings.
+ */
+ #![allow(unused_unsafe)]
++// KlaussCPU (the klausscpu-llvm fork) takes the riscv64 modules: its kernel
++// ABI is asm-generic and LP64 as riscv64's.  It differs in riscv64's own
++// additions (riscv_* system calls, hwprobe, ptrace and sigcontext registers,
++// ELF hwcaps), which rustc's use of rustix does not reach, and in `char`,
++// which is signed.
+ 
+ #[cfg(feature = "std")]
+ pub use std::os::raw as ctypes;
+@@ -37,6 +42,7 @@ pub mod ctypes {
+         target_arch = "x86",
+         target_arch = "x86_64",
+         target_arch = "xtensa",
++        target_arch = "klausscpu",
+     ))]
+     pub type c_char = c_schar;
+ 
+@@ -1415,95 +1421,95 @@ pub mod vm_sockets;
+ #[path = "riscv32/xdp.rs"]
+ pub mod xdp;
+ #[cfg(feature = "auxvec")]
+-#[cfg(target_arch = "riscv64")]
++#[cfg(any(target_arch = "riscv64", target_arch = "klausscpu"))]
+ #[path = "riscv64/auxvec.rs"]
+ pub mod auxvec;
+ #[cfg(feature = "bootparam")]
+-#[cfg(target_arch = "riscv64")]
++#[cfg(any(target_arch = "riscv64", target_arch = "klausscpu"))]
+ #[path = "riscv64/bootparam.rs"]
+ pub mod bootparam;
+ #[cfg(feature = "btrfs")]
+-#[cfg(target_arch = "riscv64")]
++#[cfg(any(target_arch = "riscv64", target_arch = "klausscpu"))]
+ #[path = "riscv64/btrfs.rs"]
+ pub mod btrfs;
+ #[cfg(feature = "elf_uapi")]
+-#[cfg(target_arch = "riscv64")]
++#[cfg(any(target_arch = "riscv64", target_arch = "klausscpu"))]
+ #[path = "riscv64/elf_uapi.rs"]
+ pub mod elf_uapi;
+ #[cfg(feature = "errno")]
+-#[cfg(target_arch = "riscv64")]
++#[cfg(any(target_arch = "riscv64", target_arch = "klausscpu"))]
+ #[path = "riscv64/errno.rs"]
+ pub mod errno;
+ #[cfg(feature = "general")]
+-#[cfg(target_arch = "riscv64")]
++#[cfg(any(target_arch = "riscv64", target_arch = "klausscpu"))]
+ #[path = "riscv64/general.rs"]
+ pub mod general;
+ #[cfg(feature = "if_arp")]
+-#[cfg(target_arch = "riscv64")]
++#[cfg(any(target_arch = "riscv64", target_arch = "klausscpu"))]
+ #[path = "riscv64/if_arp.rs"]
+ pub mod if_arp;
+ #[cfg(feature = "if_ether")]
+-#[cfg(target_arch = "riscv64")]
++#[cfg(any(target_arch = "riscv64", target_arch = "klausscpu"))]
+ #[path = "riscv64/if_ether.rs"]
+ pub mod if_ether;
+ #[cfg(feature = "if_packet")]
+-#[cfg(target_arch = "riscv64")]
++#[cfg(any(target_arch = "riscv64", target_arch = "klausscpu"))]
+ #[path = "riscv64/if_packet.rs"]
+ pub mod if_packet;
+ #[cfg(feature = "if_tun")]
+-#[cfg(target_arch = "riscv64")]
++#[cfg(any(target_arch = "riscv64", target_arch = "klausscpu"))]
+ #[path = "riscv64/if_tun.rs"]
+ pub mod if_tun;
+ #[cfg(feature = "image")]
+-#[cfg(target_arch = "riscv64")]
++#[cfg(any(target_arch = "riscv64", target_arch = "klausscpu"))]
+ #[path = "riscv64/image.rs"]
+ pub mod image;
+ #[cfg(feature = "io_uring")]
+-#[cfg(target_arch = "riscv64")]
++#[cfg(any(target_arch = "riscv64", target_arch = "klausscpu"))]
+ #[path = "riscv64/io_uring.rs"]
+ pub mod io_uring;
+ #[cfg(feature = "ioctl")]
+-#[cfg(target_arch = "riscv64")]
++#[cfg(any(target_arch = "riscv64", target_arch = "klausscpu"))]
+ #[path = "riscv64/ioctl.rs"]
+ pub mod ioctl;
+ #[cfg(feature = "landlock")]
+-#[cfg(target_arch = "riscv64")]
++#[cfg(any(target_arch = "riscv64", target_arch = "klausscpu"))]
+ #[path = "riscv64/landlock.rs"]
+ pub mod landlock;
+ #[cfg(feature = "loop_device")]
+-#[cfg(target_arch = "riscv64")]
++#[cfg(any(target_arch = "riscv64", target_arch = "klausscpu"))]
+ #[path = "riscv64/loop_device.rs"]
+ pub mod loop_device;
+ #[cfg(feature = "mempolicy")]
+-#[cfg(target_arch = "riscv64")]
++#[cfg(any(target_arch = "riscv64", target_arch = "klausscpu"))]
+ #[path = "riscv64/mempolicy.rs"]
+ pub mod mempolicy;
+ #[cfg(feature = "net")]
+-#[cfg(target_arch = "riscv64")]
++#[cfg(any(target_arch = "riscv64", target_arch = "klausscpu"))]
+ #[path = "riscv64/net.rs"]
+ pub mod net;
+ #[cfg(feature = "netlink")]
+-#[cfg(target_arch = "riscv64")]
++#[cfg(any(target_arch = "riscv64", target_arch = "klausscpu"))]
+ #[path = "riscv64/netlink.rs"]
+ pub mod netlink;
+ #[cfg(feature = "prctl")]
+-#[cfg(target_arch = "riscv64")]
++#[cfg(any(target_arch = "riscv64", target_arch = "klausscpu"))]
+ #[path = "riscv64/prctl.rs"]
+ pub mod prctl;
+ #[cfg(feature = "ptrace")]
+-#[cfg(target_arch = "riscv64")]
++#[cfg(any(target_arch = "riscv64", target_arch = "klausscpu"))]
+ #[path = "riscv64/ptrace.rs"]
+ pub mod ptrace;
+ #[cfg(feature = "system")]
+-#[cfg(target_arch = "riscv64")]
++#[cfg(any(target_arch = "riscv64", target_arch = "klausscpu"))]
+ #[path = "riscv64/system.rs"]
+ pub mod system;
+ #[cfg(feature = "vm_sockets")]
+-#[cfg(target_arch = "riscv64")]
++#[cfg(any(target_arch = "riscv64", target_arch = "klausscpu"))]
+ #[path = "riscv64/vm_sockets.rs"]
+ pub mod vm_sockets;
+ #[cfg(feature = "xdp")]
+-#[cfg(target_arch = "riscv64")]
++#[cfg(any(target_arch = "riscv64", target_arch = "klausscpu"))]
+ #[path = "riscv64/xdp.rs"]
+ pub mod xdp;
+ #[cfg(feature = "auxvec")]
+-- 
+2.53.0
+

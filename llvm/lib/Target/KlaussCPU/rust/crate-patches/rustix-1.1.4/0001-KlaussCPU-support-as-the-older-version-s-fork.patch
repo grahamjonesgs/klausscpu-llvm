@@ -1,0 +1,52 @@
+From c902f6b3c821cc08555ed53db281f1ab0f0d10e5 Mon Sep 17 00:00:00 2001
+From: Graham Jones <grahamjonesgs@gmail.com>
+Date: Wed, 18 Nov 2026 14:03:51 +0200
+Subject: [PATCH] KlaussCPU support (as the older version's fork)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/backend/libc/c.rs | 6 ++++--
+ src/ioctl/linux.rs    | 3 ++-
+ 2 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/src/backend/libc/c.rs b/src/backend/libc/c.rs
+index 5eeff95..d7d6e6b 100644
+--- a/src/backend/libc/c.rs
++++ b/src/backend/libc/c.rs
+@@ -482,7 +482,8 @@ pub(super) use readwrite_pv64v2::{preadv64v2 as preadv2, pwritev64v2 as pwritev2
+     not(any(
+         target_os = "emscripten",
+         target_env = "gnu",
+-        all(target_arch = "loongarch64", target_env = "musl")
++        all(target_arch = "loongarch64", target_env = "musl"),
++        all(target_arch = "klausscpu", target_env = "musl")
+     ))
+ ))]
+ mod statx_flags {
+@@ -506,7 +507,8 @@ mod statx_flags {
+         target_os = "android",
+         target_os = "emscripten",
+         target_env = "gnu",
+-        all(target_arch = "loongarch64", target_env = "musl")
++        all(target_arch = "loongarch64", target_env = "musl"),
++        all(target_arch = "klausscpu", target_env = "musl")
+     ))
+ ))]
+ pub(crate) use statx_flags::*;
+diff --git a/src/ioctl/linux.rs b/src/ioctl/linux.rs
+index 8d96a1b..c41dc86 100644
+--- a/src/ioctl/linux.rs
++++ b/src/ioctl/linux.rs
+@@ -51,7 +51,8 @@ const DIR_MASK: Opcode = (1 << DIR_BITS) - 1;
+     target_arch = "riscv32",
+     target_arch = "riscv64",
+     target_arch = "loongarch64",
+-    target_arch = "csky"
++    target_arch = "csky",
++    target_arch = "klausscpu"
+ ))]
+ mod consts {
+     use super::Opcode;
+-- 
+2.53.0
+

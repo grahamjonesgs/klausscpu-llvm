@@ -1,0 +1,37 @@
+From eb6ec045c3bb74cb55d317140dcef62cacf62754 Mon Sep 17 00:00:00 2001
+From: Graham Jones <grahamjonesgs@gmail.com>
+Date: Wed, 18 Nov 2026 14:14:33 +0200
+Subject: [PATCH 2/2] KlaussCPU: refuse the auxvec, elf, elf_uapi and ptrace
+ modules
+
+Their riscv64 or Elf64 layouts are wrong for KlaussCPU.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/lib.rs | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/src/lib.rs b/src/lib.rs
+index e5c649c..71d0021 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -10,7 +10,15 @@ this behavior. We can simply silence these warnings.
+ // ABI is asm-generic and LP64 as riscv64's.  It differs in riscv64's own
+ // additions (riscv_* system calls, hwprobe, ptrace and sigcontext registers,
+ // ELF hwcaps), which rustc's use of rustix does not reach, and in `char`,
+-// which is signed.
++// which is signed.  The riscv64 `sigaction` also lacks KlaussCPU's
++// `sa_restorer` (its uapi signal.h has SA_RESTORER), and `elf` picks Elf64
++// types from the pointer width (KlaussCPU is LP64 in ELFCLASS32 files), so
++// the modules whose layouts differ are refused rather than wrong:
++#[cfg(all(
++    target_arch = "klausscpu",
++    any(feature = "auxvec", feature = "elf", feature = "ptrace", feature = "elf_uapi")
++))]
++compile_error!("linux-raw-sys: the auxvec, elf, elf_uapi and ptrace modules have no KlaussCPU port");
+ 
+ #[cfg(feature = "std")]
+ pub use std::os::raw as ctypes;
+-- 
+2.53.0
+

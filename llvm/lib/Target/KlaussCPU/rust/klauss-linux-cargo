@@ -47,15 +47,24 @@ case "$KLAUSSCPU_CARGO_TOOLCHAIN" in
 esac
 export RUSTC=$KLAUSSCPU_RUSTC
 
-flags='"-Zunstable-options", "-Clink-arg=--sysroot='"$SYSROOT"'"'
-[ "${KLAUSSCPU_LINUX_DYNAMIC:-0}" = 1 ] &&
-	flags="$flags"', "-Ctarget-feature=-crt-static", "-Crelocation-model=pic"'
+# A rustc with rustc-patches/0005 has the target built in (PIC by default,
+# thread-locals on); an older one takes the JSON file (static relocation
+# model, no thread-locals).
+if "$KLAUSSCPU_RUSTC" --print target-list | grep -qx klausscpu-unknown-linux-musl; then
+	TARGET=klausscpu-unknown-linux-musl JSON=() flags=
+	DYNFLAGS='"-Ctarget-feature=-crt-static"'
+else
+	TARGET=$SPEC JSON=(--config 'unstable.json-target-spec=true') flags='"-Zunstable-options", '
+	DYNFLAGS='"-Ctarget-feature=-crt-static", "-Crelocation-model=pic"'
+fi
+flags="$flags"'"-Clink-arg=--sysroot='"$SYSROOT"'"'
+[ "${KLAUSSCPU_LINUX_DYNAMIC:-0}" = 1 ] && flags="$flags, $DYNFLAGS"
 # `test` needs the test crate too; asking for it always costs one crate.
 T=target.klausscpu-unknown-linux-musl
 exec cargo $KLAUSSCPU_CARGO_TOOLCHAIN \
 	--config 'unstable.build-std=["std", "panic_unwind", "test"]' \
-	--config 'unstable.json-target-spec=true' \
-	--config "build.target=\"$SPEC\"" \
+	"${JSON[@]}" \
+	--config "build.target=\"$TARGET\"" \
 	--config "$T.linker=\"$LLVM_BIN/clang\"" \
 	--config "$T.rustflags=[$flags]" \
 	--config "$T.runner=\"$RUSTDIR/klauss-linux-run\"" \

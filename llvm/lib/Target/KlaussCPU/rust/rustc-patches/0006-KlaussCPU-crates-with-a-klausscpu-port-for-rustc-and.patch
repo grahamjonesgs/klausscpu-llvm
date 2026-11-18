@@ -1,0 +1,102 @@
+From 03743a7a6f47ef5d290bb24ba9992804002f0ca8 Mon Sep 17 00:00:00 2001
+From: Graham Jones <grahamjonesgs@gmail.com>
+Date: Wed, 18 Nov 2026 14:33:11 +0200
+Subject: [PATCH 6/6] KlaussCPU: crates with a klausscpu port for rustc and
+ bootstrap
+
+The compiler workspace takes libc, linux-raw-sys and rustix from forks in
+the checkout (libc-klausscpu, linux-raw-sys-klausscpu, rustix-klausscpu),
+and bootstrap takes cc from cc-klausscpu, so that bootstrap can detect the
+target's C compiler and rustc can be built for klausscpu-unknown-linux-musl.
+klausscpu-llvm rust/crate-patches and rust/setup-crate-forks.sh make them.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_014M2VjfE1z6ckDALN3F4XEF
+---
+ Cargo.lock               |  8 +-------
+ Cargo.toml               | 11 +++++++++++
+ src/bootstrap/Cargo.lock |  2 --
+ src/bootstrap/Cargo.toml |  5 +++++
+ 4 files changed, 17 insertions(+), 9 deletions(-)
+
+diff --git a/Cargo.lock b/Cargo.lock
+index 74438734b..20fcdc225 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2214,9 +2214,7 @@ checksum = "9fa0e2a1fcbe2f6be6c42e342259976206b383122fc152e872795338b5a3f3a7"
+ 
+ [[package]]
+ name = "libc"
+-version = "0.2.183"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "b5b646652bf6661599e1da8901b3b9522896f01e736bad5f723fe7a3a27f899d"
++version = "0.2.185"
+ 
+ [[package]]
+ name = "libffi"
+@@ -2330,8 +2328,6 @@ dependencies = [
+ [[package]]
+ name = "linux-raw-sys"
+ version = "0.11.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "df1d3c3b53da64cf5760482273a98e575c651a67eec7f77df96b5b642de8f039"
+ 
+ [[package]]
+ name = "litemap"
+@@ -5031,8 +5027,6 @@ dependencies = [
+ [[package]]
+ name = "rustix"
+ version = "1.1.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "cd15f8a2c5551a84d56efdc1cd049089e409ac19a3072d5037a17fd70719ff3e"
+ dependencies = [
+  "bitflags",
+  "errno",
+diff --git a/Cargo.toml b/Cargo.toml
+index 67c7a9d67..a62d0e447 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -93,3 +93,14 @@ codegen-units = 1
+ # For git dependencies, also add your source to ALLOWED_SOURCES in src/tools/tidy/src/extdeps.rs.
+ #[patch.crates-io]
+ 
++
++# KlaussCPU: crates with a klausscpu port, for a rustc that runs on KlaussCPU
++# Linux (RUST_ON_BOARD_PLAN.md R3): libc (klausscpu-llvm rust/libc-patches, as
++# library/Cargo.toml does for std), and linux-raw-sys and rustix, which
++# tempfile needs (rust/crate-patches).  They replace the crates.io versions
++# for the host compiler's build too, and a --locked or vendored build needs
++# their lock entries.
++[patch.crates-io]
++libc = { path = 'libc-klausscpu' }
++linux-raw-sys = { path = 'linux-raw-sys-klausscpu' }
++rustix = { path = 'rustix-klausscpu' }
+diff --git a/src/bootstrap/Cargo.lock b/src/bootstrap/Cargo.lock
+index 7c890e3f2..c383fd393 100644
+--- a/src/bootstrap/Cargo.lock
++++ b/src/bootstrap/Cargo.lock
+@@ -96,8 +96,6 @@ dependencies = [
+ [[package]]
+ name = "cc"
+ version = "1.2.28"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "4ad45f4f74e4e20eaa392913b7b33a7091c87e59628f4dd27888205ad888843c"
+ dependencies = [
+  "shlex",
+ ]
+diff --git a/src/bootstrap/Cargo.toml b/src/bootstrap/Cargo.toml
+index f4b89e8a2..35d71ffd8 100644
+--- a/src/bootstrap/Cargo.toml
++++ b/src/bootstrap/Cargo.toml
+@@ -94,3 +94,8 @@ debug = 0
+ [profile.dev.package]
+ # Only use debuginfo=1 to further reduce compile times.
+ bootstrap.debug = 1
++
++# KlaussCPU: cc-rs that knows the klausscpu architecture, for the target's
++# compiler detection (klausscpu-llvm rust/cc-patches; RUST_ON_BOARD_PLAN.md R3).
++[patch.crates-io]
++cc = { path = "../../cc-klausscpu" }
+-- 
+2.53.0
+

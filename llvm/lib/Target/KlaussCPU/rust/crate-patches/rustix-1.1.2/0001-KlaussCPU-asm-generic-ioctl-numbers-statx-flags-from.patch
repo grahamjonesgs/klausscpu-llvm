@@ -1,0 +1,53 @@
+From 158e04dd5915438919b932f935bc50c57d4b896c Mon Sep 17 00:00:00 2001
+From: Graham Jones <grahamjonesgs@gmail.com>
+Date: Wed, 18 Nov 2026 13:36:43 +0200
+Subject: [PATCH] KlaussCPU: asm-generic ioctl numbers; statx flags from libc
+ (musl 1.2.5)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/backend/libc/c.rs | 6 ++++--
+ src/ioctl/linux.rs    | 3 ++-
+ 2 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/src/backend/libc/c.rs b/src/backend/libc/c.rs
+index 7e7fd75..523baaa 100644
+--- a/src/backend/libc/c.rs
++++ b/src/backend/libc/c.rs
+@@ -495,7 +495,8 @@ pub(super) use readwrite_pv64v2::{preadv64v2 as preadv2, pwritev64v2 as pwritev2
+     not(any(
+         target_os = "emscripten",
+         target_env = "gnu",
+-        all(target_arch = "loongarch64", target_env = "musl")
++        all(target_arch = "loongarch64", target_env = "musl"),
++        all(target_arch = "klausscpu", target_env = "musl")
+     ))
+ ))]
+ mod statx_flags {
+@@ -518,7 +519,8 @@ mod statx_flags {
+     not(any(
+         target_os = "emscripten",
+         target_env = "gnu",
+-        all(target_arch = "loongarch64", target_env = "musl")
++        all(target_arch = "loongarch64", target_env = "musl"),
++        all(target_arch = "klausscpu", target_env = "musl")
+     ))
+ ))]
+ pub(crate) use statx_flags::*;
+diff --git a/src/ioctl/linux.rs b/src/ioctl/linux.rs
+index 8d96a1b..c41dc86 100644
+--- a/src/ioctl/linux.rs
++++ b/src/ioctl/linux.rs
+@@ -51,7 +51,8 @@ const DIR_MASK: Opcode = (1 << DIR_BITS) - 1;
+     target_arch = "riscv32",
+     target_arch = "riscv64",
+     target_arch = "loongarch64",
+-    target_arch = "csky"
++    target_arch = "csky",
++    target_arch = "klausscpu"
+ ))]
+ mod consts {
+     use super::Opcode;
+-- 
+2.53.0
+

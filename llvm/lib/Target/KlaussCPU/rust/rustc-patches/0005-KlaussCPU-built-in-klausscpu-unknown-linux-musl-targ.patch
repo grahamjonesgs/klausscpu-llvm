@@ -1,0 +1,358 @@
+From 86e44bcd065e81174b7cfe0adb4b2366eb3f3e2e Mon Sep 17 00:00:00 2001
+From: Graham Jones <grahamjonesgs@gmail.com>
+Date: Wed, 18 Nov 2026 14:33:11 +0200
+Subject: [PATCH 5/6] KlaussCPU: built-in klausscpu-unknown-linux-musl target,
+ so rustc can run on it
+
+- Arch::KlaussCpu (was Arch::Other("klausscpu") from the JSON specs; the
+  JSON "klausscpu" string now parses to it), threaded through callconv,
+  va_arg, target features, inline asm (unsupported), c-variadic status,
+  scalable vectors, miri's malloc alignment.
+- targets/klausscpu_unknown_linux_musl.rs: the Linux JSON spec built in
+  (tier 3, host tools): PIC by default (needed for dylibs and the host
+  tools), thread-locals on, relro, uwtable, static CRT by default; clang
+  links, with the musl sysroot's crt objects and libunwind.
+- rustc_codegen_ssa: the object crate cannot write KlaussCPU ELF, so the
+  objects rustc writes itself (metadata wrappers, a dylib's .rustc
+  metadata, the linked-symbols object) are ELF32-LE i386 objects given
+  KlaussCPU's e_machine and e_flags.  They never hold code or relocations.
+  Without them a dylib's metadata went to the linker raw (read as a linker
+  script) and a dylib lost its exported code.
+- bootstrap: no self-contained musl objects for klausscpu (it links the
+  sysroot's), and klausscpu-unknown-linux-musl in STAGE0_MISSING_TARGETS.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_014M2VjfE1z6ckDALN3F4XEF
+---
+ compiler/rustc_codegen_llvm/src/va_arg.rs     |  4 +-
+ compiler/rustc_codegen_ssa/src/back/link.rs   |  2 +-
+ .../rustc_codegen_ssa/src/back/metadata.rs    | 35 ++++++++++++---
+ compiler/rustc_span/src/symbol.rs             |  1 +
+ compiler/rustc_target/src/asm/mod.rs          |  2 +-
+ compiler/rustc_target/src/callconv/mod.rs     |  4 +-
+ compiler/rustc_target/src/spec/mod.rs         | 10 ++++-
+ .../targets/klausscpu_unknown_linux_musl.rs   | 44 +++++++++++++++++++
+ compiler/rustc_target/src/target_features.rs  |  4 +-
+ .../src/core/config/target_selection.rs       |  4 +-
+ src/bootstrap/src/core/sanity.rs              |  1 +
+ src/tools/miri/src/shims/alloc.rs             |  3 +-
+ 12 files changed, 97 insertions(+), 17 deletions(-)
+ create mode 100644 compiler/rustc_target/src/spec/targets/klausscpu_unknown_linux_musl.rs
+
+diff --git a/compiler/rustc_codegen_llvm/src/va_arg.rs b/compiler/rustc_codegen_llvm/src/va_arg.rs
+index 8721b6177..319331bfc 100644
+--- a/compiler/rustc_codegen_llvm/src/va_arg.rs
++++ b/compiler/rustc_codegen_llvm/src/va_arg.rs
+@@ -1224,11 +1224,11 @@ pub(super) fn emit_va_arg<'ll, 'tcx>(
+             bx.va_arg(addr.immediate(), bx.cx.layout_of(target_ty).llvm_type(bx.cx))
+         }
+ 
+-        // KlaussCPU (JSON target spec): `va_list` is a `void *` walking 8-byte
++        // KlaussCPU: `va_list` is a `void *` walking 8-byte
+         // slots, never realigned; a value over 16 bytes is a slot holding its
+         // address (clang's `emitVoidPtrVAArg` with AllowHigherAlign=false; see
+         // ABI.md in the klausscpu-llvm fork).
+-        Arch::Other(ref arch) if arch == "klausscpu" => emit_ptr_va_arg(
++        Arch::KlaussCpu => emit_ptr_va_arg(
+             bx,
+             addr,
+             target_ty,
+diff --git a/compiler/rustc_codegen_ssa/src/back/link.rs b/compiler/rustc_codegen_ssa/src/back/link.rs
+index c68220aea..a5017cc53 100644
+--- a/compiler/rustc_codegen_ssa/src/back/link.rs
++++ b/compiler/rustc_codegen_ssa/src/back/link.rs
+@@ -2268,7 +2268,7 @@ fn add_linked_symbol_object(
+     }
+ 
+     let path = tmpdir.join("symbols.o");
+-    let result = std::fs::write(&path, file.write().unwrap());
++    let result = std::fs::write(&path, super::metadata::write_object_file(sess, &file));
+     if let Err(error) = result {
+         sess.dcx().emit_fatal(errors::FailedToWrite { path, error });
+     }
+diff --git a/compiler/rustc_codegen_ssa/src/back/metadata.rs b/compiler/rustc_codegen_ssa/src/back/metadata.rs
+index 55a85547e..c187ba321 100644
+--- a/compiler/rustc_codegen_ssa/src/back/metadata.rs
++++ b/compiler/rustc_codegen_ssa/src/back/metadata.rs
+@@ -20,7 +20,7 @@
+ use rustc_middle::bug;
+ use rustc_session::Session;
+ use rustc_span::sym;
+-use rustc_target::spec::{CfgAbi, LlvmAbi, Os, RelocModel, Target, ef_avr_arch};
++use rustc_target::spec::{Arch, CfgAbi, LlvmAbi, Os, RelocModel, Target, ef_avr_arch};
+ use tracing::debug;
+ 
+ use super::apple;
+@@ -205,8 +205,10 @@ pub(crate) fn create_object_file(sess: &Session) -> Option<write::Object<'static
+         Endian::Little => Endianness::Little,
+         Endian::Big => Endianness::Big,
+     };
+-    let Some((architecture, sub_architecture)) =
+-        sess.target.object_architecture(&sess.unstable_target_features)
++    let Some((architecture, sub_architecture)) = sess
++        .target
++        .object_architecture(&sess.unstable_target_features)
++        .or_else(|| (sess.target.arch == Arch::KlaussCpu).then_some((Architecture::I386, None)))
+     else {
+         return None;
+     };
+@@ -553,7 +555,7 @@ pub(crate) fn create_wrapper_file(
+         _ => {}
+     };
+     file.append_section_data(section, data, 1);
+-    (file.write().unwrap(), MetadataPosition::First)
++    (write_object_file(sess, &file), MetadataPosition::First)
+ }
+ 
+ // Historical note:
+@@ -615,7 +617,30 @@ pub fn create_compressed_metadata_file(
+         flags: SymbolFlags::None,
+     });
+ 
+-    file.write().unwrap()
++    write_object_file(sess, &file)
++}
++
++/// Writes an object made by `create_object_file`.
++///
++/// KlaussCPU (the klausscpu-llvm fork): the `object` crate cannot write its
++/// ELF files, so `create_object_file` makes an ELF32 little-endian i386
++/// object, and this gives the written file KlaussCPU's `e_machine` and
++/// `e_flags`.  These objects never hold code or relocations, only data
++/// sections and symbols (metadata, and the undefined symbols that make the
++/// linker keep a dylib's exported code), so nothing else is i386-specific.
++pub(crate) fn write_object_file(sess: &Session, file: &write::Object<'_>) -> Vec<u8> {
++    let mut data = file.write().unwrap();
++    if sess.target.arch == Arch::KlaussCpu {
++        const EM_KLAUSSCPU: u16 = 0x4b43;
++        // The calling convention (ABI version 3) in the low byte, as the
++        // backend's own objects.
++        const EF_KLAUSSCPU_ABI3: u32 = 3;
++        assert_eq!(&data[..6], b"\x7fELF\x01\x01", "not an ELF32 little-endian file");
++        // Elf32_Ehdr: e_machine at offset 18, e_flags at offset 36.
++        data[18..20].copy_from_slice(&EM_KLAUSSCPU.to_le_bytes());
++        data[36..40].copy_from_slice(&EF_KLAUSSCPU_ABI3.to_le_bytes());
++    }
++    data
+ }
+ 
+ /// * Xcoff - On AIX, custom sections are merged into predefined sections,
+diff --git a/compiler/rustc_span/src/symbol.rs b/compiler/rustc_span/src/symbol.rs
+index ceb6d1c24..01f0bb236 100644
+--- a/compiler/rustc_span/src/symbol.rs
++++ b/compiler/rustc_span/src/symbol.rs
+@@ -1151,6 +1151,7 @@
+         keylocker_x86,
+         keyword,
+         kind,
++        klausscpu,
+         kreg,
+         kreg0,
+         label,
+diff --git a/compiler/rustc_target/src/asm/mod.rs b/compiler/rustc_target/src/asm/mod.rs
+index 1129c2edd..726bc81db 100644
+--- a/compiler/rustc_target/src/asm/mod.rs
++++ b/compiler/rustc_target/src/asm/mod.rs
+@@ -282,7 +282,7 @@ pub fn from_arch(arch: &Arch) -> Option<Self> {
+             Arch::M68k => Some(Self::M68k),
+             Arch::CSky => Some(Self::CSKY),
+             Arch::Xtensa => Some(Self::Xtensa),
+-            Arch::Other(_) => None,
++            Arch::KlaussCpu | Arch::Other(_) => None,
+         }
+     }
+ }
+diff --git a/compiler/rustc_target/src/callconv/mod.rs b/compiler/rustc_target/src/callconv/mod.rs
+index 6ab3dba07..e5d9c698a 100644
+--- a/compiler/rustc_target/src/callconv/mod.rs
++++ b/compiler/rustc_target/src/callconv/mod.rs
+@@ -720,7 +720,7 @@ pub fn adjust_for_foreign_abi<C>(&mut self, cx: &C, abi: ExternAbi)
+             Arch::RiscV32 | Arch::RiscV64 => riscv::compute_abi_info(cx, self),
+             Arch::Wasm32 | Arch::Wasm64 => wasm::compute_abi_info(cx, self),
+             Arch::Bpf => bpf::compute_abi_info(cx, self),
+-            Arch::Other(name) if name == "klausscpu" => klausscpu::compute_abi_info(cx, self),
++            Arch::KlaussCpu => klausscpu::compute_abi_info(cx, self),
+             arch @ (Arch::SpirV | Arch::Other(_)) => {
+                 panic!("no lowering implemented for {arch}")
+             }
+@@ -739,7 +739,7 @@ pub fn adjust_for_rust_abi<C>(&mut self, cx: &C)
+             Arch::LoongArch32 | Arch::LoongArch64 => loongarch::compute_rust_abi_info(cx, self),
+             Arch::AArch64 => aarch64::compute_rust_abi_info(cx, self),
+             Arch::Bpf => bpf::compute_rust_abi_info(self),
+-            Arch::Other(name) if name == "klausscpu" => klausscpu::compute_rust_abi_info(cx, self),
++            Arch::KlaussCpu => klausscpu::compute_rust_abi_info(cx, self),
+             _ => {}
+         };
+ 
+diff --git a/compiler/rustc_target/src/spec/mod.rs b/compiler/rustc_target/src/spec/mod.rs
+index d21082e9b..741c5a847 100644
+--- a/compiler/rustc_target/src/spec/mod.rs
++++ b/compiler/rustc_target/src/spec/mod.rs
+@@ -1703,6 +1703,7 @@ fn $module() {
+     ("riscv64gc-unknown-none-elf", riscv64gc_unknown_none_elf),
+     ("riscv64gc-unknown-linux-gnu", riscv64gc_unknown_linux_gnu),
+     ("riscv64gc-unknown-linux-musl", riscv64gc_unknown_linux_musl),
++    ("klausscpu-unknown-linux-musl", klausscpu_unknown_linux_musl),
+     ("riscv64a23-unknown-linux-gnu", riscv64a23_unknown_linux_gnu),
+ 
+     ("sparc-unknown-none-elf", sparc_unknown_none_elf),
+@@ -1884,6 +1885,7 @@ pub enum Arch {
+         Bpf = "bpf",
+         CSky = "csky",
+         Hexagon = "hexagon",
++        KlaussCpu = "klausscpu",
+         LoongArch32 = "loongarch32",
+         LoongArch64 = "loongarch64",
+         M68k = "m68k",
+@@ -1921,6 +1923,7 @@ pub fn desc_symbol(&self) -> Symbol {
+             Self::Bpf => sym::bpf,
+             Self::CSky => sym::csky,
+             Self::Hexagon => sym::hexagon,
++            Self::KlaussCpu => sym::klausscpu,
+             Self::LoongArch32 => sym::loongarch32,
+             Self::LoongArch64 => sym::loongarch64,
+             Self::M68k => sym::m68k,
+@@ -1956,7 +1959,7 @@ pub fn supports_scalable_vectors(&self) -> bool {
+             AmdGpu | Arm | Arm64EC | Avr | Bpf | CSky | Hexagon | LoongArch32 | LoongArch64
+             | M68k | Mips | Mips32r6 | Mips64 | Mips64r6 | Msp430 | Nvptx64 | PowerPC
+             | PowerPC64 | S390x | Sparc | Sparc64 | SpirV | Wasm32 | Wasm64 | X86 | X86_64
+-            | Xtensa | Other(_) => false,
++            | Xtensa | KlaussCpu | Other(_) => false,
+         }
+     }
+ }
+@@ -2212,7 +2215,9 @@ pub fn supports_c_variadic_definitions(&self) -> CVariadicStatus {
+ 
+             // We don't know how c-variadics work for this target. Using the default LLVM
+             // fallback implementation probably works, but we can't guarantee it.
+-            Other(_) => CVariadicStatus::Unstable { feature: sym::c_variadic_experimental_arch },
++            KlaussCpu | Other(_) => {
++                CVariadicStatus::Unstable { feature: sym::c_variadic_experimental_arch }
++            }
+ 
+             // These targets require more testing before we commit to c-variadic definitions
+             // being stable.
+@@ -3848,6 +3853,7 @@ pub fn object_architecture(
+             | Arch::SpirV
+             | Arch::Wasm32
+             | Arch::Wasm64
++            | Arch::KlaussCpu
+             | Arch::Other(_) => return None,
+         })
+     }
+diff --git a/compiler/rustc_target/src/spec/targets/klausscpu_unknown_linux_musl.rs b/compiler/rustc_target/src/spec/targets/klausscpu_unknown_linux_musl.rs
+new file mode 100644
+index 000000000..f0e9d549a
+--- /dev/null
++++ b/compiler/rustc_target/src/spec/targets/klausscpu_unknown_linux_musl.rs
+@@ -0,0 +1,44 @@
++// KlaussCPU Linux (klausscpu-llvm fork, llvm/lib/Target/KlaussCPU/ABI.md):
++// LP64 in ELFCLASS32 files, soft float, musl 1.2.5, LLVM's libunwind. The
++// linker is the fork's clang, which knows the triple and finds the musl
++// sysroot itself on the board (/opt/llvm); a cross build passes
++// `-Clink-arg=--sysroot=...`. The same target as the fork's
++// rust/klausscpu-unknown-linux-musl.json, built in so that it can be a host.
++
++use crate::spec::{
++    Arch, Cc, Env, LinkerFlavor, Lld, SplitDebuginfo, Target, TargetMetadata, TargetOptions, base,
++};
++
++pub(crate) fn target() -> Target {
++    let mut base = base::linux::opts();
++    base.add_pre_link_args(
++        LinkerFlavor::Gnu(Cc::Yes, Lld::No),
++        &["--target=klausscpu-unknown-linux-musl"],
++    );
++
++    Target {
++        llvm_target: "klausscpu-unknown-linux-musl".into(),
++        metadata: TargetMetadata {
++            description: Some("KlaussCPU Linux (musl 1.2.5)".into()),
++            tier: Some(3),
++            host_tools: Some(true),
++            std: Some(true),
++        },
++        pointer_width: 64,
++        data_layout: "e-m:e-p:64:64-i64:64-n32:64".into(),
++        arch: Arch::KlaussCpu,
++        options: TargetOptions {
++            env: Env::Musl,
++            linker: Some("clang".into()),
++            max_atomic_width: Some(64),
++            // musl's crt objects and libc come from the clang sysroot, not
++            // from rustc's self-contained directory.  A dylib or cdylib needs
++            // `-C target-feature=-crt-static` (as on the other musl targets):
++            // musl's libc.a is not PIC.
++            crt_static_default: true,
++            emit_debug_gdb_scripts: false,
++            supported_split_debuginfo: std::borrow::Cow::Borrowed(&[SplitDebuginfo::Off]),
++            ..base
++        },
++    }
++}
+diff --git a/compiler/rustc_target/src/target_features.rs b/compiler/rustc_target/src/target_features.rs
+index d7fb954d0..520146bd0 100644
+--- a/compiler/rustc_target/src/target_features.rs
++++ b/compiler/rustc_target/src/target_features.rs
+@@ -1110,7 +1110,7 @@ pub fn rust_target_features(&self) -> &'static [(&'static str, Stability, Implie
+             Arch::M68k => M68K_FEATURES,
+             Arch::Avr => AVR_FEATURES,
+             Arch::Xtensa => XTENSA_FEATURES,
+-            Arch::AmdGpu | Arch::Msp430 | Arch::SpirV | Arch::Other(_) => &[],
++            Arch::AmdGpu | Arch::Msp430 | Arch::SpirV | Arch::KlaussCpu | Arch::Other(_) => &[],
+         }
+     }
+ 
+@@ -1136,7 +1136,7 @@ pub fn features_for_correct_fixed_length_vector_abi(&self) -> &'static [(u64, &'
+             Arch::CSky => CSKY_FEATURES_FOR_CORRECT_FIXED_LENGTH_VECTOR_ABI,
+             // FIXME: for some tier3 targets, we are overly cautious and always give warnings
+             // when passing args in vector registers.
+-            Arch::Msp430 | Arch::SpirV | Arch::Xtensa | Arch::Other(_) => &[],
++            Arch::Msp430 | Arch::SpirV | Arch::Xtensa | Arch::KlaussCpu | Arch::Other(_) => &[],
+         }
+     }
+ 
+diff --git a/src/bootstrap/src/core/config/target_selection.rs b/src/bootstrap/src/core/config/target_selection.rs
+index 8457607b8..1cef8d31d 100644
+--- a/src/bootstrap/src/core/config/target_selection.rs
++++ b/src/bootstrap/src/core/config/target_selection.rs
+@@ -97,7 +97,9 @@ pub fn is_cygwin(&self) -> bool {
+     }
+ 
+     pub fn needs_crt_begin_end(&self) -> bool {
+-        self.contains("musl") && !self.contains("unikraft")
++        // KlaussCPU links musl's crt objects and libunwind from the clang
++        // sysroot, never rustc's self-contained ones.
++        self.contains("musl") && !self.contains("unikraft") && !self.contains("klausscpu")
+     }
+ 
+     /// Path to the file defining the custom target, if any.
+diff --git a/src/bootstrap/src/core/sanity.rs b/src/bootstrap/src/core/sanity.rs
+index ca8af279b..3e462df70 100644
+--- a/src/bootstrap/src/core/sanity.rs
++++ b/src/bootstrap/src/core/sanity.rs
+@@ -37,6 +37,7 @@ pub struct Finder {
+ /// when the newly-bumped stage 0 compiler now knows about the formerly-missing targets.
+ const STAGE0_MISSING_TARGETS: &[&str] = &[
+     // just a dummy comment so the list doesn't get onelined
++    "klausscpu-unknown-linux-musl",
+ ];
+ 
+ /// Minimum version threshold for libstdc++ required when using prebuilt LLVM
+diff --git a/src/tools/miri/src/shims/alloc.rs b/src/tools/miri/src/shims/alloc.rs
+index b4d53c36d..22f7fd2c1 100644
+--- a/src/tools/miri/src/shims/alloc.rs
++++ b/src/tools/miri/src/shims/alloc.rs
+@@ -36,7 +36,8 @@ fn malloc_align(&self, size: u64) -> Align {
+             | Arch::Wasm32
+             | Arch::Hexagon
+             | Arch::RiscV32
+-            | Arch::Xtensa => 8,
++            | Arch::Xtensa
++            | Arch::KlaussCpu => 8,
+             Arch::X86_64
+             | Arch::AArch64
+             | Arch::Arm64EC
+-- 
+2.53.0
+

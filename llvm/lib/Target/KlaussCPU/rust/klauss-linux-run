@@ -8,6 +8,9 @@
 #   KLAUSSCPU_BOARD_KEY  the SSH key (default ~/.ssh/klausscpu_board_ed25519
 #                     if it exists, else ssh's own choice)
 #   KLAUSSCPU_BOARD_DIR  where the program goes (default /data/rust-run)
+#   KLAUSSCPU_KEEP=1  leave the program there afterwards (by default it is
+#                     removed: /data is small, and test binaries have a
+#                     new name for every build)
 #
 # The run holds the board locks (/run/user/$UID/klausscpu-board.lock and
 # ~/.cache/klausscpu-board.lock, as tools/validate/board-check.sh), so it
@@ -33,4 +36,6 @@ scp -q "${OPTS[@]}" "$PROG" "$BOARD:$DIR/$NAME"
 # -t only when we have a terminal, so a program can be interactive; cargo
 # test's output is piped.
 T=(); [ -t 0 ] && [ -t 1 ] && T=(-t)
-exec ssh "${T[@]}" "${OPTS[@]}" "$BOARD" "cd $DIR && ./$(q "$NAME") $(q "$@")"
+RM="rm -f $(q "$NAME")"
+[ "${KLAUSSCPU_KEEP:-0}" = 1 ] && RM=:
+exec ssh "${T[@]}" "${OPTS[@]}" "$BOARD" "cd $DIR && { ./$(q "$NAME") $(q "$@"); rc=\$?; $RM; exit \$rc; }"
