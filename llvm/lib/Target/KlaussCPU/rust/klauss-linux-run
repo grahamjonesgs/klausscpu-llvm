@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# klauss-linux-run <program> [arguments]: copy a KlaussCPU Linux program to
+# the board and run it there over SSH, with the program's output and exit
+# status.  klauss-linux-cargo makes it cargo's runner, so `cargo run` and
+# `cargo test` run on the board.
+#
+#   KLAUSSCPU_BOARD   user@host (default root@192.168.68.59)
+#   KLAUSSCPU_BOARD_KEY  the SSH key (default ~/.ssh/klausscpu_board_ed25519
+#                     if it exists, else ssh's own choice)
+#   KLAUSSCPU_BOARD_DIR  where the program goes (default /data/rust-run)
+#
+# The run holds the board locks (/run/user/$UID/klausscpu-board.lock and
+# ~/.cache/klausscpu-board.lock, as tools/validate/board-check.sh), so it
+# waits while another session is using the board.  On the board the
+# program's working directory is KLAUSSCPU_BOARD_DIR.
+set -euo pipefail
+[ $# -ge 1 ] || { echo "usage: klauss-linux-run <program> [arguments]" >&2; exit 2; }
+PROG=$1; shift
+BOARD=${KLAUSSCPU_BOARD:-root@192.168.68.59}
+DIR=${KLAUSSCPU_BOARD_DIR:-/data/rust-run}
+KEY=${KLAUSSCPU_BOARD_KEY:-$HOME/.ssh/klausscpu_board_ed25519}
+OPTS=(-o BatchMode=yes -o ConnectTimeout=20
+	-o UserKnownHostsFile="$HOME/.cache/klausscpu-board-known_hosts" -o StrictHostKeyChecking=accept-new)
+[ -f "$KEY" ] && OPTS+=(-i "$KEY" -o IdentitiesOnly=yes)
+NAME=$(basename "$PROG")
+q() { printf '%q ' "$@"; }
+L1=/run/user/$(id -u)/klausscpu-board.lock L2=$HOME/.cache/klausscpu-board.lock
+if [ -z "${KLAUSS_LINUX_RUN_LOCKED:-}" ]; then
+	KLAUSS_LINUX_RUN_LOCKED=1 exec flock "$L1" flock "$L2" "$0" "$PROG" "$@"
+fi
+ssh "${OPTS[@]}" "$BOARD" "mkdir -p $DIR && rm -f $DIR/$NAME"
+scp -q "${OPTS[@]}" "$PROG" "$BOARD:$DIR/$NAME"
+# -t only when we have a terminal, so a program can be interactive; cargo
+# test's output is piped.
+T=(); [ -t 0 ] && [ -t 1 ] && T=(-t)
+exec ssh "${T[@]}" "${OPTS[@]}" "$BOARD" "cd $DIR && ./$(q "$NAME") $(q "$@")"

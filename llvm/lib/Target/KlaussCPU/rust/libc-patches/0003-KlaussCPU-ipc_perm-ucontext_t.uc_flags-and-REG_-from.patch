@@ -1,0 +1,85 @@
+From 70ad877b6bc4209ef53a57734e8425a7c5460f07 Mon Sep 17 00:00:00 2001
+From: Graham Jones <noreply@anthropic.com>
+Date: Tue, 17 Nov 2026 23:49:01 +0200
+Subject: [PATCH 3/3] KlaussCPU: ipc_perm, ucontext_t.uc_flags and REG_* from
+ musl's headers
+
+Three definitions the klausscpu module had kept from its riscv64
+template, checked against the KlaussCPU musl headers with libc-test:
+
+- ipc_perm: klausscpu has no bits/ipc.h, so musl uses
+  arch/generic/bits/ipc.h: mode is a mode_t (4 bytes) and __seq an int,
+  then two longs. riscv64's u16 mode/__seq with padding had the same
+  size but the wrong field types (mode read only its low 16 bits).
+- ucontext_t: musl's KlaussCPU bits/signal.h names the first field
+  uc_flags (riscv64's is __uc_flags). The layout was already right.
+- REG_*: riscv64's gregs indices (REG_PC 0, REG_SP 2, ...) do not exist
+  on KlaussCPU. musl's arch/klausscpu/bits/reg.h has only REG_SP 16 and
+  REG_PC 17, indices into struct user_regs_struct (r0-r15, sp, pc,
+  flags). NGREG, REG_RA, REG_TP, REG_S0-2, REG_A0 and REG_NARGS are
+  removed.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_014M2VjfE1z6ckDALN3F4XEF
+---
+ .../linux/musl/b64/klausscpu/mod.rs           | 27 +++++++------------
+ 1 file changed, 10 insertions(+), 17 deletions(-)
+
+diff --git a/src/unix/linux_like/linux/musl/b64/klausscpu/mod.rs b/src/unix/linux_like/linux/musl/b64/klausscpu/mod.rs
+index b069e73..58fb1c5 100644
+--- a/src/unix/linux_like/linux/musl/b64/klausscpu/mod.rs
++++ b/src/unix/linux_like/linux/musl/b64/klausscpu/mod.rs
+@@ -35,18 +35,17 @@ s! {
+         __unused: Padding<[c_int; 2usize]>,
+     }
+ 
++    // musl arch/generic/bits/ipc.h (klausscpu has no bits/ipc.h of its own).
+     pub struct ipc_perm {
+         pub __key: crate::key_t,
+         pub uid: crate::uid_t,
+         pub gid: crate::gid_t,
+         pub cuid: crate::uid_t,
+         pub cgid: crate::gid_t,
+-        pub mode: c_ushort,
+-        __pad1: Padding<c_ushort>,
+-        pub __seq: c_ushort,
+-        __pad2: Padding<c_ushort>,
+-        __unused1: Padding<c_ulong>,
+-        __unused2: Padding<c_ulong>,
++        pub mode: crate::mode_t,
++        pub __seq: c_int,
++        __unused1: Padding<c_long>,
++        __unused2: Padding<c_long>,
+     }
+ 
+     #[repr(align(8))]
+@@ -68,7 +67,7 @@ s! {
+ s_no_extra_traits! {
+     // asm-generic order: the mcontext comes before the signal mask.
+     pub struct ucontext_t {
+-        pub __uc_flags: c_ulong,
++        pub uc_flags: c_ulong,
+         pub uc_link: *mut ucontext_t,
+         pub uc_stack: crate::stack_t,
+         pub uc_mcontext: mcontext_t,
+@@ -648,13 +647,7 @@ pub const IEXTEN: crate::tcflag_t = 0x00008000;
+ pub const TOSTOP: crate::tcflag_t = 0x00000100;
+ pub const FLUSHO: crate::tcflag_t = 0x00001000;
+ 
+-pub const NGREG: usize = 32;
+-pub const REG_PC: usize = 0;
+-pub const REG_RA: usize = 1;
+-pub const REG_SP: usize = 2;
+-pub const REG_TP: usize = 4;
+-pub const REG_S0: usize = 8;
+-pub const REG_S1: usize = 9;
+-pub const REG_A0: usize = 10;
+-pub const REG_S2: usize = 18;
+-pub const REG_NARGS: usize = 8;
++// musl arch/klausscpu/bits/reg.h: indices into struct user_regs_struct
++// (r0-r15, sp, pc, flags).
++pub const REG_SP: usize = 16;
++pub const REG_PC: usize = 17;
+-- 
+2.53.0
+

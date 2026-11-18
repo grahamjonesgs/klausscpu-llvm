@@ -1,0 +1,2 @@
+# Cargo.lock pins ctest and its dependencies (the parent .gitignore ignores it).
+!Cargo.lock

@@ -1,0 +1,48 @@
+[package]
+name = "libc-test-klausscpu"
+version = "0.1.0"
+description = "Upstream libc-test (rust-lang/libc 0.2.185) adapted for klausscpu-unknown-linux-musl"
+publish = false
+edition = "2021"
+license = "MIT OR Apache-2.0"
+build = "build.rs"
+
+[workspace]
+
+[dependencies]
+cfg-if = "1.0.4"
+# setup.sh substitutes the KlaussCPU libc fork's directory.
+libc = { path = "@LIBC_SRC@", default-features = false, features = ["std"] }
+
+[build-dependencies]
+cc = "1.2.43"
+ctest = "=0.5.0-beta.3"
+regex = "1.12.2"
+
+# The generated tests have their own main(); build them as binaries so that
+# no libtest is needed for the target.
+[[bin]]
+name = "ctest"
+path = "tests/ctest.rs"
+[[bin]]
+name = "linux_fcntl"
+path = "tests/linux_fcntl.rs"
+[[bin]]
+name = "linux_if_arp"
+path = "tests/linux_if_arp.rs"
+[[bin]]
+name = "linux_ipv6"
+path = "tests/linux_ipv6.rs"
+[[bin]]
+name = "linux_elf"
+path = "tests/linux_elf.rs"
+[[bin]]
+name = "linux_strerror_r"
+path = "tests/linux_strerror_r.rs"
+[[bin]]
+name = "linux_termios"
+path = "tests/linux_termios.rs"
+
+[profile.release]
+opt-level = 1
+debug = false

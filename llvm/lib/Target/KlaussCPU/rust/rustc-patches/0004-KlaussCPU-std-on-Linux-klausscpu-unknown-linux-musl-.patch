@@ -1,0 +1,153 @@
+From 30d2c110cf861af4bca67b03385aaec738e570e3 Mon Sep 17 00:00:00 2001
+From: Graham Jones <noreply@anthropic.com>
+Date: Tue, 17 Nov 2026 23:05:07 +0200
+Subject: [PATCH] KlaussCPU: std on Linux (klausscpu-unknown-linux-musl, a JSON
+ target)
+
+- library/Cargo.toml: libc from ../libc-klausscpu (libc 0.2.185 with a
+  klausscpu musl module; klausscpu-llvm rust/libc-patches).
+- std, unwind: the klausscpu cases: os::linux::raw (stat from libc),
+  MIN_ALIGN 8 (musl's max_align_t), unwinder_private_data_size 2 (LLVM
+  libunwind's _Unwind_Exception), UNWIND_DATA_REG R0/R1 (the backend's
+  exception pointer and selector registers).
+- unwind: a dynamically linked KlaussCPU program links libunwind.so (the
+  sysroot has LLVM's libunwind, no libgcc_s).
+- check-cfg: target_arch "klausscpu" is known (a JSON target is not in
+  rustc's built-in list).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_014M2VjfE1z6ckDALN3F4XEF
+---
+ library/Cargo.lock                     | 2 --
+ library/Cargo.toml                     | 3 +++
+ library/std/Cargo.toml                 | 2 ++
+ library/std/src/os/linux/raw.rs        | 3 ++-
+ library/std/src/sys/alloc/mod.rs       | 1 +
+ library/std/src/sys/personality/gcc.rs | 3 +++
+ library/unwind/Cargo.toml              | 2 +-
+ library/unwind/src/lib.rs              | 4 +++-
+ library/unwind/src/libunwind.rs        | 3 +++
+ 9 files changed, 18 insertions(+), 5 deletions(-)
+
+diff --git a/library/Cargo.lock b/library/Cargo.lock
+index 99e976517..93162db7a 100644
+--- a/library/Cargo.lock
++++ b/library/Cargo.lock
+@@ -147,8 +147,6 @@ dependencies = [
+ [[package]]
+ name = "libc"
+ version = "0.2.185"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "52ff2c0fe9bc6cb6b14a0592c2ff4fa9ceb83eea9db979b0487cd054946a2b8f"
+ dependencies = [
+  "rustc-std-workspace-core",
+ ]
+diff --git a/library/Cargo.toml b/library/Cargo.toml
+index 788c990c1..f2ec3afed 100644
+--- a/library/Cargo.toml
++++ b/library/Cargo.toml
+@@ -85,6 +85,9 @@ rustflags = [
+ rustc-std-workspace-core = { path = 'rustc-std-workspace-core' }
+ rustc-std-workspace-alloc = { path = 'rustc-std-workspace-alloc' }
+ rustc-std-workspace-std = { path = 'rustc-std-workspace-std' }
++# KlaussCPU: the libc crate with a klausscpu musl module (klausscpu-llvm
++# llvm/lib/Target/KlaussCPU/rust/libc-patches).
++libc = { path = '../libc-klausscpu' }
+ 
+ # See comments in `library/windows-sys/Cargo.toml` for why this is patched
+ windows-sys = { path = 'windows-sys' }
+diff --git a/library/std/Cargo.toml b/library/std/Cargo.toml
+index 4c433d497..075271abe 100644
+--- a/library/std/Cargo.toml
++++ b/library/std/Cargo.toml
+@@ -162,6 +162,8 @@ check-cfg = [
+     # and to the `backtrace` crate which messes-up with Cargo list
+     # of declared features, we therefor expect any feature cfg
+     'cfg(feature, values(any()))',
++    # KlaussCPU is a JSON-spec target, unknown to rustc's built-in list.
++    'cfg(target_arch, values("klausscpu"))',
+     # Internal features aren't marked known config by default, we use these to
+     # gate tests.
+     'cfg(target_has_reliable_f16)',
+diff --git a/library/std/src/os/linux/raw.rs b/library/std/src/os/linux/raw.rs
+index 6f2da15a9..c2e42c4bf 100644
+--- a/library/std/src/os/linux/raw.rs
++++ b/library/std/src/os/linux/raw.rs
+@@ -237,7 +237,8 @@ pub struct stat {
+     target_arch = "s390x",
+     target_arch = "sparc64",
+     target_arch = "riscv64",
+-    target_arch = "riscv32"
++    target_arch = "riscv32",
++    target_arch = "klausscpu"
+ ))]
+ mod arch {
+     #[stable(feature = "raw_ext", since = "1.1.0")]
+diff --git a/library/std/src/sys/alloc/mod.rs b/library/std/src/sys/alloc/mod.rs
+index f2f1d1c7f..e95c528b6 100644
+--- a/library/std/src/sys/alloc/mod.rs
++++ b/library/std/src/sys/alloc/mod.rs
+@@ -27,6 +27,7 @@
+     target_arch = "hexagon",
+     target_arch = "riscv32",
+     target_arch = "xtensa",
++    target_arch = "klausscpu",
+ )) {
+     8
+ } else if cfg!(any(
+diff --git a/library/std/src/sys/personality/gcc.rs b/library/std/src/sys/personality/gcc.rs
+index 019d5629d..ad458a8a5 100644
+--- a/library/std/src/sys/personality/gcc.rs
++++ b/library/std/src/sys/personality/gcc.rs
+@@ -86,6 +86,9 @@
+ #[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
+ const UNWIND_DATA_REG: (i32, i32) = (10, 11); // x10, x11
+ 
++#[cfg(target_arch = "klausscpu")]
++const UNWIND_DATA_REG: (i32, i32) = (0, 1); // R0, R1
++
+ #[cfg(any(target_arch = "loongarch32", target_arch = "loongarch64"))]
+ const UNWIND_DATA_REG: (i32, i32) = (4, 5); // a0, a1
+ 
+diff --git a/library/unwind/Cargo.toml b/library/unwind/Cargo.toml
+index 1293c469d..c8e9bd3f7 100644
+--- a/library/unwind/Cargo.toml
++++ b/library/unwind/Cargo.toml
+@@ -35,4 +35,4 @@ system-llvm-libunwind = []
+ 
+ [lints.rust.unexpected_cfgs]
+ level = "warn"
+-check-cfg = ['cfg(target_arch, values("loongarch32"))']
++check-cfg = ['cfg(target_arch, values("loongarch32", "klausscpu"))']
+diff --git a/library/unwind/src/lib.rs b/library/unwind/src/lib.rs
+index 4e380d889..5370a5a2e 100644
+--- a/library/unwind/src/lib.rs
++++ b/library/unwind/src/lib.rs
+@@ -72,7 +72,9 @@
+     }
+     _ => {
+         #[link(name = "unwind", kind = "static", modifiers = "-bundle", cfg(target_feature = "crt-static"))]
+-        #[link(name = "gcc_s", cfg(all(not(target_feature = "crt-static"), not(target_arch = "hexagon"))))]
++        #[link(name = "gcc_s", cfg(all(not(target_feature = "crt-static"), not(target_arch = "hexagon"), not(target_arch = "klausscpu"))))]
++        // KlaussCPU's dynamic sysroot has LLVM's libunwind.so, no libgcc_s.
++        #[link(name = "unwind", cfg(all(not(target_feature = "crt-static"), target_arch = "klausscpu")))]
+         unsafe extern "C" {}
+     }
+ }
+diff --git a/library/unwind/src/libunwind.rs b/library/unwind/src/libunwind.rs
+index 6967c7f7f..dbc328037 100644
+--- a/library/unwind/src/libunwind.rs
++++ b/library/unwind/src/libunwind.rs
+@@ -72,6 +72,9 @@ pub enum _Unwind_Reason_Code {
+ #[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
+ pub const unwinder_private_data_size: usize = 2;
+ 
++#[cfg(target_arch = "klausscpu")]
++pub const unwinder_private_data_size: usize = 2;
++
+ #[cfg(all(target_family = "wasm", target_os = "emscripten"))]
+ pub const unwinder_private_data_size: usize = 20;
+ 
+-- 
+2.53.0
+

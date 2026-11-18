@@ -1,0 +1,409 @@
+--- a/build.rs
++++ b/build.rs
+@@ -1,4 +1,4 @@
+-#![deny(warnings)]
++#![allow(dead_code)]
+ #![allow(clippy::match_like_matches_macro)]
+ 
+ use std::fs::File;
+@@ -17,6 +17,9 @@
+     io,
+ };
+ 
++/// The libc crate under test (the KlaussCPU fork); run.sh exports KLAUSSCPU_LIBC_SRC.
++const LIBC_SRC: &str = concat!(env!("KLAUSSCPU_LIBC_SRC"), "/src/lib.rs");
++
+ fn do_cc() {
+     let target = env::var("TARGET").unwrap();
+     if cfg!(unix) || target.contains("cygwin") {
+@@ -175,10 +178,25 @@
+ fn main() {
+     // Avoid unnecessary re-building.
+     println!("cargo:rerun-if-changed=build.rs");
++    println!("cargo:rerun-if-changed={}", LIBC_SRC.trim_end_matches("lib.rs"));
++    println!("cargo:rerun-if-env-changed=KLAUSSCPU_LIBC_TEST_SKIP_KERNEL_CONSTS");
++
++    // KlaussCPU: the target is a JSON spec; ctest's macro expansion runs
++    // `$RUSTC --target klausscpu-unknown-linux-musl`, which needs
++    // -Zunstable-options and RUST_TARGET_PATH. Route it through a wrapper.
++    if env::var("TARGET").unwrap().contains("klausscpu") {
++        let real = env::var("RUSTC").unwrap();
++        let wrapper = concat!(env!("CARGO_MANIFEST_DIR"), "/rustc-expand-wrapper.sh");
++        // SAFETY: build scripts are single-threaded here.
++        unsafe {
++            env::set_var("REAL_RUSTC", real);
++            env::set_var("RUSTC", wrapper);
++        }
++    }
+ 
+     do_cc();
+     do_ctest();
+-    do_semver();
++    // KlaussCPU: no semver lists here (they live in upstream libc-test/semver).
+ }
+ 
+ macro_rules! headers {
+@@ -451,7 +469,7 @@
+         _ => false,
+     });
+ 
+-    ctest::generate_test(&mut cfg, "../src/lib.rs", "ctest_output.rs").unwrap();
++    ctest::generate_test(&mut cfg, LIBC_SRC, "ctest_output.rs").unwrap();
+ }
+ 
+ fn test_openbsd(target: &str) {
+@@ -651,7 +669,7 @@
+         }
+     });
+ 
+-    ctest::generate_test(&mut cfg, "../src/lib.rs", "ctest_output.rs").unwrap();
++    ctest::generate_test(&mut cfg, LIBC_SRC, "ctest_output.rs").unwrap();
+ }
+ 
+ fn test_cygwin(target: &str) {
+@@ -816,7 +834,7 @@
+         }
+     });
+ 
+-    ctest::generate_test(&mut cfg, "../src/lib.rs", "ctest_output.rs").unwrap();
++    ctest::generate_test(&mut cfg, LIBC_SRC, "ctest_output.rs").unwrap();
+ }
+ 
+ fn test_windows(target: &str) {
+@@ -937,7 +955,7 @@
+         }
+     });
+ 
+-    ctest::generate_test(&mut cfg, "../src/lib.rs", "ctest_output.rs").unwrap();
++    ctest::generate_test(&mut cfg, LIBC_SRC, "ctest_output.rs").unwrap();
+ }
+ 
+ fn test_redox(target: &str) {
+@@ -987,7 +1005,7 @@
+         "wchar.h",
+     );
+ 
+-    ctest::generate_test(&mut cfg, "../src/lib.rs", "ctest_output.rs").unwrap();
++    ctest::generate_test(&mut cfg, LIBC_SRC, "ctest_output.rs").unwrap();
+ }
+ 
+ fn test_solarish(target: &str) {
+@@ -1277,7 +1295,7 @@
+         }
+     });
+ 
+-    ctest::generate_test(&mut cfg, "../src/lib.rs", "ctest_output.rs").unwrap();
++    ctest::generate_test(&mut cfg, LIBC_SRC, "ctest_output.rs").unwrap();
+ }
+ 
+ fn test_netbsd(target: &str) {
+@@ -1590,7 +1608,7 @@
+         });
+     }
+ 
+-    ctest::generate_test(&mut cfg, "../src/lib.rs", "ctest_output.rs").unwrap();
++    ctest::generate_test(&mut cfg, LIBC_SRC, "ctest_output.rs").unwrap();
+ }
+ 
+ fn test_dragonflybsd(target: &str) {
+@@ -1816,7 +1834,7 @@
+         }
+     });
+ 
+-    ctest::generate_test(&mut cfg, "../src/lib.rs", "ctest_output.rs").unwrap();
++    ctest::generate_test(&mut cfg, LIBC_SRC, "ctest_output.rs").unwrap();
+ }
+ 
+ fn test_wasi(target: &str) {
+@@ -1910,7 +1928,7 @@
+     // doesn't support sizeof.
+     cfg.skip_struct_field(|s, field| s.ident() == "dirent" && field.ident() == "d_name");
+ 
+-    ctest::generate_test(&mut cfg, "../src/lib.rs", "ctest_output.rs").unwrap();
++    ctest::generate_test(&mut cfg, LIBC_SRC, "ctest_output.rs").unwrap();
+ }
+ 
+ fn test_android(target: &str) {
+@@ -2393,7 +2411,7 @@
+         }
+     });
+ 
+-    ctest::generate_test(&mut cfg, "../src/lib.rs", "ctest_output.rs").unwrap();
++    ctest::generate_test(&mut cfg, LIBC_SRC, "ctest_output.rs").unwrap();
+ 
+     test_linux_like_apis(target);
+ }
+@@ -3100,7 +3118,7 @@
+     // FIXME(ctest): The original ctest bypassed this requirement somehow.
+     cfg.rename_type(move |ty| (ty == "dot3Vendors").then_some(format!("enum {ty}")));
+ 
+-    ctest::generate_test(&mut cfg, "../src/lib.rs", "ctest_output.rs").unwrap();
++    ctest::generate_test(&mut cfg, LIBC_SRC, "ctest_output.rs").unwrap();
+ }
+ 
+ fn test_emscripten(target: &str) {
+@@ -3353,7 +3371,7 @@
+         }
+     });
+ 
+-    ctest::generate_test(&mut cfg, "../src/lib.rs", "ctest_output.rs").unwrap();
++    ctest::generate_test(&mut cfg, LIBC_SRC, "ctest_output.rs").unwrap();
+ }
+ 
+ fn test_neutrino(target: &str) {
+@@ -3612,7 +3630,7 @@
+ 
+     cfg.skip_static(move |static_| static_.ident() == "__dso_handle");
+ 
+-    ctest::generate_test(&mut cfg, "../src/lib.rs", "ctest_output.rs").unwrap();
++    ctest::generate_test(&mut cfg, LIBC_SRC, "ctest_output.rs").unwrap();
+ }
+ 
+ fn which_vxworks() -> Option<(u32, u32)> {
+@@ -3763,7 +3781,7 @@
+     // Not defined in vxworks. Just a crate specific union type.
+     cfg.skip_union(move |u| u.ident() == "sa_u_t");
+ 
+-    ctest::generate_test(&mut cfg, "../src/lib.rs", "ctest_output.rs").unwrap();
++    ctest::generate_test(&mut cfg, LIBC_SRC, "ctest_output.rs").unwrap();
+ }
+ 
+ fn config_gnu_bits(target: &str, cfg: &mut ctest::TestGenerator) {
+@@ -3855,6 +3873,13 @@
+     let gnueabihf = target.contains("gnueabihf");
+     let x86_64_gnux32 = target.contains("gnux32") && x86_64;
+     let riscv64 = target.contains("riscv64");
++    // KlaussCPU: LP64 musl 1.2.5 on an asm-generic kernel, like riscv64.
++    let klausscpu = target.contains("klausscpu");
++    // By default every kernel constant is checked against the KlaussCPU
++    // sysroot's (Linux 7.3) headers; upstream skips them on non-glibc
++    // targets. KLAUSSCPU_LIBC_TEST_SKIP_KERNEL_CONSTS=1 restores that.
++    let check_kernel_consts =
++        klausscpu && env::var("KLAUSSCPU_LIBC_TEST_SKIP_KERNEL_CONSTS").is_err();
+     let hexagon = target.contains("hexagon");
+     let loongarch64 = target.contains("loongarch64");
+     let wasm32 = target.contains("wasm32");
+@@ -4000,6 +4025,8 @@
+         ((x86_64 || x86_32 || arm) && !gnueabihf && !l4re, "sys/io.h"),
+         // `sys/reg.h` is only available on x86 and x86_64
+         ((x86_64 || x86_32) && !l4re, "sys/reg.h"),
++        // KlaussCPU: REG_SP / REG_PC (struct user_regs_struct indices)
++        (klausscpu, "sys/reg.h"),
+         // sysctl system call is deprecated and not available on musl
+         // It is also unsupported in x32, deprecated since glibc 2.30:
+         (!(x32 || musl || gnu || l4re), "sys/sysctl.h"),
+@@ -4314,13 +4341,13 @@
+             "mnt_ns_info" => true,
+ 
+             // FIXME(musl): Struct has changed for new musl versions
+-            "tcp_info" if musl => true,
++            "tcp_info" if musl && !klausscpu => true,
+ 
+             // FIXME(musl): Supported in new musl but we don't have a new enough version in CI.
+-            "statx" | "statx_timestamp" if musl => true,
++            "statx" | "statx_timestamp" if musl && !klausscpu => true,
+ 
+             // FIXME(musl): New fields in newer versions
+-            "utmpx" if !old_musl => true,
++            "utmpx" if !old_musl && !klausscpu => true,
+ 
+             // FIXME(linux): Requires >= 6.16 kernel headers.
+             // On 64 bits the size did not change, skip only for 32 bits.
+@@ -4339,7 +4366,7 @@
+             return true;
+         }
+ 
+-        if !gnu {
++        if !gnu && !check_kernel_consts {
+             // Skip definitions from the kernel on non-glibc Linux targets.
+             // They're libc-independent, so we only need to check them on one
+             // libc. We don't want to break CI if musl or another libc doesn't
+@@ -4439,10 +4466,10 @@
+ 
+                 /* Added in versions more recent than what we test */
+                 // Since 1.2.3
+-                "SO_BUSY_POLL_BUDGET" | "SO_PREFER_BUSY_POLL" => return true,
++                "SO_BUSY_POLL_BUDGET" | "SO_PREFER_BUSY_POLL" if !klausscpu => return true,
+ 
+                 // FIXME(musl): value was updated in new musl
+-                "RLIM_NLIMITS" => return true,
++                "RLIM_NLIMITS" if !klausscpu => return true,
+ 
+                 // FIXME(musl): Values changed in newer musl versions on these arches
+                 "O_LARGEFILE" if riscv64 || x86_64 => return true,
+@@ -4451,6 +4478,33 @@
+             }
+         }
+ 
++        // KlaussCPU: constants removed from the uapi headers of the newer
++        // kernel in its sysroot (Linux 7.3); arch-independent.
++        if klausscpu && matches!(name, "KERN_REALROOTDEV" | "VM_LAPTOP_MODE") {
++            return true;
++        }
++        // KlaussCPU: values that changed in newer kernels (Linux 7.3 uapi:
++        // SW_MAX 0x11 since SW_MACHINE_COVER, FUTEX_CMD_MASK also masks the
++        // FUTEX2 bits); arch-independent, libc has the older values.
++        if klausscpu && matches!(name, "SW_MAX" | "SW_CNT" | "FUTEX_CMD_MASK") {
++            return true;
++        }
++        // KlaussCPU: kernel constants that musl's own headers do not declare
++        // (musl defines sys/stat.h, netinet/tcp.h and sys/msg.h itself);
++        // arch-independent, and upstream checks them on glibc only.
++        if klausscpu
++            && (name.starts_with("STATX_")
++                || matches!(name, "TCP_COOKIE_TRANSACTIONS" | "MSG_COPY"))
++        {
++            return true;
++        }
++        // KlaussCPU: cacheflush (244) is in the kernel's syscall table
++        // (linux/patches/0005) but not yet in musl's bits/syscall.h.in nor in
++        // the sysroot; the Rust value is checked by hand in the README.
++        if klausscpu && name == "SYS_cacheflush" {
++            return true;
++        }
++
+         match name {
+             // These constants are not available if gnu headers have been included
+             // and can therefore not be tested here
+@@ -4506,7 +4560,7 @@
+ 
+             // FIXME(linux): Not defined on ARM, gnueabihf, mips, musl, PowerPC, riscv64, s390x, and sparc64.
+             "SYS_memfd_secret"
+-                if arm | gnueabihf | mips | musl | ppc | riscv64 | s390x | sparc64 =>
++                if (arm | gnueabihf | mips | musl | ppc | riscv64 | s390x | sparc64) && !klausscpu =>
+             {
+                 true
+             }
+@@ -4632,7 +4686,7 @@
+             }
+ 
+             // FIXME(linux): Requires >= 6.10 kernel headers.
+-            "SYS_mseal" => true,
++            "SYS_mseal" if !klausscpu => true,
+ 
+             // FIXME(linux): seems to not be available all the time (from <include/linux/sched.h>:
+             "PF_VCPU" | "PF_IDLE" | "PF_EXITING" | "PF_POSTCOREDUMP" | "PF_IO_WORKER"
+@@ -4781,13 +4835,14 @@
+ 
+             // FIXME(musl): This needs musl 1.2.2 or later, which is newer than what we test with
+             // on CI.
+-            "gettid" | "reallocarray" if musl => true,
++            // (KlaussCPU: musl 1.2.5 has all of these, so they are checked.)
++            "gettid" | "reallocarray" if musl && !klausscpu => true,
+             // Needs musl 1.2.3 or later.
+-            "pthread_getname_np" if musl => true,
++            "pthread_getname_np" if musl && !klausscpu => true,
+             // Added in musl 1.2.5
+-            "preadv2" | "pwritev2" if musl => true,
++            "preadv2" | "pwritev2" if musl && !klausscpu => true,
+             // FIXME(musl): Supported in new musl but we don't have a new enough version in CI.
+-            "statx" if musl => true,
++            "statx" if musl && !klausscpu => true,
+ 
+             // Needs glibc 2.33 or later.
+             "mallinfo2" => true,
+@@ -4826,6 +4881,10 @@
+ 
+     cfg.skip_struct_field_type(move |union_, field| {
+         match (union_.ident(), field.ident()) {
++            // KlaussCPU: musl's statx uses uint64_t / int64_t (unsigned long /
++            // long), libc __u64 / __s64 (long long); same size, which is
++            // still checked.
++            ("statx" | "statx_timestamp", _) if klausscpu => true,
+             // This is a weird union, don't check the type.
+             ("ifaddrs", "ifa_ifu") => true,
+             // sighandler_t type is super weird
+@@ -4860,6 +4919,12 @@
+ 
+     cfg.skip_struct_field(move |struct_, field| {
+         match (struct_.ident(), field.ident()) {
++            // KlaussCPU: newer kernel fields that musl 1.2.5 keeps in __spare
++            ("statx", "stx_mnt_id" | "stx_dio_mem_align" | "stx_dio_offset_align")
++                if klausscpu =>
++            {
++                true
++            }
+             // this is actually a union on linux, so we can't represent it well and
+             // just insert some padding.
+             ("siginfo_t", "_pad") => true,
+@@ -5036,7 +5101,7 @@
+         }
+     }
+ 
+-    ctest::generate_test(&mut cfg, "../src/lib.rs", "ctest_output.rs").unwrap();
++    ctest::generate_test(&mut cfg, LIBC_SRC, "ctest_output.rs").unwrap();
+ 
+     if !l4re {
+         test_linux_like_apis(target);
+@@ -5067,7 +5132,7 @@
+             .skip_union(|_| true)
+             .skip_fn(|function| function.ident() != "strerror_r");
+ 
+-        ctest::generate_test(&mut cfg, "../src/lib.rs", "linux_strerror_r.rs").unwrap();
++        ctest::generate_test(&mut cfg, LIBC_SRC, "linux_strerror_r.rs").unwrap();
+     }
+ 
+     let mut cfg = ctest_cfg();
+@@ -5097,7 +5162,7 @@
+             cfg.header("linux/fcntl.h");
+         }
+ 
+-        ctest::generate_test(&mut cfg, "../src/lib.rs", "linux_fcntl.rs").unwrap();
++        ctest::generate_test(&mut cfg, LIBC_SRC, "linux_fcntl.rs").unwrap();
+     }
+ 
+     let mut cfg = ctest_cfg();
+@@ -5122,7 +5187,7 @@
+                 _ => None,
+             });
+ 
+-        ctest::generate_test(&mut cfg, "../src/lib.rs", "linux_termios.rs").unwrap();
++        ctest::generate_test(&mut cfg, LIBC_SRC, "linux_termios.rs").unwrap();
+     }
+ 
+     let mut cfg = ctest_cfg();
+@@ -5145,7 +5210,7 @@
+         config_gnu_bits(target, &mut cfg);
+         headers!(cfg, "linux/in6.h",);
+ 
+-        ctest::generate_test(&mut cfg, "../src/lib.rs", "linux_ipv6.rs").unwrap();
++        ctest::generate_test(&mut cfg, LIBC_SRC, "linux_ipv6.rs").unwrap();
+     }
+ 
+     let mut cfg = ctest_cfg();
+@@ -5166,7 +5231,7 @@
+ 
+         config_gnu_bits(target, &mut cfg);
+ 
+-        ctest::generate_test(&mut cfg, "../src/lib.rs", "linux_elf.rs").unwrap();
++        ctest::generate_test(&mut cfg, LIBC_SRC, "linux_elf.rs").unwrap();
+     }
+ 
+     if (linux && !wali) || android {
+@@ -5182,7 +5247,7 @@
+             .skip_alias(|_| true)
+             .skip_const(move |constant| constant.ident() != "ARPHRD_CAN");
+ 
+-        ctest::generate_test(&mut cfg, "../src/lib.rs", "linux_if_arp.rs").unwrap();
++        ctest::generate_test(&mut cfg, LIBC_SRC, "linux_if_arp.rs").unwrap();
+     }
+ }
+ 
+@@ -5521,7 +5586,7 @@
+         }
+     });
+ 
+-    ctest::generate_test(&mut cfg, "../src/lib.rs", "ctest_output.rs").unwrap();
++    ctest::generate_test(&mut cfg, LIBC_SRC, "ctest_output.rs").unwrap();
+ }
+ 
+ fn test_aix(target: &str) {
+@@ -5817,7 +5882,7 @@
+     let c_enums = ["uio_rw"];
+     cfg.alias_is_c_enum(move |e| c_enums.contains(&e));
+ 
+-    ctest::generate_test(&mut cfg, "../src/lib.rs", "ctest_output.rs").unwrap();
++    ctest::generate_test(&mut cfg, LIBC_SRC, "ctest_output.rs").unwrap();
+ }
+ 
+ /// Attempt to execute a command and collect its output, If the command fails for whatever

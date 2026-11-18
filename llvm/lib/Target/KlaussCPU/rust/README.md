@@ -16,6 +16,11 @@ directory:
 | `klauss-build` | one driver for both flavors (`elf` / `llext`), with path discovery, section-merge, and loader/import verification baked in |
 | `klausscpu.ld` | bundled bare-metal linker script (mirror of the runtime's, which klausscpu-runtime's `check-toolchain-constants.py` compares; makes bare-metal links self-contained) |
 | `.klaussbuild.env.sample` | template for the machine-local `.klaussbuild.env` (gitignored) the driver sources |
+| `klausscpu-unknown-linux-musl.json` | rustc target spec for programs with the full `std` on the board's Linux (part 7; the lit test checks it too) |
+| `rustc-patches/0004-*.patch`, `rustc-patches/backtrace/0001-*.patch` | `std`/`unwind` for that target, and backtrace-rs reading ELF32 (part 7) |
+| `libc-patches/` | the `libc` crate fork (0.2.185 plus a `klausscpu` musl module), which `std` is built with (part 7) |
+| `klauss-linux-cargo`, `klauss-linux-run` | cargo for the Linux target, and the runner that runs its programs on the board over SSH (part 7) |
+| `linux-std/` | `stdcheck` (a std smoke test), `library-tests.sh` (Rust's own core/alloc/std test suites on the board) and `libc-test/` (the `libc` fork against musl's headers) |
 
 Pinned versions (re-verify on any change — see "Rebasing" below):
 
@@ -78,6 +83,14 @@ git fetch --depth 1 origin 09a371361240e42b0d69438fd1179efcf212e576
 git checkout 09a371361240e42b0d69438fd1179efcf212e576 -b klausscpu
 git am <this-repo>/llvm/lib/Target/KlaussCPU/rust/rustc-patches/00*.patch
 
+# 0004 builds std's libc from ../libc-klausscpu (the whole library
+# workspace, the host's std too), so the fork must exist before x.py:
+mkdir libc-klausscpu && curl -sL https://static.crates.io/crates/libc/libc-0.2.185.crate |
+  tar xz --strip-components=1 -C libc-klausscpu
+(cd libc-klausscpu && git init -q && git add -A && git commit -qm 'libc 0.2.185 from crates.io' &&
+  git am <this-repo>/llvm/lib/Target/KlaussCPU/rust/libc-patches/*.patch)
+echo /libc-klausscpu/ >> .git/info/exclude
+
 cp <this-repo>/llvm/lib/Target/KlaussCPU/rust/rustc-patches/bootstrap.toml .
 #   → edit [target.<host triple>] (x86_64-apple-darwin, x86_64-unknown-linux-gnu,
 #     ...) and its llvm-config to point at YOUR fork build/bin/llvm-config
@@ -91,6 +104,19 @@ LIBRARY_PATH=/usr/local/lib ./x.py build --stage 1 library
 
 The stage1 sysroot contains a `rust-src` link automatically — that is what
 `-Zbuild-std` compiles `core`/`alloc` from.
+
+Then, for `std` on Linux (part 7), patch the backtrace submodule **without
+committing** (x.py resets a submodule whose checked-out commit differs from
+the recorded one, but keeps uncommitted changes):
+
+```sh
+git -C library/backtrace apply \
+  <this-repo>/llvm/lib/Target/KlaussCPU/rust/rustc-patches/backtrace/0001-*.patch
+```
+
+`bootstrap.toml` has `deny-warnings = false`: the `libc` fork, a path
+dependency of the library workspace, has warnings of its own that bootstrap
+would otherwise turn into errors.
 
 ## 3. Build the example crates
 
@@ -226,7 +252,82 @@ halts.
 - **Extension panics park the SSH connection thread** (no `llext_exit`
   kernel export yet — RUST_PLAN.md §6.5).
 
-## 7. Rebasing the pins
+## 7. std on Linux
+
+Programs for the board's Linux (klausscpu-runtime `LINUX_PLAN.md`) get the
+whole standard library: threads, files, processes, pipes, TCP/UDP and DNS,
+time, thread-locals, atomics, unwinding panics, backtraces with function
+names.  The target is `klausscpu-unknown-linux-musl.json` (a JSON target, the
+same LLVM triple as the C toolchain's): LP64 in ELFCLASS32 files, musl 1.2.5,
+LLVM's libunwind, `panic = unwind`.
+
+```sh
+cd any-cargo-project
+<this-dir>/klauss-linux-cargo build --release   # target/klausscpu-unknown-linux-musl/release/
+<this-dir>/klauss-linux-cargo run --release     # ... and run it on the board
+<this-dir>/klauss-linux-cargo test --release    # the tests, on the board
+```
+
+- **`klauss-linux-cargo`** passes everything on cargo's command line, so a
+  project needs no `.cargo/config.toml`: `-Zbuild-std=std,panic_unwind,test`
+  from the patched rustc's `rust-src`, the JSON target, clang as the linker
+  with the musl + libc++ sysroot (`KLAUSSCPU_LINUX_SYSROOT`, default the
+  runtime's `linux-ws/dyn/sysroot`), and `klauss-linux-run` as the runner.
+  It reads `KLAUSSCPU_RUSTC` from `.klaussbuild.env` as `klauss-build` does.
+- **Static or dynamic.** Programs are static by default.
+  `KLAUSSCPU_LINUX_DYNAMIC=1` links them against the board's `libc.so` and
+  `libunwind.so.1` instead; that makes a PIE (`-Crelocation-model=pic`),
+  because the clang driver only gives a program an interpreter with `-pie`
+  (as for C: the board has no non-PIE dynamic programs).  Use a separate
+  `--target-dir` for each: cargo does not rebuild std when only these flags
+  change.
+- **`klauss-linux-run <program> [args]`** copies the program to
+  `/data/rust-run` on the board (`KLAUSSCPU_BOARD`, `KLAUSSCPU_BOARD_KEY`,
+  `KLAUSSCPU_BOARD_DIR`) and runs it over SSH with its exit status, holding
+  both board locks (as `tools/validate/board-check.sh`).
+- **What the patches change.**  `rustc-patches/0004`: std's `libc` comes from
+  the fork (`[patch.crates-io]` in `library/Cargo.toml`, the path relative to
+  the sysroot's `rust-src` link, so the fork lives inside the rust checkout);
+  `klausscpu` in std's per-arch lists (`stat` from libc, `MIN_ALIGN` 8, the
+  EH data registers R0/R1); `unwind` links LLVM's libunwind (`-lunwind`) and
+  has `_Unwind_Exception`'s two private words.  `backtrace/0001`: backtrace-rs
+  picks the ELF class from the pointer width; KlaussCPU's 64-bit pointers in
+  ELF32 files gave `<unknown>` for every frame.  `libc-patches/`: the
+  `klausscpu` module (from riscv64's, with musl's syscall numbers, signal
+  context and `ipc_perm`), and `dl_phdr_info` pointing at `Elf32_Phdr`.
+- **A stale std.**  cargo does not notice a change to the `libc` fork (or
+  the backtrace submodule) in `rust-src`: delete the project's `target/`
+  after changing them.  The symptom can be strange: a std still built with
+  the 64-bit `dl_phdr_info` panicked inside symbol lookup while holding
+  std's backtrace lock, and the panic handler then waited on the same lock
+  forever (std's `error` test hung).
+- **`cacheflush`** (syscall 244, `linux/patches/0005` in the runtime) is in
+  `libc` as `SYS_cacheflush`; musl's `bits/syscall.h.in` does not have it yet.
+
+**Testing.**
+
+- `linux-std/stdcheck`: `klauss-linux-cargo run --release` in it (and with
+  `KLAUSSCPU_LINUX_DYNAMIC=1`) prints `stdcheck: PASS`, 26 checks.
+- `linux-std/library-tests.sh`: Rust's own `coretests`, `alloctests` and
+  std's integration tests (the Windows ones left out), copied from the
+  checkout and built at opt-level 2 with debug assertions and overflow
+  checks, std included; one binary at a time on the board, about 50 minutes.
+- `linux-std/libc-test/`: the `libc` fork against musl's and the kernel's
+  headers (upstream's ctest for every constant, type, field and function,
+  plus function signatures and the C primitive types); see its README.
+
+Results (2026-11-18, bitstream tmg2, Linux 7.3.3):
+
+| Check | Result |
+|---|---|
+| `stdcheck`, static and dynamic (PIE) | 26/26 each, `stdcheck: PASS` |
+| `coretests` | 2768 passed, 2 ignored, 0 failed (411 s) |
+| `alloctests` | unit 333, integration 1331, `vec_deque_alloc_error` 1; 0 failed (29 min) |
+| std's integration tests | 27 binaries, all pass: `sync` 337 (1 ignored), `path` 35, `num` 25, `time` 15, `error` 14, `thread_local` 11, `env` 8, `env_modify` 7 (1 ignored), `thread` 5, `process_spawning`, `pipe_subprocess`, `panic`, ... |
+| `library-tests.sh` total | 30 of 30 binaries passed, about 50 minutes |
+| `libc-test` | ctest 9944 checks + 98 in the `linux_*` groups, fnsig 740/740 functions, prims 22/22 types; 0 failed |
+
+## 8. Rebasing the pins
 
 The fork tracks LLVM trunk; rustc master moves its LLVM API expectations.
 When bumping either side, re-audit `compiler/rustc_llvm/llvm-wrapper/` —
@@ -239,4 +340,10 @@ and regenerate `rustc-patches/` via:
 ```sh
 git -C <klausscpu-rust> format-patch <base>..klausscpu \
     -o <this-repo>/llvm/lib/Target/KlaussCPU/rust/rustc-patches/
+git -C <klausscpu-rust>/libc-klausscpu format-patch HEAD~3..HEAD \
+    -o <this-repo>/llvm/lib/Target/KlaussCPU/rust/libc-patches/   # the commits on 0.2.185
 ```
+
+When rust master moves to a newer `libc`, rebase `libc-patches/` onto that
+version and change the crates.io version in part 2; then re-run
+`linux-std/libc-test/`.

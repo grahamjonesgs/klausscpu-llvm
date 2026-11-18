@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# klauss-linux-cargo <cargo arguments>: cargo for Rust programs with the full
+# standard library on the board's Linux (klausscpu-unknown-linux-musl.json,
+# README.md "std on Linux").  Works in any cargo project; nothing to add to it:
+#
+#   klauss-linux-cargo build --release     target/klausscpu-unknown-linux-musl/release/<bin>
+#   klauss-linux-cargo run --release       ... and run it on the board (klauss-linux-run)
+#   klauss-linux-cargo test --release      the tests, run on the board
+#
+# std (core, alloc, std, panic_unwind; plus test for `test`) is built from the
+# patched rustc's rust-src with -Zbuild-std.  Programs are linked statically
+# by default.  KLAUSSCPU_LINUX_DYNAMIC=1 links them against the board's
+# libc.so and libunwind.so instead (a PIE, as C programs: the clang driver
+# makes dynamic programs only with -pie).  Build static and dynamic programs
+# in separate target directories (--target-dir): cargo does not rebuild std
+# when only these flags change.
+#
+#   KLAUSSCPU_RUSTC   the patched stage1 rustc (as klauss-build; also read
+#                     from .klaussbuild.env here)
+#   KLAUSSCPU_LLVM_BIN  the fork's build/bin (default: <repo>/build/bin), for
+#                     clang, the linker driver
+#   KLAUSSCPU_LINUX_SYSROOT  the musl + libc++ sysroot (default:
+#                     ~/Documents/src/klausscpu-runtime/linux-ws/dyn/sysroot)
+#   KLAUSSCPU_CARGO_TOOLCHAIN  as klauss-build (default +nightly if rustup has it)
+set -euo pipefail
+RUSTDIR=$(cd "$(dirname "$0")" && pwd)
+REPO=$(cd "$RUSTDIR/../../../../.." && pwd)
+[ -f "$RUSTDIR/.klaussbuild.env" ] && . "$RUSTDIR/.klaussbuild.env"
+LLVM_BIN=${KLAUSSCPU_LLVM_BIN:-$REPO/build/bin}
+SYSROOT=${KLAUSSCPU_LINUX_SYSROOT:-$HOME/Documents/src/klausscpu-runtime/linux-ws/dyn/sysroot}
+SPEC=$RUSTDIR/klausscpu-unknown-linux-musl.json
+die() { echo "klauss-linux-cargo: $*" >&2; exit 1; }
+[ -n "${KLAUSSCPU_RUSTC:-}" ] || die "set KLAUSSCPU_RUSTC to the patched stage1 rustc (README.md part 2)"
+[ -x "$KLAUSSCPU_RUSTC" ] || die "no rustc at $KLAUSSCPU_RUSTC"
+[ -x "$LLVM_BIN/clang" ] || die "no clang in $LLVM_BIN (set KLAUSSCPU_LLVM_BIN)"
+[ -f "$SYSROOT/lib/libc.a" ] || die "no musl sysroot at $SYSROOT (set KLAUSSCPU_LINUX_SYSROOT)"
+if [ -z "${KLAUSSCPU_CARGO_TOOLCHAIN+set}" ]; then
+	if command -v rustup >/dev/null && rustup toolchain list 2>/dev/null | grep -q '^nightly'; then
+		KLAUSSCPU_CARGO_TOOLCHAIN=+nightly
+	else
+		KLAUSSCPU_CARGO_TOOLCHAIN=
+	fi
+fi
+case "$KLAUSSCPU_CARGO_TOOLCHAIN" in
++nightly*) ;;
+*) export RUSTC_BOOTSTRAP=1 ;;
+esac
+export RUSTC=$KLAUSSCPU_RUSTC
+
+flags='"-Zunstable-options", "-Clink-arg=--sysroot='"$SYSROOT"'"'
+[ "${KLAUSSCPU_LINUX_DYNAMIC:-0}" = 1 ] &&
+	flags="$flags"', "-Ctarget-feature=-crt-static", "-Crelocation-model=pic"'
+# `test` needs the test crate too; asking for it always costs one crate.
+T=target.klausscpu-unknown-linux-musl
+exec cargo $KLAUSSCPU_CARGO_TOOLCHAIN \
+	--config 'unstable.build-std=["std", "panic_unwind", "test"]' \
+	--config 'unstable.json-target-spec=true' \
+	--config "build.target=\"$SPEC\"" \
+	--config "$T.linker=\"$LLVM_BIN/clang\"" \
+	--config "$T.rustflags=[$flags]" \
+	--config "$T.runner=\"$RUSTDIR/klauss-linux-run\"" \
+	"$@"

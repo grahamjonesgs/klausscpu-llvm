@@ -16,6 +16,9 @@ llvm-config = "/Users/gjonesblackcyton/Documents/src/klausscpu-llvm/build/bin/ll
 debug = false
 codegen-units = 0
 incremental = true
+# The patched libc (std on Linux) is a path dependency, so its warnings
+# are not capped; the bootstrap would turn them into errors.
+deny-warnings = false
 
 [build]
 # stage1 compiler + std for the host is all M1 needs.

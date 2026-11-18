@@ -44,3 +44,23 @@
 # ATOMIC:       __sync_val_compare_and_swap_[[#div(W,8)]]
 # ATOMIC-LABEL: rmw_over:
 # ATOMIC:       __atomic_fetch_add_[[#div(W,4)]]
+
+## The Linux spec (klausscpu-unknown-linux-musl.json, std on Linux) repeats
+## the same facts for the Linux triple, and offers the same atomics: musl
+## supplies __sync_*_N (LR/SC).
+
+# RUN: %python -c "import json, sys; s = json.load(open(sys.argv[1])); \
+# RUN:   print('rust', s['data-layout'], s['llvm-target'], s['target-endian'], \
+# RUN:         s['target-pointer-width'], s['arch'], s['os'], s['env'])" \
+# RUN:   %S/../../../lib/Target/KlaussCPU/rust/klausscpu-unknown-linux-musl.json > %t.linux
+# RUN: echo "" | opt -mtriple=klausscpu-unknown-linux-musl -S >> %t.linux
+# RUN: FileCheck %s --check-prefix=LINUX --input-file=%t.linux
+
+# LINUX:      rust [[DL:e-[^ ]*-p:]][[PW:[0-9]+]][[DLREST::[^ ]*]] klausscpu-unknown-linux-musl little [[PW]] klausscpu linux musl
+# LINUX:      target datalayout = "[[DL]][[PW]][[DLREST]]"
+
+# RUN: %python %S/Inputs/rust-spec-atomics.py \
+# RUN:   %S/../../../lib/Target/KlaussCPU/rust/klausscpu-unknown-linux-musl.json \
+# RUN:   %t.linux.ll > %t.linux.atomics
+# RUN: llc -mtriple=klausscpu-unknown-linux-musl -O1 %t.linux.ll -o - >> %t.linux.atomics
+# RUN: FileCheck %s --check-prefix=ATOMIC --input-file=%t.linux.atomics

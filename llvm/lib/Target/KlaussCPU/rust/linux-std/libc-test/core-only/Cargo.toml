@@ -1,0 +1,10 @@
+[package]
+name = "core-only"
+version = "0.1.0"
+edition = "2021"
+publish = false
+# Builds only `core` for the JSON target, so that ctest's macro expansion of
+# the libc crate (rustc -Zunpretty=expanded --target klausscpu-...) can load it.
+[workspace]
+[lib]
+path = "src/lib.rs"

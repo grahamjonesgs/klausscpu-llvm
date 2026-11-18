@@ -1,0 +1,52 @@
+From 7db176c615ec637c9ecf0bdff830f0e3ffc03755 Mon Sep 17 00:00:00 2001
+From: Graham Jones <noreply@anthropic.com>
+Date: Tue, 17 Nov 2026 23:49:00 +0200
+Subject: [PATCH 2/3] KlaussCPU: dl_phdr_info points at Elf32_Phdr
+
+KlaussCPU is LP64 in ELFCLASS32 files. musl's <link.h> for it
+(arch/klausscpu/bits/link.h, klausscpu-llvm ABI.md "<link.h> and the
+loader's structures") makes ElfW(Phdr) and ElfW(Half) the Elf32 types,
+while dlpi_addr stays an 8-byte load address. libc picked the Elf64
+types from target_pointer_width = "64", so dlpi_phdr had the wrong
+pointee: std's backtrace (backtrace-rs libs_dl_iterate_phdr) read
+32-byte Elf32_Phdr entries as 56-byte Elf64_Phdr ones and got wrong
+p_vaddr / p_memsz for every segment after the first.
+
+Found by libc-test (ctest) built for klausscpu-unknown-linux-musl: the
+generated C did not compile (incompatible pointer types for
+dl_phdr_info.dlpi_phdr).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_014M2VjfE1z6ckDALN3F4XEF
+---
+ src/unix/linux_like/linux_l4re_shared.rs | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/src/unix/linux_like/linux_l4re_shared.rs b/src/unix/linux_like/linux_l4re_shared.rs
+index cf76b39..dabbcf4 100644
+--- a/src/unix/linux_like/linux_l4re_shared.rs
++++ b/src/unix/linux_like/linux_l4re_shared.rs
+@@ -113,14 +113,16 @@ s! {
+ 
+         pub dlpi_name: *const c_char,
+ 
+-        #[cfg(target_pointer_width = "64")]
++        // KlaussCPU is LP64 with ELFCLASS32 files: its program headers are
++        // Elf32_Phdr, while dlpi_addr is a 64-bit load address.
++        #[cfg(all(target_pointer_width = "64", not(target_arch = "klausscpu")))]
+         pub dlpi_phdr: *const Elf64_Phdr,
+-        #[cfg(target_pointer_width = "32")]
++        #[cfg(any(target_pointer_width = "32", target_arch = "klausscpu"))]
+         pub dlpi_phdr: *const Elf32_Phdr,
+ 
+-        #[cfg(target_pointer_width = "64")]
++        #[cfg(all(target_pointer_width = "64", not(target_arch = "klausscpu")))]
+         pub dlpi_phnum: Elf64_Half,
+-        #[cfg(target_pointer_width = "32")]
++        #[cfg(any(target_pointer_width = "32", target_arch = "klausscpu"))]
+         pub dlpi_phnum: Elf32_Half,
+ 
+         // As of uClibc 1.0.36, the following fields are
+-- 
+2.53.0
+

@@ -1,0 +1,35 @@
+From 2e77f8c179d970eaf32c8fbb607d9e543f0ea724 Mon Sep 17 00:00:00 2001
+From: Graham Jones <noreply@anthropic.com>
+Date: Wed, 18 Nov 2026 00:47:24 +0200
+Subject: [PATCH] KlaussCPU: parse the running binary as ELFCLASS32
+
+KlaussCPU is LP64 in ELFCLASS32 files, so the ELF class can't be chosen
+from target_pointer_width: as FileHeader64 every frame symbolized as
+<unknown>.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_014M2VjfE1z6ckDALN3F4XEF
+---
+ src/symbolize/gimli/elf.rs | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/symbolize/gimli/elf.rs b/src/symbolize/gimli/elf.rs
+index fd9903d..547d1be 100644
+--- a/src/symbolize/gimli/elf.rs
++++ b/src/symbolize/gimli/elf.rs
+@@ -18,9 +18,10 @@ use object::read::StringTable;
+ use object::read::elf::{CompressionHeader, FileHeader, SectionHeader, SectionTable, Sym};
+ use object::{BigEndian, Bytes, NativeEndian};
+ 
+-#[cfg(target_pointer_width = "32")]
++// KlaussCPU is LP64 in ELFCLASS32 files.
++#[cfg(any(target_pointer_width = "32", target_arch = "klausscpu"))]
+ type Elf = object::elf::FileHeader32<NativeEndian>;
+-#[cfg(target_pointer_width = "64")]
++#[cfg(all(target_pointer_width = "64", not(target_arch = "klausscpu")))]
+ type Elf = object::elf::FileHeader64<NativeEndian>;
+ 
+ impl Mapping {
+-- 
+2.53.0
+
