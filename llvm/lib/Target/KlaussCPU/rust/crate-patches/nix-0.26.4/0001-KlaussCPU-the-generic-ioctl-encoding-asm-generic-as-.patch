@@ -1,0 +1,27 @@
+From 05cb2b886c8c4adef3abe89156009ddcd0363142 Mon Sep 17 00:00:00 2001
+From: Graham Jones <grahamjonesgs@gmail.com>
+Date: Thu, 19 Nov 2026 09:12:47 +0200
+Subject: [PATCH] KlaussCPU: the generic ioctl encoding (asm-generic, as
+ riscv64)
+
+---
+ src/sys/ioctl/linux.rs | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/sys/ioctl/linux.rs b/src/sys/ioctl/linux.rs
+index 0c0a209..6de3a03 100644
+--- a/src/sys/ioctl/linux.rs
++++ b/src/sys/ioctl/linux.rs
+@@ -42,7 +42,8 @@ mod consts {
+     target_arch = "x86_64",
+     target_arch = "aarch64",
+     target_arch = "riscv32",
+-    target_arch = "riscv64"
++    target_arch = "riscv64",
++    target_arch = "klausscpu"
+ ))]
+ mod consts {
+     #[doc(hidden)]
+-- 
+2.53.0
+

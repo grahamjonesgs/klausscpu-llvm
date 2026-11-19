@@ -15,6 +15,8 @@
 #   linux-raw-sys-0.12.1-klausscpu   linux-raw-sys 0.12.1  crate-patches/... (cargo)
 #   rustix-klausscpu                 rustix 1.1.2     crate-patches/...    (rustc)
 #   rustix-1.1.4-klausscpu           rustix 1.1.4     crate-patches/...    (cargo)
+#   nix-0.26.4-klausscpu             nix 0.26.4       crate-patches/...    (serialport, for
+#                                    klausscc built on the board)
 #
 # Only std needs libc-klausscpu; the rest are for a rustc and cargo that run
 # on the board (klausscpu-runtime RUST_ON_BOARD_PLAN.md).
@@ -45,3 +47,4 @@ fork linux-raw-sys-klausscpu linux-raw-sys 0.11.0 "$HERE/crate-patches/linux-raw
 fork linux-raw-sys-0.12.1-klausscpu linux-raw-sys 0.12.1 "$HERE/crate-patches/linux-raw-sys-0.12.1"
 fork rustix-klausscpu rustix 1.1.2 "$HERE/crate-patches/rustix-1.1.2"
 fork rustix-1.1.4-klausscpu rustix 1.1.4 "$HERE/crate-patches/rustix-1.1.4"
+fork nix-0.26.4-klausscpu nix 0.26.4 "$HERE/crate-patches/nix-0.26.4"
